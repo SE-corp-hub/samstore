@@ -95,9 +95,10 @@
 
 ### Phase 1 — PH-context foundation (§20, §7 address, §3 portal)
 1. **PH address model:** `regions/provinces/cities/barangays` lookup tables seeded with PH admin divisions; `addresses` table; checkout upgraded to cascading dropdowns (Region→Province→City/Municipality→Barangay) + Street/Blk/Lot + Landmark + instruction. Backfill-free (addresses already free-text in old orders).
-2. **₱ / Asia/Manila / Taglish utils** in `packages/contracts`: `formatPesos()`, money-in-words (Filipino/peso), timezone normalization; sweep UI money displays to ₱.
+2. **₱ / Asia/Manila / Taglish utils** in `packages/contracts`: `formatPesos`, `manilaNow`, `formatManila`, `pesoInWords` (Filipino money-in-words).
 3. **Tenant + audit hardening check:** new-module regression tests; confirm every new endpoint reuses the tenant guard; document app-layer isolation (no RLS) in progress.md.
 4. **Customer account portal:** register/login by phone (OTP-lite), profile + saved addresses, order history, loyalty balance, vouchers, consent management. Extend existing `CustomerAccount.tsx` + `customer-auth` service.
+- **Status:** items **1 ✅** (`Ph*` tables + `db:seed:addresses` 17/17/60/592 curated PSGC-style subset, checkout cascade dropdowns + chain-validated name snapshot — Module P1, commit below) and **2 ✅** (`format.ts`). **Remaining:** 3 (hardening regression sweep with role/membership), 4 (customer portal/address book).
 - **Accept:** PH dropdowns round-trip; portal flows tested; tenant regression suite green.
 
 ### Phase 2 — Catalog depth (§5)

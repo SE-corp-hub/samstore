@@ -40,6 +40,8 @@ import { ReportsService, REPORTS_SERVICE } from "./reports/reports.service.js";
 import { ReportsController } from "./reports/reports.controller.js";
 import { DeliveryService, DELIVERY_SERVICE } from "./delivery/delivery.service.js";
 import { DeliveryController } from "./delivery/delivery.controller.js";
+import { AddressService, ADDRESS_GATEWAY } from "./address/address.service.js";
+import { AddressController } from "./address/address.controller.js";
 import { HealthController } from "./health/health.controller.js";
 import { verifyToken } from "./auth/auth.domain.js";
 import {
@@ -53,11 +55,15 @@ import {
 const CLAIM_SECRET = process.env.CLAIM_SIGNING_SECRET ?? "dev-only-in-memory-secret-0123456789";
 
 @Module({
-  controllers: [CheckoutController, PublicStoreController, CartController, AuthController, AdminController, OrderLookupController, CustomerAuthController, PosController, PaymentsController, CreditController, ExpensesController, PurchasesController, InventoryController, ReportsController, DeliveryController, HealthController, RegisterController, RolePermissionsController],
+  controllers: [CheckoutController, PublicStoreController, CartController, AuthController, AdminController, OrderLookupController, CustomerAuthController, PosController, PaymentsController, CreditController, ExpensesController, PurchasesController, InventoryController, ReportsController, DeliveryController, HealthController, RegisterController, RolePermissionsController, AddressController],
   providers: [
     {
       provide: DELIVERY_SERVICE,
       useFactory: () => new DeliveryService(),
+    },
+    {
+      provide: ADDRESS_GATEWAY,
+      useFactory: () => new AddressService(),
     },
     {
       provide: REPORTS_SERVICE,
@@ -155,8 +161,8 @@ const CLAIM_SECRET = process.env.CLAIM_SIGNING_SECRET ?? "dev-only-in-memory-sec
       // CheckoutService is framework-free by design (tests construct it directly).
       // Prisma-backed repositories hit the real Postgres (Supabase).
       provide: CHECKOUT_SERVICE,
-      inject: ["MESSENGER_SERVICE", "VOUCHER_PUBLIC_SERVICE", LOYALTY_SERVICE],
-      useFactory: (messenger: MessengerService, voucher: VoucherPublicService, loyalty: LoyaltyService) => {
+      inject: ["MESSENGER_SERVICE", "VOUCHER_PUBLIC_SERVICE", LOYALTY_SERVICE, ADDRESS_GATEWAY],
+      useFactory: (messenger: MessengerService, voucher: VoucherPublicService, loyalty: LoyaltyService, address: AddressService) => {
       const creditSvc = new CreditService();
       return new CheckoutService(
           new PrismaStoreRepository(),
@@ -192,6 +198,7 @@ const CLAIM_SECRET = process.env.CLAIM_SIGNING_SECRET ?? "dev-only-in-memory-sec
             check: (storeId, storeCustomerId, amountMinor) => creditSvc.checkCredit(storeId, storeCustomerId, amountMinor),
             record: (orderId, storeId, storeCustomerId, amountMinor) => creditSvc.recordPurchase(orderId, storeId, storeCustomerId, amountMinor),
           },
+          address, // AddressGateway — PH hierarchy validate + snapshot (P1)
         );
       },
     },

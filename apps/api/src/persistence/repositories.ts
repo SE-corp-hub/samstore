@@ -84,6 +84,15 @@ export interface OrderRecord {
   landmark: string | null;
   deliverySchedule: string | null;
   notes: string | null;
+  /** P1: PH address hierarchy codes + frozen name snapshot (null = legacy free-text). */
+  deliveryRegionCode?: string | null;
+  deliveryProvinceCode?: string | null;
+  deliveryCityCode?: string | null;
+  deliveryBarangayCode?: string | null;
+  deliveryRegionName?: string | null;
+  deliveryProvinceName?: string | null;
+  deliveryCityName?: string | null;
+  deliveryBarangayName?: string | null;
   claimToken: string | null;
   items: {
     productId: string | null;

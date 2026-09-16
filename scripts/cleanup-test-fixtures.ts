@@ -14,7 +14,7 @@
 import { prisma } from "../apps/api/src/persistence/prisma-repositories.js";
 
 /** Store slugs created by test runs (see the prefixes in the api test files). */
-const TEST_STORE_SLUG = /^(?:m[456]\d{6,}|m5|rc\d{6,}|sg\d{6,}|obx\d{6,}|pay\d{6,}|tx[joz]-\w+|probe-|pay-|m5-idem)/i;
+const TEST_STORE_SLUG = /^(?:m[456]\d{6,}|m5|rc\d{6,}|sg\d{6,}|obx\d{6,}|pay\d{6,}|tx[joz]-\w+|probe-|pay-|m5-idem|p1c\d+|p1ad\d+)/i;
 
 async function main() {
   const apply = process.argv.includes("--apply");
@@ -84,6 +84,23 @@ async function main() {
     const used = new Set(stillUsed.map((s) => s.customerId));
     const deletable = customerIds.filter((id) => !used.has(id));
     if (deletable.length) await prisma.customer.deleteMany({ where: { id: { in: deletable } } });
+  }
+
+  // P1: PH address reference fixtures (region → … cascades via FK). Only rows whose
+  // code matches the P1 test prefixes are touched; seeded regions (reg-*) are never.
+  const phRegions = await prisma.phRegion.findMany({
+    where: { OR: [{ code: { startsWith: "P1C" } }, { code: { startsWith: "P1T" } }, { code: { startsWith: "P1AD" } }] },
+    select: { id: true, code: true },
+  });
+  if (phRegions.length > 0) {
+    const phRegionIds = phRegions.map((r) => r.id);
+    console.log(`P1 address fixtures: ${phRegions.length} region tree(s) to remove.`);
+    if (apply) {
+      await prisma.phBarangay.deleteMany({ where: { city: { province: { regionId: { in: phRegionIds } } } } });
+      await prisma.phCity.deleteMany({ where: { province: { regionId: { in: phRegionIds } } } });
+      await prisma.phProvince.deleteMany({ where: { regionId: { in: phRegionIds } } });
+      await prisma.phRegion.deleteMany({ where: { id: { in: phRegionIds } } });
+    }
   }
 
   console.log(`\nDeleted ${junk.length} leaked test store(s).`);

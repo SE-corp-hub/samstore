@@ -729,6 +729,16 @@ model Order {
   deliveryAddressLine2 String?
   landmark             String?
   deliverySchedule     String? // requested date/time window, free-form for slice
+  // P1: PH address hierarchy — codes reference Ph* lookup tables; the NAMES are the
+  // immutable snapshot frozen at checkout (nullable legacy free-text orders stay blank).
+  deliveryRegionCode   String?
+  deliveryProvinceCode String?
+  deliveryCityCode     String?
+  deliveryBarangayCode String?
+  deliveryRegionName   String?
+  deliveryProvinceName String?
+  deliveryCityName     String?
+  deliveryBarangayName String?
   notes                String?
   acknowledgedAt       DateTime?
   createdAt            DateTime      @default(now())
@@ -955,4 +965,56 @@ model OutboxEvent {
 
   @@index([status, nextAttemptAt])
   @@index([aggregateType, aggregateId])
+}
+
+// ─────────────────────────────── P1: PH address reference hierarchy ───────────────────────────────
+// Platform REFERENCE data — NOT store-owned, so no storeId. Codes are PSGC-style
+// stable identifiers. The seed ships a curated subset (Metro Manila + demo provinces);
+// the full PSGC 42k-barangay dataset is PENDING. Order rows snapshot the NAMES.
+// "type" on PhCity is "city" | "municipality".
+
+model PhRegion {
+  id        String       @id @default(cuid())
+  code      String       @unique // PSGC-style region code
+  name      String
+  sortOrder Int          @default(0)
+  provinces PhProvince[]
+
+  @@map("PhRegion")
+}
+
+model PhProvince {
+  id       String     @id @default(cuid())
+  code     String     @unique // PSGC-style province code
+  regionId String
+  region   PhRegion   @relation(fields: [regionId], references: [id], onDelete: Cascade)
+  name     String
+  cities   PhCity[]
+
+  @@index([regionId])
+  @@map("PhProvince")
+}
+
+model PhCity {
+  id         String       @id @default(cuid())
+  code       String       @unique // PSGC-style city/municipality code
+  provinceId String
+  province   PhProvince   @relation(fields: [provinceId], references: [id], onDelete: Cascade)
+  name       String
+  type       String // city | municipality
+  barangays  PhBarangay[]
+
+  @@index([provinceId])
+  @@map("PhCity")
+}
+
+model PhBarangay {
+  id     String  @id @default(cuid())
+  code   String  @unique // PSGC-style barangay code
+  cityId String
+  city   PhCity  @relation(fields: [cityId], references: [id], onDelete: Cascade)
+  name   String
+
+  @@index([cityId])
+  @@map("PhBarangay")
 }

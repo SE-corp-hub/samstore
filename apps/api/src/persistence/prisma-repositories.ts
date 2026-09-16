@@ -288,6 +288,15 @@ export class PrismaOrderRepository implements OrderRepository {
       notes: o.notes,
       claimToken: liveClaim?.token ?? null,
       storeCustomerId: o.storeCustomerId ?? null,
+      // P1: PH address snapshot round-trips with the order.
+      deliveryRegionCode: o.deliveryRegionCode ?? null,
+      deliveryProvinceCode: o.deliveryProvinceCode ?? null,
+      deliveryCityCode: o.deliveryCityCode ?? null,
+      deliveryBarangayCode: o.deliveryBarangayCode ?? null,
+      deliveryRegionName: o.deliveryRegionName ?? null,
+      deliveryProvinceName: o.deliveryProvinceName ?? null,
+      deliveryCityName: o.deliveryCityName ?? null,
+      deliveryBarangayName: o.deliveryBarangayName ?? null,
       items: o.items,
       createdAt: o.createdAt,
     };
@@ -325,6 +334,15 @@ export class PrismaOrderRepository implements OrderRepository {
           landmark: order.landmark,
           deliverySchedule: order.deliverySchedule,
           notes: order.notes,
+          // P1: PH address codes + frozen name snapshot round-trip with the order.
+          deliveryRegionCode: order.deliveryRegionCode ?? undefined,
+          deliveryProvinceCode: order.deliveryProvinceCode ?? undefined,
+          deliveryCityCode: order.deliveryCityCode ?? undefined,
+          deliveryBarangayCode: order.deliveryBarangayCode ?? undefined,
+          deliveryRegionName: order.deliveryRegionName ?? undefined,
+          deliveryProvinceName: order.deliveryProvinceName ?? undefined,
+          deliveryCityName: order.deliveryCityName ?? undefined,
+          deliveryBarangayName: order.deliveryBarangayName ?? undefined,
           storeCustomerId: order.storeCustomerId ?? undefined,
         },
       });
@@ -406,6 +424,15 @@ export class PrismaOrderRepository implements OrderRepository {
           landmark: order.landmark,
           deliverySchedule: order.deliverySchedule,
           notes: order.notes,
+          // P1: PH address codes + frozen name snapshot round-trip with the order.
+          deliveryRegionCode: order.deliveryRegionCode ?? undefined,
+          deliveryProvinceCode: order.deliveryProvinceCode ?? undefined,
+          deliveryCityCode: order.deliveryCityCode ?? undefined,
+          deliveryBarangayCode: order.deliveryBarangayCode ?? undefined,
+          deliveryRegionName: order.deliveryRegionName ?? undefined,
+          deliveryProvinceName: order.deliveryProvinceName ?? undefined,
+          deliveryCityName: order.deliveryCityName ?? undefined,
+          deliveryBarangayName: order.deliveryBarangayName ?? undefined,
           storeCustomerId: order.storeCustomerId ?? undefined,
         },
       });
@@ -426,7 +453,12 @@ export class PrismaOrderRepository implements OrderRepository {
       }
 
       await tx.orderStatusHistory.create({
-        data: { orderId: o.id, storeId: order.storeId, toStatus: order.status as OrderStatus, actorType: "system" },
+        data: {
+          orderId: o.id,
+          storeId: order.storeId,
+          toStatus: order.status as OrderStatus,
+          actorType: "system",
+        },
       });
 
       if (order.claimToken) {

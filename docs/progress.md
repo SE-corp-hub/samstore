@@ -1,6 +1,21 @@
 # PINDIAN — Progress Log
 
-Updated: 2026-09-16 · **Phase 0 foundation transfer** · Active model: `deepseek/deepseek-v4-flash-0731` (openrouter), boilerplate tier `inclusionai/ling-3.0-flash`
+Updated: 2026-09-16 · **P1: PH address hierarchy + ₱/Manila formatters** · Active model: `deepseek/deepseek-v4-flash-0731` (openrouter), boilerplate tier `inclusionai/ling-3.0-flash`
+
+## P1 — PH context: address model + checkout dropdowns + shared formatters
+
+| Item | Detail |
+|---|---|
+| Schema | `PhRegion/PhProvince/PhCity/PhBarangay` (platform reference data — NOT store-owned; `code` unique, cascade parents, `PhCity.type` city/municipality). `Order` gains nullable `delivery{Region,Province,City,Barangay}{Code,Name}` — codes for join, NAMES frozen as the immutable snapshot. Migration `20260916140000_module_p1_ph_address`. |
+| Drift healed | Live DB `User.email` was still NOT NULL while schema says optional (A1 only added phone columns) — latent bug for phone-only registrations. Migration drops NOT NULL (always safe). |
+| Contracts | `format.ts`: `formatPesos` (₱1,234.50 grouping), `manilaNow`/`formatManila` (Asia/Manila, host-tz-independent), `pesoInWords` (pragmatic Filipino amount-in-words to bilyon, with centavos + ligatures). `CheckoutRequest` gains optional `regionCode/provinceCode/cityCode/barangayCode`; `OrderViewDTO` gains name snapshots. |
+| API | `AddressController` (`/public/address/regions|provinces?region=|cities?province=|barangays?city=`) + `AddressService` behind `ADDRESS_GATEWAY`. `checkout.service` takes an optional `AddressGateway`; when any code is present ALL FOUR must be present for delivery, chain-validated (never guessed), names snapshotted onto the order + `snapshot.phAddress`. Partial codes, pickup+codes, broken chain, unknowns → clean validation errors. Legacy free-text-only checkout unchanged. |
+| Seed | `db:seed:addresses` (`prisma/seed-ph-addresses.ts`): curated upsets — 17 regions, 17 provinces, 60 cities/municipalities, 592 real barangays (Metro Manila full + Cavite/Laguna/Batangas/Rizal/Bulacan/Pampanga/Cebu/Bohol/Iloilo/Bacolod/Davao/Cagayan de Oro/GenSan/Baguio/La Union/Pangasinan samples). Full PSGC dataset PENDING (labelled). |
+| Web | `api/address.ts` helper; `CheckoutForm` delivery section = 4 cascading selects (region→province→city/municipality→barangay) + street/building/landmark/schedule; review step shows the joined PH line; Continue requires line1 ≥5 + full selection on delivery. |
+| Tests | +15: `ph-format.test.ts` (9 pure unit), `address/service.test.ts` (2 DB: cascade + chain reject), `checkout/checkout-address.test.ts` (5 DB: snapshot, partial reject, pickup reject, unknown-chain reject, legacy path). |
+| Ops | Fixture sweeper extended for `P1C/P1T/P1AD` slugs + PH region trees; cleaned 28 leaked stores + 20 leaked regions from aborted runs. |
+| Gate | lint 0 errors · **full suite 53 files / 366 tests / 0 fail** · API boots (`/health` ok; regions=17; NCR→Metro Manila→17 cities→24 Makati barangays) · web `/sam-store` HTTP 200. Dev servers left running on :4100/:3000. |
+| Commit | (this commit) |
 
 ## Phase 0 — Foundation transfer into `extraricestore` (Pindian repo)
 
@@ -13,6 +28,8 @@ Updated: 2026-09-16 · **Phase 0 foundation transfer** · Active model: `deepsee
 | Gate | lint 0 errors · **unit tests 351 pass / 0 fail across 50 files** (`npm test`, sequential runner) · API boots on :4100 (`/health` ok; `/public/stores/{slug}?token=` returns store + 4 products) · web boots (`next dev` on :3100; `/sam-store` HTTP 200 "Sam's Store - Order Online"). |
 | Env notes | `REDIS_URL` placeholder → in-process fallback (by design); `JWT_SECRET` absent from local `.env` (placeholder in `.env.example`) — set before prod. PS5 console shows `₱` as `?` (encoding only; data correct). `npm run dev:web` inline-var bash syntax doesn't work under `cmd` — launch web as `npx next dev` with `NEXT_PUBLIC_API_URL` set in the parent env. |
 | Commit | (this commit) |
+
+---
 
 # SAM STORE — Progress Log
 

@@ -51,6 +51,19 @@ export interface CreditGateway {
   record(orderId: string, storeId: string, storeCustomerId: string, amountMinor: number): Promise<void>;
 }
 
+/** P1: PH address hierarchy — validate a full selection and snapshot its names. */
+export interface AddressGateway {
+  resolve(
+    regionCode: string,
+    provinceCode: string,
+    cityCode: string,
+    barangayCode: string,
+  ): Promise<
+    | { ok: true; names: { regionName: string; provinceName: string; cityName: string; barangayName: string } }
+    | { ok: false; message: string }
+  >;
+}
+
 /** DI token — explicit, so dependency resolution doesn't rely on emitDecoratorMetadata. */
 export const CHECKOUT_SERVICE = Symbol("CHECKOUT_SERVICE");
 
@@ -67,6 +80,7 @@ export class CheckoutService {
     private readonly loyalty?: LoyaltyGateway,
     private readonly resolveCustomer?: (customerToken: string) => Promise<string | null>,
     private readonly credit?: CreditGateway,
+    private readonly address?: AddressGateway,
   ) {}
 
   async checkout(request: CheckoutRequest): Promise<CheckoutResult> {
@@ -177,6 +191,43 @@ export class CheckoutService {
     const deliveryType = request.deliveryType ?? "delivery";
     const deliveryFee = deliveryType === "pickup" ? 0 : store.deliveryFeeMinor;
 
+    // 5c. P1 PH address: all-or-nothing codes, chain-validated, NAMES snapshotted.
+    //     Adding ONLY the street line (no codes) keeps the legacy free-text path.
+    const phCodes: Array<keyof CheckoutRequest> = ["regionCode", "provinceCode", "cityCode", "barangayCode"];
+    const presentCodes = phCodes.filter((c) => {
+      const v = request[c];
+      return typeof v === "string" && v.trim().length > 0;
+    });
+    let phAddress: { regionName: string; provinceName: string; cityName: string; barangayName: string } | null =
+      null;
+    if (presentCodes.length > 0) {
+      if (deliveryType !== "delivery") {
+        return { ok: false, error: { type: "validation", errors: ["Address codes are only accepted for delivery orders"] } };
+      }
+      if (presentCodes.length !== 4) {
+        return {
+          ok: false,
+          error: {
+            type: "validation",
+            errors: ["Complete the full address (region, province, city/municipality, barangay)"],
+          },
+        };
+      }
+      if (!this.address) {
+        return { ok: false, error: { type: "validation", errors: ["PH address lookup is unavailable right now"] } };
+      }
+      const resolved = await this.address.resolve(
+        request.regionCode!.trim(),
+        request.provinceCode!.trim(),
+        request.cityCode!.trim(),
+        request.barangayCode!.trim(),
+      );
+      if (!resolved.ok) {
+        return { ok: false, error: { type: "validation", errors: [resolved.message] } };
+      }
+      phAddress = resolved.names;
+    }
+
     // 6. Server-authoritative totals
     let totals;
     try {
@@ -284,6 +335,7 @@ export class CheckoutService {
         store: { slug: store.slug, name: store.name },
         paymentMethod,
         deliveryType,
+        ...(phAddress ? { phAddress } : {}),
         ...(request.voucherCode ? { voucherCode: request.voucherCode.toUpperCase(), discountMinor } : {}),
         ...(loyaltyPoints > 0 ? { loyaltyPointsRedeemed: loyaltyPoints } : {}),
       },
@@ -297,6 +349,15 @@ export class CheckoutService {
       deliveryAddressLine2: request.deliveryAddressLine2?.trim() ?? null,
       landmark: request.landmark?.trim() ?? null,
       deliverySchedule: request.deliverySchedule?.trim() ?? null,
+      // P1: PH address codes + frozen name snapshot (null when legacy free-text only).
+      deliveryRegionCode: phAddress ? request.regionCode!.trim() : null,
+      deliveryProvinceCode: phAddress ? request.provinceCode!.trim() : null,
+      deliveryCityCode: phAddress ? request.cityCode!.trim() : null,
+      deliveryBarangayCode: phAddress ? request.barangayCode!.trim() : null,
+      deliveryRegionName: phAddress?.regionName ?? null,
+      deliveryProvinceName: phAddress?.provinceName ?? null,
+      deliveryCityName: phAddress?.cityName ?? null,
+      deliveryBarangayName: phAddress?.barangayName ?? null,
       notes: request.notes?.trim() ?? null,
       claimToken,
       items,

@@ -2,6 +2,47 @@
 // Single source of truth for the Thin Slice API surface.
 // Money: integer minor units (cents) everywhere — never floats.
 
+export {
+  formatPesos,
+  manilaNow,
+  formatManila,
+  pesoInWords,
+} from "./format.js";
+
+// ─────────────────────────────── PH address (P1) ───────────────────────────────
+// Reference (platform) hierarchy — NOT store-owned. Codes come from the curated
+// PSGC-style seed (full dataset PENDING). Name snapshots are frozen on orders.
+
+export interface PhRegionDTO {
+  code: string;
+  name: string;
+}
+
+export interface PhProvinceDTO {
+  code: string;
+  name: string;
+}
+
+export interface PhCityDTO {
+  code: string;
+  name: string;
+  /** "city" | "municipality" */
+  type: string;
+}
+
+export interface PhBarangayDTO {
+  code: string;
+  name: string;
+}
+
+/** Full PH address chosen from the cascading dropdowns (codes, not free text). */
+export interface PhAddressSelection {
+  regionCode: string;
+  provinceCode: string;
+  cityCode: string;
+  barangayCode: string;
+}
+
 // ─────────────────────────────── Catalog ───────────────────────────────
 
 export interface CategoryDTO {
@@ -111,6 +152,13 @@ export interface CheckoutRequest {
   landmark?: string;
   deliverySchedule?: string;
   notes?: string;
+  /** P1: PH address hierarchy codes from the cascading dropdowns (all-or-nothing for delivery).
+   *  When present they're validated against Ph* reference tables and their NAMES are snapshotted
+   *  on the order for history immutability. Omitted → legacy free-text only (no snapshot). */
+  regionCode?: string;
+  provinceCode?: string;
+  cityCode?: string;
+  barangayCode?: string;
   /** delivery | pickup (pickup: no delivery fee, address not required) — UI U5. */
   deliveryType?: "delivery" | "pickup";
   /** COD for guests/unapproved; "credit" allowed only for approved customers up to limit. */
@@ -326,6 +374,11 @@ export interface OrderViewDTO {
   landmark: string | null;
   deliverySchedule: string | null;
   notes: string | null;
+  /** P1: frozen PH address snapshot (names only) when checkout used the dropdown flow. */
+  deliveryRegionName: string | null;
+  deliveryProvinceName: string | null;
+  deliveryCityName: string | null;
+  deliveryBarangayName: string | null;
   items: {
     productName: string;
     sku: string;

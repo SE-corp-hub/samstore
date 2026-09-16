@@ -1,7 +1,17 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { CheckoutResponse, PublicStoreDTO } from "../types";
+import {
+  fetchRegions,
+  fetchProvinces,
+  fetchCities,
+  fetchBarangays,
+  type PhRegionOption,
+  type PhProvinceOption,
+  type PhCityOption,
+  type PhBarangayOption,
+} from "../api/address";
 
 interface CheckoutFormProps {
   cartToken: string;
@@ -13,6 +23,8 @@ interface CheckoutFormProps {
 }
 
 const toPesos = (m: number) => `₱${(m / 100).toFixed(2)}`;
+
+const EMPTY_PH = { code: "", name: "" };
 
 export default function CheckoutForm({ cartToken, store, subtotalMinor, deliveryFeeMinor, onSuccess, onClose }: CheckoutFormProps) {
   const customerToken = typeof window !== "undefined" ? localStorage.getItem("samstore.customer.token") : null;
@@ -42,10 +54,85 @@ export default function CheckoutForm({ cartToken, store, subtotalMinor, delivery
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // P1: PH address cascade
+  const [regions, setRegions] = useState<PhRegionOption[]>([]);
+  const [provinces, setProvinces] = useState<PhProvinceOption[]>([]);
+  const [cities, setCities] = useState<PhCityOption[]>([]);
+  const [barangays, setBarangays] = useState<PhBarangayOption[]>([]);
+  const [region, setRegion] = useState<{ code: string; name: string }>(EMPTY_PH);
+  const [province, setProvince] = useState<{ code: string; name: string }>(EMPTY_PH);
+  const [city, setCity] = useState<{ code: string; name: string }>(EMPTY_PH);
+  const [barangay, setBarangay] = useState<{ code: string; name: string }>(EMPTY_PH);
+  const [addrLoading, setAddrLoading] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    if (deliveryType === "delivery" && regions.length === 0) {
+      fetchRegions().then((r) => {
+        if (alive) setRegions(r);
+      });
+    }
+    return () => {
+      alive = false;
+    };
+  }, [deliveryType, regions.length]);
+
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm((f) => ({ ...f, [k]: e.target.value }));
 
+  const resetPane = () => {
+    setProvince(EMPTY_PH);
+    setCity(EMPTY_PH);
+    setBarangay(EMPTY_PH);
+    setProvinces([]);
+    setCities([]);
+    setBarangays([]);
+  };
+
+  const onRegionSelect = async (code: string) => {
+    const chosen = regions.find((r) => r.code === code);
+    setRegion(chosen ? { code, name: chosen.name } : EMPTY_PH);
+    resetPane();
+    if (!code) return;
+    setAddrLoading(true);
+    const ps = await fetchProvinces(code);
+    setProvinces(ps);
+    setAddrLoading(false);
+  };
+
+  const onProvinceSelect = async (code: string) => {
+    const chosen = provinces.find((p) => p.code === code);
+    setProvince(chosen ? { code, name: chosen.name } : EMPTY_PH);
+    setCity(EMPTY_PH);
+    setBarangay(EMPTY_PH);
+    setCities([]);
+    setBarangays([]);
+    if (!code) return;
+    setAddrLoading(true);
+    const cs = await fetchCities(code);
+    setCities(cs);
+    setAddrLoading(false);
+  };
+
+  const onCitySelect = async (code: string) => {
+    const chosen = cities.find((c) => c.code === code);
+    setCity(chosen ? { code, name: chosen.name } : EMPTY_PH);
+    setBarangay(EMPTY_PH);
+    setBarangays([]);
+    if (!code) return;
+    setAddrLoading(true);
+    const bs = await fetchBarangays(code);
+    setBarangays(bs);
+    setAddrLoading(false);
+  };
+
+  const onBarangaySelect = (code: string) => {
+    const chosen = barangays.find((b) => b.code === code);
+    setBarangay(chosen ? { code, name: chosen.name } : EMPTY_PH);
+  };
+
   const delivery = deliveryType === "delivery";
+  const addressComplete = !delivery || (!!region.code && !!province.code && !!city.code && !!barangay.code);
   const fee = delivery ? deliveryFeeMinor : 0;
   const total = subtotalMinor + fee;
   const canPickup = store.pickupEnabled;
@@ -66,6 +153,10 @@ export default function CheckoutForm({ cartToken, store, subtotalMinor, delivery
         body: JSON.stringify({
           ...form,
           deliveryAddressLine1: delivery ? form.deliveryAddressLine1 : undefined,
+          regionCode: delivery ? region.code || undefined : undefined,
+          provinceCode: delivery ? province.code || undefined : undefined,
+          cityCode: delivery ? city.code || undefined : undefined,
+          barangayCode: delivery ? barangay.code || undefined : undefined,
           cartToken,
           deliveryType,
           paymentMethod,
@@ -93,11 +184,24 @@ export default function CheckoutForm({ cartToken, store, subtotalMinor, delivery
     }
   };
 
+  const fullAddressLine = [
+    form.deliveryAddressLine1,
+    form.deliveryAddressLine2,
+    barangay.name,
+    city.name,
+    province.name,
+    region.name,
+  ]
+    .filter((x) => x && x.trim())
+    .join(", ");
+
   const steps = [
     { n: 1, label: "Contact" },
     { n: 2, label: "Review" },
     { n: 3, label: "Pay" },
   ];
+
+  const selectClassName = "form-select small";
 
   return (
     <div className="checkout-form">
@@ -142,12 +246,68 @@ export default function CheckoutForm({ cartToken, store, subtotalMinor, delivery
           {delivery ? (
             <>
               <div className="mb-2">
-                <label className="form-label small">Address line 1 *</label>
-                <input className="form-control" value={form.deliveryAddressLine1} onChange={set("deliveryAddressLine1")} required minLength={5} placeholder="House no. & street" />
+                <label className="form-label small">Region *</label>
+                <select
+                  className={selectClassName}
+                  value={region.code}
+                  onChange={(e) => onRegionSelect(e.target.value)}
+                  disabled={addrLoading}
+                >
+                  <option value="">{addrLoading ? "Loading…" : "Select region"}</option>
+                  {regions.map((r) => (
+                    <option key={r.code} value={r.code}>{r.name}</option>
+                  ))}
+                </select>
               </div>
               <div className="mb-2">
-                <label className="form-label small">Address line 2</label>
-                <input className="form-control" value={form.deliveryAddressLine2} onChange={set("deliveryAddressLine2")} placeholder="Barangay / city" />
+                <label className="form-label small">Province *</label>
+                <select
+                  className={selectClassName}
+                  value={province.code}
+                  onChange={(e) => onProvinceSelect(e.target.value)}
+                  disabled={!region.code || addrLoading}
+                >
+                  <option value="">{!region.code ? "Select a region first" : addrLoading ? "Loading…" : "Select province"}</option>
+                  {provinces.map((p) => (
+                    <option key={p.code} value={p.code}>{p.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="mb-2">
+                <label className="form-label small">City / Municipality *</label>
+                <select
+                  className={selectClassName}
+                  value={city.code}
+                  onChange={(e) => onCitySelect(e.target.value)}
+                  disabled={!province.code || addrLoading}
+                >
+                  <option value="">{!province.code ? "Select a province first" : addrLoading ? "Loading…" : "Select city / municipality"}</option>
+                  {cities.map((c) => (
+                    <option key={c.code} value={c.code}>{c.name}{c.type === "municipality" ? " (Municipality)" : ""}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="mb-2">
+                <label className="form-label small">Barangay *</label>
+                <select
+                  className={selectClassName}
+                  value={barangay.code}
+                  onChange={(e) => onBarangaySelect(e.target.value)}
+                  disabled={!city.code || addrLoading}
+                >
+                  <option value="">{!city.code ? "Select a city / municipality first" : addrLoading ? "Loading…" : "Select barangay"}</option>
+                  {barangays.map((b) => (
+                    <option key={b.code} value={b.code}>{b.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="mb-2">
+                <label className="form-label small">Street / House no. *</label>
+                <input className="form-control" value={form.deliveryAddressLine1} onChange={set("deliveryAddressLine1")} required minLength={5} placeholder="e.g. 123 Mabini St." />
+              </div>
+              <div className="mb-2">
+                <label className="form-label small">Building / Unit (optional)</label>
+                <input className="form-control" value={form.deliveryAddressLine2} onChange={set("deliveryAddressLine2")} placeholder="e.g. Unit 5, Blk 2" />
               </div>
               <div className="mb-2">
                 <label className="form-label small">Landmark</label>
@@ -168,7 +328,7 @@ export default function CheckoutForm({ cartToken, store, subtotalMinor, delivery
 
           <div className="d-flex justify-content-between">
             <button type="button" className="btn btn-outline-secondary" onClick={onClose}>Back to cart</button>
-            <button type="button" className="btn btn-primary" disabled={!form.customerName.trim() || !form.customerPhone.trim() || (delivery && form.deliveryAddressLine1.trim().length < 5)}
+            <button type="button" className="btn btn-primary" disabled={!form.customerName.trim() || !form.customerPhone.trim() || (delivery && (form.deliveryAddressLine1.trim().length < 5 || !addressComplete))}
               onClick={() => { setError(null); setStep(2); }}>
               Continue
             </button>
@@ -220,6 +380,9 @@ export default function CheckoutForm({ cartToken, store, subtotalMinor, delivery
         <div>
           <div className="card mb-3">
             <div className="card-body small">
+              {delivery && (
+                <div className="mb-1 d-flex justify-content-between"><span className="text-muted">Deliver to</span><span className="text-end">{fullAddressLine}</span></div>
+              )}
               <div className="d-flex justify-content-between"><span className="text-muted">Subtotal</span><span>{toPesos(subtotalMinor)}</span></div>
               <div className="d-flex justify-content-between"><span className="text-muted">{delivery ? "Delivery" : "Pickup"}</span>
                 <span>{delivery ? toPesos(fee) : "Free — self pickup"}</span></div>
