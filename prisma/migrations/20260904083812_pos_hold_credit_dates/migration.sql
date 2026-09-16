@@ -1,0 +1,9 @@
+-- AlterEnum
+ALTER TYPE "OrderStatus" ADD VALUE 'ON_HOLD';
+
+-- AlterTable
+ALTER TABLE "CreditEntry" ADD COLUMN     "dueAt" TIMESTAMP(3),
+ADD COLUMN     "startAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP;
+
+-- AlterTable
+ALTER TABLE "StoreSettings" ADD COLUMN     "creditTermDays" INTEGER NOT NULL DEFAULT 30;

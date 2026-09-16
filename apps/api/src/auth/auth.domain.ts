@@ -1,0 +1,59 @@
+// Auth domain — password hashing + JWT sign/verify.
+// bcrypt 3.x is ESM-only; these are async.
+
+import bcrypt from "bcryptjs";
+import jwt from "jsonwebtoken";
+
+export interface AuthConfig {
+  jwtSecret: string;
+  jwtExpiresIn: string; // e.g. "7d"
+}
+
+const BCRYPT_ROUNDS = 12;
+
+export async function hashPassword(plain: string): Promise<string> {
+  return bcrypt.hash(plain, BCRYPT_ROUNDS);
+}
+
+export async function verifyPassword(plain: string, hash: string): Promise<boolean> {
+  return bcrypt.compare(plain, hash);
+}
+
+export interface TokenPayload {
+  sub: string; // user id
+  role: string;
+  email: string;
+  phone?: string;
+  // for store-scoped roles: the store the user belongs to
+  storeId?: string;
+}
+
+export function signToken(payload: TokenPayload, config: AuthConfig): string {
+  return jwt.sign(payload, config.jwtSecret, { expiresIn: config.jwtExpiresIn } as jwt.SignOptions);
+}
+
+export interface VerifiedToken {
+  sub: string;
+  role: string;
+  email: string;
+  phone?: string;
+  storeId?: string;
+  iat: number;
+  exp: number;
+}
+
+export class InvalidTokenError extends Error {
+  constructor(message = "Invalid or expired token") {
+    super(message);
+    this.name = "InvalidTokenError";
+  }
+}
+
+export function verifyToken(token: string, config: AuthConfig): VerifiedToken {
+  try {
+    const decoded = jwt.verify(token, config.jwtSecret) as VerifiedToken;
+    return decoded;
+  } catch {
+    throw new InvalidTokenError();
+  }
+}

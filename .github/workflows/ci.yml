@@ -1,0 +1,84 @@
+name: CI
+
+# Quality gate (no database) runs on every push/PR.
+# The DB-backed test gate needs a managed Postgres URL and only runs when the
+# operator has configured the DATABASE_URL repository secret (a red gate here
+# means "tests did not run", never a fabricated pass).
+# The Playwright critical-path suite needs both servers up, so it is manual.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  quality:
+    name: schema + types + secrets + build (no DB)
+    runs-on: ubuntu-latest
+    env:
+      # `prisma validate` requires the env var to exist; it never connects.
+      DATABASE_URL: postgresql://ci:ci@localhost:5432/ci_check
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Prisma generate
+        run: npx prisma generate
+      - name: Prisma schema validate
+        run: npm run db:validate
+      - name: Typecheck (contracts + api + web)
+        run: npm run typecheck
+      - name: Secret / PII scan (filenames only)
+        run: npm run check:secrets
+      - name: Build
+        run: npm run build
+
+  db-tests:
+    name: sequential test gate (needs DATABASE_URL secret)
+    runs-on: ubuntu-latest
+    if: ${{ secrets.DATABASE_URL != '' }}
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      JWT_SECRET: ${{ secrets.JWT_SECRET || 'ci-only-jwt-secret-0123456789abcdef' }}
+      CLAIM_SIGNING_SECRET: ${{ secrets.CLAIM_SIGNING_SECRET || 'ci-only-claim-secret-0123456789abcdef' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate
+      - name: Apply migrations
+        run: npx prisma migrate deploy
+      - name: Tests (one file at a time — the pooler caps sessions at 15)
+        run: npm test
+      - name: Reconciliation must report zero drift
+        run: npx tsx scripts/reconcile.ts
+
+  e2e:
+    name: Playwright critical path (manual)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Start API + web against the configured database
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          CLAIM_SIGNING_SECRET: ${{ secrets.CLAIM_SIGNING_SECRET }}
+        run: |
+          (cd apps/api && PORT=4100 npm run start &)
+          (cd apps/web && npm run build && npm run start &)
+          npx wait-on http://localhost:4100/health http://localhost:3000/admin/login --timeout 120000
+      - run: npm run test:e2e

@@ -1,0 +1,958 @@
+// SAM STORE — Prisma schema (Thin Slice + roles/tenancy day one)
+// Rule from AGENTS.md: EVERY store-owned table carries store_id.
+// Money is stored as integer minor units (cents) — never floats.
+// Naming: camelCase fields (Prisma), no @map; revisit with a dedicated mapping pass.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────── Enums ───────────────────────────────
+
+enum StoreStatus {
+  ACTIVE
+  SUSPENDED
+  ARCHIVED
+  CLOSED
+}
+
+enum LinkStatus {
+  ACTIVE
+  REVOKED
+  ROTATED
+}
+
+// M3: explicit fulfillment — replaces address inference (backfilled; the app
+// writes it at order creation; reads switch in Module 8).
+enum OrderFulfillmentType {
+  PICKUP
+  DELIVERY
+}
+
+enum CartStatus {
+  OPEN
+  CONVERTED
+  ABANDONED
+  EXPIRED
+}
+
+enum OrderStatus {
+  RECEIVED
+  CONFIRMED
+  PREPARING
+  READY
+  OUT_FOR_DELIVERY
+  DELIVERED
+  ON_HOLD // POS held order (V1) — goods earmarked, resume/edit/complete later
+  COMPLETED // counter/POS sale — terminal, payment captured at completion
+  CANCELLED
+  FAILED_DELIVERY
+}
+
+enum PaymentStatus {
+  PENDING // COD: awaiting collection at delivery
+  COLLECTED // COD: collected
+  CANCELLED_REFUND // unused in slice; reserved
+}
+
+enum PlatformRole {
+  PLATFORM_ADMIN
+}
+
+enum StoreRole {
+  OWNER
+  MANAGER
+  STAFF
+  SALES_AGENT
+  DELIVERY // P12: courier — sees OUT_FOR_DELIVERY orders only; no admin surfaces
+}
+
+enum MembershipStatus {
+  PENDING
+  ACTIVE
+  DEACTIVATED
+}
+
+enum CustomerApprovalStatus {
+  NOT_REQUIRED
+  PENDING
+  APPROVED
+  REJECTED
+  SUSPENDED
+}
+
+// ─────────────────────────────── Tenancy / platform ───────────────────────────────
+
+model PlatformUser {
+  id           String       @id @default(cuid())
+  email        String       @unique
+  passwordHash String
+  role         PlatformRole @default(PLATFORM_ADMIN)
+  mfaEnabled   Boolean      @default(false)
+  isActive     Boolean      @default(true)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+}
+
+// ─────────────────────────────── Users / auth ───────────────────────────────
+
+model User {
+  id           String   @id @default(cuid())
+  // A1: phone is the primary identity (E.164, unique). Email is optional —
+  // Postgres unique indexes allow many NULLs, so this stays a plain unique field.
+  email        String?  @unique
+  phone        String?  @unique
+  phoneVerified Boolean  @default(false)
+  phoneVerifiedAt DateTime?
+  passwordHash String
+  name         String?
+  role         String   @default("STORE_OWNER") // STORE_OWNER | PLATFORM_ADMIN | MANAGER | STAFF | SALES_AGENT
+  mustChangePassword Boolean @default(false) // v6: set by admin password reset — forces a password change on next login
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  memberships        UserStore[]
+  transfersRequested StockTransfer[] @relation("TransferRequestedBy")
+  transfersApproved  StockTransfer[] @relation("TransferApprovedBy")
+  passwordResets     PasswordResetHistory[]
+}
+
+model UserStore {
+  id        String           @id @default(cuid())
+  userId    String
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  storeId   String
+  store     Store            @relation(fields: [storeId], references: [id])
+  role      StoreRole
+  status    MembershipStatus @default(ACTIVE)
+  createdAt DateTime         @default(now())
+
+  @@unique([userId, storeId])
+}
+
+// M7: roles × permissions deny matrix — a store row REMOVES a capability set from a role.
+// Deny-only: `allowed=false` is the only persisted state; restoring = delete the row.
+model RolePermission {
+  id        String   @id @default(cuid())
+  storeId   String
+  store     Store    @relation(fields: [storeId], references: [id])
+  role      String // StoreRole (tenant) vocabulary: OWNER/MANAGER/STAFF/SALES_AGENT/DELIVERY
+  key       String   // one of the TENANT_ROLES capability-set keys: ADMIN|VIEW|MANAGE|OWNER_MANAGER|DELIVERY
+  allowed   Boolean  @default(false) // deny-only → always false; kept for explicit-history
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([storeId, role, key])
+  @@index([storeId])
+}
+
+model Store {
+  id           String      @id @default(cuid())
+  slug         String      @unique
+  name         String
+  description  String?
+  logoUrl      String? // image URL or small base64 (P8 allows base64/null)
+  accentColor  String?     @default("#d94f2b") // P8: storefront accent
+  bannerText   String? // P8: storefront banner message
+  shareMessage String? // P8: default share text
+  currencyCode String      @default("PHP") // operator decision 2026-09-01: Philippines → PHP
+  timezone     String      @default("Asia/Manila") // operator decision 2026-09-01
+  status       StoreStatus @default(ACTIVE)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  settings       StoreSettings?
+  publicLink     PublicStoreLink?
+  categories     Category[]
+  products       Product[]
+  stockLevels    StockLevel[]
+  productImages  ProductImage[]
+  carts          Cart[]
+  orders         Order[]
+  storeCustomers StoreCustomer[]
+  memberships    StoreMembership[]
+  statusHistory  StoreStatusHistory[]
+  userStores     UserStore[]
+  counters       StoreCounter[]
+  auditLogs      AuditLog[]
+  vouchers       Voucher[]
+  loyaltyEntries LoyaltyEntry[]
+  registers        Register[] // N1: cash drawer registers (one per store today)
+  registerSessions RegisterSession[]
+  cashMovements    CashMovement[]
+  paymentMethods   PaymentMethod[] // N2: per-store tender methods
+  notifications  NotificationLog[]
+  warehouses     Warehouse[]
+  stockTransfers StockTransfer[]
+  payments       Payment[]
+  creditEntries  CreditEntry[]
+  expenses       Expense[]
+  purchases      Purchase[]
+  suppliers      Supplier[] // M6: vendor master per store
+  rolePermissions RolePermission[] // M7: roles × permissions deny matrix
+  stockMovements StockMovement[]
+  outboxEvents   OutboxEvent[]
+}
+
+model StoreSettings {
+  id                       String   @id @default(cuid())
+  storeId                  String   @unique
+  store                    Store    @relation(fields: [storeId], references: [id])
+  allowGuestOrders         Boolean  @default(true)
+  requireCustomerApproval  Boolean  @default(false)
+  orderingPaused           Boolean  @default(false)
+  minOrderAmountMinor      Int      @default(0)
+  orderCutoff              String? // e.g. "21:00" store-local; parsed by app
+  maxOpenOrdersPerCustomer Int      @default(10)
+  deliveryEnabled          Boolean  @default(true)
+  pickupEnabled            Boolean  @default(false)
+  deliveryFeeMinor         Int      @default(0)
+  creditLimitMinor         Int      @default(0) // store-wide utang limit (0 = credit disabled)
+  creditTermDays           Int      @default(30) // V1: default dueAt offset for credit purchases
+  receiptHeader            String? // P11: printed at top of receipts
+  receiptFooter            String? // P11: printed at bottom
+  showVatLabel             Boolean  @default(true) // P11: display-only VAT note (decision #2)
+  // M4 tax engine. Defaults reproduce today's totals exactly: VAT is extracted for display and
+  // the printed slip can hide it, so turning `vatEnabled` off is a true kill switch.
+  vatEnabled               Boolean  @default(true) // compute + snapshot VAT
+  vatRateBp                Int      @default(1200) // basis points: 1200 = 12% PH VAT
+  pricesIncludeVat         Boolean  @default(true) // catalogue prices already contain the VAT (decision #1)
+  vatShowOnReceipt         Boolean  @default(true) // store owner may HIDE the VAT lines (decision #1b)
+  tin                      String? // BIR taxpayer identification number, printed on the slip
+  requireOpenShift         Boolean  @default(true) // N1: counter cash sales require an open register shift
+  dailySalesTargetMinor    Int      @default(0) // Overview: daily sales target (0 = off)
+  hidePricePreOrder        Boolean  @default(false) // Hide per-product prices in Pre Orders screen
+  closedStoreMessage       String?
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+}
+
+model PublicStoreLink {
+  id        String     @id @default(cuid())
+  storeId   String     @unique
+  store     Store      @relation(fields: [storeId], references: [id])
+  slug      String     @unique // human-readable
+  token     String     @unique // high-entropy, generated at app layer
+  status    LinkStatus @default(ACTIVE)
+  createdAt DateTime   @default(now())
+  rotatedAt DateTime?
+  revokedAt DateTime?
+}
+
+model StoreCounter {
+  id      String @id @default(cuid())
+  storeId String
+  store   Store  @relation(fields: [storeId], references: [id])
+  kind    String // "ORDER_SEQ"
+  value   Int    @default(0)
+
+  @@unique([storeId, kind])
+}
+
+// ─────────────────────────────── Catalog ───────────────────────────────
+
+model Category {
+  id        String   @id @default(cuid())
+  storeId   String
+  store     Store    @relation(fields: [storeId], references: [id])
+  name      String
+  slug      String
+  sortOrder Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  products Product[]
+
+  @@unique([storeId, slug])
+}
+
+model Product {
+  id          String    @id @default(cuid())
+  storeId     String
+  store       Store     @relation(fields: [storeId], references: [id])
+  categoryId  String?
+  category    Category? @relation(fields: [categoryId], references: [id])
+  sku         String
+  name        String
+  description String?
+  barcode     String? // M5: scannable GTIN/EAN/UPC; store-scoped unique; POS search + labels
+  unit        String? // M5: display unit, e.g. "pc", "pack", "kilo", "bottle"
+  soldByWeight Boolean   @default(false) // M5: per-kilo item; decimal qty deferred (integer-only this module)
+  priceMinor  Int // integer minor units; NEVER float
+  taxExempt   Boolean   @default(false) // M4: VAT-exempt line (e.g. basic goods / zero-rated)
+  costMinor   Int       @default(0) // latest purchase cost (P5) — feeds COGS/profit (P10)
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  images        ProductImage[]
+  stockLevel    StockLevel?     @relation(fields: [stockLevelId], references: [id]) // legacy single-level (no warehouse); kept for backward compat
+  stockLevels   StockLevel[]    @relation("ProductStockLevels")
+  cartItems     CartItem[]
+  orderItems    OrderItem[]
+  purchaseItems PurchaseItem[]
+  stockMovements StockMovement[]
+  transfersFrom StockTransfer[]
+  stockLevelId  String?
+
+  @@unique([storeId, sku])
+  @@unique([storeId, barcode]) // M5: scannable barcode unique per store
+  @@unique([storeId, id]) // M3: composite target for tenant-consistent children
+}
+
+model ProductImage {
+  id        String  @id @default(cuid())
+  storeId   String
+  store     Store   @relation(fields: [storeId], references: [id])
+  productId String
+  product   Product @relation(fields: [storeId, productId], references: [storeId, id]) // M3: tenant-consistent
+  url       String
+  sortOrder Int     @default(0)
+}
+
+// ─────────────────────────────── Warehouses / inventory ───────────────────────────────
+
+model Warehouse {
+  id        String   @id @default(cuid())
+  storeId   String
+  store     Store    @relation(fields: [storeId], references: [id])
+  name      String
+  isDefault Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  stockLevels   StockLevel[]
+  stockMovements StockMovement[]
+  transfersFrom StockTransfer[] @relation("TransferFrom")
+  transfersTo   StockTransfer[] @relation("TransferTo")
+
+  @@unique([storeId, name])
+}
+
+enum TransferStatus {
+  REQUESTED
+  APPROVED
+  IN_TRANSIT
+  COMPLETED
+  CANCELLED
+}
+
+model StockTransfer {
+  id              String         @id @default(cuid())
+  storeId         String
+  store           Store          @relation(fields: [storeId], references: [id])
+  fromWarehouseId String
+  fromWarehouse   Warehouse      @relation("TransferFrom", fields: [fromWarehouseId], references: [id])
+  toWarehouseId   String
+  toWarehouse     Warehouse      @relation("TransferTo", fields: [toWarehouseId], references: [id])
+  productId       String
+  product         Product        @relation(fields: [productId], references: [id])
+  quantity        Int
+  status          TransferStatus @default(REQUESTED)
+  requestedById   String
+  requestedBy     User           @relation("TransferRequestedBy", fields: [requestedById], references: [id])
+  approvedById    String?
+  approvedBy      User?          @relation("TransferApprovedBy", fields: [approvedById], references: [id])
+  reason          String?
+  createdAt       DateTime       @default(now())
+  completedAt     DateTime?
+
+  @@index([storeId, status])
+}
+
+model StockLevel {
+  id               String     @id @default(cuid())
+  storeId          String
+  store            Store      @relation(fields: [storeId], references: [id])
+  productId        String
+  product          Product    @relation("ProductStockLevels", fields: [storeId, productId], references: [storeId, id]) // M3: tenant-consistent
+  warehouseId      String?
+  warehouse        Warehouse? @relation(fields: [warehouseId], references: [id])
+  quantityOnHand   Int        @default(0)
+  quantityReserved Int        @default(0)
+  reorderThreshold Int        @default(0)
+  updatedAt        DateTime   @updatedAt
+  products         Product[]
+
+  @@index([storeId, productId])
+  @@unique([storeId, id]) // M3: composite target for tenant-consistent children
+}
+
+// ─────────────────────────────── Cart ───────────────────────────────
+
+model Cart {
+  id         String     @id @default(cuid())
+  storeId    String? // null until the first product binds the cart to a store
+  store      Store?     @relation(fields: [storeId], references: [id])
+  token      String     @unique // high-entropy guest cart token
+  customerId String? // linked customer once accounts exist
+  status     CartStatus @default(OPEN)
+  expiresAt  DateTime? // soft-expiry: abandoned carts get released
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+
+  items CartItem[]
+}
+
+model CartItem {
+  id             String   @id @default(cuid())
+  cartId         String
+  cart           Cart     @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  storeId        String
+  productId      String
+  product        Product  @relation(fields: [storeId, productId], references: [storeId, id]) // M3: tenant-consistent
+  quantity       Int
+  unitPriceMinor Int // snapshot at add-time; revalidated at checkout per AGENTS.md
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([cartId, productId])
+}
+
+// ─────────────────────────────── Notifications ───────────────────────────────
+
+model NotificationLog {
+  id        String   @id @default(cuid())
+  storeId   String
+  store     Store    @relation(fields: [storeId], references: [id])
+  template  String
+  channel   String // messenger | sms | email
+  recipient String?
+  text      String
+  delivered Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([storeId, createdAt])
+}
+
+// ─────────────────────────────── Payments / receipts ───────────────────────────────
+
+model Payment {
+  id          String   @id @default(cuid())
+  orderId     String?
+  order       Order?   @relation(fields: [orderId], references: [id])
+  storeId     String
+  store       Store    @relation(fields: [storeId], references: [id])
+  method      String // cash | credit | cod_collected | <payment-method code>
+  amountMinor Int
+  changeMinor Int      @default(0) // cash tendered change (cash sales)
+  tenderedMinor Int?   // N2: cash handed over (changeMinor = tendered - applied)
+  reference   String?  // N2: e-wallet / bank reference
+  idempotencyKey String? // N2: replaying the same key never double-charges
+  receivedAt  DateTime @default(now())
+  type        String   @default("payment") // payment | refund | void
+  note        String?
+  createdBy   String? // actor user id
+  signatureData String? // v4: finger-drawn signature (data-URL PNG) for utang collections
+  signatureAt   DateTime? // v4: when the signature was captured
+  registerSessionId String? // N1: cash drawer shift this tender belongs to (null = off-counter)
+  registerSession   RegisterSession? @relation(fields: [registerSessionId], references: [id])
+
+  @@index([storeId, receivedAt])
+  @@index([orderId])
+  @@index([registerSessionId])
+  @@index([storeId, idempotencyKey])
+}
+
+// ─────────────────────────── Payment methods (N2) ───────────────────────────
+
+enum PaymentMethodKind {
+  CASH
+  CREDIT
+  EWALLET
+  TRANSFER
+  OTHER
+}
+
+/// A tender method this store accepts (cash, gcash, utang...). Seeded with sensible
+/// defaults on first use; requiresReference forces an e-wallet / bank reference.
+model PaymentMethod {
+  id                String            @id @default(cuid())
+  storeId           String
+  store             Store             @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  code              String
+  label             String
+  kind              PaymentMethodKind @default(OTHER)
+  requiresReference Boolean           @default(false)
+  enabled           Boolean           @default(true)
+  sortOrder         Int               @default(0)
+  createdAt         DateTime          @default(now())
+
+  @@unique([storeId, code])
+  @@unique([storeId, id])
+  @@index([storeId, enabled])
+}
+
+// ──────────────────────────── Cash drawer / shifts (N1) ────────────────────────────
+// One physical drawer per store today (operator decision): a Register is the device,
+// a RegisterSession is one cashier's shift on it. Balances are DERIVED from the
+// append-only movement + payment rows — never stored as a mutable total.
+
+enum RegisterStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum RegisterSessionStatus {
+  OPEN
+  CLOSED
+}
+
+enum CashMovementType {
+  FLOAT // opening float (recorded at open, informational)
+  CASH_IN // cash added to the drawer (owner drop-in, change fund top-up)
+  CASH_OUT // cash removed (bank drop, petty cash, expense paid from the drawer)
+  REFUND // cash refunded to a customer
+}
+
+model Register {
+  id        String         @id @default(cuid())
+  storeId   String
+  store     Store          @relation(fields: [storeId], references: [id])
+  name      String         @default("Main counter")
+  status    RegisterStatus @default(ACTIVE)
+  createdAt DateTime       @default(now())
+  sessions  RegisterSession[]
+
+  @@unique([storeId, id]) // M3: composite target so children can be tenant-consistent
+  @@index([storeId])
+}
+
+model RegisterSession {
+  id                String                @id @default(cuid())
+  storeId           String
+  store             Store                 @relation(fields: [storeId], references: [id])
+  registerId        String
+  register          Register              @relation(fields: [storeId, registerId], references: [storeId, id])
+  status            RegisterSessionStatus @default(OPEN)
+  openedBy          String
+  openedAt          DateTime              @default(now())
+  openingFloatMinor Int                   @default(0)
+  closedBy          String?
+  closedAt          DateTime?
+  countedMinor      Int? // cash the cashier counted at close
+  expectedMinor     Int? // computed at close (opening float + cash in − cash out + cash sales − cash refunds)
+  varianceMinor     Int? // countedMinor − expectedMinor (negative = short)
+  notes             String?
+  movements         CashMovement[]
+  payments          Payment[] // N1: every tender recorded against this shift
+  orders            Order[] // N1: counter sales opened during this shift
+
+  @@unique([storeId, id]) // M3: composite target for tenant-consistent children
+  @@index([storeId, status])
+  @@index([storeId, openedAt])
+}
+
+model CashMovement {
+  id          String           @id @default(cuid())
+  storeId     String
+  store       Store            @relation(fields: [storeId], references: [id])
+  sessionId   String
+  session     RegisterSession  @relation(fields: [storeId, sessionId], references: [storeId, id])
+  type        CashMovementType
+  amountMinor Int // always POSITIVE; the type decides the sign
+  reason      String?
+  createdBy   String
+  createdAt   DateTime         @default(now())
+
+  @@index([storeId, sessionId, createdAt])
+}
+
+// ─────────────────────────────── Expenses ───────────────────────────────
+
+model Expense {
+  id          String   @id @default(cuid())
+  storeId     String
+  store       Store    @relation(fields: [storeId], references: [id])
+  category    String // rent | utilities | supplies | wages | transport | other
+  amountMinor Int
+  note        String?
+  spentAt     DateTime @default(now())
+  createdBy   String?
+  createdAt   DateTime @default(now())
+
+  @@index([storeId, spentAt])
+}
+
+// ─────────────────────────────── Purchases / replenishment ───────────────────────────────
+
+model Purchase {
+  id             String   @id @default(cuid())
+  storeId        String
+  store          Store    @relation(fields: [storeId], references: [id])
+  vendor         String?
+  vendorId       String?
+  supplier       Supplier? @relation(fields: [vendorId], references: [id])
+  note           String?
+  totalCostMinor Int      @default(0)
+  purchasedAt    DateTime @default(now())
+  createdBy      String?
+  createdAt      DateTime @default(now())
+
+  items PurchaseItem[]
+
+  @@index([storeId, purchasedAt])
+  @@unique([storeId, id]) // M3: composite target for tenant-consistent children
+}
+
+model PurchaseItem {
+  id            String   @id @default(cuid())
+  purchaseId    String
+  purchase      Purchase @relation(fields: [purchaseId], references: [id])
+  storeId       String
+  productId     String
+  product       Product  @relation(fields: [storeId, productId], references: [storeId, id], onDelete: Restrict) // M3: tenant-consistent
+  quantity      Int
+  costMinor     Int
+  lineCostMinor Int
+}
+
+// ─────────────────────────────── Suppliers ───────────────────────────────
+
+model Supplier {
+  id            String   @id @default(cuid())
+  storeId       String
+  store         Store    @relation(fields: [storeId], references: [id])
+  name          String
+  contactPerson String?
+  phone         String?
+  email         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  purchases     Purchase[]
+
+  @@unique([storeId, id])
+  @@index([storeId, name])
+}
+
+// ─────────────────────────────── Loyalty ───────────────────────────────
+
+enum LoyaltyEntryType {
+  EARN
+  REDEEM
+  ADJUST // admin manual points adjust (+/-) with note
+}
+
+model LoyaltyEntry {
+  id              String           @id @default(cuid())
+  storeId         String
+  store           Store            @relation(fields: [storeId], references: [id])
+  customerId      String
+  customer        Customer         @relation(fields: [customerId], references: [id])
+  storeCustomerId String
+  storeCustomer   StoreCustomer    @relation(fields: [storeId, storeCustomerId], references: [storeId, id]) // M3: tenant-consistent
+  type            LoyaltyEntryType
+  points          Int // positive for EARN, negative for REDEEM
+  balanceAfter    Int
+  orderId         String?
+  description     String
+  createdAt       DateTime         @default(now())
+  order           Order?           @relation(fields: [orderId], references: [id])
+
+  @@index([storeCustomerId, createdAt])
+}
+
+// ─────────────────────────────── Orders ───────────────────────────────
+
+// ─────────────────────────────── Vouchers / promotions ───────────────────────────────
+
+model Voucher {
+  id             String    @id @default(cuid())
+  storeId        String
+  store          Store     @relation(fields: [storeId], references: [id])
+  code           String // customer-facing, e.g. SAM10
+  description    String?
+  discountMinor  Int // flat discount in minor units (reserved for % variant later)
+  minOrderMinor  Int       @default(0)
+  maxRedemptions Int? // null = unlimited
+  usedCount      Int       @default(0) // M6: atomic counter guard for concurrent redemptions
+  startsAt       DateTime?
+  expiresAt      DateTime?
+  isActive       Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+
+  redemptions VoucherRedemption[]
+
+  @@unique([storeId, code])
+  @@index([storeId, isActive])
+  @@unique([storeId, id]) // M3: composite target for tenant-consistent children
+}
+
+model VoucherRedemption {
+  id        String   @id @default(cuid())
+  voucherId String
+  voucher   Voucher  @relation(fields: [storeId, voucherId], references: [storeId, id]) // M3: tenant-consistent
+  storeId   String
+  orderId   String? // null until redeemed at checkout
+  order     Order?   @relation(fields: [orderId], references: [id])
+  createdAt DateTime @default(now())
+
+  @@unique([voucherId, orderId])
+  @@index([storeId, createdAt])
+}
+
+model Order {
+  id                   String        @id @default(cuid())
+  orderNumber          String        @unique // store-scoped human-readable, e.g. SAMSTO-000001
+  storeId              String
+  store                Store         @relation(fields: [storeId], references: [id])
+  status               OrderStatus   @default(RECEIVED)
+  source               String        @default("online") // online | pos
+  deliveryType         String        @default("delivery") // delivery | pickup (UI U5)
+  fulfillmentType      OrderFulfillmentType @default(DELIVERY) // M3: explicit; backfilled from address
+  currencyCode         String
+  subtotalMinor        Int
+  deliveryFeeMinor     Int           @default(0)
+  discountMinor        Int           @default(0)
+  totalMinor           Int
+  snapshot             Json // immutable product names/SKUs/prices at purchase; catalog edits never change history
+  // M4: immutable tax breakdown of this sale, frozen with the order like every other money field.
+  vatableMinor         Int           @default(0) // net-of-VAT base (prices inclusive) or pre-VAT base (exclusive)
+  vatMinor             Int           @default(0) // the VAT amount extracted/added
+  vatExemptMinor       Int           @default(0) // VAT-exempt sales in this order
+  vatRateBp            Int           @default(0) // the rate applied at the time of sale (0 = not taxed)
+  paymentMethod        String        @default("cod")
+  paymentStatus        PaymentStatus @default(PENDING)
+  idempotencyKey       String?       @unique // sha256 per apps/api/src/domain/idempotency.ts
+  cartToken            String // bound for idempotent retries; mismatch on retry is rejected
+  customerName         String
+  customerPhone        String
+  signatureData        String? // v4: finger-drawn signature (data-URL PNG) captured at utang finalize
+  signatureAt          DateTime? // v4: when the signature was captured
+  deliveryAddressLine1 String
+  deliveryAddressLine2 String?
+  landmark             String?
+  deliverySchedule     String? // requested date/time window, free-form for slice
+  notes                String?
+  acknowledgedAt       DateTime?
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+
+  items           OrderItem[]
+  statusHistory   OrderStatusHistory[]
+  stockMovements  StockMovement[]
+  redemptions     VoucherRedemption[]
+  claimTokens     OrderClaimToken[]
+  payments        Payment[]
+  creditEntries   CreditEntry[]
+  storeCustomerId String? // linked customer account (optional, guests = null)
+  storeCustomer   StoreCustomer?       @relation(fields: [storeCustomerId], references: [id])
+  loyaltyEntries  LoyaltyEntry[]
+  registerSessionId String? // N1: the cash drawer shift this counter sale belongs to (null = online/off-counter)
+  registerSession   RegisterSession? @relation(fields: [registerSessionId], references: [id])
+
+  @@index([storeId, status, createdAt])
+  @@unique([storeId, id]) // M3: composite target for tenant-consistent children
+}
+
+model OrderItem {
+  id             String   @id @default(cuid())
+  orderId        String
+  order          Order    @relation(fields: [storeId, orderId], references: [storeId, id]) // M3: tenant-consistent
+  storeId        String
+  productId      String? // kept as ref; name/sku/price are snapshot columns
+  product        Product? @relation(fields: [productId], references: [id])
+  productName    String
+  sku            String
+  unitPriceMinor Int
+  quantity       Int
+  lineTotalMinor Int // unitPriceMinor * quantity, server-computed
+}
+
+model OrderStatusHistory {
+  id         String       @id @default(cuid())
+  orderId    String
+  order      Order        @relation(fields: [storeId, orderId], references: [storeId, id]) // M3: tenant-consistent
+  storeId    String
+  fromStatus OrderStatus?
+  toStatus   OrderStatus
+  reason     String? // required for manual overrides
+  actorType  String // platform_admin | store_owner | staff | sales_agent | system
+  actorId    String?
+  createdAt  DateTime     @default(now())
+
+  @@index([orderId, createdAt])
+}
+
+model OrderClaimToken {
+  id        String    @id @default(cuid())
+  orderId   String
+  order     Order     @relation(fields: [storeId, orderId], references: [storeId, id]) // M3: tenant-consistent
+  storeId   String
+  token     String    @unique // single-use, HMAC-signed at app layer
+  usedAt    DateTime?
+  expiresAt DateTime
+  createdAt DateTime  @default(now())
+}
+
+// ─────────────────────────────── Customers / membership (roles) ───────────────────────────────
+
+model Customer {
+  id           String   @id @default(cuid())
+  email        String?
+  phone        String?
+  passwordHash String?
+  name         String?
+  address      String? // v6: customer home/barangay address for delivery & records
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  storeProfiles  StoreCustomer[] @relation("GlobalToStore")
+  loyaltyEntries LoyaltyEntry[]
+
+  @@unique([email, phone])
+}
+
+model StoreCustomer {
+  id                   String                 @id @default(cuid())
+  storeId              String
+  store                Store                  @relation(fields: [storeId], references: [id])
+  customerId           String
+  customer             Customer               @relation("GlobalToStore", fields: [customerId], references: [id])
+  approvalStatus       CustomerApprovalStatus @default(NOT_REQUIRED)
+  loyaltyBalancePoints Int                    @default(0) // loyalty points balance (per-store)
+  creditApproved       Boolean                @default(false) // approved for utang (P3)
+  creditLimitMinor     Int                    @default(0) // per-customer credit limit (0 = store default)
+  creditBalanceMinor   Int                    @default(0) // open balance (positive = owes)
+  createdAt            DateTime               @default(now())
+  updatedAt            DateTime               @updatedAt
+
+  orders  Order[]
+  loyalty LoyaltyEntry[]
+  credit  CreditEntry[]
+
+  @@unique([storeId, customerId])
+  @@unique([storeId, id]) // M3: composite target for tenant-consistent children
+}
+
+model CreditEntry {
+  id              String        @id @default(cuid())
+  storeId         String
+  store           Store         @relation(fields: [storeId], references: [id])
+  storeCustomerId String
+  storeCustomer   StoreCustomer @relation(fields: [storeId, storeCustomerId], references: [storeId, id]) // M3: tenant-consistent
+  orderId         String?
+  order           Order?        @relation(fields: [orderId], references: [id])
+  type            String // purchase | payment
+  amountMinor     Int // signed: +purchase (debt), -payment (settle)
+  startAt         DateTime      @default(now()) // V1: purchase date
+  dueAt           DateTime? // V1: startAt + store creditTermDays (or manual)
+  note            String?
+  createdBy       String?
+  createdAt       DateTime      @default(now())
+
+  @@index([storeId, storeCustomerId, createdAt])
+}
+
+model StoreStatusHistory {
+  id         String   @id @default(cuid())
+  storeId    String
+  store      Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  fromStatus String?
+  toStatus   String
+  reason     String?
+  changedBy  String? // actor user id (platform admin)
+  createdAt  DateTime @default(now())
+
+  @@index([storeId, createdAt])
+}
+
+model PasswordResetHistory {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  storeId   String   @default("")
+  resetBy   String? // acting admin/owner id
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+}
+
+model StoreMembership {
+  id             String           @id @default(cuid())
+  storeId        String
+  store          Store            @relation(fields: [storeId], references: [id])
+  platformUserId String? // set on acceptance
+  email          String
+  displayName    String
+  role           StoreRole
+  status         MembershipStatus @default(PENDING)
+  invitedAt      DateTime         @default(now())
+  acceptedAt     DateTime?
+  deactivatedAt  DateTime?
+
+  @@unique([storeId, email])
+}
+
+// ─────────────────────────────── Audit ───────────────────────────────
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  storeId    String? // null = platform-level event
+  store      Store?   @relation(fields: [storeId], references: [id])
+  actorType  String // platform_admin | store_owner | staff | sales_agent | system | customer
+  actorId    String?
+  action     String
+  entityType String
+  entityId   String
+  before     Json?
+  after      Json?
+  createdAt  DateTime @default(now())
+
+  @@index([storeId, entityType, entityId, createdAt])
+}
+
+// ─────────────────────────────── M3: integrity foundation ───────────────────────────────
+// Append-only stock MOVEMENT audit — every reservation/release/consume/adjust/
+// receipt/transfer that changes a StockLevel. The balances are derived facts;
+// this ledger is the source for reconciliation (Module 4 consumes + writes it).
+model StockMovement {
+  id           String   @id @default(cuid())
+  storeId      String
+  store        Store    @relation(fields: [storeId], references: [id])
+  productId    String
+  product      Product  @relation(fields: [storeId, productId], references: [storeId, id])
+  warehouseId  String?
+  warehouse    Warehouse? @relation(fields: [warehouseId], references: [id])
+  delta        Int // signed: +receipt/-sale/-reserve/+release/+adjust ...
+  type         String // RESERVE | RELEASE | CONSUME | ADJUST | RECEIPT | TRANSFER_IN | TRANSFER_OUT | VOID_RESTORE
+  orderId      String?
+  order        Order?   @relation(fields: [orderId], references: [id])
+  note         String?
+  createdBy    String?
+  balanceAfter Int? // stock-level balance after applying this movement (reconcilable)
+  createdAt    DateTime @default(now())
+
+  @@index([storeId, productId, createdAt])
+  @@index([storeId, type, createdAt])
+  @@unique([storeId, id]) // composite target for future child refs
+}
+
+// Transactional OUTBOX for external side effects (notifications etc.).
+// Written in the SAME transaction as the authoritative state change; a worker
+// (Module 9) processes PENDING rows to PROCESSED/FAILED with retries. Never
+// call an external provider synchronously inside a commerce command.
+model OutboxEvent {
+  id            String   @id @default(cuid())
+  storeId       String
+  store         Store    @relation(fields: [storeId], references: [id])
+  aggregateType String // order | payment | customer | ...
+  aggregateId   String
+  eventType     String // order.received | order.updated | notification.send | ...
+  payload       Json
+  status        String   @default("PENDING") // PENDING | PROCESSED | FAILED
+  attempts      Int      @default(0)
+  nextAttemptAt DateTime @default(now())
+  lastError     String?
+  createdAt     DateTime @default(now())
+  processedAt   DateTime?
+
+  @@index([status, nextAttemptAt])
+  @@index([aggregateType, aggregateId])
+}

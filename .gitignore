@@ -1,0 +1,30 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+build/
+.next/
+out/
+
+# environment / secrets — NEVER commit
+.env
+.env.local
+.env.*.local
+
+# logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# coverage
+coverage/
+
+*.tsbuildinfo
+
+# Playwright E2E artifacts
+apps/api/test-results/
+apps/api/playwright-report/

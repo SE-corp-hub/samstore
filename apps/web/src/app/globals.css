@@ -1,0 +1,99 @@
+:root {
+  --sam-primary: #d94f2b;
+  --sam-primary-dark: #b83c1e;
+}
+
+body {
+  background: #faf7f2;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+.navbar.bg-dark {
+  background-color: #2b2118 !important;
+}
+
+.btn-primary {
+  background-color: var(--sam-primary);
+  border-color: var(--sam-primary);
+}
+.btn-primary:hover,
+.btn-primary:focus {
+  background-color: var(--sam-primary-dark);
+  border-color: var(--sam-primary-dark);
+}
+
+.product-card {
+  transition: box-shadow 0.15s ease, transform 0.15s ease;
+}
+.product-card:hover {
+  box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.12);
+  transform: translateY(-2px);
+}
+
+.cart-drawer {
+  background: #fff;
+}
+
+.checkout-form {
+  max-width: 480px;
+  margin: 0 auto;
+  background: #fff;
+  border: 1px solid #e9e2d8;
+  border-radius: 0.75rem;
+  padding: 1.5rem;
+}
+
+.badge.text-bg-primary {
+  background-color: var(--sam-primary) !important;
+}
+
+/* Landing page hero */
+.hero {
+  background: linear-gradient(135deg, #2b2118 0%, #4a342a 60%, #d94f2b 130%);
+}
+.hero h1 {
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.35);
+}
+
+/* N1 — cash drawer report: print only the report body (57mm thermal roll friendly).
+   A cashier prints the X/Z report straight from the modal; everything else on the
+   page (nav, buttons, modal chrome) is hidden in print. */
+.register-report {
+  font-variant-numeric: tabular-nums;
+}
+
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  .register-report,
+  .register-report * {
+    visibility: visible;
+  }
+  .register-report {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 57mm;
+    max-width: 57mm;
+    font-family: ui-monospace, "Courier New", monospace;
+    font-size: 11px;
+    color: #000;
+  }
+  .register-report table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  .register-report table td {
+    padding: 1px 0;
+    border: 0;
+  }
+  .register-report .text-muted {
+    color: #333 !important;
+  }
+}
+
+@page {
+  size: 57mm auto;
+  margin: 3mm;
+}

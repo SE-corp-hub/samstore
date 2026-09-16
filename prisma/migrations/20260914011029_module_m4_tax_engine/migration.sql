@@ -1,0 +1,15 @@
+-- AlterTable
+ALTER TABLE "Order" ADD COLUMN     "vatExemptMinor" INTEGER NOT NULL DEFAULT 0,
+ADD COLUMN     "vatMinor" INTEGER NOT NULL DEFAULT 0,
+ADD COLUMN     "vatRateBp" INTEGER NOT NULL DEFAULT 0,
+ADD COLUMN     "vatableMinor" INTEGER NOT NULL DEFAULT 0;
+
+-- AlterTable
+ALTER TABLE "Product" ADD COLUMN     "taxExempt" BOOLEAN NOT NULL DEFAULT false;
+
+-- AlterTable
+ALTER TABLE "StoreSettings" ADD COLUMN     "pricesIncludeVat" BOOLEAN NOT NULL DEFAULT true,
+ADD COLUMN     "tin" TEXT,
+ADD COLUMN     "vatEnabled" BOOLEAN NOT NULL DEFAULT true,
+ADD COLUMN     "vatRateBp" INTEGER NOT NULL DEFAULT 1200,
+ADD COLUMN     "vatShowOnReceipt" BOOLEAN NOT NULL DEFAULT true;

@@ -1,0 +1,62 @@
+{
+  "name": "sam-store",
+  "version": "0.1.0",
+  "private": true,
+  "description": "SAM STORE — multi-tenant Messenger commerce platform",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "build:web": "npm run build -w @sam-store/web",
+    "start:api": "cd apps/api && node --import tsx src/main.ts",
+    "start:web": "npm run start -w @sam-store/web",
+    "dev:api": "cd apps/api && npx tsx src/main.ts",
+    "dev:web": "cd apps/web && NEXT_PUBLIC_API_URL=http://localhost:4100 npx next dev -p 3000",
+    "test": "node scripts/run-tests.mjs",
+    "typecheck": "tsc --noEmit -p packages/contracts/tsconfig.json && tsc --noEmit -p apps/api/tsconfig.json && tsc --noEmit -p apps/web/tsconfig.json",
+    "db:validate": "prisma validate",
+    "db:format": "prisma format",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:deploy": "prisma migrate deploy",
+    "db:seed": "tsx prisma/seed.ts",
+    "test:e2e": "playwright test --config apps/api/playwright.config.ts",
+    "lint": "eslint apps/api/src apps/web/src && npm run typecheck && npm run check:secrets",
+    "check:secrets": "node scripts/check-secrets.mjs",
+    "test:cov": "node scripts/run-tests.mjs --coverage",
+    "reconcile": "tsx scripts/reconcile.ts",
+    "fixtures:cleanup": "tsx scripts/cleanup-test-fixtures.ts"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "@prisma/client": "^6.1.0",
+    "@types/express": "^5.0.6",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/node": "^22.10.0",
+    "@typescript-eslint/eslint-plugin": "^8.70.0",
+    "@typescript-eslint/parser": "^8.70.0",
+    "eslint": "^9.39.5",
+    "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "prisma": "^6.1.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "allowScripts": {
+    "@prisma/client@6.19.3": true,
+    "@prisma/engines@6.19.3": true,
+    "prisma@6.19.3": true,
+    "esbuild@0.28.2": true
+  },
+  "dependencies": {
+    "@upstash/redis": "^1.38.4",
+    "bcryptjs": "^3.0.3",
+    "jsonwebtoken": "^9.0.3"
+  },
+  "type": "module"
+}
