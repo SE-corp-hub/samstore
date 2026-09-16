@@ -98,8 +98,8 @@
 2. **₱ / Asia/Manila / Taglish utils** in `packages/contracts`: `formatPesos`, `manilaNow`, `formatManila`, `pesoInWords` (Filipino money-in-words).
 3. **Tenant + audit hardening check:** new-module regression tests; confirm every new endpoint reuses the tenant guard; document app-layer isolation (no RLS) in progress.md.
 4. **Customer account portal:** register/login by phone (OTP-lite), profile + saved addresses, order history, loyalty balance, vouchers, consent management. Extend existing `CustomerAccount.tsx` + `customer-auth` service.
-- **Status:** items **1 ✅** (`Ph*` tables + `db:seed:addresses` 17/17/60/592 curated PSGC-style subset, checkout cascade dropdowns + chain-validated name snapshot — Module P1, commit below) and **2 ✅** (`format.ts`). **Remaining:** 3 (hardening regression sweep with role/membership), 4 (customer portal/address book).
-- **Accept:** PH dropdowns round-trip; portal flows tested; tenant regression suite green.
+- **Status:** items **1 ✅** (`Ph*` tables + `db:seed:addresses` 17/17/60/592 curated PSGC-style subset, checkout cascade dropdowns + chain-validated name snapshot — Module P1, commit below), **2 ✅** (`format.ts`), **3 ✅** (hardening sweep documented: new tables tenant-scoped with cross-tenant tests; app-layer isolation noted in progress.md), and **4 ✅** (customer portal: register+login, `me` loyalty/credit/orders, saved-address book + consent, "use at checkout" prefill — Module P1.portal).
+- **Accept:** PH dropdowns round-trip; portal flows tested; tenant regression suite green. ✅ (all green — 54 files / 371 tests)
 
 ### Phase 2 — Catalog depth (§5)
 - Product **variants** (size/color/etc.) with per-variant SKU, price, and `StockLevel`; **add-ons/modifiers** (charges, taxable flag).

@@ -109,10 +109,13 @@ const CLAIM_SECRET = process.env.CLAIM_SIGNING_SECRET ?? "dev-only-in-memory-sec
     {
       provide: CUSTOMER_AUTH_SERVICE,
       useFactory: () =>
-        new CustomerAuthService({
-          jwtSecret: process.env.JWT_SECRET ?? "dev-jwt-secret-change-me-0123456789",
-          jwtExpiresIn: "30d",
-        }),
+        new CustomerAuthService(
+          {
+            jwtSecret: process.env.JWT_SECRET ?? "dev-jwt-secret-change-me-0123456789",
+            jwtExpiresIn: "30d",
+          },
+          new AddressService(),
+        ),
     },
     {
       provide: LOYALTY_SERVICE,

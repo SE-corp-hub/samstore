@@ -173,7 +173,7 @@ export default function Storefront({ store, products }: StorefrontProps) {
       <main className="container py-4">
         {accountOpen && (
           <div className="mb-4" style={{ maxWidth: 420 }}>
-            <CustomerAccount />
+            <CustomerAccount storeId={store.id} />
           </div>
         )}
         {cartError && (

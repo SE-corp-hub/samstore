@@ -815,6 +815,7 @@ model Customer {
 
   storeProfiles  StoreCustomer[] @relation("GlobalToStore")
   loyaltyEntries LoyaltyEntry[]
+  consents       ConsentRecord[]
 
   @@unique([email, phone])
 }
@@ -836,6 +837,7 @@ model StoreCustomer {
   orders  Order[]
   loyalty LoyaltyEntry[]
   credit  CreditEntry[]
+  addresses StoreCustomerAddress[]
 
   @@unique([storeId, customerId])
   @@unique([storeId, id]) // M3: composite target for tenant-consistent children
@@ -871,6 +873,54 @@ model StoreStatusHistory {
   createdAt  DateTime @default(now())
 
   @@index([storeId, createdAt])
+}
+
+// ─────────────────────────────── Customer saved addresses (P1.portal) ───────────────────────────────
+// Tenant-scoped via the store profile. PH hierarchy codes + FROZEN name snapshots so
+// later reference-data edits never rewrite a saved address's meaning. A store's customer
+// owns ONLY their own addresses (isolated per store profile).
+
+model StoreCustomerAddress {
+  id              String        @id @default(cuid())
+  storeId         String
+  storeCustomerId String
+  storeCustomer   StoreCustomer @relation(fields: [storeId, storeCustomerId], references: [storeId, id], onDelete: Cascade)
+  label           String? // e.g. Home / Office / Store pickup
+  addressLine1    String? // street / house no.
+  addressLine2    String? // building / unit
+  landmark        String?
+  instructions    String?
+  regionCode      String?
+  provinceCode    String?
+  cityCode        String?
+  barangayCode    String?
+  regionName      String?
+  provinceName    String?
+  cityName        String?
+  barangayName    String?
+  isDefault       Boolean       @default(false)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@index([storeId, storeCustomerId])
+  @@unique([storeId, id]) // M3: composite target for tenant-consistent children
+}
+
+// ─────────────────────────────── DPA / privacy consent records (P1.portal) ───────────────────────────────
+// RA 10173 (Data Privacy Act) — auditable, append-only capture of each consent grant.
+
+model ConsentRecord {
+  id         String   @id @default(cuid())
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  scope      String // e.g. "dpv1" (data privacy agreement)
+  channel    String // web | messenger | pos | email | sms
+  granted    Boolean  @default(true)
+  version    String? // privacy-notice version, e.g. "2026.09"
+  recordedBy String? // actor (customer id or staff id) — null = self-service
+  createdAt  DateTime @default(now())
+
+  @@index([customerId, scope])
 }
 
 model PasswordResetHistory {

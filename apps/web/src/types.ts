@@ -19,6 +19,7 @@ export interface ProductDTO {
 }
 
 export interface PublicStoreDTO {
+  id: string;
   slug: string;
   name: string;
   description: string | null;

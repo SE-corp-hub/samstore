@@ -1,6 +1,20 @@
 # PINDIAN — Progress Log
 
-Updated: 2026-09-16 · **P1: PH address hierarchy + ₱/Manila formatters** · Active model: `deepseek/deepseek-v4-flash-0731` (openrouter), boilerplate tier `inclusionai/ling-3.0-flash`
+Updated: 2026-09-16 · **P1.portal: customer account (saved PH addresses + DPA consent) + hardening note** · Active model: `deepseek/deepseek-v4-flash-0731` (openrouter), boilerplate tier `inclusionai/ling-3.0-flash`
+
+## P1.portal — Customer account: saved addresses, consent, "use at checkout"
+
+| Item | Detail |
+|---|---|
+| Schema | `StoreCustomerAddress` (tenant-scoped via the `StoreCustomer` profile; PH codes + FROZEN name snapshots; `isDefault`; cascade delete) and `ConsentRecord` (RA 10173 append-only: scope/channel/granted/version/recordedBy). `Customer.consents`, `StoreCustomer.addresses` relations. Migration `20260916170000_module_p1_customer_account`. |
+| Service | `CustomerAuthService` (+injected `AddressService`): `list/create/update/deleteAddress` — PH codes all-or-nothing + chain-validated through `AddressService`, name snapshots; lazy `ensureProfile` so a brand-new customer can save an address pre-first-order; first address auto-default; `update` without codes preserves the snapshot. `recordConsent`/`listConsents`; `register` captures the `dpv1` consent when provided. |
+| API | Controller routes: `GET/POST/PATCH/DELETE /auth/customer/addresses(/:id)`, `POST /auth/customer/consent`, `GET /auth/customer/consents`. All token-guarded (JWT role CUSTOMER). |
+| UI | `CustomerAccount.tsx` saved-addresses book (list/add via PH cascading selects/set default/delete) + "Use at checkout" → `localStorage.samstore.savedAddress`; `CheckoutForm` prefills the PH cascade + street from it (validated against live lists; silently ignored when codes no longer resolve). Register form includes the DPA consent checkbox. `PublicStoreDTO` now carries `id` so the account can scope addresses per store. |
+| Fixes found | `resolveCodes` initially filtered the KEYS instead of the VALUES (would pass key names to the address lookup) and the names map used code keys (would overwrite codes with names) — both corrected; the shared path is now covered by DB tests. |
+| Tests | +5 `auth/customer-account.test.ts`: consent capture+list, address CRUD + PH snapshot + default + snapshot-preserving update + delete, partial-codes rejection, **tenant isolation (customer A cannot read/edit/delete customer B's address)**, bad-token rejection. |
+| Item 3 (tenant/audit) | Hardening sweep: `StoreCustomerAddress` carries `storeId` + composite `@@unique([storeId, id])`; the tenant boundary is the per-store `StoreCustomer` profile (cross-tenant tests above). `Ph*`/address-lookup endpoints are platform reference data (no store data → no cross-tenant surface). `ConsentRecord` is customer-global by design (a person, not a store). App-layer isolation (no RLS) remains the documented enforcement point. |
+| Gate | lint 0 errors · **full suite 54 files / 371 tests / 0 fail** · live HTTP smoke: register+dpv1 consent → save "Bahay @ Bangkal, Makati, Metro Manila (NCR)" (snapshot + default) → list + consents; web `/sam-store` 200. |
+| Commit | (this commit) |
 
 ## P1 — PH context: address model + checkout dropdowns + shared formatters
 

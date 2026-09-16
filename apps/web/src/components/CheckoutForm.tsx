@@ -26,6 +26,28 @@ const toPesos = (m: number) => `₱${(m / 100).toFixed(2)}`;
 
 const EMPTY_PH = { code: "", name: "" };
 
+const SAVED_ADDRESS_USE_KEY = "samstore.savedAddress";
+
+interface SavedAddressPreset {
+  addressLine1?: string | null;
+  addressLine2?: string | null;
+  landmark?: string | null;
+  regionCode?: string | null;
+  provinceCode?: string | null;
+  cityCode?: string | null;
+  barangayCode?: string | null;
+}
+
+function readSavedAddressPreset(): SavedAddressPreset | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(SAVED_ADDRESS_USE_KEY);
+    return raw ? (JSON.parse(raw) as SavedAddressPreset) : null;
+  } catch {
+    return null;
+  }
+}
+
 export default function CheckoutForm({ cartToken, store, subtotalMinor, deliveryFeeMinor, onSuccess, onClose }: CheckoutFormProps) {
   const customerToken = typeof window !== "undefined" ? localStorage.getItem("samstore.customer.token") : null;
   const [step, setStep] = useState<1 | 2 | 3>(1);
@@ -76,6 +98,45 @@ export default function CheckoutForm({ cartToken, store, subtotalMinor, delivery
       alive = false;
     };
   }, [deliveryType, regions.length]);
+
+  // Prefill from a saved address chosen in the Account book ("use at checkout").
+  const [preset, setPreset] = useState<SavedAddressPreset | null>(() => readSavedAddressPreset());
+  const [prefillDone, setPrefillDone] = useState(false);
+
+  useEffect(() => {
+    void setPreset;
+    if (!preset || prefillDone || deliveryType !== "delivery") return;
+    if (regions.length === 0) return;
+    const region = regions.find((r) => r.code === preset.regionCode);
+    if (!region) { setPrefillDone(true); return; } // preset no longer resolves — ignore silently
+    setRegion({ code: region.code, name: region.name });
+    void (async () => {
+      const ps = await fetchProvinces(region.code);
+      setProvinces(ps);
+      const prov = preset.provinceCode ? ps.find((x) => x.code === preset.provinceCode) : null;
+      if (!prov) { setPrefillDone(true); return; }
+      setProvince({ code: prov.code, name: prov.name });
+      const cs = await fetchCities(prov.code);
+      setCities(cs);
+      const city = preset.cityCode ? cs.find((x) => x.code === preset.cityCode) : null;
+      if (!city) { setPrefillDone(true); return; }
+      setCity({ code: city.code, name: city.name });
+      const bs = await fetchBarangays(city.code);
+      setBarangays(bs);
+      const brgy = preset.barangayCode ? bs.find((x) => x.code === preset.barangayCode) : null;
+      if (!brgy) { setPrefillDone(true); return; }
+      setBarangay({ code: brgy.code, name: brgy.name });
+      if (preset.addressLine1 || preset.addressLine2 || preset.landmark) {
+        setForm((f) => ({
+          ...f,
+          deliveryAddressLine1: f.deliveryAddressLine1 || preset.addressLine1 || "",
+          deliveryAddressLine2: preset.addressLine2 ?? "",
+          landmark: preset.landmark ?? "",
+        }));
+      }
+      setPrefillDone(true);
+    })();
+  }, [regions, preset, prefillDone, deliveryType]);
 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm((f) => ({ ...f, [k]: e.target.value }));
