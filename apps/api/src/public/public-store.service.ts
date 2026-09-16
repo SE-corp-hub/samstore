@@ -61,18 +61,42 @@ export class PublicStoreService {
     }
 
     const products = await this.catalog.listActiveProducts(store.id);
+    const variants = await this.catalog.getVariantsByProductIds(store.id, products.map((p) => p.id));
+    const byProduct = new Map<string, (typeof variants)[number][]>();
+    for (const v of variants) {
+      const list = byProduct.get(v.productId) ?? [];
+      list.push(v);
+      byProduct.set(v.productId, list);
+    }
     return {
       closed: false,
       store: base,
-      products: products.map((p) => ({
-        id: p.id,
-        sku: p.sku,
-        name: p.name,
-        description: p.description,
-        priceMinor: p.priceMinor,
-        category: p.categoryName ? { id: "", name: p.categoryName, slug: "", sortOrder: 0 } : null,
-        images: p.images.map((url, i) => ({ url, sortOrder: i })),
-        availableQuantity: p.quantityOnHand - p.quantityReserved,
+      products: await Promise.all(products.map(async (p) => {
+        const pv = byProduct.get(p.id) ?? [];
+        const addons = await this.catalog.getProductAddons(store.id, p.id);
+        return {
+          id: p.id,
+          sku: p.sku,
+          name: p.name,
+          description: p.description,
+          priceMinor: p.priceMinor,
+          category: p.categoryName ? { id: "", name: p.categoryName, slug: "", sortOrder: 0 } : null,
+          images: p.images.map((url, i) => ({ url, sortOrder: i })),
+          availableQuantity: p.quantityOnHand - p.quantityReserved,
+          variants: pv.map((v) => ({
+            id: v.id,
+            name: v.name,
+            sku: v.sku,
+            priceMinor: v.priceMinor,
+            availableQuantity: v.quantityOnHand - v.quantityReserved,
+          })),
+          addons: addons.map((a) => ({
+            id: a.id,
+            name: a.name,
+            required: a.required,
+            options: a.options.map((o) => ({ id: o.id, name: o.name, priceMinor: o.priceMinor })),
+          })),
+        };
       })),
     };
   }

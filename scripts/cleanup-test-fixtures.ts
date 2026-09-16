@@ -14,7 +14,7 @@
 import { prisma } from "../apps/api/src/persistence/prisma-repositories.js";
 
 /** Store slugs created by test runs (see the prefixes in the api test files). */
-const TEST_STORE_SLUG = /^(?:m[456]\d{6,}|m5|rc\d{6,}|sg\d{6,}|obx\d{6,}|pay\d{6,}|tx[joz]-\w+|probe-|pay-|m5-idem|p1c\d+|p1ad\d+)/i;
+const TEST_STORE_SLUG = /^(?:m[456]\d{6,}|m5|rc\d{6,}|sg\d{6,}|obx\d{6,}|pay\d{6,}|tx[joz]-\w+|probe-|pay-|m5-idem|p1c\d+|p1ad\d+|p2c\d+)/i;
 
 async function main() {
   const apply = process.argv.includes("--apply");

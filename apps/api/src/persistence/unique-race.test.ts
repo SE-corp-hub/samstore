@@ -40,7 +40,7 @@ test("cart: two concurrent adds of the same product merge instead of throwing P2
   assert.equal(rejected.length, 0, `no add may fail: ${JSON.stringify(rejected.map((r) => (r as PromiseRejectedResult).reason?.message))}`);
 
   const item = await prisma.cartItem.findUnique({
-    where: { cartId_productId: { cartId: cart.id, productId: product.id } },
+    where: { cartId_productId_variantId_addonKey: { cartId: cart.id, productId: product.id, variantId: "", addonKey: "" } },
     select: { quantity: true },
   });
   assert.equal(item?.quantity, 2, "both adds are counted exactly once");

@@ -6,6 +6,7 @@ import ProductCard from "../components/ProductCard";
 import CartDrawer, { type CartLineUI } from "../components/CartDrawer";
 import CheckoutForm from "../components/CheckoutForm";
 import OrderTracker from "../components/OrderTracker";
+import ProductPicker from "../components/ProductPicker";
 import { CustomerAccount } from "../components/CustomerAccount";
 import {
   ensureCartToken,
@@ -55,7 +56,15 @@ export default function Storefront({ store, products }: StorefrontProps) {
         .map((i) => {
           const product = productById().get(i.productId);
           if (!product) return null;
-          return { product: { ...product, priceMinor: i.unitPriceMinor }, quantity: i.quantity };
+          return {
+            lineId: i.lineId,
+            product: { ...product, priceMinor: i.unitPriceMinor },
+            unitPriceMinor: i.unitPriceMinor,
+            variant: i.variant,
+            addons: i.addons,
+            addonsTotalMinor: i.addonsTotalMinor,
+            quantity: i.quantity,
+          };
         })
         .filter((l): l is CartLineUI => l !== null),
     [productById],
@@ -75,26 +84,34 @@ export default function Storefront({ store, products }: StorefrontProps) {
       });
   }, [toLines]);
 
-  const addProduct = async (p: ProductDTO) => {
+  const addProduct = async (p: ProductDTO, opts: { variantId?: string; addons?: { addonId: string; optionId: string }[] } = {}) => {
     setCartError(null);
     try {
       const token = cartToken ?? (await ensureCartToken());
       setCartToken(token);
-      const cart = await addItem(token, p.id, 1);
+      const cart = await addItem(token, p.id, 1, opts);
       setLines(toLines(cart));
     } catch (e) {
       setCartError(e instanceof Error ? e.message : "Could not add item");
     }
   };
 
-  const updateQty = async (productId: string, qty: number) => {
+  const openPicker = (p: ProductDTO) => {
+    if (p.variants.length > 0 || p.addons.length > 0) {
+      setPickProduct(p);
+    } else {
+      void addProduct(p);
+    }
+  };
+
+  const updateQty = async (lineId: string, qty: number) => {
     if (!cartToken) return;
     setCartError(null);
     try {
       const cart =
         qty <= 0
-          ? await removeItem(cartToken, productId)
-          : await updateItemQuantity(cartToken, productId, qty);
+          ? await removeItem(cartToken, lineId)
+          : await updateItemQuantity(cartToken, lineId, qty);
       setLines(toLines(cart));
     } catch (e) {
       setCartError(e instanceof Error ? e.message : "Could not update item");
@@ -110,7 +127,8 @@ export default function Storefront({ store, products }: StorefrontProps) {
   };
 
   const cartCount = lines.reduce((s, l) => s + l.quantity, 0);
-  const subtotal = lines.reduce((s, l) => s + l.product.priceMinor * l.quantity, 0);
+  const subtotal = lines.reduce((s, l) => s + (l.unitPriceMinor + l.addonsTotalMinor) * l.quantity, 0);
+  const [pickProduct, setPickProduct] = useState<ProductDTO | null>(null);
 
   if (store.orderingPaused || !store.guestOrderingEnabled) {
     return (
@@ -273,7 +291,7 @@ export default function Storefront({ store, products }: StorefrontProps) {
               <div className="row g-3">
                 {filteredProducts.map((p) => (
                   <div className="col-6 col-md-4 col-lg-3" key={p.id}>
-                    <ProductCard product={p} onAdd={addProduct} />
+                    <ProductCard product={p} onAdd={(prod) => openPicker(prod)} />
                   </div>
                 ))}
               </div>
@@ -292,6 +310,15 @@ export default function Storefront({ store, products }: StorefrontProps) {
         deliveryFeeMinor={store.deliveryFeeMinor}
         minOrderMinor={store.minOrderAmountMinor}
       />
+
+      {/* P2a: variant / add-on picker modal */}
+      {pickProduct && (
+        <ProductPicker
+          product={pickProduct}
+          onAdd={(p, opts) => { void addProduct(p, opts); setPickProduct(null); }}
+          onClose={() => setPickProduct(null)}
+        />
+      )}
     </div>
   );
 }

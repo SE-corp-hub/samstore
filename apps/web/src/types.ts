@@ -5,6 +5,21 @@ export interface CategoryDTO {
   sortOrder: number;
 }
 
+export interface ProductVariantDTO {
+  id: string;
+  name: string;
+  sku: string;
+  priceMinor: number;
+  availableQuantity: number;
+}
+
+export interface ProductAddonDTO {
+  id: string;
+  name: string;
+  required: boolean;
+  options: { id: string; name: string; priceMinor: number }[];
+}
+
 export interface ProductDTO {
   id: string;
   sku: string;
@@ -16,6 +31,8 @@ export interface ProductDTO {
   images: { url: string; sortOrder: number }[];
   /** quantityOnHand minus quantityReserved; null when unlimited */
   availableQuantity: number | null;
+  variants: ProductVariantDTO[];
+  addons: ProductAddonDTO[];
 }
 
 export interface PublicStoreDTO {
@@ -38,10 +55,15 @@ export interface PublicStoreDTO {
 }
 
 export interface CartLineDTO {
+  lineId: string;
   productId: string;
   sku: string;
   name: string;
   unitPriceMinor: number;
+  variantId: string | null;
+  variant: { id: string; name: string; sku: string } | null;
+  addons: { addonId: string; optionId: string; name: string; priceMinor: number }[];
+  addonsTotalMinor: number;
   quantity: number;
   lineTotalMinor: number;
 }
@@ -54,10 +76,15 @@ export interface CartDTO {
 }
 
 export interface CartItemDTO {
+  lineId: string;
   productId: string;
   sku: string;
   name: string;
   unitPriceMinor: number;
+  variantId: string | null;
+  variant: { id: string; name: string; sku: string } | null;
+  addons: { addonId: string; optionId: string; name: string; priceMinor: number }[];
+  addonsTotalMinor: number;
   quantity: number;
   lineTotalMinor: number;
 }

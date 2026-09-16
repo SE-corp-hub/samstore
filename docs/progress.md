@@ -1,6 +1,21 @@
 # PINDIAN — Progress Log
 
-Updated: 2026-09-16 · **P1.portal: customer account (saved PH addresses + DPA consent) + hardening note** · Active model: `deepseek/deepseek-v4-flash-0731` (openrouter), boilerplate tier `inclusionai/ling-3.0-flash`
+Updated: 2026-09-16 · **P2a: product variants + add-ons end-to-end** · Active model: `deepseek/deepseek-v4-flash-0731` (openrouter), boilerplate tier `inclusionai/ling-3.0-flash`
+
+## P2a — Variants + add-ons/modifiers (catalog → storefront → cart → checkout)
+
+| Item | Detail |
+|---|---|
+| Schema | `ProductVariant` (own SKU/price/stock counters; tenant-scoped, cascade), `ProductAddon` + `ProductAddonOption` (groups→options with server prices). `CartItem` line identity → `@@unique([cartId, productId, variantId, addonKey])` with `""` sentinel (NULLs make Postgres unique permissive → duplicate plain lines), `addons Json` snapshot + `addonsTotalMinor`; `OrderItem` gains `variantId/variantName/addons` immutable snapshot; `StockMovement.variantId` for variant reservation audit. Migrations `20260916180000_module_p2a_variants_addons` + `…_cart_variant_identity` (drop variant FK — sentinel "" can't reference a variant; tenancy stays app-enforced; backfilled existing rows). |
+| Repos | `ProductVariantRecord/AddonRecord`; `CatalogRepository.getVariantById/getVariantsByIds/getVariantsByProductIds/getProductAddons`; `CartRepository.addItem` upserts by the new compound key + stores add-ons; `updateItemQuantity/removeItem` now target the **line id** (CartItem id); `AtomicCheckoutEffects.stockReservations` carries `variantId`. |
+| Cart | `CartService.addItem` resolves the variant (must belong to the product, active), prices from VARIANT price, resolves add-on options server-side (client prices never trusted), computes `addonKey` fingerprint + `addonsTotalMinor`, guards variant stock `onHand - reserved` vs existing line qty; cart callers updated to lineId. |
+| Checkout | `revalidateCartLines` re-prices variant lines from LIVE variant price and drops missing/inactive/mismatched variants; `computeOrderTotals` includes `addonsTotalMinor`; `createAtomic` RESERVES variant counters via guarded conditional UPDATE + a `RESERVE` StockMovement carrying `variantId` (same atomic "two buyers" safety as StockLevel); items snapshot variant name + add-on names/prices; tax base includes add-ons. |
+| Public storefront | `ProductDTO` now carries `variants` + `addons`; **`ProductPicker`** modal (variant buttons incl. sold-out state, add-on group toggles with required validation, qty, live total). Product cards open the picker for variant/add-on products; `CartDrawer` renders variant + add-on lines with per-line price incl. add-ons and line-id qty controls. |
+| Seed | `db:seed` adds **KAPE-MALAY** (Hot/₱140 Iced/₱160 variants + "Extras" group: Extra shot +₱20, Soy/Silky +₱30) for manual walkthroughs. |
+| Tests | +4 `cart/variant-cart.test.ts` (real DB): distinct lines per add-on combo + server prices, variant stock guard (5-unit commit ceiling), cross-product variant rejection, **atomic variant reservation + name/add-on snapshot on checkout** (+ `StockMovement` audit). Existing cart unit tests migrated to the lineId API. |
+| Notes / honest | **P2b (not in this module):** admin-panel variant/add-on management UI, featured/tags/related/upsell, warehouse low-stock surfacing, **POS variant selling** (`pos.service` load/reserve flows still product-only; POS sells plain products), and add-on price revalidation against live groups at checkout (add-on prices are server-frozen at add-time). |
+| Gate | lint 0 errors · **full suite 55 files / 375 tests / 0 fail** · live HTTP smoke: storefront returns KAPE-MALAY variants(+add-ons); cart add Iced+Extra shot ×2 → 36000; checkout total ₱410 incl. delivery; web `/sam-store` 200. |
+| Commit | (this commit) |
 
 ## P1.portal — Customer account: saved addresses, consent, "use at checkout"
 

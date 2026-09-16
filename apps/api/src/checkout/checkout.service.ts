@@ -164,6 +164,10 @@ export class CheckoutService {
       cart.storeId,
       cart.lines.map((l) => l.productId),
     );
+    // P2a: variant pricing + survival — a line prices from its variant's current price.
+    const variantIds = cart.lines.map((l) => l.variantId).filter((v): v is string => !!v);
+    const freshVariants = await this.catalog.getVariantsByIds(cart.storeId, variantIds);
+    const freshVariantsMap = new Map(freshVariants.map((v) => [v.id, { id: v.id, productId: v.productId, priceMinor: v.priceMinor, isActive: v.isActive }]));
     let revalidated;
     try {
       revalidated = revalidateCartLines(
@@ -171,6 +175,7 @@ export class CheckoutService {
         new Map(
           freshProducts.map((p) => [p.id, { id: p.id, priceMinor: p.priceMinor, isActive: p.isActive }]),
         ),
+        freshVariantsMap,
       );
     } catch (e) {
       if (e instanceof CartRevalidationError) {
@@ -296,13 +301,20 @@ export class CheckoutService {
     // 8. Immutable line items (names/SKUs snapshot at purchase time)
     const items = revalidated.lines.map((line) => {
       const product = freshProducts.find((p) => p.id === line.productId);
+      const variant = line.variantId ? freshVariants.find((v) => v.id === line.variantId) : null;
+      const unit = line.unitPriceMinor;
+      const addonsTotal = line.addonsTotalMinor ?? 0;
       return {
         productId: product?.id ?? null,
         productName: product?.name ?? "Unknown product",
-        sku: product?.sku ?? "UNKNOWN",
-        unitPriceMinor: line.unitPriceMinor,
+        sku: variant?.sku ?? product?.sku ?? "UNKNOWN",
+        // P2a: variant + add-ons frozen with the sale
+        variantId: line.variantId ?? null,
+        variantName: variant?.name ?? null,
+        addons: line.addons ?? [],
+        unitPriceMinor: unit,
         quantity: line.quantity,
-        lineTotalMinor: line.unitPriceMinor * line.quantity,
+        lineTotalMinor: (unit + addonsTotal) * line.quantity,
       };
     });
 
@@ -325,7 +337,7 @@ export class CheckoutService {
       // delivery fee is excluded from it (decision 2).
       ...(await taxColumnsFor(
         store.id,
-        revalidated.lines.map((l: any) => ({ productId: l.productId ?? null, lineTotalMinor: l.lineTotalMinor ?? l.unitPriceMinor * l.quantity })),
+        revalidated.lines.map((l: any) => ({ productId: l.productId ?? null, lineTotalMinor: (l.unitPriceMinor + (l.addonsTotalMinor ?? 0)) * l.quantity })),
         { discountMinor, deliveryFeeMinor: totals.deliveryFeeMinor, settingsOverride: store },
       )),
       snapshot: {
@@ -371,7 +383,7 @@ export class CheckoutService {
       try {
         created = await this.orders.createAtomic(order, {
           cart: { token: cart.token, storeId: cart.storeId },
-          stockReservations: items.map((i) => ({ productId: i.productId ?? "", quantity: i.quantity })),
+          stockReservations: items.map((i) => ({ productId: i.productId ?? "", variantId: i.variantId ?? null, quantity: i.quantity })),
           ...(voucherId ? { voucherRedemption: { voucherId } } : {}),
           ...(loyaltyPoints > 0 && customerId && storeCustomerId
             ? { loyalty: { customerId, storeCustomerId, points: loyaltyPoints } }

@@ -63,6 +63,27 @@ export interface ProductDTO {
   images: { url: string; sortOrder: number }[];
   /** quantityOnHand minus quantityReserved; null when unlimited */
   availableQuantity: number | null;
+  /** P2a: optional variants (own price/SKU/stock). */
+  variants: ProductVariantDTO[];
+  /** P2a: optional add-on/modifier groups. */
+  addons: ProductAddonDTO[];
+}
+
+export interface ProductVariantDTO {
+  id: string;
+  name: string;
+  sku: string;
+  /** absolute price in integer minor units */
+  priceMinor: number;
+  /** quantityOnHand minus quantityReserved */
+  availableQuantity: number;
+}
+
+export interface ProductAddonDTO {
+  id: string;
+  name: string;
+  required: boolean;
+  options: { id: string; name: string; priceMinor: number }[];
 }
 
 export interface PublicStoreDTO {
@@ -85,11 +106,17 @@ export interface PublicStoreDTO {
 // ─────────────────────────────── Cart ───────────────────────────────
 
 export interface CartLineDTO {
+  lineId: string;
   productId: string;
   sku: string;
   name: string;
-  /** snapshot of unit price at add-time, integer minor units */
+  /** snapshot of unit price at add-time, integer minor units (variant price when a variant) */
   unitPriceMinor: number;
+  /** P2a */
+  variantId: string | null;
+  variant: { id: string; name: string; sku: string } | null;
+  addons: { addonId: string; optionId: string; name: string; priceMinor: number }[];
+  addonsTotalMinor: number;
   quantity: number;
   lineTotalMinor: number;
 }
@@ -114,6 +141,10 @@ export interface CartRevalidationDTO {
 export interface AddToCartRequest {
   productId: string;
   quantity: number;
+  /** P2a: optional variant of the product. */
+  variantId?: string;
+  /** P2a: optional add-on option picks (prices resolved server-side). */
+  addons?: { addonId: string; optionId: string }[];
 }
 
 export interface UpdateCartItemRequest {
@@ -125,10 +156,16 @@ export interface CreateCartResponse {
 }
 
 export interface CartItemDTO {
+  lineId: string;
   productId: string;
   sku: string;
   name: string;
   unitPriceMinor: number;
+  /** P2a */
+  variantId: string | null;
+  variant: { id: string; name: string; sku: string } | null;
+  addons: { addonId: string; optionId: string; name: string; priceMinor: number }[];
+  addonsTotalMinor: number;
   quantity: number;
   lineTotalMinor: number;
 }

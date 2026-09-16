@@ -53,32 +53,40 @@ export class CartController {
     return r.value;
   }
 
-  /** POST /public/carts/:token/items — add a product (binds store on first add) */
+  /** POST /public/carts/:token/items — add a product (binds store on first add); variant/add-ons optional (P2a) */
   @Post(":token/items")
-  async add(@Param("token") token: string, @Body() body: { productId: string; quantity: number }) {
-    const dto = assertDto<{ productId: string; quantity: number }>(body, CART_ADD_DTO);
-    const r = await this.carts.addItem(token, dto.productId, dto.quantity);
+  async add(@Param("token") token: string, @Body() body: {
+    productId: string;
+    quantity: number;
+    variantId?: string;
+    addons?: { addonId: string; optionId: string }[];
+  }) {
+    const dto = assertDto<{ productId: string; quantity: number; variantId?: string; addons?: { addonId: string; optionId: string }[] }>(body, CART_ADD_DTO);
+    const r = await this.carts.addItem(token, dto.productId, dto.quantity, {
+      variantId: dto.variantId,
+      addons: dto.addons,
+    });
     if (!r.ok) throw new HttpException(r.error, statusFor(r.error));
     return r.value;
   }
 
-  /** PATCH /public/carts/:token/items/:productId — set quantity */
-  @Patch(":token/items/:productId")
+  /** PATCH /public/carts/:token/items/:lineId — set quantity */
+  @Patch(":token/items/:lineId")
   async updateQty(
     @Param("token") token: string,
-    @Param("productId") productId: string,
+    @Param("lineId") lineId: string,
     @Body() body: { quantity: number },
   ) {
     const dto = assertDto<{ quantity: number }>(body, CART_QTY_DTO);
-    const r = await this.carts.updateQuantity(token, productId, dto.quantity);
+    const r = await this.carts.updateQuantity(token, lineId, dto.quantity);
     if (!r.ok) throw new HttpException(r.error, statusFor(r.error));
     return r.value;
   }
 
-  /** DELETE /public/carts/:token/items/:productId — remove line */
-  @Delete(":token/items/:productId")
-  async remove(@Param("token") token: string, @Param("productId") productId: string) {
-    const r = await this.carts.removeItem(token, productId);
+  /** DELETE /public/carts/:token/items/:lineId — remove line */
+  @Delete(":token/items/:lineId")
+  async remove(@Param("token") token: string, @Param("lineId") lineId: string) {
+    const r = await this.carts.removeItem(token, lineId);
     if (!r.ok) throw new HttpException(r.error, statusFor(r.error));
     return r.value;
   }

@@ -4,7 +4,12 @@ import { useState } from "react";
 import type { ProductDTO } from "../types";
 
 export interface CartLineUI {
+  lineId: string;
   product: ProductDTO;
+  unitPriceMinor: number;
+  variant: { id: string; name: string; sku: string } | null;
+  addons: { addonId: string; optionId: string; name: string; priceMinor: number }[];
+  addonsTotalMinor: number;
   quantity: number;
 }
 
@@ -12,7 +17,7 @@ interface CartDrawerProps {
   open: boolean;
   onClose: () => void;
   lines: CartLineUI[];
-  onUpdateQty: (productId: string, qty: number) => void;
+  onUpdateQty: (lineId: string, qty: number) => void;
   onCheckout: () => void;
   deliveryFeeMinor: number;
   minOrderMinor: number;
@@ -23,7 +28,7 @@ const toPesos = (minor: number) => `₱${(minor / 100).toFixed(2)}`;
 export default function CartDrawer({
   open, onClose, lines, onUpdateQty, onCheckout, deliveryFeeMinor, minOrderMinor,
 }: CartDrawerProps) {
-  const subtotal = lines.reduce((s, l) => s + l.product.priceMinor * l.quantity, 0);
+  const subtotal = lines.reduce((s, l) => s + (l.unitPriceMinor + l.addonsTotalMinor) * l.quantity, 0);
   const total = subtotal + (subtotal > 0 ? deliveryFeeMinor : 0);
   const belowMin = minOrderMinor > 0 && total < minOrderMinor;
   const [checkingOut, setCheckingOut] = useState(false);
@@ -50,13 +55,21 @@ export default function CartDrawer({
           ) : (
             <ul className="list-group list-group-flush">
               {lines.map((l) => (
-                <li key={l.product.id} className="list-group-item px-0 d-flex gap-2 align-items-center">
+                <li key={l.lineId} className="list-group-item px-0 d-flex gap-2 align-items-center">
                   <div className="flex-grow-1">
                     <div className="fw-semibold small">{l.product.name}</div>
-                    <div className="text-muted small">{toPesos(l.product.priceMinor)} each</div>
+                    {l.variant && <div className="small text-muted">{l.variant.name}</div>}
+                    {l.addons.length > 0 && (
+                      <div className="small text-muted">
+                        {l.addons.map((a) => `+ ${a.name} ${toPesos(a.priceMinor)}`).join(" · ")}
+                      </div>
+                    )}
+                    <div className="text-muted small">
+                      {toPesos(l.unitPriceMinor + l.addonsTotalMinor)} each
+                    </div>
                   </div>
                   <div className="input-group input-group-sm" style={{ width: 110 }}>
-                    <button className="btn btn-outline-secondary" onClick={() => onUpdateQty(l.product.id, l.quantity - 1)}>
+                    <button className="btn btn-outline-secondary" onClick={() => onUpdateQty(l.lineId, l.quantity - 1)}>
                       <i className="bi bi-dash"></i>
                     </button>
                     <input
@@ -65,12 +78,12 @@ export default function CartDrawer({
                       min={1}
                       readOnly
                     />
-                    <button className="btn btn-outline-secondary" onClick={() => onUpdateQty(l.product.id, l.quantity + 1)}>
+                    <button className="btn btn-outline-secondary" onClick={() => onUpdateQty(l.lineId, l.quantity + 1)}>
                       <i className="bi bi-plus"></i>
                     </button>
                   </div>
-                  <div className="fw-semibold small" style={{ width: 70, textAlign: "right" }}>
-                    {toPesos(l.product.priceMinor * l.quantity)}
+                  <div className="fw-semibold small" style={{ width: 72, textAlign: "right" }}>
+                    {toPesos((l.unitPriceMinor + l.addonsTotalMinor) * l.quantity)}
                   </div>
                 </li>
               ))}

@@ -40,10 +40,43 @@ export interface ProductRecord {
   quantityReserved: number;
 }
 
-export interface CartLineRecord {
+export interface ProductVariantRecord {
+  id: string;
   productId: string;
+  name: string;
+  sku: string;
+  priceMinor: number;
+  isActive: boolean;
+  quantityOnHand: number;
+  quantityReserved: number;
+}
+
+export interface AddonOptionRecord {
+  id: string;
+  name: string;
+  priceMinor: number;
+  isActive: boolean;
+}
+
+export interface AddonRecord {
+  id: string;
+  name: string;
+  required: boolean;
+  options: AddonOptionRecord[];
+}
+
+export interface CartLineRecord {
+  /** stable line id (CartItem id). Present for persisted carts; optional for literals. */
+  lineId?: string;
+  productId: string;
+  variantId?: string | null;
+  addonKey?: string | null;
+  addons?: unknown[] | null;
+  /** per-unit add-on cost (minor units) — 0 for plain products */
+  addonsTotalMinor?: number;
   quantity: number;
   unitPriceMinor: number;
+  lineTotalMinor?: number;
 }
 
 export interface CartRecord {
@@ -101,6 +134,10 @@ export interface OrderRecord {
     unitPriceMinor: number;
     quantity: number;
     lineTotalMinor: number;
+    /** P2a: immutable variant + add-on snapshot (names/prices frozen with the sale). */
+    variantId?: string | null;
+    variantName?: string | null;
+    addons?: unknown[] | null;
   }[];
   createdAt: Date;
 }
@@ -115,16 +152,29 @@ export interface CatalogRepository {
   getProductsByIds(storeId: string, ids: string[]): Promise<ProductRecord[]>;
   /** Cross-store lookup — used only to bind a fresh cart to the product's store on first add. */
   getProductById(id: string): Promise<ProductRecord | null>;
+  /** P2a: variant lookups (price + stock) — tenant-scoped. */
+  getVariantById(id: string): Promise<ProductVariantRecord | null>;
+  getVariantsByIds(storeId: string, ids: string[]): Promise<ProductVariantRecord[]>;
+  /** P2a: all variants for a set of products (storefront payload). */
+  getVariantsByProductIds(storeId: string, productIds: string[]): Promise<ProductVariantRecord[]>;
+  /** P2a: add-on groups + active options for a product. */
+  getProductAddons(storeId: string, productId: string): Promise<AddonRecord[]>;
 }
 
 export interface CartRepository {
   findByToken(token: string): Promise<CartRecord | null>;
   /** Create a cart (must be unique token); storeId bound on first add. */
   create(cart: CartRecord): Promise<CartRecord>;
-  /** Add a line; upserts quantity when the product is already in the cart. */
-  addItem(cartId: string, storeId: string, productId: string, quantity: number, unitPriceMinor: number): Promise<void>;
-  updateItemQuantity(cartId: string, productId: string, quantity: number): Promise<void>;
-  removeItem(cartId: string, productId: string): Promise<void>;
+  /** Add/upsert a line keyed by (productId, variantId, addonKey); unit price is the
+   *  variant/ product price; add-on costs are stored separately (addonsTotalMinor). */
+  addItem(cartId: string, storeId: string, productId: string, quantity: number, unitPriceMinor: number, opts?: {
+    variantId?: string | null;
+    addonKey?: string | null;
+    addons?: unknown[] | null;
+    addonsTotalMinor?: number;
+  }): Promise<void>;
+  updateItemQuantity(lineId: string, quantity: number): Promise<void>;
+  removeItem(lineId: string): Promise<void>;
   save(cart: CartRecord): Promise<void>;
 }
 
@@ -144,8 +194,9 @@ export interface OrderRepository {
 export interface AtomicCheckoutEffects {
   /** Convert the cart (status → CONVERTED) in the same transaction. */
   cart?: { token: string; storeId: string };
-  /** Reserve stock: quantityReserved += qty + a RESERVE movement per level. */
-  stockReservations?: { productId: string; quantity: number }[];
+  /** Reserve stock: quantityReserved += qty + a RESERVE movement per row.
+   *  variantId set → reserves the variant's own counters (P2a); otherwise the product StockLevel. */
+  stockReservations?: { productId: string; variantId?: string | null; quantity: number }[];
   /** Record voucher redemption (one row per (voucher, order)). */
   voucherRedemption?: { voucherId: string };
   /** Deduct loyalty points + write the REDEEM ledger entry. */
@@ -196,6 +247,18 @@ export class InMemoryCatalogRepository implements CatalogRepository {
   async getProductById(id: string): Promise<ProductRecord | null> {
     return this.byId.get(id) ?? null;
   }
+  async getVariantById(id: string): Promise<ProductVariantRecord | null> {
+    return null; // InMemory test double: no variant data
+  }
+  async getVariantsByIds(storeId: string, ids: string[]): Promise<ProductVariantRecord[]> {
+    return []; // InMemory test double: no variant data
+  }
+  async getVariantsByProductIds(storeId: string, productIds: string[]): Promise<ProductVariantRecord[]> {
+    return []; // InMemory test double: no variant data
+  }
+  async getProductAddons(storeId: string, productId: string): Promise<AddonRecord[]> {
+    return []; // InMemory test double: no add-on data
+  }
 }
 
 export class InMemoryCartRepository implements CartRepository {
@@ -212,24 +275,47 @@ export class InMemoryCartRepository implements CartRepository {
     this.byToken.set(cart.token, cart);
     return cart;
   }
-  async addItem(cartId: string, storeId: string, productId: string, quantity: number, unitPriceMinor: number): Promise<void> {
+  async addItem(cartId: string, storeId: string, productId: string, quantity: number, unitPriceMinor: number, opts?: {
+    variantId?: string | null;
+    addonKey?: string | null;
+    addons?: unknown[] | null;
+    addonsTotalMinor?: number;
+  }): Promise<void> {
     const cart = [...this.byToken.values()].find((c) => c.id === cartId);
     if (!cart) return;
-    const existing = cart.lines.find((l) => l.productId === productId);
+    const existing = cart.lines.find(
+      (l) => l.productId === productId && (l.variantId ?? null) === (opts?.variantId ?? null) && (l.addonKey ?? null) === (opts?.addonKey ?? null),
+    );
     if (existing) {
       existing.quantity += quantity;
     } else {
-      cart.lines.push({ productId, quantity, unitPriceMinor });
+      cart.lines.push({
+        lineId: randomId(),
+        productId,
+        variantId: opts?.variantId ?? null,
+        addonKey: opts?.addonKey ?? null,
+        addons: opts?.addons ?? null,
+        addonsTotalMinor: opts?.addonsTotalMinor ?? 0,
+        quantity,
+        unitPriceMinor,
+      });
     }
   }
-  async updateItemQuantity(cartId: string, productId: string, quantity: number): Promise<void> {
-    const cart = [...this.byToken.values()].find((c) => c.id === cartId);
-    const line = cart?.lines.find((l) => l.productId === productId);
-    if (line) line.quantity = quantity;
+  async updateItemQuantity(lineId: string, quantity: number): Promise<void> {
+    for (const cart of this.byToken.values()) {
+      const line = cart.lines.find((l) => l.lineId === lineId);
+      if (line) {
+        line.quantity = quantity;
+        return;
+      }
+    }
   }
-  async removeItem(cartId: string, productId: string): Promise<void> {
-    const cart = [...this.byToken.values()].find((c) => c.id === cartId);
-    if (cart) cart.lines = cart.lines.filter((l) => l.productId !== productId);
+  async removeItem(lineId: string): Promise<void> {
+    for (const cart of this.byToken.values()) {
+      const before = cart.lines.length;
+      cart.lines = cart.lines.filter((l) => l.lineId !== lineId);
+      if (cart.lines.length !== before) return;
+    }
   }
   async save(cart: CartRecord): Promise<void> {
     this.byToken.set(cart.token, cart);

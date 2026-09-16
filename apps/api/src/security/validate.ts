@@ -237,6 +237,19 @@ export const CART_ADD_DTO: ObjectRule = {
   fields: {
     productId: { kind: "string", required: true, min: 8, max: 64 },
     quantity: { kind: "int", required: true, min: 1, max: 999 },
+    // P2a: optional variant line + add-on selections (details resolved server-side).
+    variantId: { kind: "string", max: 200 },
+    addons: {
+      kind: "array",
+      max: 20,
+      item: {
+        kind: "object",
+        fields: {
+          addonId: { kind: "string", required: true, min: 1, max: 200 },
+          optionId: { kind: "string", required: true, min: 1, max: 200 },
+        },
+      },
+    },
   },
 };
 

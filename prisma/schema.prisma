@@ -172,6 +172,8 @@ model Store {
   products       Product[]
   stockLevels    StockLevel[]
   productImages  ProductImage[]
+  productVariants ProductVariant[] // P2a
+  productAddons   ProductAddon[]   // P2a
   carts          Cart[]
   orders         Order[]
   storeCustomers StoreCustomer[]
@@ -292,6 +294,8 @@ model Product {
   updatedAt   DateTime  @updatedAt
 
   images        ProductImage[]
+  variants      ProductVariant[]
+  addons        ProductAddon[]
   stockLevel    StockLevel?     @relation(fields: [stockLevelId], references: [id]) // legacy single-level (no warehouse); kept for backward compat
   stockLevels   StockLevel[]    @relation("ProductStockLevels")
   cartItems     CartItem[]
@@ -314,6 +318,68 @@ model ProductImage {
   product   Product @relation(fields: [storeId, productId], references: [storeId, id]) // M3: tenant-consistent
   url       String
   sortOrder Int     @default(0)
+}
+
+// ─────────────────────────────── Variants (P2a) ───────────────────────────────
+// A product may offer variants (size/color/…). Each variant has its OWN SKU, absolute
+// price, and its OWN stock counters (onHand/reserved). Variant stock is reserved at
+// checkout through the same atomic path (StockMovement rows carry variantId for audit).
+
+model ProductVariant {
+  id                String   @id @default(cuid())
+  storeId           String
+  store             Store    @relation(fields: [storeId], references: [id])
+  productId         String
+  product           Product  @relation(fields: [storeId, productId], references: [storeId, id], onDelete: Cascade)
+  name              String
+  sku               String
+  priceMinor        Int // absolute price for this variant (server-authoritative)
+  quantityOnHand    Int      @default(0)
+  quantityReserved  Int      @default(0)
+  isActive          Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@unique([storeId, sku])
+  @@unique([storeId, id]) // M3: composite target for tenant-consistent children
+  @@index([storeId, productId])
+}
+
+// ─────────────────────────────── Add-ons / modifiers (P2a) ───────────────────────────────
+// An add-on GROUP (e.g. "Extras") exposes OPTIONS ("Extra rice +₱20", "Side +₱35").
+// A product may have several groups; the storefront renders checkboxes/radios.
+
+model ProductAddon {
+  id               String   @id @default(cuid())
+  storeId          String
+  store            Store    @relation(fields: [storeId], references: [id])
+  productId        String
+  product          Product  @relation(fields: [storeId, productId], references: [storeId, id], onDelete: Cascade)
+  name             String
+  required         Boolean  @default(false)
+  sortOrder        Int      @default(0)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  options ProductAddonOption[]
+
+  @@unique([storeId, id]) // M3: composite target for tenant-consistent children
+  @@index([storeId, productId])
+}
+
+model ProductAddonOption {
+  id            String      @id @default(cuid())
+  storeId       String
+  addonId       String
+  addon         ProductAddon @relation(fields: [storeId, addonId], references: [storeId, id], onDelete: Cascade)
+  name          String
+  priceMinor    Int
+  isActive      Boolean     @default(true)
+  sortOrder     Int         @default(0)
+  createdAt     DateTime    @default(now())
+
+  @@unique([storeId, id]) // M3: composite target for tenant-consistent children
+  @@index([storeId, addonId])
 }
 
 // ─────────────────────────────── Warehouses / inventory ───────────────────────────────
@@ -401,18 +467,27 @@ model Cart {
 }
 
 model CartItem {
-  id             String   @id @default(cuid())
-  cartId         String
-  cart           Cart     @relation(fields: [cartId], references: [id], onDelete: Cascade)
-  storeId        String
-  productId      String
-  product        Product  @relation(fields: [storeId, productId], references: [storeId, id]) // M3: tenant-consistent
-  quantity       Int
-  unitPriceMinor Int // snapshot at add-time; revalidated at checkout per AGENTS.md
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id              String    @id @default(cuid())
+  cartId          String
+  cart            Cart      @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  storeId         String
+  productId       String
+  product         Product   @relation(fields: [storeId, productId], references: [storeId, id]) // M3: tenant-consistent
+  // P2a: line identity uses "" sentinel for "no variant / no add-ons" (Postgres unique
+  // treats NULLs as distinct, so nullable columns would duplicate plain lines). The
+  // variant FK is intentionally NOT database-enforced: sentinel "" can't reference a
+  // variant, and tenant integrity is enforced at the app layer like the rest of the app.
+  variantId       String    @default("")
+  addonKey        String    @default("")
+  addons          Json?   // [{addonId, optionId, name, priceMinor}] line snapshot
+  quantity        Int
+  unitPriceMinor  Int // base unit price (VARIANT price when variantId set); add-on costs are separate below
+  addonsTotalMinor Int  @default(0) // P2a: server-computed sum of selected add-on option prices
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
-  @@unique([cartId, productId])
+  @@unique([cartId, productId, variantId, addonKey])
+  @@index([storeId])
 }
 
 // ─────────────────────────────── Notifications ───────────────────────────────
@@ -768,11 +843,15 @@ model OrderItem {
   storeId        String
   productId      String? // kept as ref; name/sku/price are snapshot columns
   product        Product? @relation(fields: [productId], references: [id])
+  // P2a: immutable variant + add-on snapshot (names/prices frozen with the sale)
+  variantId      String?
+  variantName    String?
+  addons         Json?
   productName    String
   sku            String
   unitPriceMinor Int
   quantity       Int
-  lineTotalMinor Int // unitPriceMinor * quantity, server-computed
+  lineTotalMinor Int // unitPriceMinor * quantity (excludes add-on costs; add-on total is on the Order totals)
 }
 
 model OrderStatusHistory {
@@ -978,6 +1057,7 @@ model StockMovement {
   store        Store    @relation(fields: [storeId], references: [id])
   productId    String
   product      Product  @relation(fields: [storeId, productId], references: [storeId, id])
+  variantId    String?  // P2a: variant-level movements (null = product-level)
   warehouseId  String?
   warehouse    Warehouse? @relation(fields: [warehouseId], references: [id])
   delta        Int // signed: +receipt/-sale/-reserve/+release/+adjust ...

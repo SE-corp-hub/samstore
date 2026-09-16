@@ -4,6 +4,8 @@
 export interface PriceLine {
   unitPriceMinor: number;
   quantity: number;
+  /** P2a: server-priced add-on cost per unit (0 for plain lines). */
+  addonsTotalMinor?: number;
 }
 
 export interface OrderTotalsInput {
@@ -53,8 +55,14 @@ export function computeOrderTotals(input: OrderTotalsInput): OrderTotals {
         `quantity must be a positive integer, got ${line.quantity}`,
       );
     }
+    const addonsMinor = line.addonsTotalMinor ?? 0;
+    if (!Number.isInteger(addonsMinor) || addonsMinor < 0) {
+      throw new InvalidPriceInputError(
+        `addonsTotalMinor must be a non-negative integer, got ${addonsMinor}`,
+      );
+    }
     // Integer math in minor units; intermediate values stay well under 2^53.
-    subtotalMinor += line.unitPriceMinor * line.quantity;
+    subtotalMinor += (line.unitPriceMinor + addonsMinor) * line.quantity;
   }
 
   const totalMinor = subtotalMinor - discountMinor + deliveryFeeMinor;

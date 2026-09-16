@@ -127,6 +127,41 @@ async function main() {
     productIds.push(product.id);
   }
 
+  // P2a demo: a VARIANT product with an ADD-ON group (own stock per variant).
+  const kapeMalay = await prisma.product.upsert({
+    where: { storeId_sku: { storeId: store.id, sku: "KAPE-MALAY" } },
+    update: {},
+    create: {
+      storeId: store.id,
+      sku: "KAPE-MALAY",
+      name: "Kape Malay",
+      description: "Specialty coffee — hot or iced, with extras.",
+      priceMinor: 14000,
+      categoryId: drinks.id,
+      variants: {
+        create: [
+          { name: "Hot", sku: "KAPE-MALAY-HOT", priceMinor: 14000, quantityOnHand: 40, quantityReserved: 0 },
+          { name: "Iced", sku: "KAPE-MALAY-ICED", priceMinor: 16000, quantityOnHand: 40, quantityReserved: 0 },
+        ],
+      },
+      addons: {
+        create: [
+          {
+            name: "Extras",
+            sortOrder: 1,
+            options: {
+              create: [
+                { name: "Extra shot", priceMinor: 2000, sortOrder: 1 },
+                { name: "Soy/Silky milk", priceMinor: 3000, sortOrder: 2 },
+              ],
+            },
+          },
+        ],
+      },
+    },
+  });
+  productIds.push(kapeMalay.id);
+
   // Demo guest cart (use this token for manual checkout tests).
   // Full reset: delete any previous cart with this token, then create fresh OPEN.
   await prisma.cart.deleteMany({ where: { token: "cart-demo-token" } });
@@ -161,7 +196,7 @@ async function main() {
   console.log("Seed complete:");
   console.log(`  store:   sam-store (${store.id})`);
   console.log(`  link:    sam-store + token ${link?.token ?? "(missing)"}`);
-  console.log(`  products: ${products.map((p) => p.sku).join(", ")}`);
+  console.log(`  products: ${products.map((p) => p.sku).join(", ")}, KAPE-MALAY (+variants, +add-ons)`);
   console.log(`  demo cart token: cart-demo-token`);
 
   // Ready-made demo logins for every staff role at Sam's Store (P1–P12 walkthrough).

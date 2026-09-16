@@ -6,6 +6,8 @@ import { PrismaClient } from "@prisma/client";
 import type {
   StoreRecord,
   ProductRecord,
+  ProductVariantRecord,
+  AddonRecord,
   CartRecord,
   OrderRecord,
   StoreRepository,
@@ -151,15 +153,76 @@ export class PrismaCatalogRepository implements CatalogRepository {
     });
     return row ? PrismaCatalogRepository.toRecord(row) : null;
   }
+
+  async getVariantById(id: string): Promise<ProductVariantRecord | null> {
+    const v = await prisma.productVariant.findUnique({ where: { id } });
+    if (!v) return null;
+    return {
+      id: v.id,
+      productId: v.productId,
+      name: v.name,
+      sku: v.sku,
+      priceMinor: v.priceMinor,
+      isActive: v.isActive,
+      quantityOnHand: v.quantityOnHand,
+      quantityReserved: v.quantityReserved,
+    };
+  }
+
+  async getVariantsByIds(storeId: string, ids: string[]): Promise<ProductVariantRecord[]> {
+    if (ids.length === 0) return [];
+    const rows = await prisma.productVariant.findMany({
+      where: { storeId, id: { in: ids } },
+    });
+    return rows.map((v) => ({
+      id: v.id,
+      productId: v.productId,
+      name: v.name,
+      sku: v.sku,
+      priceMinor: v.priceMinor,
+      isActive: v.isActive,
+      quantityOnHand: v.quantityOnHand,
+      quantityReserved: v.quantityReserved,
+    }));
+  }
+
+  async getVariantsByProductIds(storeId: string, productIds: string[]): Promise<ProductVariantRecord[]> {
+    if (productIds.length === 0) return [];
+    const rows = await prisma.productVariant.findMany({
+      where: { storeId, productId: { in: productIds }, isActive: true },
+    });
+    return rows.map((v) => ({
+      id: v.id,
+      productId: v.productId,
+      name: v.name,
+      sku: v.sku,
+      priceMinor: v.priceMinor,
+      isActive: v.isActive,
+      quantityOnHand: v.quantityOnHand,
+      quantityReserved: v.quantityReserved,
+    }));
+  }
+
+  async getProductAddons(storeId: string, productId: string): Promise<AddonRecord[]> {
+    const rows = await prisma.productAddon.findMany({
+      where: { storeId, productId },
+      orderBy: { sortOrder: "asc" },
+      include: { options: { where: { isActive: true }, orderBy: { sortOrder: "asc" } } },
+    });
+    return rows.map((a) => ({
+      id: a.id,
+      name: a.name,
+      required: a.required,
+      options: a.options.map((o) => ({ id: o.id, name: o.name, priceMinor: o.priceMinor, isActive: o.isActive })),
+    }));
+  }
 }
 
 export class PrismaCartRepository implements CartRepository {
   async findByToken(token: string): Promise<CartRecord | null> {
     const c = await prisma.cart.findUnique({
       where: { token },
-      include: {
-        items: { include: { product: { select: { id: true } } } },
-      },
+      include: { items: true },
     });
     if (!c) return null;
     return {
@@ -169,7 +232,12 @@ export class PrismaCartRepository implements CartRepository {
       status: c.status,
       expiresAt: c.expiresAt,
       lines: c.items.map((i) => ({
+        lineId: i.id,
         productId: i.productId,
+        variantId: i.variantId === "" ? null : i.variantId,
+        addonKey: i.addonKey === "" ? null : i.addonKey,
+        addons: (i.addons as unknown[] | null) ?? null,
+        addonsTotalMinor: i.addonsTotalMinor,
         quantity: i.quantity,
         unitPriceMinor: i.unitPriceMinor,
       })),
@@ -189,28 +257,40 @@ export class PrismaCartRepository implements CartRepository {
     return cart;
   }
 
-  async addItem(cartId: string, storeId: string, productId: string, quantity: number, unitPriceMinor: number): Promise<void> {
-    // A single atomic upsert on the (cartId, productId) unique key. The previous
-    // find-then-create raced: two quick adds of the same product (double-tap, two tabs)
-    // made the second create violate the constraint → P2002 → HTTP 500 to the customer.
+  async addItem(cartId: string, storeId: string, productId: string, quantity: number, unitPriceMinor: number, opts?: {
+    variantId?: string | null;
+    addonKey?: string | null;
+    addons?: unknown[] | null;
+    addonsTotalMinor?: number;
+  }): Promise<void> {
+    // A single atomic upsert on the (cartId, productId, variantId, addonKey) unique key.
+    // The previous find-then-create raced: two quick adds of the same product (double-tap,
+    // two tabs) made the second create violate the constraint → P2002 → HTTP 500.
+    const variantId = opts?.variantId ?? "";
+    const addonKey = opts?.addonKey ?? "";
     await prisma.cartItem.upsert({
-      where: { cartId_productId: { cartId, productId } },
+      where: { cartId_productId_variantId_addonKey: { cartId, productId, variantId, addonKey } },
       update: { quantity: { increment: quantity } },
-      create: { cartId, storeId, productId, quantity, unitPriceMinor },
+      create: {
+        cartId,
+        storeId,
+        productId,
+        variantId,
+        addonKey,
+        addons: (opts?.addons as object[] | null) ?? undefined,
+        addonsTotalMinor: opts?.addonsTotalMinor ?? 0,
+        quantity,
+        unitPriceMinor,
+      },
     });
   }
 
-  async updateItemQuantity(cartId: string, productId: string, quantity: number): Promise<void> {
-    await prisma.cartItem.update({
-      where: { cartId_productId: { cartId, productId } },
-      data: { quantity },
-    });
+  async updateItemQuantity(lineId: string, quantity: number): Promise<void> {
+    await prisma.cartItem.update({ where: { id: lineId }, data: { quantity } });
   }
 
-  async removeItem(cartId: string, productId: string): Promise<void> {
-    await prisma.cartItem.deleteMany({
-      where: { cartId, productId },
-    });
+  async removeItem(lineId: string): Promise<void> {
+    await prisma.cartItem.deleteMany({ where: { id: lineId } });
   }
 
   async save(cart: CartRecord): Promise<void> {
@@ -227,6 +307,10 @@ export class PrismaCartRepository implements CartRepository {
             cartId: cart.id,
             storeId: cart.storeId,
             productId: l.productId,
+            variantId: l.variantId ?? "",
+            addonKey: l.addonKey ?? "",
+            addons: l.addons as object[] | undefined,
+            addonsTotalMinor: l.addonsTotalMinor ?? 0,
             quantity: l.quantity,
             unitPriceMinor: l.unitPriceMinor,
           })),
@@ -355,6 +439,9 @@ export class PrismaOrderRepository implements OrderRepository {
             productId: i.productId,
             productName: i.productName,
             sku: i.sku,
+            variantId: i.variantId ?? null,
+            variantName: i.variantName ?? null,
+            addons: i.addons as object[] | undefined,
             unitPriceMinor: i.unitPriceMinor,
             quantity: i.quantity,
             lineTotalMinor: i.lineTotalMinor,
@@ -445,6 +532,9 @@ export class PrismaOrderRepository implements OrderRepository {
             productId: i.productId,
             productName: i.productName,
             sku: i.sku,
+            variantId: i.variantId ?? null,
+            variantName: i.variantName ?? null,
+            addons: i.addons as object[] | undefined,
             unitPriceMinor: i.unitPriceMinor,
             quantity: i.quantity,
             lineTotalMinor: i.lineTotalMinor,
@@ -470,10 +560,26 @@ export class PrismaOrderRepository implements OrderRepository {
       // 1) Reserve stock — CONDITIONAL WRITE at the database boundary. The guard
       //    (`available = quantityOnHand - quantityReserved >= qty`) is what makes
       //    "two buyers, one last unit" safe: the loser's UPDATE matches 0 rows and
-      //    the whole transaction rolls back. Products with NO level rows are
-      //    untracked and keep the legacy no-op.
+      //    the whole transaction rolls back. Variant rows (P2a) reserve the variant's
+      //    own counters + a movement carrying variantId; plain products use StockLevel.
       for (const r of effects.stockReservations ?? []) {
         if (r.quantity <= 0) continue;
+        if (r.variantId) {
+          const rows = await tx.$executeRawUnsafe(
+            'UPDATE "ProductVariant" SET "quantityReserved" = "quantityReserved" + $2 WHERE "id" = $1 AND ("quantityOnHand" - "quantityReserved") >= $2',
+            r.variantId,
+            r.quantity,
+          );
+          if (rows === 1) {
+            const fresh = await tx.productVariant.findUnique({ where: { id: r.variantId }, select: { quantityReserved: true } });
+            await tx.stockMovement.create({
+              data: { storeId: order.storeId, productId: r.productId, variantId: r.variantId, delta: r.quantity, type: "RESERVE", orderId: o.id, createdBy: "checkout", balanceAfter: fresh?.quantityReserved ?? null },
+            });
+          } else {
+            throw new InsufficientStockError(r.productId, r.quantity);
+          }
+          continue;
+        }
         const levels = await tx.stockLevel.findMany({ where: { storeId: order.storeId, productId: r.productId } });
         if (levels.length === 0) continue;
         levels.sort((a, b) => (a.warehouseId ? 0 : 1) - (b.warehouseId ? 0 : 1));

@@ -118,8 +118,10 @@ test("updateQuantity sets a new quantity", async () => {
   const { svc } = makeService();
   const created = await svc.createCart();
   if (!created.ok) return;
-  await svc.addItem(created.value.token, "prod-1", 1);
-  const r = await svc.updateQuantity(created.value.token, "prod-1", 5);
+  const added = await svc.addItem(created.value.token, "prod-1", 1);
+  if (!added.ok) return;
+  const lineId = added.value.items[0]!.lineId;
+  const r = await svc.updateQuantity(created.value.token, lineId, 5);
   assert.equal(r.ok, true);
   if (!r.ok) return;
   assert.equal(r.value.items[0]?.quantity, 5);
@@ -130,8 +132,10 @@ test("updateQuantity beyond stock is rejected", async () => {
   const { svc } = makeService();
   const created = await svc.createCart();
   if (!created.ok) return;
-  await svc.addItem(created.value.token, "prod-2", 1);
-  const r = await svc.updateQuantity(created.value.token, "prod-2", 31); // only 30
+  const added = await svc.addItem(created.value.token, "prod-2", 1);
+  if (!added.ok) return;
+  const lineId = added.value.items[0]!.lineId;
+  const r = await svc.updateQuantity(created.value.token, lineId, 31); // only 30
   assert.equal(r.ok, false);
   if (r.ok) return;
   assert.equal(r.error.type, "conflict");
@@ -141,9 +145,10 @@ test("removeItem deletes the line", async () => {
   const { svc } = makeService();
   const created = await svc.createCart();
   if (!created.ok) return;
-  await svc.addItem(created.value.token, "prod-1", 2);
-  await svc.addItem(created.value.token, "prod-2", 1);
-  const r = await svc.removeItem(created.value.token, "prod-1");
+  const a = await svc.addItem(created.value.token, "prod-1", 2);
+  const b = await svc.addItem(created.value.token, "prod-2", 1);
+  if (!a.ok || !b.ok) return;
+  const r = await svc.removeItem(created.value.token, a.value.items[0]!.lineId);
   assert.equal(r.ok, true);
   if (!r.ok) return;
   assert.equal(r.value.items.length, 1);

@@ -54,19 +54,22 @@ export async function getCart(token: string): Promise<CartWithItemsDTO> {
   return out.value;
 }
 
-export async function addItem(token: string, productId: string, quantity: number): Promise<CartWithItemsDTO> {
+export async function addItem(token: string, productId: string, quantity: number, opts?: {
+  variantId?: string;
+  addons?: { addonId: string; optionId: string }[];
+}): Promise<CartWithItemsDTO> {
   const res = await fetch(`${API_URL}/public/carts/${token}/items`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ productId, quantity }),
+    body: JSON.stringify({ productId, quantity, ...(opts?.variantId ? { variantId: opts.variantId } : {}), ...(opts?.addons && opts.addons.length ? { addons: opts.addons } : {}) }),
   });
   const out = await handle<CartWithItemsDTO>(res);
   if (!out.ok) throw new Error(out.message);
   return out.value;
 }
 
-export async function updateItemQuantity(token: string, productId: string, quantity: number): Promise<CartWithItemsDTO> {
-  const res = await fetch(`${API_URL}/public/carts/${token}/items/${productId}`, {
+export async function updateItemQuantity(token: string, lineId: string, quantity: number): Promise<CartWithItemsDTO> {
+  const res = await fetch(`${API_URL}/public/carts/${token}/items/${lineId}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ quantity }),
@@ -76,8 +79,8 @@ export async function updateItemQuantity(token: string, productId: string, quant
   return out.value;
 }
 
-export async function removeItem(token: string, productId: string): Promise<CartWithItemsDTO> {
-  const res = await fetch(`${API_URL}/public/carts/${token}/items/${productId}`, {
+export async function removeItem(token: string, lineId: string): Promise<CartWithItemsDTO> {
+  const res = await fetch(`${API_URL}/public/carts/${token}/items/${lineId}`, {
     method: "DELETE",
   });
   const out = await handle<CartWithItemsDTO>(res);
