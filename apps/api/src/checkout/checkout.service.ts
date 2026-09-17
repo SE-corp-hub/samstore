@@ -26,12 +26,21 @@ import { randomId } from "../persistence/repositories.js";
 
 export type CheckoutResult = { ok: true; value: CheckoutResponse } | { ok: false; error: ApiError };
 
-/** Optional voucher integration (injected; null in tests that don't need it). */
+/** Order/customer facts the voucher engine needs (the gateway adds first-order + per-customer counts). */
+export interface VoucherValidationContext {
+  subtotalMinor: number;
+  orderTotalMinor: number;
+  deliveryFeeMinor: number;
+  storeCustomerId: string | null;
+  productIds: string[];
+}
+
+/** Optional voucher integration (injected; null in tests that don't need it). P3a: v2 rules. */
 export interface VoucherGateway {
-  validate(storeId: string, code: string, orderTotalMinor: number): Promise<
-    { ok: true; discountMinor: number; voucherId: string } | { ok: false; message: string }
+  validate(storeId: string, code: string, ctx: VoucherValidationContext): Promise<
+    { ok: true; discountMinor: number; voucherId: string; stackable: boolean } | { ok: false; message: string }
   >;
-  redeem(orderId: string, storeId: string, voucherId: string): Promise<void>;
+  redeem(orderId: string, storeId: string, voucherId: string, storeCustomerId: string | null): Promise<void>;
 }
 
 /** Optional loyalty integration. */
@@ -254,21 +263,36 @@ export class CheckoutService {
       };
     }
 
-    // 6b. Voucher (optional): validate against the pre-discount total, then apply.
+    // 6b. Voucher (optional, P3a v2): validate against the order context, then apply.
     let discountMinor = 0;
     let voucherId: string | null = null;
+    let voucherStackable = true;
     if (request.voucherCode && this.voucher) {
-      const voucherResult = await this.voucher.validate(store.id, request.voucherCode, totals.totalMinor);
+      const voucherResult = await this.voucher.validate(store.id, request.voucherCode, {
+        subtotalMinor: totals.subtotalMinor,
+        orderTotalMinor: totals.totalMinor,
+        deliveryFeeMinor: totals.deliveryFeeMinor,
+        storeCustomerId,
+        productIds: revalidated.lines.map((l) => l.productId).filter((x): x is string => !!x),
+      });
       if (!voucherResult.ok) {
         return { ok: false, error: { type: "conflict", message: voucherResult.message } };
       }
       discountMinor = Math.min(voucherResult.discountMinor, totals.totalMinor);
       voucherId = voucherResult.voucherId;
+      voucherStackable = voucherResult.stackable;
     }
 
-    // 6c. Loyalty redemption (optional): points → discount.
+    // 6c. Loyalty redemption (optional): points → discount. A NON-stackable voucher
+    //     cannot be combined with points (P3a stackability rule).
     let loyaltyPoints = 0;
     if (request.loyaltyPoints && customerId && this.loyalty) {
+      if (voucherId && !voucherStackable) {
+        return {
+          ok: false,
+          error: { type: "conflict", message: "This voucher cannot be combined with loyalty points" },
+        };
+      }
       const remaining = totals.totalMinor - discountMinor;
       const redeemResult = await this.loyalty.redeem(store.id, customerId, request.loyaltyPoints, remaining);
       if (!redeemResult.ok) {
@@ -384,7 +408,7 @@ export class CheckoutService {
         created = await this.orders.createAtomic(order, {
           cart: { token: cart.token, storeId: cart.storeId },
           stockReservations: items.map((i) => ({ productId: i.productId ?? "", variantId: i.variantId ?? null, quantity: i.quantity })),
-          ...(voucherId ? { voucherRedemption: { voucherId } } : {}),
+          ...(voucherId ? { voucherRedemption: { voucherId, storeCustomerId } } : {}),
           ...(loyaltyPoints > 0 && customerId && storeCustomerId
             ? { loyalty: { customerId, storeCustomerId, points: loyaltyPoints } }
             : {}),
@@ -428,7 +452,7 @@ export class CheckoutService {
       created = await this.orders.create(order);
       await this.carts.save({ ...cart, status: "CONVERTED" });
       if (voucherId) {
-        await this.voucher!.redeem(created.id, store.id, voucherId);
+        await this.voucher!.redeem(created.id, store.id, voucherId, storeCustomerId);
       }
       if (loyaltyPoints > 0 && customerId && storeCustomerId && this.loyalty) {
         await this.loyalty.recordRedemption(created.id, store.id, customerId, storeCustomerId, loyaltyPoints);

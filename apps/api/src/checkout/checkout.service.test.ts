@@ -143,7 +143,7 @@ test("Module 5: voucher + loyalty + credit effects flow through the atomic call"
   catalog.seed(makeProduct({ id: "prod-loy", storeId: "store-2", priceMinor: 10000 }));
   carts.seed(makeCart({ token: "cart-loy", storeId: "store-2", lines: [{ productId: "prod-loy", quantity: 1, unitPriceMinor: 10000 }] }));
   const scId = "sc-1";
-  const voucher = { validate: async () => ({ ok: true as const, discountMinor: 500, voucherId: "v1" }), redeem: async () => {} };
+  const voucher = { validate: async () => ({ ok: true as const, discountMinor: 500, voucherId: "v1", stackable: true }), redeem: async () => {} };
   const loyalty = {
     ensureProfile: async () => ({ storeCustomerId: scId }),
     redeem: async () => ({ ok: true as const, discountMinor: 100, storeCustomerId: scId }),

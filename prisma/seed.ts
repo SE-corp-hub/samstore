@@ -162,6 +162,18 @@ async function main() {
   });
   productIds.push(kapeMalay.id);
 
+  // P3a demo vouchers: percent + free-delivery (type engine v2).
+  await prisma.voucher.upsert({
+    where: { storeId_code: { storeId: store.id, code: "PINDIAN10" } },
+    update: { type: "percent", percentBp: 1000, discountMinor: 0, minOrderMinor: 10000 },
+    create: { storeId: store.id, code: "PINDIAN10", description: "10% off (P3a demo)", type: "percent", percentBp: 1000, discountMinor: 0, minOrderMinor: 10000, stackable: true },
+  });
+  await prisma.voucher.upsert({
+    where: { storeId_code: { storeId: store.id, code: "FREESHIP" } },
+    update: { type: "free_delivery", percentBp: null, discountMinor: 0 },
+    create: { storeId: store.id, code: "FREESHIP", description: "Free delivery (P3a demo)", type: "free_delivery", discountMinor: 0, stackable: false },
+  });
+
   // Demo guest cart (use this token for manual checkout tests).
   // Full reset: delete any previous cart with this token, then create fresh OPEN.
   await prisma.cart.deleteMany({ where: { token: "cart-demo-token" } });

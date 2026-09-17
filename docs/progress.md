@@ -1,6 +1,22 @@
 # PINDIAN — Progress Log
 
-Updated: 2026-09-16 · **P2c: admin management for variants & add-ons** · Active model: `deepseek/deepseek-v4-flash-0731` (openrouter), boilerplate tier `inclusionai/ling-3.0-flash`
+Updated: 2026-09-16 · **P3a: voucher engine v2 (percent / free-delivery / first-order / per-customer / scoped / stackable)** · Active model: `deepseek/deepseek-v4-flash-0731` (openrouter), boilerplate tier `inclusionai/ling-3.0-flash`
+
+## P3a — Voucher engine v2
+
+| Item | Detail |
+|---|---|
+| Schema | `Voucher.type` (`fixed`/`percent`/`free_delivery`), `percentBp`, `firstOrderOnly`, `perCustomerLimit`, `scopeType` (`all`/`product`/`category`) + `scopeRefId`, `stackable`; `VoucherRedemption.storeCustomerId` + index for per-customer accounting. Migration `20260916190000_module_p3a_voucher_engine_v2`. |
+| Domain | `domain/voucher.ts` v2: `VoucherSnapshot` extended; `evaluateVoucher(voucher, ctx, now)` with new reasons (`first_order_only`, `per_customer_limit`, `scope_mismatch`, `no_delivery_fee`); `computeVoucherDiscount` (percent of subtotal, capped; free-delivery = fee; fixed capped at total). |
+| Gateway | `VoucherPublicService.validate(storeId, code, ctx)` — resolves per-customer redemptions, first-order status, and category ids for scoped vouchers; returns `discountMinor + stackable`. `redeem` records `storeCustomerId`. |
+| Checkout | `VoucherGateway` signature → context (subtotal/total/fee/storeCustomerId/productIds). **Stackability rule:** a non-stackable voucher blocks loyalty redemption at checkout (conflict); `createAtomic` redemption rows now carry `storeCustomerId`. |
+| Admin | `VoucherAdminService` create/update accept type/percentBp/firstOrderOnly/perCustomerLimit/scopeType + `scopeSku`/`scopeCategorySlug` (resolved to ids server-side) + stackable; validation per type (fixed needs positive amount, percent needs bp 1..10000); list returns the new fields. Controller whitelists + dates. |
+| UI | `VouchersPanel`: type select (fixed/percent/free-delivery), % input, per-customer limit, first-order + stackable toggles, scope select with SKU / category-slug fields; table shows value + rule chips. |
+| Seed | `PINDIAN10` (10% off, min ₱100, stackable) + `FREESHIP` (free delivery, non-stackable). |
+| Tests | +12: `domain/voucher.test.ts` v2 (fixed/percent/free-delivery math, first-order, per-customer, product+category scope, no-delivery-fee, cap) + `checkout/voucher-v2.test.ts` (real DB: percent discount, free-delivery waives fee, first-order reject/accept, per-customer limit on 2nd redemption, product-scope match/miss, non-stackable blocks loyalty). Found & fixed: product-scope check was accidentally dropped during a rewrite — now DB-covered. |
+| Notes | Full-suite flakiness on `variant-cart`/`outbox` observed again (leftover-store orderNumber prefix tension + cross-file outbox events) — both pass standalone; sweeper extended for `\d{2}p3v` slugs; not caused by P3a. |
+| Gate | lint 0 errors · **full suite 58 files / 397 tests / 0 fail** · live HTTP: 2×Turon ₱160 + ₱50 − 10% (₱16) = **₱194.00** via `PINDIAN10`; admin created/listed/updated a percent voucher (then removed). |
+| Commit | (this commit) |
 
 ## P2c — Admin-panel variant + add-on configuration (APIs + Products editor)
 

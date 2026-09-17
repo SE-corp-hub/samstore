@@ -620,7 +620,7 @@ export class PrismaOrderRepository implements OrderRepository {
         );
         if (consumed === 0) throw new Error("Voucher redemption limit reached");
         await tx.voucherRedemption.create({
-          data: { voucherId: effects.voucherRedemption.voucherId, storeId: order.storeId, orderId: o.id },
+          data: { voucherId: effects.voucherRedemption.voucherId, storeId: order.storeId, orderId: o.id, storeCustomerId: effects.voucherRedemption.storeCustomerId ?? null },
         });
       }
 

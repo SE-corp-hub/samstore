@@ -743,7 +743,15 @@ model Voucher {
   store          Store     @relation(fields: [storeId], references: [id])
   code           String // customer-facing, e.g. SAM10
   description    String?
-  discountMinor  Int // flat discount in minor units (reserved for % variant later)
+  discountMinor  Int // flat discount in minor units (fixed-type vouchers)
+  // P3a: voucher engine v2
+  type           String    @default("fixed") // fixed | percent | free_delivery
+  percentBp      Int? // percent vouchers: basis points (1000 = 10%)
+  firstOrderOnly Boolean   @default(false) // requires a customer account with no prior orders
+  perCustomerLimit Int?    // null = unlimited per customer
+  scopeType      String    @default("all") // all | product | category
+  scopeRefId     String? // productId or categoryId when scoped
+  stackable      Boolean   @default(false) // may be combined with loyalty redemption at checkout
   minOrderMinor  Int       @default(0)
   maxRedemptions Int? // null = unlimited
   usedCount      Int       @default(0) // M6: atomic counter guard for concurrent redemptions
@@ -766,10 +774,12 @@ model VoucherRedemption {
   storeId   String
   orderId   String? // null until redeemed at checkout
   order     Order?   @relation(fields: [orderId], references: [id])
+  storeCustomerId String? // P3a: per-customer limit accounting (null = guest)
   createdAt DateTime @default(now())
 
   @@unique([voucherId, orderId])
   @@index([storeId, createdAt])
+  @@index([voucherId, storeCustomerId])
 }
 
 model Order {

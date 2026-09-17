@@ -197,8 +197,8 @@ export interface AtomicCheckoutEffects {
   /** Reserve stock: quantityReserved += qty + a RESERVE movement per row.
    *  variantId set → reserves the variant's own counters (P2a); otherwise the product StockLevel. */
   stockReservations?: { productId: string; variantId?: string | null; quantity: number }[];
-  /** Record voucher redemption (one row per (voucher, order)). */
-  voucherRedemption?: { voucherId: string };
+  /** Record voucher redemption (one row per (voucher, order)) + per-customer accounting (P3a). */
+  voucherRedemption?: { voucherId: string; storeCustomerId?: string | null };
   /** Deduct loyalty points + write the REDEEM ledger entry. */
   loyalty?: { customerId: string; storeCustomerId: string; points: number };
   /** Create the credit (utang) purchase entry + increment the customer balance. */

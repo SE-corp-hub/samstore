@@ -153,6 +153,7 @@ Per-phase split (T1 share of the module's work):
 - Abandoned-cart recovery: cart expiry job (`CartStatus.ABANDONED`) + outbox notification.
 - **Accept:** voucher/loyalty/senior/tax math tests; duplicate redemption blocked; consent recorded.
 - **Model:** T1-dominant (80/20) — voucher/loyalty/senior/VAT math, idempotency, consent invariants on `deepseek` (fallback `z-ai/glm-5.3-flash`); forms/panels on `ling-3.0-flash`.
+- **Status:** **P3a ✅** — voucher engine v2 (types %, free-delivery, first-order, per-customer, product/category scope, stackable-with-loyalty; admin + panel + seed; +12 tests; live ₱194 smoke). **P3b PENDING** — loyalty earn/reversal/expiry/welcome config, senior/PWD 20% + ID capture, DPA checkout consent checkbox, `PIN-YYYY-NNNNNN` order numbers, abandoned-cart job.
 
 ### Phase 4 — Payments PH (§16)
 - **Payment gateway interface** + **PayMongo sandbox adapter** (`PENDING_CREDENTIALS`): GCash, Maya, cards, GrabPay via gateway-hosted checkout; tokenized only — no raw card data.

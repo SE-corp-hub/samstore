@@ -737,7 +737,12 @@ export class AdminController {
   @Post("vouchers")
   async createVoucher(
     @Req() req: Request & { user?: AuthPrincipal },
-    @Body() body: { code: string; discountMinor: number; minOrderMinor?: number; maxRedemptions?: number | null; startsAt?: string | null; expiresAt?: string | null; description?: string | null },
+    @Body() body: {
+      code: string; discountMinor?: number; type?: "fixed" | "percent" | "free_delivery"; percentBp?: number;
+      minOrderMinor?: number; maxRedemptions?: number | null; perCustomerLimit?: number | null;
+      firstOrderOnly?: boolean; scopeType?: "all" | "product" | "category"; scopeSku?: string; scopeCategorySlug?: string;
+      stackable?: boolean; startsAt?: string | null; expiresAt?: string | null; description?: string | null;
+    },
     @Headers("x-store-id") headerStoreId?: string,
   ) {
     const user = req.user;
@@ -746,8 +751,16 @@ export class AdminController {
     const result = await this.vouchersAdmin.create(storeId, {
       code: body.code,
       discountMinor: body.discountMinor,
+      type: body.type,
+      percentBp: body.percentBp,
       minOrderMinor: body.minOrderMinor,
       maxRedemptions: body.maxRedemptions,
+      perCustomerLimit: body.perCustomerLimit,
+      firstOrderOnly: body.firstOrderOnly,
+      scopeType: body.scopeType,
+      scopeSku: body.scopeSku,
+      scopeCategorySlug: body.scopeCategorySlug,
+      stackable: body.stackable,
       startsAt: body.startsAt ? new Date(body.startsAt) : null,
       expiresAt: body.expiresAt ? new Date(body.expiresAt) : null,
       description: body.description,
@@ -761,13 +774,18 @@ export class AdminController {
   async updateVoucher(
     @Req() req: Request & { user?: AuthPrincipal },
     @Param("id") id: string,
-    @Body() body: { isActive?: boolean; discountMinor?: number; maxRedemptions?: number | null },
+    @Body() body: Partial<{ isActive: boolean; discountMinor: number; maxRedemptions: number | null; type: "fixed" | "percent" | "free_delivery"; percentBp: number; perCustomerLimit: number | null; firstOrderOnly: boolean; scopeType: "all" | "product" | "category"; scopeSku: string; scopeCategorySlug: string; stackable: boolean; minOrderMinor: number; description: string | null; startsAt: string | null; expiresAt: string | null }>,
     @Headers("x-store-id") headerStoreId?: string,
   ) {
     const user = req.user;
     requireUser(user);
     const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
-    const result = await this.vouchersAdmin.update(storeId, id, body);
+    const { startsAt, expiresAt, ...rest } = body;
+    const result = await this.vouchersAdmin.update(storeId, id, {
+      ...rest,
+      ...(startsAt !== undefined ? { startsAt: startsAt ? new Date(startsAt) : null } : {}),
+      ...(expiresAt !== undefined ? { expiresAt: expiresAt ? new Date(expiresAt) : null } : {}),
+    });
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
     return result.value;
   }
