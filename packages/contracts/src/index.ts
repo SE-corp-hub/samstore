@@ -230,6 +230,8 @@ export interface CheckoutResponse {
 export interface PosSellItem {
   productId: string;
   quantity: number;
+  /** P2b: optional variant of the product (own price + own stock counters). */
+  variantId?: string;
 }
 
 export interface PosTender {

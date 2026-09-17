@@ -35,6 +35,7 @@ export class ProductAdminService {
       include: {
         category: { select: { id: true, name: true, slug: true } },
         stockLevels: { select: { quantityOnHand: true, quantityReserved: true, reorderThreshold: true } },
+        variants: { orderBy: { name: "asc" }, select: { id: true, name: true, sku: true, priceMinor: true, quantityOnHand: true, quantityReserved: true, isActive: true } },
       },
     });
     return products.map((p) => {
@@ -57,6 +58,16 @@ export class ProductAdminService {
       quantityReserved: reserved,
       availableQuantity: onHand - reserved,
       reorderThreshold: p.stockLevels[0]?.reorderThreshold ?? 0,
+      variants: p.variants.map((v) => ({
+        id: v.id,
+        name: v.name,
+        sku: v.sku,
+        priceMinor: v.priceMinor,
+        quantityOnHand: v.quantityOnHand,
+        quantityReserved: v.quantityReserved,
+        availableQuantity: v.quantityOnHand - v.quantityReserved,
+        isActive: v.isActive,
+      })),
     };
     });
   }

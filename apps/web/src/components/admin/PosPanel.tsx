@@ -13,14 +13,18 @@ import { toast } from "../../lib/toast";
 import ReceiptModal from "./ReceiptModal";
 import RegisterBar from "./RegisterBar";
 
+interface PosVariant {
+  id: string; name: string; sku: string; priceMinor: number; availableQuantity: number; isActive: boolean;
+}
 interface PosProduct {
   id: string; name: string; sku: string; barcode?: string | null; unit?: string | null;
   priceMinor: number;
   availableQuantity: number; category: { name: string } | null;
+  variants?: PosVariant[]; // P2b
 }
 interface PosCustomer { id: string; name: string | null; email: string | null; phone: string | null; address?: string | null; loyaltyPoints?: number; }
-interface CartLine { product: PosProduct; quantity: number; }
-interface HeldOrder { id: string; orderNumber: string; totalMinor: number; customerName: string; storeCustomerId: string | null; createdAt: string; items: { productId: string; productName: string; quantity: number; unitPriceMinor: number }[]; }
+interface CartLine { product: PosProduct; quantity: number; variant: PosVariant | null; }
+interface HeldOrder { id: string; orderNumber: string; totalMinor: number; customerName: string; storeCustomerId: string | null; createdAt: string; items: { productId: string; productName: string; variantId?: string | null; quantity: number; unitPriceMinor: number }[]; }
 interface LastSale { orderId: string; orderNumber: string; totalMinor: number; changeMinor: number; paymentMethod: string }
 
 const toPesos = (m: number) => `₱${(m / 100).toFixed(2)}`;
@@ -180,7 +184,7 @@ export default function PosPanel({ onNavigate }: { onNavigate?: (tab: string) =>
 
   useEffect(() => { load(); }, [load]);
 
-  const subtotal = cart.reduce((s, l) => s + l.product.priceMinor * l.quantity, 0);
+  const subtotal = cart.reduce((s, l) => s + (l.variant?.priceMinor ?? l.product.priceMinor) * l.quantity, 0);
   const tenderedMinor = Math.round(parseFloat(tendered || "0") * 100);
   const changeMinor = payment === "cash" ? tenderedMinor - subtotal : 0;
   const loyaltyCustomer = customers.find((c) => c.id === customerId);
@@ -191,12 +195,21 @@ export default function PosPanel({ onNavigate }: { onNavigate?: (tab: string) =>
     setError(null);
     setCart((c) => {
       const found = c.find((l) => l.product.id === product.id);
+      // P2b: default to the first available variant when the product has variants.
+      const variant = product.variants && product.variants.length > 0
+        ? product.variants.find((v) => v.isActive && v.availableQuantity > 0) ?? product.variants[0] ?? null
+        : null;
+      const limit = variant ? variant.availableQuantity : product.availableQuantity;
       if (found) {
-        if (found.quantity + 1 > product.availableQuantity) { setError(`Only ${product.availableQuantity} left for ${product.name}`); return c; }
-        return c.map((l) => (l.product.id === product.id ? { ...l, quantity: l.quantity + 1 } : l));
+        if (found.quantity + 1 > limit) { setError(`Only ${limit} left for ${product.name}${variant ? ` (${variant.name})` : ""}`); return c; }
+        return c.map((l) => (l.product.id === product.id ? { ...l, quantity: l.quantity + 1, variant: l.variant ?? variant } : l));
       }
-      return [...c, { product, quantity: 1 }];
+      return [...c, { product, quantity: 1, variant }];
     });
+  };
+
+  const setVariant = (productId: string, variantId: string) => {
+    setCart((c) => c.map((l) => (l.product.id === productId ? { ...l, variant: l.product.variants?.find((v) => v.id === variantId) ?? null, quantity: 1 } : l)));
   };
 
   const setQty = (productId: string, qty: number) => {
@@ -228,7 +241,7 @@ export default function PosPanel({ onNavigate }: { onNavigate?: (tab: string) =>
       const customer = await ensureCustomer();
       const res = await fetch(`${API_URL}/admin/pos/hold`, {
         method: "POST", headers: { "Content-Type": "application/json", ...adminHeaders() },
-        body: JSON.stringify({ items: cart.map((l) => ({ productId: l.product.id, quantity: l.quantity })), customerId: customer ?? undefined }),
+        body: JSON.stringify({ items: cart.map((l) => ({ productId: l.product.id, variantId: l.variant?.id ?? undefined, quantity: l.quantity })), customerId: customer ?? undefined }),
       });
       const data = await res.json();
       if (!res.ok) { setError(data?.errors?.join(", ") ?? data?.message ?? "Hold failed"); return; }
@@ -249,7 +262,7 @@ export default function PosPanel({ onNavigate }: { onNavigate?: (tab: string) =>
     const lines: CartLine[] = [];
     for (const it of h.items) {
       const prod = lineMap.get(it.productId);
-      if (prod) lines.push({ product: prod, quantity: it.quantity });
+      if (prod) lines.push({ product: prod, quantity: it.quantity, variant: prod.variants?.find((v) => v.id === it.variantId) ?? null });
     }
     setCart(lines);
     setCustomerId(h.storeCustomerId ?? "");
@@ -285,7 +298,7 @@ export default function PosPanel({ onNavigate }: { onNavigate?: (tab: string) =>
       const customer = await ensureCustomer();
       if (payment === "credit" && !customer) { setError("Add or select a customer for utang"); setBusy(false); return; }
       const payload = {
-        items: cart.map((l) => ({ productId: l.product.id, quantity: l.quantity })),
+        items: cart.map((l) => ({ productId: l.product.id, variantId: l.variant?.id ?? undefined, quantity: l.quantity })),
         paymentMethod: payment,
         tenderedMinor: payment === "cash" ? tenderedMinor : undefined,
         customerId: customer ?? undefined,
@@ -526,14 +539,25 @@ export default function PosPanel({ onNavigate }: { onNavigate?: (tab: string) =>
                       <div key={l.product.id} className="d-flex align-items-center gap-2 mb-1">
                         <div className="flex-grow-1 small">
                           <div className="fw-semibold">{l.product.name}</div>
-                          <div className="text-muted">{toPesos(l.product.priceMinor)}</div>
+                          {(l.product.variants && l.product.variants.length > 0) && (
+                            <select
+                              className="form-select form-select-sm mt-1"
+                              value={l.variant?.id ?? ""}
+                              onChange={(e) => setVariant(l.product.id, e.target.value)}
+                            >
+                              {l.product.variants.map((v) => (
+                                <option key={v.id} value={v.id}>{v.name} · {toPesos(v.priceMinor)}</option>
+                              ))}
+                            </select>
+                          )}
+                          <div className="text-muted">{toPesos(l.variant?.priceMinor ?? l.product.priceMinor)} each</div>
                         </div>
                         <div className="input-group input-group-sm" style={{ width: 104 }}>
                           <button className="btn btn-outline-secondary" onClick={() => setQty(l.product.id, l.quantity - 1)}>-</button>
                           <input className="form-control text-center" value={l.quantity} readOnly />
                           <button className="btn btn-outline-secondary" onClick={() => setQty(l.product.id, l.quantity + 1)}>+</button>
                         </div>
-                        <div className="fw-semibold small" style={{ width: 66, textAlign: "right" }}>{toPesos(l.product.priceMinor * l.quantity)}</div>
+                        <div className="fw-semibold small" style={{ width: 66, textAlign: "right" }}>{toPesos((l.variant?.priceMinor ?? l.product.priceMinor) * l.quantity)}</div>
                       </div>
                     ))}
                   </>

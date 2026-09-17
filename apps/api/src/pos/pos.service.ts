@@ -23,7 +23,7 @@ export type PosResult<T> = { ok: true; value: T } | { ok: false; error: ApiError
 
 export const POS_SERVICE = Symbol("POS_SERVICE");
 
-export interface LoadedLine { productId: string; quantity: number; unitPriceMinor: number; name: string; sku: string }
+export interface LoadedLine { productId: string; variantId: string | null; variantName: string | null; quantity: number; unitPriceMinor: number; name: string; sku: string }
 
 export class PosService {
   private readonly sequences = new PrismaOrderSequenceRepository();
@@ -44,7 +44,8 @@ export class PosService {
     return typeof sig === "string" && sig.trim().length > 0 && sig.startsWith("data:image/") && sig.trim().length <= PosService.SIGNATURE_MAX_LENGTH;
   }
 
-  /** Load fresh products for a store (active) + validate availability. */
+  /** Load fresh products for a store (active) + validate availability. P2b: variant lines
+ *  resolve their own price + stock (variant must belong to the product and be active). */
   private async loadProducts(storeId: string, items: PosSellItem[]): Promise<PosResult<{ products: any[]; lines: LoadedLine[]; totals: any }>> {
     const ids = items.map((i) => i.productId);
     const products = await prisma.product.findMany({
@@ -54,11 +55,29 @@ export class PosService {
     if (products.length !== new Set(ids).size) {
       return { ok: false, error: { type: "not_found", message: "One or more products not found or inactive" } };
     }
+    // Load every referenced variant (tenant-scoped) once.
+    const variantIds = [...new Set(items.map((i) => i.variantId).filter((v): v is string => !!v))];
+    const variants = variantIds.length > 0
+      ? await prisma.productVariant.findMany({ where: { storeId, id: { in: variantIds }, isActive: true } })
+      : [];
+    const variantMap = new Map(variants.map((v) => [v.id, v]));
+
     for (const it of items) {
       const p = products.find((x) => x.id === it.productId)!;
-      const available = p.stockLevels.reduce((s, l) => s + (l.quantityOnHand - l.quantityReserved), 0);
-      if (available < it.quantity) {
-        return { ok: false, error: { type: "conflict", message: `Only ${available} in stock for ${p.name}` } };
+      if (it.variantId) {
+        const v = variantMap.get(it.variantId);
+        if (!v || v.productId !== it.productId) {
+          return { ok: false, error: { type: "validation", errors: [v ? "Variant does not belong to this product" : "Variant not found or inactive"] } };
+        }
+        const available = v.quantityOnHand - v.quantityReserved;
+        if (available < it.quantity) {
+          return { ok: false, error: { type: "conflict", message: `Only ${available} in stock for ${p.name} (${v.name})` } };
+        }
+      } else {
+        const available = p.stockLevels.reduce((s, l) => s + (l.quantityOnHand - l.quantityReserved), 0);
+        if (available < it.quantity) {
+          return { ok: false, error: { type: "conflict", message: `Only ${available} in stock for ${p.name}` } };
+        }
       }
     }
     let totals;
@@ -66,7 +85,8 @@ export class PosService {
       totals = computeOrderTotals({
         lines: items.map((it) => {
           const p = products.find((x) => x.id === it.productId)!;
-          return { unitPriceMinor: p.priceMinor, quantity: it.quantity };
+          const v = it.variantId ? variantMap.get(it.variantId) : null;
+          return { unitPriceMinor: v?.priceMinor ?? p.priceMinor, quantity: it.quantity };
         }),
       });
     } catch (e) {
@@ -74,7 +94,8 @@ export class PosService {
     }
     const lines: LoadedLine[] = items.map((it) => {
       const p = products.find((x) => x.id === it.productId)!;
-      return { productId: p.id, quantity: it.quantity, unitPriceMinor: p.priceMinor, name: p.name, sku: p.sku };
+      const v = it.variantId ? variantMap.get(it.variantId) : null;
+      return { productId: p.id, variantId: v?.id ?? null, variantName: v?.name ?? null, quantity: it.quantity, unitPriceMinor: v?.priceMinor ?? p.priceMinor, name: p.name, sku: v?.sku ?? p.sku };
     });
     return { ok: true, value: { products, lines, totals } };
   }
@@ -137,6 +158,7 @@ export class PosService {
     const source = data.source ?? "pos";
     const items = data.lines.map((l) => ({
       productId: l.productId, productName: l.name, sku: l.sku, unitPriceMinor: l.unitPriceMinor,
+      variantId: l.variantId, variantName: l.variantName, // P2b
       quantity: l.quantity, lineTotalMinor: l.unitPriceMinor * l.quantity,
     }));
     // M4: freeze the VAT breakdown with the sale. POS orders carry no delivery fee, and the
@@ -167,7 +189,7 @@ export class PosService {
       },
     });
     await tx.orderItem.createMany({
-      data: items.map((i) => ({ orderId: data.id, storeId, productId: i.productId, productName: i.productName, sku: i.sku, unitPriceMinor: i.unitPriceMinor, quantity: i.quantity, lineTotalMinor: i.lineTotalMinor })),
+      data: items.map((i) => ({ orderId: data.id, storeId, productId: i.productId, productName: i.productName, sku: i.sku, variantId: i.variantId ?? null, variantName: i.variantName ?? null, unitPriceMinor: i.unitPriceMinor, quantity: i.quantity, lineTotalMinor: i.lineTotalMinor })),
     });
     await tx.orderStatusHistory.create({ data: { orderId: data.id, storeId, toStatus: data.status, actorType: "pos", actorId: actorId } });
   }
@@ -513,7 +535,7 @@ export class PosService {
     const loaded = await this.loadProducts(storeId, input.items);
     if (!loaded.ok) return loaded;
     const oldItems = await prisma.orderItem.findMany({ where: { orderId: holdId } });
-    const oldLines: LoadedLine[] = oldItems.map((i) => ({ productId: i.productId ?? "", quantity: i.quantity, unitPriceMinor: i.unitPriceMinor, name: i.productName, sku: i.sku }));
+    const oldLines: LoadedLine[] = oldItems.map((i) => ({ productId: i.productId ?? "", variantId: i.variantId ?? null, variantName: i.variantName ?? null, quantity: i.quantity, unitPriceMinor: i.unitPriceMinor, name: i.productName, sku: i.sku }));
     const { lines, totals } = loaded.value;
 
     await prisma.$transaction(async (tx) => {
@@ -551,7 +573,7 @@ export class PosService {
       lines = replaced.value.lines;
     } else {
       const items = await prisma.orderItem.findMany({ where: { orderId: holdId } });
-      lines = items.map((i) => ({ productId: i.productId ?? "", quantity: i.quantity, unitPriceMinor: i.unitPriceMinor, name: i.productName, sku: i.sku }));
+      lines = items.map((i) => ({ productId: i.productId ?? "", variantId: i.variantId ?? null, variantName: i.variantName ?? null, quantity: i.quantity, unitPriceMinor: i.unitPriceMinor, name: i.productName, sku: i.sku }));
     }
 
     const { storeCustomerId: custId, displayName } = input.paymentMethod === "credit"
@@ -663,7 +685,7 @@ export class PosService {
     const hold = await prisma.order.findFirst({ where: { storeId, id: holdId, status: "ON_HOLD" } });
     if (!hold) return { ok: false, error: { type: "not_found", message: "Held order not found" } };
     const items = await prisma.orderItem.findMany({ where: { orderId: holdId } });
-    const lines: LoadedLine[] = items.map((i) => ({ productId: i.productId ?? "", quantity: i.quantity, unitPriceMinor: i.unitPriceMinor, name: i.productName, sku: i.sku }));
+    const lines: LoadedLine[] = items.map((i) => ({ productId: i.productId ?? "", variantId: i.variantId ?? null, variantName: i.variantName ?? null, quantity: i.quantity, unitPriceMinor: i.unitPriceMinor, name: i.productName, sku: i.sku }));
 
     await prisma.$transaction(async (tx) => {
       await this.restoreStock(tx, storeId, lines, { orderId: holdId, createdBy: actorId });

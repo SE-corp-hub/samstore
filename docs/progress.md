@@ -1,6 +1,20 @@
 # PINDIAN — Progress Log
 
-Updated: 2026-09-16 · **P2a: product variants + add-ons end-to-end** · Active model: `deepseek/deepseek-v4-flash-0731` (openrouter), boilerplate tier `inclusionai/ling-3.0-flash`
+Updated: 2026-09-16 · **P2b: POS variant selling** · Active model: `deepseek/deepseek-v4-flash-0731` (openrouter), boilerplate tier `inclusionai/ling-3.0-flash`
+
+## P2b — POS terminal sells variants (closes Phase 2 "POS can sell variants")
+
+| Item | Detail |
+|---|---|
+| Ledger | `movements.ts` `recordMovement` + `deductStock` + `restoreStock` gain variant branches: variant lines decrement/increment the **variant's own counter** via guarded `quantityOnHand >= take` UPDATE and write a `StockMovement` carrying `variantId`. |
+| POS | `PosSellItem.variantId` (contracts); `LoadedLine` carries `variantId/variantName`; `loadProducts` resolves variants (must belong to the product + active), prices from the VARIANT, checks availability against the variant's `onHand - reserved`; `makeOrder` + `orderItem.createMany` snapshot `variantId/variantName`. Applies to sell/hold/hold-complete/pre-orders (all share `loadProducts`). |
+| Admin | `/admin/products` now returns each product's `variants` (id/name/sku/price/stock/available/isActive). |
+| Terminal UI | `PosPanel`: `PosProduct.variants`, `CartLine.variant`; adding a product defaults to the first available variant; the review line shows a variant `<select>` (swaps price); hold/sell payloads send `variantId`; resume maps held variant lines back. |
+| Tests | +4 `pos/pos-variant.test.ts` (real DB): utang sale with variant → variant price + snapshot + counter decrement + CONSUME movement; beyond-variant-stock conflict; cross-product variant rejection; hold reserves variant stock + void restores it. |
+| Ops | Fixture sweeper now also covers `posx-` and `v6t` stores (found leaked `posx-` stores from earlier aborted runs were colliding on 6-char order-number prefixes → full-suite flake). |
+| Notes / honest | Still PENDING (Phase 2 remainder): admin-panel **create/edit** variant/add-on management UI (products are configured via seed/DB today), featured/tags/related/upsell, warehouse low-stock surfacing, add-on price revalidation at checkout. |
+| Gate | lint 0 errors · **full suite 56 files / 379 tests / 0 fail** · live HTTP smoke: `/admin/products` returns KAPE-MALAY variants; a real cash POS sale of the **Iced** variant → order total exactly `16000` (variant price); storefront `/sam-store?token=` 200 with Kape Malay. |
+| Commit | (this commit) |
 
 ## P2a — Variants + add-ons/modifiers (catalog → storefront → cart → checkout)
 

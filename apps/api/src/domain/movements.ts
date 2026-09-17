@@ -11,6 +11,8 @@ export type MovementTx = Prisma.TransactionClient;
 export interface MovementInput {
   storeId: string;
   productId: string;
+  /** P2b: variant-level movement (null = product-level). */
+  variantId?: string | null;
   warehouseId?: string | null;
   delta: number;
   type: string; // RESERVE | RELEASE | CONSUME | ADJUST | RECEIPT | TRANSFER_IN | TRANSFER_OUT | VOID_RESTORE
@@ -26,6 +28,7 @@ export async function recordMovement(tx: MovementTx, m: MovementInput): Promise<
     data: {
       storeId: m.storeId,
       productId: m.productId,
+      variantId: m.variantId ?? null,
       warehouseId: m.warehouseId ?? null,
       delta: m.delta,
       type: m.type,
@@ -63,10 +66,33 @@ export class InsufficientStockError extends Error {
  * an explicit InsufficientStockError, so a balance can never go negative.
  * Products with NO stock-level rows are untracked and keep the legacy no-op.
  */
-export async function deductStock(tx: MovementTx, storeId: string, lines: { productId: string; quantity: number }[], opts?: { type?: string; orderId?: string | null; createdBy?: string | null }): Promise<void> {
+export async function deductStock(tx: MovementTx, storeId: string, lines: { productId: string; variantId?: string | null; quantity: number }[], opts?: { type?: string; orderId?: string | null; createdBy?: string | null }): Promise<void> {
   const type = opts?.type ?? "CONSUME";
   for (const l of lines) {
     if (l.quantity <= 0) continue;
+    // P2b: VARIANT lines decrement the variant's own counter (guarded the same way).
+    if (l.variantId) {
+      const take = l.quantity;
+      const changed = await tx.productVariant.updateMany({
+        where: { id: l.variantId, storeId, quantityOnHand: { gte: take } },
+        data: { quantityOnHand: { decrement: take } },
+      });
+      if (changed.count === 0) {
+        throw new InsufficientStockError(l.productId, take);
+      }
+      const fresh = await tx.productVariant.findUnique({ where: { id: l.variantId }, select: { quantityOnHand: true } });
+      await recordMovement(tx, {
+        storeId,
+        productId: l.productId,
+        variantId: l.variantId,
+        delta: -take,
+        type,
+        orderId: opts?.orderId,
+        createdBy: opts?.createdBy,
+        balanceAfter: fresh?.quantityOnHand ?? null,
+      });
+      continue;
+    }
     // Fetch ALL levels (not just in-stock ones): the difference between "this
     // product is untracked" (no rows) and "tracked but empty" decides whether a
     // shortfall is an error or a legacy no-op.
@@ -198,9 +224,27 @@ export async function adjustStock(
  * Restore stock for lines (void/cancel/edit-revert), recording a movement.
  * Uses the FIRST level for the product (legacy compatibility).
  */
-export async function restoreStock(tx: MovementTx, storeId: string, lines: { productId: string; quantity: number }[], opts?: { type?: string; orderId?: string | null; createdBy?: string | null }): Promise<void> {
+export async function restoreStock(tx: MovementTx, storeId: string, lines: { productId: string; variantId?: string | null; quantity: number }[], opts?: { type?: string; orderId?: string | null; createdBy?: string | null }): Promise<void> {
   const type = opts?.type ?? "RELEASE";
   for (const l of lines) {
+    // P2b: variant lines restore the variant's counter.
+    if (l.variantId) {
+      const updated = await tx.productVariant.update({
+        where: { id: l.variantId },
+        data: { quantityOnHand: { increment: l.quantity } },
+      });
+      await recordMovement(tx, {
+        storeId,
+        productId: l.productId,
+        variantId: l.variantId,
+        delta: l.quantity,
+        type,
+        orderId: opts?.orderId,
+        createdBy: opts?.createdBy,
+        balanceAfter: updated.quantityOnHand,
+      });
+      continue;
+    }
     const level = await tx.stockLevel.findFirst({ where: { storeId, productId: l.productId } });
     if (level) {
       const updated = await tx.stockLevel.update({
