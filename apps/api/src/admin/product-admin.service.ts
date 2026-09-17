@@ -1,6 +1,7 @@
 // Product admin service — tenant-scoped product CRUD + stock.
 
 import { prisma } from "../persistence/prisma-repositories.js";
+import { recordMovement } from "../domain/movements.js";
 import { validateProductInput, slugify, type ProductInput } from "../domain/product-validation.js";
 import type { ApiError } from "@sam-store/contracts";
 
@@ -36,6 +37,7 @@ export class ProductAdminService {
         category: { select: { id: true, name: true, slug: true } },
         stockLevels: { select: { quantityOnHand: true, quantityReserved: true, reorderThreshold: true } },
         variants: { orderBy: { name: "asc" }, select: { id: true, name: true, sku: true, priceMinor: true, quantityOnHand: true, quantityReserved: true, isActive: true } },
+        addons: { orderBy: { sortOrder: "asc" }, include: { options: { orderBy: { sortOrder: "asc" }, select: { id: true, name: true, priceMinor: true, isActive: true } } } },
       },
     });
     return products.map((p) => {
@@ -67,6 +69,12 @@ export class ProductAdminService {
         quantityReserved: v.quantityReserved,
         availableQuantity: v.quantityOnHand - v.quantityReserved,
         isActive: v.isActive,
+      })),
+      addons: p.addons.map((a) => ({
+        id: a.id,
+        name: a.name,
+        required: a.required,
+        options: a.options.map((o) => ({ id: o.id, name: o.name, priceMinor: o.priceMinor, isActive: o.isActive })),
       })),
     };
     });
@@ -225,5 +233,137 @@ export class ProductAdminService {
       create: { storeId, name, slug },
     });
     return { id: category.id };
+  }
+
+  // ─────────────────────────────── Variants (P2c admin) ───────────────────────────────
+
+  /** Create a variant on a store product (own SKU/name/price + opening stock). */
+  async addVariant(storeId: string, productId: string, input: { name: string; sku: string; priceMinor: number; quantityOnHand?: number }): Promise<AdminResult<{ id: string }>> {
+    const name = input.name?.trim();
+    const sku = input.sku?.trim();
+    if (!name || name.length > 80) return { ok: false, error: { type: "validation", errors: ["name is required (max 80 chars)"] } };
+    if (!sku || sku.length > 64) return { ok: false, error: { type: "validation", errors: ["sku is required (max 64 chars)"] } };
+    if (!Number.isInteger(input.priceMinor) || input.priceMinor < 0) return { ok: false, error: { type: "validation", errors: ["priceMinor must be a non-negative integer"] } };
+    if (input.quantityOnHand !== undefined && (!Number.isInteger(input.quantityOnHand) || input.quantityOnHand < 0)) return { ok: false, error: { type: "validation", errors: ["quantityOnHand must be a non-negative integer"] } };
+
+    const product = await prisma.product.findFirst({ where: { id: productId, storeId } });
+    if (!product) return { ok: false, error: { type: "not_found", message: "Product not found" } };
+    const dup = await prisma.productVariant.findFirst({ where: { storeId, sku } });
+    if (dup) return { ok: false, error: { type: "conflict", message: "A variant with this SKU already exists" } };
+
+    const opening = input.quantityOnHand ?? 0;
+    const v = await prisma.$transaction(async (tx) => {
+      const created = await tx.productVariant.create({
+        data: { storeId, productId, name, sku, priceMinor: input.priceMinor, quantityOnHand: opening, quantityReserved: 0 },
+      });
+      if (opening > 0) {
+        await recordMovement(tx, { storeId, productId, variantId: created.id, delta: opening, type: "RECEIPT", createdBy: "admin", balanceAfter: opening });
+      }
+      return created;
+    }, { timeout: 30_000 });
+    return { ok: true, value: { id: v.id } };
+  }
+
+  /** Update a variant (name/sku/price/active and/or set the on-hand count with an ADJUST ledger row). */
+  async updateVariant(storeId: string, variantId: string, input: { name?: string; sku?: string; priceMinor?: number; isActive?: boolean; quantityOnHand?: number }): Promise<AdminResult<{ id: string }>> {
+    const v = await prisma.productVariant.findFirst({ where: { id: variantId, storeId } });
+    if (!v) return { ok: false, error: { type: "not_found", message: "Variant not found" } };
+    if (input.sku !== undefined) {
+      const sku = input.sku.trim();
+      if (!sku || sku.length > 64) return { ok: false, error: { type: "validation", errors: ["sku is required (max 64 chars)"] } };
+      const dup = await prisma.productVariant.findFirst({ where: { storeId, sku, id: { not: variantId } } });
+      if (dup) return { ok: false, error: { type: "conflict", message: "A variant with this SKU already exists" } };
+    }
+    if (input.priceMinor !== undefined && (!Number.isInteger(input.priceMinor) || input.priceMinor < 0)) return { ok: false, error: { type: "validation", errors: ["priceMinor must be a non-negative integer"] } };
+
+    // Stock set: absolute on-hand count with a guarded write + ADJUST movement.
+    if (input.quantityOnHand !== undefined) {
+      if (!Number.isInteger(input.quantityOnHand) || input.quantityOnHand < 0) return { ok: false, error: { type: "validation", errors: ["quantityOnHand must be a non-negative integer"] } };
+      if (input.quantityOnHand < v.quantityReserved) {
+        return { ok: false, error: { type: "conflict", message: `Cannot set stock below ${v.quantityReserved} reserved` } };
+      }
+      const delta = input.quantityOnHand - v.quantityOnHand;
+      await prisma.$transaction(async (tx) => {
+        await tx.productVariant.update({ where: { id: variantId }, data: { quantityOnHand: input.quantityOnHand } });
+        if (delta !== 0) {
+          await recordMovement(tx, { storeId, productId: v.productId, variantId: v.id, delta, type: "ADJUST", createdBy: "admin", balanceAfter: input.quantityOnHand });
+        }
+      }, { timeout: 30_000 });
+    }
+
+    await prisma.productVariant.update({
+      where: { id: variantId },
+      data: {
+        ...(input.name !== undefined ? { name: input.name.trim() } : {}),
+        ...(input.sku !== undefined ? { sku: input.sku.trim() } : {}),
+        ...(input.priceMinor !== undefined ? { priceMinor: input.priceMinor } : {}),
+        ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
+      },
+    });
+    return { ok: true, value: { id: variantId } };
+  }
+
+  /** Delete a variant (refused while stock is reserved by open orders). */
+  async deleteVariant(storeId: string, variantId: string): Promise<AdminResult<{ ok: true }>> {
+    const v = await prisma.productVariant.findFirst({ where: { id: variantId, storeId } });
+    if (!v) return { ok: false, error: { type: "not_found", message: "Variant not found" } };
+    if (v.quantityReserved > 0) return { ok: false, error: { type: "conflict", message: "Variant stock is reserved by open orders" } };
+    await prisma.productVariant.delete({ where: { id: variantId } });
+    return { ok: true, value: { ok: true } };
+  }
+
+  // ─────────────────────────────── Add-ons (P2c admin) ───────────────────────────────
+
+  /** Create an add-on group with its options on a store product. */
+  async addAddon(storeId: string, productId: string, input: { name: string; required?: boolean; options?: { name: string; priceMinor: number }[] }): Promise<AdminResult<{ id: string }>> {
+    const name = input.name?.trim();
+    if (!name || name.length > 60) return { ok: false, error: { type: "validation", errors: ["name is required (max 60 chars)"] } };
+    const options = (input.options ?? []).map((o) => ({ name: o.name?.trim(), priceMinor: o.priceMinor }));
+    if (options.some((o) => !o.name || o.name.length > 60)) return { ok: false, error: { type: "validation", errors: ["option names are required (max 60 chars)"] } };
+    if (options.some((o) => !Number.isInteger(o.priceMinor) || o.priceMinor < 0)) return { ok: false, error: { type: "validation", errors: ["option prices must be non-negative integers"] } };
+
+    const product = await prisma.product.findFirst({ where: { id: productId, storeId } });
+    if (!product) return { ok: false, error: { type: "not_found", message: "Product not found" } };
+
+    const addon = await prisma.productAddon.create({
+      data: {
+        storeId, productId, name, required: input.required ?? false, sortOrder: 0,
+        options: { create: options.map((o, i) => ({ name: o.name!, priceMinor: o.priceMinor, sortOrder: i })) },
+      },
+    });
+    return { ok: true, value: { id: addon.id } };
+  }
+
+  /** Update an add-on option (name/price/active). */
+  async updateAddonOption(storeId: string, optionId: string, input: { name?: string; priceMinor?: number; isActive?: boolean }): Promise<AdminResult<{ ok: true }>> {
+    const opt = await prisma.productAddonOption.findFirst({ where: { id: optionId, storeId } });
+    if (!opt) return { ok: false, error: { type: "not_found", message: "Option not found" } };
+    if (input.name !== undefined && (!input.name.trim() || input.name.trim().length > 60)) return { ok: false, error: { type: "validation", errors: ["name is required (max 60 chars)"] } };
+    if (input.priceMinor !== undefined && (!Number.isInteger(input.priceMinor) || input.priceMinor < 0)) return { ok: false, error: { type: "validation", errors: ["priceMinor must be a non-negative integer"] } };
+    await prisma.productAddonOption.update({
+      where: { id: optionId },
+      data: {
+        ...(input.name !== undefined ? { name: input.name.trim() } : {}),
+        ...(input.priceMinor !== undefined ? { priceMinor: input.priceMinor } : {}),
+        ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
+      },
+    });
+    return { ok: true, value: { ok: true } };
+  }
+
+  /** Delete an add-on group (cascades its options). */
+  async deleteAddon(storeId: string, addonId: string): Promise<AdminResult<{ ok: true }>> {
+    const exist = await prisma.productAddon.findFirst({ where: { id: addonId, storeId } });
+    if (!exist) return { ok: false, error: { type: "not_found", message: "Add-on group not found" } };
+    await prisma.productAddon.delete({ where: { id: addonId } });
+    return { ok: true, value: { ok: true } };
+  }
+
+  /** Delete a single add-on option. */
+  async deleteAddonOption(storeId: string, optionId: string): Promise<AdminResult<{ ok: true }>> {
+    const opt = await prisma.productAddonOption.findFirst({ where: { id: optionId, storeId } });
+    if (!opt) return { ok: false, error: { type: "not_found", message: "Option not found" } };
+    await prisma.productAddonOption.delete({ where: { id: optionId } });
+    return { ok: true, value: { ok: true } };
   }
 }

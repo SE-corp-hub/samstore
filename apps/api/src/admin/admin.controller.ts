@@ -567,6 +567,92 @@ export class AdminController {
     return result.value;
   }
 
+  // ─────────────────────────────── Variants + add-ons (P2c admin) ───────────────────────────────
+
+  /** POST /admin/products/:id/variants — create a variant on a product. */
+  @Post("products/:id/variants")
+  async addVariant(@Req() req: Request & { user?: AuthPrincipal }, @Param("id") id: string, @Body() body: { name: string; sku: string; priceMinor: number; quantityOnHand?: number }, @Headers("x-store-id") headerStoreId?: string) {
+    const user = req.user;
+    requireUser(user);
+    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
+    const result = await this.productsAdmin.addVariant(storeId, id, body);
+    if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
+    await cacheBust(cacheKey("products", storeId));
+    return result.value;
+  }
+
+  /** PATCH /admin/products/variants/:variantId — update a variant (incl. set on-hand stock). */
+  @Patch("products/variants/:variantId")
+  async updateVariant(@Req() req: Request & { user?: AuthPrincipal }, @Param("variantId") variantId: string, @Body() body: Partial<{ name: string; sku: string; priceMinor: number; isActive: boolean; quantityOnHand: number }>, @Headers("x-store-id") headerStoreId?: string) {
+    const user = req.user;
+    requireUser(user);
+    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
+    const result = await this.productsAdmin.updateVariant(storeId, variantId, body);
+    if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
+    await cacheBust(cacheKey("products", storeId));
+    return result.value;
+  }
+
+  /** DELETE /admin/products/variants/:variantId — delete a variant (refused while reserved). */
+  @Delete("products/variants/:variantId")
+  async deleteVariant(@Req() req: Request & { user?: AuthPrincipal }, @Param("variantId") variantId: string, @Headers("x-store-id") headerStoreId?: string) {
+    const user = req.user;
+    requireUser(user);
+    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
+    const result = await this.productsAdmin.deleteVariant(storeId, variantId);
+    if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
+    await cacheBust(cacheKey("products", storeId));
+    return result.value;
+  }
+
+  /** POST /admin/products/:id/addons — create an add-on group with options. */
+  @Post("products/:id/addons")
+  async addAddon(@Req() req: Request & { user?: AuthPrincipal }, @Param("id") id: string, @Body() body: { name: string; required?: boolean; options?: { name: string; priceMinor: number }[] }, @Headers("x-store-id") headerStoreId?: string) {
+    const user = req.user;
+    requireUser(user);
+    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
+    const result = await this.productsAdmin.addAddon(storeId, id, body);
+    if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
+    await cacheBust(cacheKey("products", storeId));
+    return result.value;
+  }
+
+  /** PATCH /admin/products/addons/options/:optionId — update an add-on option. */
+  @Patch("products/addons/options/:optionId")
+  async updateAddonOption(@Req() req: Request & { user?: AuthPrincipal }, @Param("optionId") optionId: string, @Body() body: Partial<{ name: string; priceMinor: number; isActive: boolean }>, @Headers("x-store-id") headerStoreId?: string) {
+    const user = req.user;
+    requireUser(user);
+    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
+    const result = await this.productsAdmin.updateAddonOption(storeId, optionId, body);
+    if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
+    await cacheBust(cacheKey("products", storeId));
+    return result.value;
+  }
+
+  /** DELETE /admin/products/addons/:addonId — delete an add-on group (cascades options). */
+  @Delete("products/addons/:addonId")
+  async deleteAddon(@Req() req: Request & { user?: AuthPrincipal }, @Param("addonId") addonId: string, @Headers("x-store-id") headerStoreId?: string) {
+    const user = req.user;
+    requireUser(user);
+    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
+    const result = await this.productsAdmin.deleteAddon(storeId, addonId);
+    if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
+    await cacheBust(cacheKey("products", storeId));
+    return result.value;
+  }
+
+  /** DELETE /admin/products/addons/options/:optionId — delete one option. */
+  @Delete("products/addons/options/:optionId")
+  async deleteAddonOption(@Req() req: Request & { user?: AuthPrincipal }, @Param("optionId") optionId: string, @Headers("x-store-id") headerStoreId?: string) {
+    const user = req.user;
+    requireUser(user);
+    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
+    const result = await this.productsAdmin.deleteAddonOption(storeId, optionId);
+    if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
+    await cacheBust(cacheKey("products", storeId));
+    return result.value;
+  }
+
   /** GET /admin/settings — store + settings + public link. */
   @Get("settings")
   async getSettings(@Req() req: Request & { user?: AuthPrincipal }, @Headers("x-store-id") headerStoreId?: string) {

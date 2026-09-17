@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { API_URL } from "../../config";
 import { getAdminToken, adminHeaders } from "../../lib/admin";
 import LabelSheet from "./LabelSheet";
+import VariantEditor from "./VariantEditor";
 
 export interface AdminProduct {
   id: string;
@@ -21,6 +22,8 @@ export interface AdminProduct {
   quantityReserved: number;
   availableQuantity: number;
   reorderThreshold: number;
+  variants?: { id: string; name: string; sku: string; priceMinor: number; quantityOnHand: number; availableQuantity: number; isActive: boolean }[];
+  addons?: { id: string; name: string; required: boolean; options: { id: string; name: string; priceMinor: number; isActive: boolean }[] }[];
 }
 
 interface ProductForm {
@@ -57,6 +60,8 @@ export default function ProductsPanel() {
   // M3: batch label printing — the selected product ids open the 57 × 40 mm label sheet.
   const [selected, setSelected] = useState<string[]>([]);
   const [labelOpen, setLabelOpen] = useState(false);
+  // P2c: variant + add-on management modal
+  const [optionsFor, setOptionsFor] = useState<AdminProduct | null>(null);
 
   const token = () => getAdminToken();
 
@@ -275,6 +280,9 @@ export default function ProductsPanel() {
                   </span>
                 </td>
                 <td className="text-end">
+                  <button className="btn btn-sm btn-outline-secondary me-1" title="Variants & add-ons" onClick={() => setOptionsFor(p)}>
+                    <i className="bi bi-sliders"></i>
+                  </button>
                   <button className="btn btn-sm btn-outline-secondary me-1" onClick={() => openEdit(p)}>
                     <i className="bi bi-pencil"></i>
                   </button>
@@ -364,6 +372,13 @@ export default function ProductsPanel() {
         </>
       )}
       {labelOpen && <LabelSheet productIds={selected} onClose={() => setLabelOpen(false)} />}
+      {optionsFor && (
+        <VariantEditor
+          product={optionsFor as unknown as Parameters<typeof VariantEditor>[0]["product"]}
+          onClose={() => setOptionsFor(null)}
+          onChanged={() => { setOptionsFor(null); void load(); }}
+        />
+      )}
     </div>
   );
 }

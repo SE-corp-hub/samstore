@@ -106,7 +106,7 @@
 - Storefront: variant picker + add-on selector; cart lines carry variant/add-on selections; checkout snapshots them.
 - Featured products, tags, search & filters, related/upsell/cross-sell; low-stock threshold surfaced per warehouse.
 - **Accept:** variant cart/order/stock integrity tests; POS can sell variants.
-- **Status:** **P2a ✅** — variants + add-ons end-to-end (schema/hierarchy, storefront `ProductPicker`, cart line identity by `(product,variant,addonKey)`, atomic variant stock reservation + snapshots, seed KAPE-MALAY, 4 DB tests + live smoke). **P2b ✅** — POS sells variants (variant-aware stock ledger, POS line resolution/snapshots, terminal variant select, `/admin/products` variant exposure, +4 DB tests). **P2c PENDING** — admin-panel create/edit variant/add-on management UI, featured/tags/related/upsell, warehouse low-stock surfacing, add-on revalidation at checkout.
+- **Status:** **P2a ✅** — variants + add-ons end-to-end. **P2b ✅** — POS sells variants. **P2c ✅** — admin management of variants + add-ons (APIs + Products-panel `VariantEditor`, +6 DB tests). **Remaining P2d PENDING:** featured/tags/related/upsell, warehouse low-stock surfacing, add-on price revalidation at checkout.
 
 ### Phase 3 — Cart & checkout depth (§6, §7, §10, §11)
 - Voucher engine v2: % and fixed, free-delivery, first-order, product/category-scoped, min-spend, usage + per-customer limits, **stackable/non-stackable rules**, storewide promos (`Voucher` extended + `VoucherRule` tables as needed).

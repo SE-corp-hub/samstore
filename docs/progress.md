@@ -1,6 +1,19 @@
 # PINDIAN — Progress Log
 
-Updated: 2026-09-16 · **P2b: POS variant selling** · Active model: `deepseek/deepseek-v4-flash-0731` (openrouter), boilerplate tier `inclusionai/ling-3.0-flash`
+Updated: 2026-09-16 · **P2c: admin management for variants & add-ons** · Active model: `deepseek/deepseek-v4-flash-0731` (openrouter), boilerplate tier `inclusionai/ling-3.0-flash`
+
+## P2c — Admin-panel variant + add-on configuration (APIs + Products editor)
+
+| Item | Detail |
+|---|---|
+| API | `ProductAdminService` + `/admin/products/*` routes (all `resolveTenant ADMIN` + `cacheBust`): `POST :id/variants` (create variant w/ opening stock → `RECEIPT` movement), `PATCH variants/:vid` (name/sku/price/active + set on-hand count → guarded write + `ADJUST` movement; refuses below reserved), `DELETE variants/:vid` (refused while stock reserved), `POST :id/addons` (group w/ nested options), `PATCH addons/options/:oid`, `DELETE addons/:addonId` (cascade), `DELETE addons/options/:oid`. SKU uniqueness per store; cross-store invisible (not_found). |
+| List | `/admin/products` now returns each product's `variants` (price/stock/available) **and** `addons` (groups → options). |
+| UI | `VariantEditor.tsx` modal (variants list: rename/inline price + stock set/delete; add new variant; add-on groups with option chips + delete option/group; add group with first option). Opened via a new sliders button per product row in `ProductsPanel`; every write reloads the panel. |
+| Tests | +6 `admin/product-variant-admin.test.ts` (real DB): addVariant opening stock + RECEIPT ledger, updateVariant price/name + absolute-stock ADJUST movement (delta 7), duplicate-SKU conflict + set-below-reserved guard, delete-while-reserved refused, add-on group/option CRUD, **tenant isolation (variant of store A invisible to store B)**. |
+| Fixes | Nested add-on option create no longer passes the redundant `storeId` (Prisma auto-fills the composite FK — passing it was a validation error). |
+| Notes / honest | Still PENDING Phase 2 remainder: featured/tags/related/upsell, warehouse low-stock surfacing, add-on price revalidation at checkout. |
+| Gate | lint 0 errors · **full suite 57 files / 385 tests / 0 fail** · live HTTP smoke: `/admin/products` returns KAPE-MALAY variants+addons; created/updated(deleted an XL Smoke variant (set stock 7/price 19000) → verified removed. |
+| Commit | (this commit) |
 
 ## P2b — POS terminal sells variants (closes Phase 2 "POS can sell variants")
 
