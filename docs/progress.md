@@ -1,6 +1,17 @@
 # PINDIAN — Progress Log
 
-Updated: 2026-09-20 · **P3b: statutory 20% Senior/PWD discount + DPA consent gate** · Active model: `deepseek/deepseek-v4-flash-0731` (openrouter), boilerplate tier `inclusionai/ling-3.0-flash`
+Updated: 2026-09-20 · **P3c: add-on price revalidation at checkout** · Active model: `deepseek/deepseek-v4-flash-0731` (openrouter), boilerplate tier `inclusionai/ling-3.0-flash`
+
+## P3c — Add-on price revalidation at checkout
+
+| Item | Detail |
+|---|---|
+| Gap fixed | Checkout re-priced product/variant units but **carried add-on totals through unchanged** (the `cart.ts` comment promised re-validation "against the live groups in the checkout service" — it didn't exist). A stale add-on price survived to order creation. |
+| Domain | `domain/cart.ts` `revalidateCartLines` gains a 4th arg `freshAddons: Map<optionId, { addonId, name, priceMinor }>` and re-prices each line's add-on snapshot per unit: live price applied + reported in `addonPriceChanges` (`{ productId, optionId, name, fromMinor, toMinor }`); options that vanished/were deactivated/left their add-on group are dropped with their cost removed, listed in `removedAddonOptionIds`. `addonsTotalMinor` + `subtotalMinor` always reflect the live prices. Empty/unaddon lines are untouched (backward compatible). |
+| Checkout | `checkout.service.ts` loads live add-on groups (`getProductAddons` per cart product, active options only) and passes them into revalidation; the order snapshot now carries `addonPriceChanges` + `removedAddonOptionIds` so the storefront can explain the adjustment — same pattern as `priceChanges`. |
+| Tests | +9: `domain/cart.test.ts` +6 (price up, deactivated dropped, group-mismatch dropped, mixed set, no-addons untouched, variant line add-ons) and `checkout/addon-revalidation.test.ts` +3 (real DB: price raised after add → order charged the live price + snapshot lists the change; option deactivated → dropped, never charged; price lowered → customer pays less). |
+| Gate | api + web `tsc` 0 errors · web build ✓ · **isolation gate 68/68 across the 9 touched files** (cart 12, statutory-discount 5, addon-revalidation 3, statutory-consent 6, checkout.service 16, checkout-address 5, voucher-v2 6, variant-cart 4, store-access 11). Full-suite run remains flaky under shared-DB contention (set shifts run-to-run: worker/outbox, POS, split-payment, voucher-v2, suppliers) — pre-existing per the P3a note; every such test passes in isolation. |
+| Commit | (this commit) |
 
 ## P3b — Statutory 20% discount (Senior Citizen / PWD) + DPA consent
 

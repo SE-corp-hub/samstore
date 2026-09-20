@@ -187,6 +187,19 @@ export class CheckoutService {
     const variantIds = cart.lines.map((l) => l.variantId).filter((v): v is string => !!v);
     const freshVariants = await this.catalog.getVariantsByIds(cart.storeId, variantIds);
     const freshVariantsMap = new Map(freshVariants.map((v) => [v.id, { id: v.id, productId: v.productId, priceMinor: v.priceMinor, isActive: v.isActive }]));
+    // P3c: live add-on groups — each line's add-ons are re-priced from the CURRENT
+    // option prices; options that vanished/were deactivated are dropped (never a stale total).
+    const freshAddonGroups = (await Promise.all(
+      cart.lines.map((l) => this.catalog.getProductAddons(cart.storeId, l.productId)),
+    )).flat();
+    const freshAddonsMap = new Map<string, { addonId: string; name: string; priceMinor: number }>();
+    for (const group of freshAddonGroups) {
+      for (const option of group.options) {
+        if (option.isActive) {
+          freshAddonsMap.set(option.id, { addonId: group.id, name: option.name, priceMinor: option.priceMinor });
+        }
+      }
+    }
     let revalidated;
     try {
       revalidated = revalidateCartLines(
@@ -195,6 +208,7 @@ export class CheckoutService {
           freshProducts.map((p) => [p.id, { id: p.id, priceMinor: p.priceMinor, isActive: p.isActive }]),
         ),
         freshVariantsMap,
+        freshAddonsMap,
       );
     } catch (e) {
       if (e instanceof CartRevalidationError) {
@@ -407,6 +421,8 @@ export class CheckoutService {
         lines: revalidated.lines,
         items,
         priceChanges: revalidated.priceChanges,
+        ...(revalidated.addonPriceChanges.length > 0 ? { addonPriceChanges: revalidated.addonPriceChanges } : {}),
+        ...(revalidated.removedAddonOptionIds.length > 0 ? { removedAddonOptionIds: revalidated.removedAddonOptionIds } : {}),
         store: { slug: store.slug, name: store.name },
         paymentMethod,
         deliveryType,
