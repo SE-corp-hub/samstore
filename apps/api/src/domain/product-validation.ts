@@ -24,6 +24,8 @@ export interface ProductInput {
   relatedProductIds?: string[];
   /** P3d: same-store product ids shown as upsell/"Upgrade" (replace-all, max 12). */
   upsellProductIds?: string[];
+  /** P3f: quantity-on-hand at/below which the item is flagged LOW stock. */
+  reorderThreshold?: number;
 }
 
 export type ProductValidation = { ok: true } | { ok: false; errors: string[] };
@@ -108,6 +110,11 @@ export function validateProductInput(input: ProductInput): ProductValidation {
         errors.push(`${label} contains an invalid product id`);
       }
     }
+  }
+
+  // P3f: reorder threshold must be a non-negative integer when provided.
+  if (input.reorderThreshold !== undefined && (!Number.isInteger(input.reorderThreshold) || input.reorderThreshold < 0)) {
+    errors.push("reorderThreshold must be a non-negative integer");
   }
 
   return errors.length === 0 ? { ok: true } : { ok: false, errors };

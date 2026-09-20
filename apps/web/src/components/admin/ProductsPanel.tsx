@@ -47,9 +47,11 @@ interface ProductForm {
   tags: string;
   related: string[];
   upsell: string[];
+  /** P3f: quantity-on-hand at/below which the item is flagged LOW stock. */
+  reorderThreshold: string;
 }
 
-const EMPTY_FORM: ProductForm = { name: "", sku: "", barcode: "", unit: "", soldByWeight: false, priceMinor: "", stock: "", categorySlug: "", description: "", taxExempt: false, featured: false, tags: "", related: [], upsell: [] };
+const EMPTY_FORM: ProductForm = { name: "", sku: "", barcode: "", unit: "", soldByWeight: false, priceMinor: "", stock: "", categorySlug: "", description: "", taxExempt: false, featured: false, tags: "", related: [], upsell: [], reorderThreshold: "" };
 
 export default function ProductsPanel() {
   const [products, setProducts] = useState<AdminProduct[]>([]);
@@ -127,6 +129,7 @@ export default function ProductsPanel() {
       tags: (p.tags ?? []).join(", "),
       related: p.related?.filter((r) => r.isActive).map((r) => r.id) ?? [],
       upsell: p.upsell?.filter((r) => r.isActive).map((r) => r.id) ?? [],
+      reorderThreshold: (p.reorderThreshold || 0).toString(),
     });
     setModal({ open: true, editing: p });
   };
@@ -150,6 +153,7 @@ export default function ProductsPanel() {
         taxExempt: form.taxExempt,
         featured: form.featured,
         tags: form.tags.split(",").map((t) => t.trim()).filter((t) => t.length > 0),
+        reorderThreshold: form.reorderThreshold === "" ? undefined : parseInt(form.reorderThreshold, 10),
         ...(modal.editing
           ? { relatedProductIds: form.related, upsellProductIds: form.upsell }
           : {}),
@@ -286,8 +290,9 @@ export default function ProductsPanel() {
                   {p.barcode && <div className="text-muted text-opacity-75" style={{ fontSize: "0.8em" }} title="Barcode">{p.barcode}</div>}
                 </td>
                 <td className="text-end">{toPesos(p.priceMinor)}</td>
-                <td className={`text-end ${p.availableQuantity <= p.reorderThreshold ? "text-danger fw-semibold" : ""}`}>
+                <td className={`text-end ${p.reorderThreshold > 0 && p.availableQuantity <= p.reorderThreshold ? "text-danger fw-semibold" : ""}`}>
                   {p.availableQuantity}
+                  {p.reorderThreshold > 0 && <small className="text-muted"> ≤{p.reorderThreshold}</small>}
                   {p.quantityReserved > 0 && <small className="text-muted"> ({p.quantityReserved} reserved)</small>}
                 </td>
                 <td className="small">{p.category?.name ?? "—"}</td>
@@ -349,13 +354,17 @@ export default function ProductsPanel() {
                       <label className="form-check-label small" htmlFor="soldByWeight">Sold per weight (kilo) <span className="text-muted">— decimal quantity on a future module; pricing stays per-unit for now</span></label>
                     </div>
                     <div className="row">
-                      <div className="col-6 mb-2">
+                      <div className="col-4 mb-2">
                         <label className="form-label small">Price (₱) *</label>
                         <input className="form-control" required type="number" step="0.01" min="0" value={form.priceMinor} onChange={(e) => setForm({ ...form, priceMinor: e.target.value })} />
                       </div>
-                      <div className="col-6 mb-2">
+                      <div className="col-4 mb-2">
                         <label className="form-label small">Stock</label>
                         <input className="form-control" type="number" min="0" value={form.stock} onChange={(e) => setForm({ ...form, stock: e.target.value })} />
+                      </div>
+                      <div className="col-4 mb-2">
+                        <label className="form-label small">Reorder at</label>
+                        <input className="form-control" type="number" min="0" placeholder="0" title="Flag LOW stock at or below this on-hand qty" value={form.reorderThreshold} onChange={(e) => setForm({ ...form, reorderThreshold: e.target.value })} />
                       </div>
                     </div>
                     <div className="mb-2">

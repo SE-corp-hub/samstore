@@ -236,7 +236,7 @@ export default function InventoryPanel() {
                 <td className="text-end fw-semibold">{r.availableQuantity}</td>
                 <td className="text-end">{toPesos(r.costMinor)}</td>
                 <td className="text-end">{toPesos(r.valueMinor)}</td>
-                <td><span className={`badge ${STATUS_BADGE[r.status]}`}>{r.status}</span></td>
+                <td><span className={`badge ${STATUS_BADGE[r.status]}`}>{r.status}{r.reorderThreshold > 0 ? ` ≤${r.reorderThreshold}` : ""}</span></td>
                 <td className="text-end">
                   <button type="button" className="btn btn-sm btn-outline-primary"
                     onClick={() => { setAdjust(r); setAdjustMode("delta"); setAdjustQty(""); setAdjustReason(""); setAdjustAllowNegative(false); setAdjustError(null); }}>

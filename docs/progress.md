@@ -1,6 +1,17 @@
 # PINDIAN — Progress Log
 
-Updated: 2026-09-20 · **P3e: variant/add-on admin editor — full create/edit** · Active model: `deepseek/deepseek-v4-flash-0731` (openrouter), boilerplate tier `inclusionai/ling-3.0-flash`
+Updated: 2026-09-20 · **P3f: low-stock surfacing — configurable reorder thresholds** · Active model: `deepseek/deepseek-v4-flash-0731` (openrouter), boilerplate tier `inclusionai/ling-3.0-flash`
+
+## P3f — Warehouse low-stock surfacing (reorder thresholds)
+
+| Item | Detail |
+|---|---|
+| Gap fixed | The backend already computed `status` (in/low/out) and `stockLow` reports, but `reorderThreshold` was **never writable** (default 0 everywhere) — so the entire low-stock system was dormant (`low` requires `threshold > 0`). The P2c "low-stock surfacing" leftover was this missing configuration + UI surface. |
+| Backend | `ProductInput.reorderThreshold?` + validation (non-negative integer). `create` sets it on the initial stock level; `update` upserts it on the same stock row the stock logic targets (default warehouse → legacy warehouse-less → create with 0 on-hand). Controller POST/PATCH product body types extended. Reads were already wired (inventory status, `analytics/status` lowStock count, `reports/stockLow`, purchases suggestions) — they now light up. |
+| Web | `ProductsPanel`: new **"Reorder at"** input in the product form (POST/PATCH), low-stock cell shows red + `≤threshold` when available ≤ threshold (>0); `InventoryPanel` status badges now show `low ≤N` / `out ≤N` trigger levels. Dashboard low-stock count and the Low filter were already there. |
+| Tests | +5 `admin/product-lowstock-admin.test.ts` (real DB): create + threshold → inventory status `low` + `listFiltered` round-trip; update raises/clears threshold → status flips low↔in; threshold set with no stock level yet (creates one, 0 on-hand → `out`); negative threshold rejected; **tenant isolation** (store B → `not_found`). |
+| Gate | api + web `tsc` 0 errors · web build ✓ · **26/26 across the 6 touched files standalone** (product-lowstock-admin 5, product-merchandising 4, product-m5 6, product-variant-admin 6, addon-group-admin 4, inventory.service 1). Full-suite run 391 tests / 11 fail — all the documented pre-existing flaky set (checkout-address, ledger drift, worker/outbox, split-payment, POS variants, purchases, reports); none are this module's tests; every such test passes in isolation. |
+| Commit | (this commit) |
 
 ## P3e — Variant / add-on admin editor (create + edit)
 

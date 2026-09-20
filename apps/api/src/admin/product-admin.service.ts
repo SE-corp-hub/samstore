@@ -144,6 +144,7 @@ export class ProductAdminService {
           productId: product.id,
           warehouseId: defaultWarehouse?.id ?? null,
           quantityOnHand: input.stock,
+          reorderThreshold: input.reorderThreshold ?? 0,
         },
       });
     }
@@ -250,6 +251,26 @@ export class ProductAdminService {
           await tx.stockMovement.create({
             data: { storeId, productId, warehouseId, delta, type: "ADJUST", orderId: null, createdBy: null, note: "product edit stock", balanceAfter },
           });
+        }
+      }
+      // P3f: set the reorder threshold on the same stock row the stock logic targets
+      // (default warehouse, else a legacy warehouse-less row); create it when absent.
+      if (input.reorderThreshold !== undefined) {
+        const defaultWarehouse = await tx.warehouse.findFirst({ where: { storeId, isDefault: true } });
+        const existing = await tx.stockLevel.findFirst({
+          where: { storeId, productId, warehouseId: defaultWarehouse?.id ?? null },
+        });
+        if (existing) {
+          await tx.stockLevel.update({ where: { id: existing.id }, data: { reorderThreshold: input.reorderThreshold } });
+        } else if (defaultWarehouse) {
+          await tx.stockLevel.create({ data: { storeId, productId, warehouseId: defaultWarehouse.id, quantityOnHand: 0, reorderThreshold: input.reorderThreshold } });
+        } else {
+          const anyRow = await tx.stockLevel.findFirst({ where: { storeId, productId } });
+          if (anyRow) {
+            await tx.stockLevel.update({ where: { id: anyRow.id }, data: { reorderThreshold: input.reorderThreshold } });
+          } else {
+            await tx.stockLevel.create({ data: { storeId, productId, quantityOnHand: 0, reorderThreshold: input.reorderThreshold } });
+          }
         }
       }
     });
