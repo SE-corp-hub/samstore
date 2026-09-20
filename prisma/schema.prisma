@@ -203,43 +203,48 @@ model Store {
 }
 
 model StoreSettings {
-  id                       String   @id @default(cuid())
-  storeId                  String   @unique
-  store                    Store    @relation(fields: [storeId], references: [id])
-  allowGuestOrders         Boolean  @default(true)
-  requireCustomerApproval  Boolean  @default(false)
-  orderingPaused           Boolean  @default(false)
-  minOrderAmountMinor      Int      @default(0)
-  orderCutoff              String? // e.g. "21:00" store-local; parsed by app
-  maxOpenOrdersPerCustomer Int      @default(10)
-  deliveryEnabled          Boolean  @default(true)
-  pickupEnabled            Boolean  @default(false)
-  deliveryFeeMinor         Int      @default(0)
-  creditLimitMinor         Int      @default(0) // store-wide utang limit (0 = credit disabled)
-  creditTermDays           Int      @default(30) // V1: default dueAt offset for credit purchases
-  receiptHeader            String? // P11: printed at top of receipts
-  receiptFooter            String? // P11: printed at bottom
-  showVatLabel             Boolean  @default(true) // P11: display-only VAT note (decision #2)
+  id                        String   @id @default(cuid())
+  storeId                   String   @unique
+  store                     Store    @relation(fields: [storeId], references: [id])
+  allowGuestOrders          Boolean  @default(true)
+  requireCustomerApproval   Boolean  @default(false)
+  orderingPaused            Boolean  @default(false)
+  minOrderAmountMinor       Int      @default(0)
+  orderCutoff               String? // e.g. "21:00" store-local; parsed by app
+  maxOpenOrdersPerCustomer  Int      @default(10)
+  deliveryEnabled           Boolean  @default(true)
+  pickupEnabled             Boolean  @default(false)
+  deliveryFeeMinor          Int      @default(0)
+  creditLimitMinor          Int      @default(0) // store-wide utang limit (0 = credit disabled)
+  creditTermDays            Int      @default(30) // V1: default dueAt offset for credit purchases
+  receiptHeader             String? // P11: printed at top of receipts
+  receiptFooter             String? // P11: printed at bottom
+  showVatLabel              Boolean  @default(true) // P11: display-only VAT note (decision #2)
   // M4 tax engine. Defaults reproduce today's totals exactly: VAT is extracted for display and
   // the printed slip can hide it, so turning `vatEnabled` off is a true kill switch.
-  vatEnabled               Boolean  @default(true) // compute + snapshot VAT
-  vatRateBp                Int      @default(1200) // basis points: 1200 = 12% PH VAT
-  pricesIncludeVat         Boolean  @default(true) // catalogue prices already contain the VAT (decision #1)
-  vatShowOnReceipt         Boolean  @default(true) // store owner may HIDE the VAT lines (decision #1b)
-  tin                      String? // BIR taxpayer identification number, printed on the slip
-  requireOpenShift         Boolean  @default(true) // N1: counter cash sales require an open register shift
+  vatEnabled                Boolean  @default(true) // compute + snapshot VAT
+  vatRateBp                 Int      @default(1200) // basis points: 1200 = 12% PH VAT
+  pricesIncludeVat          Boolean  @default(true) // catalogue prices already contain the VAT (decision #1)
+  vatShowOnReceipt          Boolean  @default(true) // store owner may HIDE the VAT lines (decision #1b)
+  tin                       String? // BIR taxpayer identification number, printed on the slip
+  requireOpenShift          Boolean  @default(true) // N1: counter cash sales require an open register shift
   // P3b: statutory 20% discount for Senior Citizens & PWDs (RA 9994 / RA 10754)
-  seniorPwdDiscountEnabled Boolean  @default(false)
-  dailySalesTargetMinor    Int      @default(0) // Overview: daily sales target (0 = off)
-  hidePricePreOrder        Boolean  @default(false) // Hide per-product prices in Pre Orders screen
-  closedStoreMessage       String?
+  seniorPwdDiscountEnabled  Boolean  @default(false)
+  dailySalesTargetMinor     Int      @default(0) // Overview: daily sales target (0 = off)
+  hidePricePreOrder         Boolean  @default(false) // Hide per-product prices in Pre Orders screen
+  closedStoreMessage        String?
   // P3g: Website→Messenger bridge — the store's connection state. Sends stay
   // SUPPRESSED (portal status) until a live provider is operator-approved; the
   // connected flag is the admin's recorded intent (real creds live in env, never DB).
-  messengerConnected       Boolean  @default(false)
-  messengerPageId          String?
-  createdAt                DateTime @default(now())
-  updatedAt                DateTime @updatedAt
+  messengerConnected        Boolean  @default(false)
+  messengerPageId           String?
+  // P3h: loyalty config — earn rate (pts per ₱1), one-time welcome bonus,
+  // points expiry (months; 0 = never expires).
+  loyaltyPointsPerPeso      Int      @default(1)
+  loyaltyWelcomeBonusPoints Int      @default(0)
+  loyaltyExpiryMonths       Int      @default(0)
+  createdAt                 DateTime @default(now())
+  updatedAt                 DateTime @updatedAt
 }
 
 model PublicStoreLink {
@@ -746,6 +751,9 @@ enum LoyaltyEntryType {
   EARN
   REDEEM
   ADJUST // admin manual points adjust (+/-) with note
+  WELCOME // one-time signup/welcome bonus (P3h)
+  REVERSE // earned points clawed back on void/refund (P3h)
+  EXPIRED // points removed by the expiry job (P3h)
 }
 
 model LoyaltyEntry {

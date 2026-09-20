@@ -33,6 +33,10 @@ export interface StoreSettingsInput {
   // P3g: Website→Messenger bridge — recorded connection state (sends stay suppressed).
   messengerConnected?: boolean;
   messengerPageId?: string | null;
+  // P3h: loyalty config.
+  loyaltyPointsPerPeso?: number;
+  loyaltyWelcomeBonusPoints?: number;
+  loyaltyExpiryMonths?: number;
 }
 
 export class StoreSettingsService {
@@ -80,6 +84,9 @@ export class StoreSettingsService {
         seniorPwdDiscountEnabled: store.settings?.seniorPwdDiscountEnabled ?? false,
         messengerConnected: store.settings?.messengerConnected ?? false,
         messengerPageId: store.settings?.messengerPageId ?? null,
+        loyaltyPointsPerPeso: store.settings?.loyaltyPointsPerPeso ?? 1,
+        loyaltyWelcomeBonusPoints: store.settings?.loyaltyWelcomeBonusPoints ?? 0,
+        loyaltyExpiryMonths: store.settings?.loyaltyExpiryMonths ?? 0,
       },
     };
   }
@@ -126,6 +133,9 @@ export class StoreSettingsService {
         ...(input.seniorPwdDiscountEnabled !== undefined ? { seniorPwdDiscountEnabled: input.seniorPwdDiscountEnabled } : {}),
         ...(input.messengerConnected !== undefined ? { messengerConnected: input.messengerConnected } : {}),
         ...(input.messengerPageId !== undefined ? { messengerPageId: input.messengerPageId } : {}),
+        ...(input.loyaltyPointsPerPeso !== undefined ? { loyaltyPointsPerPeso: input.loyaltyPointsPerPeso } : {}),
+        ...(input.loyaltyWelcomeBonusPoints !== undefined ? { loyaltyWelcomeBonusPoints: input.loyaltyWelcomeBonusPoints } : {}),
+        ...(input.loyaltyExpiryMonths !== undefined ? { loyaltyExpiryMonths: input.loyaltyExpiryMonths } : {}),
       },
       create: {
         storeId,
@@ -148,6 +158,9 @@ export class StoreSettingsService {
         seniorPwdDiscountEnabled: input.seniorPwdDiscountEnabled ?? false,
         messengerConnected: input.messengerConnected ?? false,
         messengerPageId: input.messengerPageId ?? null,
+        loyaltyPointsPerPeso: input.loyaltyPointsPerPeso ?? 1,
+        loyaltyWelcomeBonusPoints: input.loyaltyWelcomeBonusPoints ?? 0,
+        loyaltyExpiryMonths: input.loyaltyExpiryMonths ?? 0,
       },
     });
     return { ok: true, value: { id: storeId } };

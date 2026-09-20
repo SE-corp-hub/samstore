@@ -701,6 +701,7 @@ export class AdminController {
       pickupEnabled?: boolean; orderCutoff?: string | null; maxOpenOrdersPerCustomer?: number;
       seniorPwdDiscountEnabled?: boolean;
       messengerConnected?: boolean; messengerPageId?: string | null;
+      loyaltyPointsPerPeso?: number; loyaltyWelcomeBonusPoints?: number; loyaltyExpiryMonths?: number;
     },
     @Headers("x-store-id") headerStoreId?: string,
   ) {
@@ -949,6 +950,18 @@ export class AdminController {
     const result = await this.loyalty.adjustPoints(storeId, id, body.delta, body.note);
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
     return result.value;
+  }
+
+  /** POST /admin/loyalty/expire - P3h: FIFO-expire points older than the store's window
+   *  (loyaltyExpiryMonths). A scheduler/cron should call this daily; returns counts. */
+  @Post("loyalty/expire")
+  async expireLoyaltyPoints(@Req() req: Request & { user?: AuthPrincipal }, @Headers("x-store-id") headerStoreId?: string) {
+    const user = req.user;
+    requireUser(user);
+    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
+    const result = await this.loyalty.expirePoints(storeId);
+    await cacheBust(cacheKey("customers", storeId));
+    return result;
   }
 
   /** PATCH /admin/orders/:id/items — W1: stock-delta item edit (RECEIVED/CONFIRMED/ON_HOLD). */

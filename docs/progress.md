@@ -1,6 +1,20 @@
 # PINDIAN — Progress Log
 
-Updated: 2026-09-20 · **P3g: Website→Messenger bridge — suppress-send + portal status** · Active model: `deepseek/deepseek-v4-flash-0731` (openrouter), boilerplate tier `inclusionai/ling-3.0-flash`
+Updated: 2026-09-20 · **P3h: loyalty depth — rate/welcome config, reversal on voids/refunds, FIFO expiry** · Active model: `deepseek/deepseek-v4-flash-0731` (openrouter), boilerplate tier `inclusionai/ling-3.0-flash`
+
+## P3h — Loyalty-at-checkout depth (Plan Phase 3 remainder)
+
+| Item | Detail |
+|---|---|
+| Gap fixed | Earn (on delivered orders), redeem at checkout, customer ledger, and manual adjust already existed — but the rate was a hard-coded 1pt/₱1, no welcome bonus, no reversal when an order is voided/refunded, and no expiry. |
+| Schema | `StoreSettings.loyaltyPointsPerPeso` (default 1), `loyaltyWelcomeBonusPoints` (default 0), `loyaltyExpiryMonths` (default 0 = never). `LoyaltyEntryType` gains `WELCOME` / `REVERSE` / `EXPIRED`. Migrations `20260920110000_module_p3h_loyalty_depth` + `20260920110100_module_p3h_loyalty_entry_types` (db-execute + registered). |
+| Domain | `pointsEarnedFor(totalMinor, rate)` (rate-aware; `pointsEarned` kept backward-compatible); `expirablePoints(entries, cutoff)` — pure FIFO expiry: debits consume the OLDEST positive points first; returns outstanding aged points (never more than balance). |
+| Service | `ensureProfile` grants the welcome bonus once (only on profile CREATE). `earnForDeliveredOrder` earns at the store's rate. New `reverseForOrder(orderId, reason)` — claws back earned points (REVERSE entry, balance floor 0, **idempotent** via existing REVERSE check; no-op when nothing earned). New `expirePoints(storeId)` — FIFO expiry per customer over the ledger, writes EXPIRED entries, busts the customers cache. |
+| Payments | `voidOrder` + `refundOrder` now call `reverseForOrder` after cancelling — a refunded/voided order never keeps its earned points. |
+| Admin/Web | SettingsPanel gains a **Loyalty points** card (rate / welcome bonus / expiry months). New `POST /admin/loyalty/expire` (scheduler/cron should call it daily; returns `{ expiredPoints, customers }`). |
+| Tests | +11: `domain/loyalty.test.ts` +5 (`pointsEarnedFor` rates, 4 FIFO-expiry cases) and `loyalty/loyalty-depth.test.ts` +7 (real DB: welcome granted once, no-welcome default, rate-aware earn, reversal idempotent + balance floor + no-op with no earn, FIFO expiry keeps fresh points + second run no-op, expiry disabled skip). |
+| Gate | api + web `tsc` 0 errors · web build ✓ · **53/53 across the 5 touched files standalone** (loyalty domain 9, loyalty-depth 7, checkout.service 16, payments.service 10, store-access 11). Full-suite run 402 tests / 12 fail — all the documented pre-existing flaky set (variant-cart, checkout-address, ledger drift, worker/outbox, POS refund/void, pre-orders, purchases, reports); none this module's; every such test passes standalone. |
+| Commit | (this commit) |
 
 ## P3g — Website→Messenger bridge (suppress-send + portal status)
 

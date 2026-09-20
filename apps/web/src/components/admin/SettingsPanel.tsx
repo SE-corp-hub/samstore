@@ -38,6 +38,9 @@ interface StoreSettings {
     seniorPwdDiscountEnabled: boolean;
     messengerConnected: boolean;
     messengerPageId: string | null;
+    loyaltyPointsPerPeso: number;
+    loyaltyWelcomeBonusPoints: number;
+    loyaltyExpiryMonths: number;
   };
 }
 
@@ -82,6 +85,9 @@ export default function SettingsPanel() {
   const [seniorPwdDiscountEnabled, setSeniorPwdDiscountEnabled] = useState(false);
   const [messengerConnected, setMessengerConnected] = useState(false);
   const [messengerPageId, setMessengerPageId] = useState("");
+  const [loyaltyPointsPerPeso, setLoyaltyPointsPerPeso] = useState("1");
+  const [loyaltyWelcomeBonusPoints, setLoyaltyWelcomeBonusPoints] = useState("0");
+  const [loyaltyExpiryMonths, setLoyaltyExpiryMonths] = useState("0");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -115,6 +121,9 @@ export default function SettingsPanel() {
       setSeniorPwdDiscountEnabled(d.settings.seniorPwdDiscountEnabled ?? false);
       setMessengerConnected(d.settings.messengerConnected ?? false);
       setMessengerPageId(d.settings.messengerPageId ?? "");
+      setLoyaltyPointsPerPeso((d.settings.loyaltyPointsPerPeso ?? 1).toString());
+      setLoyaltyWelcomeBonusPoints((d.settings.loyaltyWelcomeBonusPoints ?? 0).toString());
+      setLoyaltyExpiryMonths((d.settings.loyaltyExpiryMonths ?? 0).toString());
     } catch (e) {
       setError(e instanceof Error ? e.message : "Load failed");
     } finally {
@@ -190,6 +199,12 @@ export default function SettingsPanel() {
   const saveMessenger = () => saveSection({
     messengerConnected,
     messengerPageId: messengerPageId.trim() || null,
+  });
+
+  const saveLoyalty = () => saveSection({
+    loyaltyPointsPerPeso: parseInt(loyaltyPointsPerPeso || "1", 10),
+    loyaltyWelcomeBonusPoints: parseInt(loyaltyWelcomeBonusPoints || "0", 10),
+    loyaltyExpiryMonths: parseInt(loyaltyExpiryMonths || "0", 10),
   });
 
   const saveInvoices = () => toast("Invoice settings saved");
@@ -285,6 +300,32 @@ export default function SettingsPanel() {
                   </div>
                   <div className="mt-2 d-flex justify-content-end">
                     <button className="btn btn-primary" type="button" disabled={saving} onClick={saveMessenger}>{saving ? "Saving…" : "Save messenger settings"}</button>
+                  </div>
+                </div>
+              </div>
+
+              {/* P3h: loyalty configuration. */}
+              <div className="card mb-4">
+                <div className="card-body">
+                  <h6 className="card-title small fw-bold">Loyalty points</h6>
+                  <div className="row g-3">
+                    <div className="col-md-4">
+                      <label className="form-label small">Points per ₱1 spent</label>
+                      <input id="loyaltyRate" className="form-control" type="number" min="1" max="100" value={loyaltyPointsPerPeso} onChange={(e) => setLoyaltyPointsPerPeso(e.target.value)} />
+                    </div>
+                    <div className="col-md-4">
+                      <label className="form-label small">Welcome bonus (points)</label>
+                      <input id="loyaltyWelcome" className="form-control" type="number" min="0" value={loyaltyWelcomeBonusPoints} onChange={(e) => setLoyaltyWelcomeBonusPoints(e.target.value)} />
+                      <small className="text-muted d-block">Granted once when a customer first orders.</small>
+                    </div>
+                    <div className="col-md-4">
+                      <label className="form-label small">Expire points after (months)</label>
+                      <input id="loyaltyExpiry" className="form-control" type="number" min="0" value={loyaltyExpiryMonths} onChange={(e) => setLoyaltyExpiryMonths(e.target.value)} />
+                      <small className="text-muted d-block">0 = never. FIFO from the oldest first.</small>
+                    </div>
+                  </div>
+                  <div className="mt-2 d-flex justify-content-end">
+                    <button className="btn btn-primary" type="button" disabled={saving} onClick={saveLoyalty}>{saving ? "Saving…" : "Save loyalty settings"}</button>
                   </div>
                 </div>
               </div>

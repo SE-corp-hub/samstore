@@ -3,7 +3,7 @@
 
 import { prisma } from "../persistence/prisma-repositories.js";
 import { cacheGet, cacheSet, cacheBust, cacheKey } from "../persistence/ttl-cache.js";
-import { pointsEarned, redeemDiscountMinor } from "../domain/loyalty.js";
+import { pointsEarnedFor, pointsEarned, redeemDiscountMinor, expirablePoints } from "../domain/loyalty.js";
 import type { ApiError, AdminCreateCustomerRequest, AdminUpdateCustomerRequest } from "@sam-store/contracts";
 import type { LoyaltyGateway } from "../checkout/checkout.service.js";
 
@@ -36,14 +36,36 @@ interface AdminCustomerWithProfile {
 }
 
 export class LoyaltyService implements LoyaltyGateway {
-  /** Ensure a per-store customer profile exists (created lazily at checkout). */
+  /** Ensure a per-store customer profile exists (created lazily at checkout).
+   *  P3h: on first creation grants the store's configured welcome bonus once. */
   async ensureProfile(storeId: string, customerId: string): Promise<{ storeCustomerId: string }> {
-    const sc = await prisma.storeCustomer.upsert({
+    const existing = await prisma.storeCustomer.findUnique({
       where: { storeId_customerId: { storeId, customerId } },
-      update: {},
-      create: { storeId, customerId },
     });
-    return { storeCustomerId: sc.id };
+    if (existing) return { storeCustomerId: existing.id };
+
+    const settings = await prisma.storeSettings.findUnique({ where: { storeId } });
+    const welcome = Math.max(0, settings?.loyaltyWelcomeBonusPoints ?? 0);
+
+    return prisma.$transaction(async (tx) => {
+      const sc = await tx.storeCustomer.create({
+        data: { storeId, customerId, loyaltyBalancePoints: welcome },
+      });
+      if (welcome > 0) {
+        await tx.loyaltyEntry.create({
+          data: {
+            storeId,
+            customerId,
+            storeCustomerId: sc.id,
+            type: "WELCOME",
+            points: welcome,
+            balanceAfter: welcome,
+            description: `Welcome bonus: ${welcome} pts`,
+          },
+        });
+      }
+      return { storeCustomerId: sc.id };
+    });
   }
 
   /** Earn points for a delivered order (idempotent: only when order.storeCustomerId set). */
@@ -57,7 +79,10 @@ export class LoyaltyService implements LoyaltyGateway {
     const existing = await prisma.loyaltyEntry.findFirst({ where: { orderId, type: "EARN" } });
     if (existing) return;
 
-    const points = pointsEarned(order.totalMinor);
+    // P3h: earn rate is store-configurable.
+    const settings = await prisma.storeSettings.findUnique({ where: { storeId: order.storeId } });
+    const rate = Math.max(1, settings?.loyaltyPointsPerPeso ?? 1);
+    const points = pointsEarnedFor(order.totalMinor, rate);
     if (points <= 0) return;
 
     await prisma.$transaction(async (tx) => {
@@ -78,6 +103,77 @@ export class LoyaltyService implements LoyaltyGateway {
         },
       });
     });
+  }
+
+  /** P3h: reverse points earned for an order when it is voided/refunded (idempotent). */
+  async reverseForOrder(orderId: string, reason: string): Promise<void> {
+    const earned = await prisma.loyaltyEntry.findMany({ where: { orderId, type: "EARN" } });
+    if (earned.length === 0) return;
+    const total = earned.reduce((s, e) => s + e.points, 0);
+    if (total <= 0) return;
+    const alreadyReversed = await prisma.loyaltyEntry.findFirst({ where: { orderId, type: "REVERSE" } });
+    if (alreadyReversed) return;
+
+    const first = earned[0]!;
+    await prisma.$transaction(async (tx) => {
+      const sc = await tx.storeCustomer.findUnique({ where: { id: first.storeCustomerId } });
+      if (!sc) return;
+      const newBalance = Math.max(0, sc.loyaltyBalancePoints - total);
+      await tx.storeCustomer.update({ where: { id: sc.id }, data: { loyaltyBalancePoints: newBalance } });
+      await tx.loyaltyEntry.create({
+        data: {
+          storeId: first.storeId,
+          customerId: first.customerId,
+          storeCustomerId: sc.id,
+          type: "REVERSE",
+          points: -total,
+          balanceAfter: newBalance,
+          orderId,
+          description: `Reversed ${total} pts — ${reason}`,
+        },
+      });
+    });
+  }
+
+  /** P3h: FIFO-expire points older than the store's expiry window (0 months = never).
+   *  Returns how many points expired and how many customers were touched. */
+  async expirePoints(storeId: string): Promise<{ expiredPoints: number; customers: number }> {
+    const settings = await prisma.storeSettings.findUnique({ where: { storeId } });
+    const months = settings?.loyaltyExpiryMonths ?? 0;
+    if (months <= 0) return { expiredPoints: 0, customers: 0 };
+
+    const cutoff = new Date();
+    cutoff.setMonth(cutoff.getMonth() - months);
+
+    const profiles = await prisma.storeCustomer.findMany({ where: { storeId } });
+    let expiredPoints = 0;
+    let customers = 0;
+    for (const sc of profiles) {
+      const entries = await prisma.loyaltyEntry.findMany({
+        where: { storeCustomerId: sc.id },
+        orderBy: { createdAt: "asc" },
+        select: { type: true, points: true, createdAt: true },
+      });
+      const toExpire = expirablePoints(entries, cutoff);
+      if (toExpire <= 0) continue;
+      const newBalance = Math.max(0, sc.loyaltyBalancePoints - toExpire);
+      await prisma.loyaltyEntry.create({
+        data: {
+          storeId,
+          customerId: sc.customerId,
+          storeCustomerId: sc.id,
+          type: "EXPIRED",
+          points: -toExpire,
+          balanceAfter: newBalance,
+          description: `Expired ${toExpire} pts (older than ${months} months)`,
+        },
+      });
+      await prisma.storeCustomer.update({ where: { id: sc.id }, data: { loyaltyBalancePoints: newBalance } });
+      expiredPoints += toExpire;
+      customers += 1;
+    }
+    await cacheBust(cacheKey("customers", storeId));
+    return { expiredPoints, customers };
   }
 
   /** Redeem points at checkout — validates balance, returns discount + debits. */

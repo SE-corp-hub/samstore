@@ -8,6 +8,7 @@
 import { prisma } from "../persistence/prisma-repositories.js";
 import { restoreStock } from "../domain/movements.js";
 import { RegisterService } from "../registers/register.service.js";
+import { LoyaltyService } from "../loyalty/loyalty.service.js";
 import type { ApiError } from "@sam-store/contracts";
 
 export type PaymentResult<T> = { ok: true; value: T } | { ok: false; error: ApiError };
@@ -17,6 +18,8 @@ export const PAYMENTS_SERVICE = Symbol("PAYMENTS_SERVICE");
 export class PaymentsService {
   /** N1: drawer attribution for the non-POS cash paths (refunds, admin payments). */
   private readonly registers = new RegisterService();
+  /** P3h: reversals — points earned for a cancelled order are clawed back. */
+  private readonly loyalty = new LoyaltyService();
 
   /** Record a payment against an order. */
   async recordPayment(input: {
@@ -151,6 +154,8 @@ export class PaymentsService {
         data: { orderId, storeId, fromStatus: order.status, toStatus: "CANCELLED", reason: reason?.trim() ?? null, actorType: "pos_void", actorId },
       });
     });
+    // P3h: claw back points earned for this order (idempotent; no-op when none earned).
+    await this.loyalty.reverseForOrder(orderId, "order voided");
     return { ok: true, value: { id: orderId, status: "CANCELLED" } };
   }
 
@@ -186,6 +191,8 @@ export class PaymentsService {
         data: { orderId, storeId, fromStatus: order.status, toStatus: "CANCELLED", reason: reason?.trim() ?? null, actorType: "pos_refund", actorId },
       });
     });
+    // P3h: claw back points earned for this order (idempotent; no-op when none earned).
+    await this.loyalty.reverseForOrder(orderId, "order refunded");
     return { ok: true, value: { id: orderId, status: "CANCELLED" } };
   }
 
