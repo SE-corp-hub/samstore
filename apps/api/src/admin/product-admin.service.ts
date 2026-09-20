@@ -395,6 +395,36 @@ export class ProductAdminService {
     return { ok: true, value: { ok: true } };
   }
 
+  /** P3e: update an add-on group (name / required flag). */
+  async updateAddon(storeId: string, addonId: string, input: { name?: string; required?: boolean }): Promise<AdminResult<{ ok: true }>> {
+    const group = await prisma.productAddon.findFirst({ where: { id: addonId, storeId } });
+    if (!group) return { ok: false, error: { type: "not_found", message: "Add-on group not found" } };
+    if (input.name !== undefined && (!input.name.trim() || input.name.trim().length > 60)) return { ok: false, error: { type: "validation", errors: ["name is required (max 60 chars)"] } };
+    if (input.required !== undefined && typeof input.required !== "boolean") return { ok: false, error: { type: "validation", errors: ["required must be a boolean"] } };
+    await prisma.productAddon.update({
+      where: { id: addonId },
+      data: {
+        ...(input.name !== undefined ? { name: input.name.trim() } : {}),
+        ...(input.required !== undefined ? { required: input.required } : {}),
+      },
+    });
+    return { ok: true, value: { ok: true } };
+  }
+
+  /** P3e: add an option to an existing add-on group (appended in sort order). */
+  async addAddonOption(storeId: string, addonId: string, input: { name: string; priceMinor: number }): Promise<AdminResult<{ id: string }>> {
+    const group = await prisma.productAddon.findFirst({ where: { id: addonId, storeId } });
+    if (!group) return { ok: false, error: { type: "not_found", message: "Add-on group not found" } };
+    const name = input.name?.trim();
+    if (!name || name.length > 60) return { ok: false, error: { type: "validation", errors: ["name is required (max 60 chars)"] } };
+    if (!Number.isInteger(input.priceMinor) || input.priceMinor < 0) return { ok: false, error: { type: "validation", errors: ["priceMinor must be a non-negative integer"] } };
+    const last = await prisma.productAddonOption.findFirst({ where: { storeId, addonId }, orderBy: { sortOrder: "desc" }, select: { sortOrder: true } });
+    const option = await prisma.productAddonOption.create({
+      data: { storeId, addonId, name, priceMinor: input.priceMinor, sortOrder: (last?.sortOrder ?? -1) + 1 },
+    });
+    return { ok: true, value: { id: option.id } };
+  }
+
   /** Delete an add-on group (cascades its options). */
   async deleteAddon(storeId: string, addonId: string): Promise<AdminResult<{ ok: true }>> {
     const exist = await prisma.productAddon.findFirst({ where: { id: addonId, storeId } });

@@ -629,6 +629,30 @@ export class AdminController {
     return result.value;
   }
 
+  /** PATCH /admin/products/addons/:addonId — update an add-on group (name / required). */
+  @Patch("products/addons/:addonId")
+  async updateAddon(@Req() req: Request & { user?: AuthPrincipal }, @Param("addonId") addonId: string, @Body() body: Partial<{ name: string; required: boolean }>, @Headers("x-store-id") headerStoreId?: string) {
+    const user = req.user;
+    requireUser(user);
+    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
+    const result = await this.productsAdmin.updateAddon(storeId, addonId, body);
+    if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
+    await cacheBust(cacheKey("products", storeId));
+    return result.value;
+  }
+
+  /** POST /admin/products/addons/:addonId/options — add an option to an existing group. */
+  @Post("products/addons/:addonId/options")
+  async addAddonOption(@Req() req: Request & { user?: AuthPrincipal }, @Param("addonId") addonId: string, @Body() body: { name: string; priceMinor: number }, @Headers("x-store-id") headerStoreId?: string) {
+    const user = req.user;
+    requireUser(user);
+    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
+    const result = await this.productsAdmin.addAddonOption(storeId, addonId, body);
+    if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
+    await cacheBust(cacheKey("products", storeId));
+    return result.value;
+  }
+
   /** DELETE /admin/products/addons/:addonId — delete an add-on group (cascades options). */
   @Delete("products/addons/:addonId")
   async deleteAddon(@Req() req: Request & { user?: AuthPrincipal }, @Param("addonId") addonId: string, @Headers("x-store-id") headerStoreId?: string) {

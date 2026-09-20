@@ -1,6 +1,17 @@
 # PINDIAN — Progress Log
 
-Updated: 2026-09-20 · **P3d: catalog merchandising — featured / tags / related / upsell** · Active model: `deepseek/deepseek-v4-flash-0731` (openrouter), boilerplate tier `inclusionai/ling-3.0-flash`
+Updated: 2026-09-20 · **P3e: variant/add-on admin editor — full create/edit** · Active model: `deepseek/deepseek-v4-flash-0731` (openrouter), boilerplate tier `inclusionai/ling-3.0-flash`
+
+## P3e — Variant / add-on admin editor (create + edit)
+
+| Item | Detail |
+|---|---|
+| Gap fixed | The P2c `VariantEditor` could add variants and CREATE groups (first option only) + delete; you could NOT rename a variant, toggle it off, rename a group, flip `required`, add options to an EXISTING group, or edit an option's name/price — edits were DB/seed-only. |
+| Backend | `ProductAdminService` +2 methods: `updateAddon` (`PATCH /admin/products/addons/:addonId` — name / required) and `addAddonOption` (`POST /admin/products/addons/:addonId/options` — appends with the next sortOrder). Both tenant-scoped (`not_found` cross-store) with validation (1–60 char names, non-negative integer prices). Existing `updateVariant`/`updateAddonOption` already covered name/isActive/price edits. |
+| Web | `VariantEditor` upgraded: variant rows have an inline rename input + active toggle (alongside the existing price/stock blur-edits); add-on groups have an inline rename input + required switch; each group gains an "Add option" row (name + price) that posts to the new endpoint; option chips are inline-editable (name + price, onBlur) with the delete X preserved. Writes keep the established "reload-to-continue" flow (authoritative refetch). |
+| Tests | +4 `admin/addon-group-admin.test.ts` (real DB): rename + required round-trip through `listFiltered`, addOptionToGroup appends after existing options, validation rejects blank name / negative price / blank option name, **tenant isolation** (store B cannot edit store A's group → `not_found`). |
+| Gate | api + web `tsc` 0 errors · web build ✓ · **21/21 across the 5 touched files standalone** (addon-group-admin 4, product-variant-admin 6, product-m5 6, product-merchandising 4, public merchandising 1). Full-suite run remains flaky under shared-DB contention (set shifts run-to-run) — pre-existing per the P3a note; every such test passes in isolation. |
+| Commit | (this commit) |
 
 ## P3d — Catalog merchandising (featured / tags / related / upsell)
 
