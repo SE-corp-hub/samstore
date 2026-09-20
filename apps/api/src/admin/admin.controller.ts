@@ -700,6 +700,7 @@ export class AdminController {
       minOrderAmountMinor?: number; deliveryFeeMinor?: number; deliveryEnabled?: boolean;
       pickupEnabled?: boolean; orderCutoff?: string | null; maxOpenOrdersPerCustomer?: number;
       seniorPwdDiscountEnabled?: boolean;
+      messengerConnected?: boolean; messengerPageId?: string | null;
     },
     @Headers("x-store-id") headerStoreId?: string,
   ) {

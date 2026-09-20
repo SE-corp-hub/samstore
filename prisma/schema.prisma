@@ -233,6 +233,11 @@ model StoreSettings {
   dailySalesTargetMinor    Int      @default(0) // Overview: daily sales target (0 = off)
   hidePricePreOrder        Boolean  @default(false) // Hide per-product prices in Pre Orders screen
   closedStoreMessage       String?
+  // P3g: Website→Messenger bridge — the store's connection state. Sends stay
+  // SUPPRESSED (portal status) until a live provider is operator-approved; the
+  // connected flag is the admin's recorded intent (real creds live in env, never DB).
+  messengerConnected       Boolean  @default(false)
+  messengerPageId          String?
   createdAt                DateTime @default(now())
   updatedAt                DateTime @updatedAt
 }

@@ -8,6 +8,7 @@ import CheckoutForm from "../components/CheckoutForm";
 import OrderTracker from "../components/OrderTracker";
 import ProductPicker from "../components/ProductPicker";
 import { CustomerAccount } from "../components/CustomerAccount";
+import { API_URL } from "../config";
 import {
   ensureCartToken,
   getStoredCartToken,
@@ -23,9 +24,12 @@ const toPesos = (minor: number) => `₱${(minor / 100).toFixed(2)}`;
 interface StorefrontProps {
   store: PublicStoreDTO;
   products: ProductDTO[];
+  /** P3g: public-link slug + token so the Messenger bridge opt-in is token-gated. */
+  slug?: string;
+  token?: string;
 }
 
-export default function Storefront({ store, products }: StorefrontProps) {
+export default function Storefront({ store, products, slug, token }: StorefrontProps) {
   const [cartOpen, setCartOpen] = useState(false);
   const [view, setView] = useState<"menu" | "checkout" | "done">("menu");
   const [cartToken, setCartToken] = useState<string | null>(null);
@@ -132,6 +136,35 @@ export default function Storefront({ store, products }: StorefrontProps) {
     setView("done");
   };
 
+  // P3g: Website→Messenger bridge opt-in — the endpoint is slug+token gated and
+  // reports the honest (suppress-send) status; we never invent a PSID here.
+  const [messengerBusy, setMessengerBusy] = useState(false);
+  const [messengerStatus, setMessengerStatus] = useState<string | null>(null);
+  const messengerOptIn = async () => {
+    if (!slug) return;
+    setMessengerBusy(true);
+    setMessengerStatus(null);
+    try {
+      const res = await fetch(
+        `${API_URL}/public/stores/${encodeURIComponent(slug)}/messenger/opt-in?token=${encodeURIComponent(token ?? "")}`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: `Order ${lastOrder?.orderNumber ?? ""} updates` }) },
+      );
+      const d = await res.json().catch(() => null);
+      if (!res.ok) { setMessengerStatus("Messenger updates aren't available for this store yet."); return; }
+      if (d?.result?.delivered === true) {
+        setMessengerStatus("Sent! Watch your Messenger for updates.");
+      } else if (d?.status?.suppressed === true) {
+        setMessengerStatus("Messenger sends are suppressed until this store is connected — your tracking token above is how you follow the order.");
+      } else {
+        setMessengerStatus("Messenger updates aren't available for this store yet.");
+      }
+    } catch {
+      setMessengerStatus("Couldn't reach the messenger bridge right now.");
+    } finally {
+      setMessengerBusy(false);
+    }
+  };
+
   const cartCount = lines.reduce((s, l) => s + l.quantity, 0);
   const subtotal = lines.reduce((s, l) => s + (l.unitPriceMinor + l.addonsTotalMinor) * l.quantity, 0);
   const [pickProduct, setPickProduct] = useState<ProductDTO | null>(null);
@@ -229,6 +262,14 @@ export default function Storefront({ store, products }: StorefrontProps) {
                   </div>
                 )}
                 <OrderTracker initialToken={lastOrder.claimToken} />
+                {slug && (
+                  <div className="mt-2">
+                    <button className="btn btn-sm btn-outline-primary" disabled={messengerBusy} onClick={() => void messengerOptIn()}>
+                      <i className="bi bi-messenger me-1"></i>{messengerBusy ? "Checking…" : "Get order updates on Messenger"}
+                    </button>
+                    {messengerStatus && <div className="alert alert-light border small text-start mb-2 mt-1" role="status"><i className="bi bi-info-circle me-1"></i>{messengerStatus}</div>}
+                  </div>
+                )}
                 <div className="d-grid gap-2 mt-3">
                   <button
                     className="btn btn-sm btn-outline-secondary"

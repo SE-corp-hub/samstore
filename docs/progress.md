@@ -1,6 +1,20 @@
 # PINDIAN — Progress Log
 
-Updated: 2026-09-20 · **P3f: low-stock surfacing — configurable reorder thresholds** · Active model: `deepseek/deepseek-v4-flash-0731` (openrouter), boilerplate tier `inclusionai/ling-3.0-flash`
+Updated: 2026-09-20 · **P3g: Website→Messenger bridge — suppress-send + portal status** · Active model: `deepseek/deepseek-v4-flash-0731` (openrouter), boilerplate tier `inclusionai/ling-3.0-flash`
+
+## P3g — Website→Messenger bridge (suppress-send + portal status)
+
+| Item | Detail |
+|---|---|
+| Master-prompt rule | "Adapter behind an interface + mock provider + tests only. No live Graph/Send API calls… Website→Messenger bridge defaults to suppress-send with portal status; never guess a token." |
+| Already present | `messenger/adapter.ts` (interface + `SuppressedMessengerProvider` + `MockMessengerProvider` + `MessengerService`), `webhook-verification.ts` (signature + challenge), each tested. No persisted connection state, no bridge surface existed. |
+| Schema | `StoreSettings.messengerConnected Boolean @default(false)` + `messengerPageId String?` — the admin's RECORDED connection intent (real credentials live in env vars, never the DB). Migration `20260920100000_module_p3g_messenger_bridge` (db-execute + registered, machinery still blocked by the P2a drift). |
+| Bridge | `messenger/bridge.service.ts` `MessengerBridgeService`: `status(storeId)` → `{ connected, pageId, provider, suppressed }` (provider is `suppressed`/`mock`, never `live`); `bridgeOptIn(storeId, { psid?, text? })` — **never guesses a token**: no caller-supplied PSID → logged `not_connected` with `recipient: null`; with a PSID → routed through the provider (suppressed default) — every attempt writes an auditable `NotificationLog` row (channel `messenger`, `delivered`). |
+| Endpoints | `POST /public/stores/:slug/messenger/opt-in?token=` (slug+token gated via new `PublicStoreService.resolveStoreId`, same gate as the storefront). Settings PATCH/GET carry the two messenger fields for the admin portal. |
+| Web | SettingsPanel: new **Messenger (website→Messenger bridge)** card in General — honest "sends are suppressed" status + connected toggle + Page ID. Storefront order-done screen: "Get order updates on Messenger" button → posts the token-gated opt-in and renders the returned honest status (suppressed / not available / delivered). |
+| Tests | +6 `messenger/bridge.service.test.ts` (real DB): default status suppressed/not-connected; recorded intent shows in status while provider stays suppressed; no-psid opt-in → `not_connected` + NotificationLog with `recipient: null` (never fabricated); psid opt-in → suppressed + logged; mock provider (demos) delivers + logs; unknown store `not_found` + status tenant-scoped. |
+| Gate | api + web `tsc` 0 errors · web build ✓ · **20/20 across the 4 messenger/public files standalone** (bridge 6, adapter 4, webhook-verification 5, public-store 5). Full-suite run 397 tests / 16 fail — all the documented pre-existing flaky set (checkout-address, stock ledger, drift, expenses, worker/outbox, POS refund/void, pre-orders, purchases, reports); none are this module's; every such test passes in isolation. |
+| Commit | (this commit) |
 
 ## P3f — Warehouse low-stock surfacing (reorder thresholds)
 

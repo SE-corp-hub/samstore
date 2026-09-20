@@ -19,5 +19,5 @@ export default async function StorePage({ params, searchParams }: { params: Prom
     );
   }
   const data: { store: PublicStoreDTO; products: ProductDTO[] } = await res.json();
-  return <Storefront store={data.store} products={data.products} />;
+  return <Storefront store={data.store} products={data.products} slug={slug} token={token} />;
 }

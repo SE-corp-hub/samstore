@@ -30,6 +30,9 @@ export interface StoreSettingsInput {
   dailySalesTargetMinor?: number; // Overview: daily sales target (0 = off)
   hidePricePreOrder?: boolean; // P11: hide per-product prices in Pre Orders screen
   seniorPwdDiscountEnabled?: boolean; // P3b: statutory 20% senior/PWD discount
+  // P3g: Website→Messenger bridge — recorded connection state (sends stay suppressed).
+  messengerConnected?: boolean;
+  messengerPageId?: string | null;
 }
 
 export class StoreSettingsService {
@@ -75,6 +78,8 @@ export class StoreSettingsService {
         dailySalesTargetMinor: store.settings?.dailySalesTargetMinor ?? 0,
         hidePricePreOrder: store.settings?.hidePricePreOrder ?? false,
         seniorPwdDiscountEnabled: store.settings?.seniorPwdDiscountEnabled ?? false,
+        messengerConnected: store.settings?.messengerConnected ?? false,
+        messengerPageId: store.settings?.messengerPageId ?? null,
       },
     };
   }
@@ -119,6 +124,8 @@ export class StoreSettingsService {
         ...(input.dailySalesTargetMinor !== undefined ? { dailySalesTargetMinor: input.dailySalesTargetMinor } : {}),
         ...(input.hidePricePreOrder !== undefined ? { hidePricePreOrder: input.hidePricePreOrder } : {}),
         ...(input.seniorPwdDiscountEnabled !== undefined ? { seniorPwdDiscountEnabled: input.seniorPwdDiscountEnabled } : {}),
+        ...(input.messengerConnected !== undefined ? { messengerConnected: input.messengerConnected } : {}),
+        ...(input.messengerPageId !== undefined ? { messengerPageId: input.messengerPageId } : {}),
       },
       create: {
         storeId,
@@ -139,6 +146,8 @@ export class StoreSettingsService {
         dailySalesTargetMinor: input.dailySalesTargetMinor ?? 0,
         hidePricePreOrder: input.hidePricePreOrder ?? false,
         seniorPwdDiscountEnabled: input.seniorPwdDiscountEnabled ?? false,
+        messengerConnected: input.messengerConnected ?? false,
+        messengerPageId: input.messengerPageId ?? null,
       },
     });
     return { ok: true, value: { id: storeId } };

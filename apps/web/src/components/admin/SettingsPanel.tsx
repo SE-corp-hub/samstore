@@ -36,6 +36,8 @@ interface StoreSettings {
     dailySalesTargetMinor: number;
     hidePricePreOrder: boolean;
     seniorPwdDiscountEnabled: boolean;
+    messengerConnected: boolean;
+    messengerPageId: string | null;
   };
 }
 
@@ -78,6 +80,8 @@ export default function SettingsPanel() {
   const [vatShowOnReceipt, setVatShowOnReceipt] = useState(true);
   const [tin, setTin] = useState("");
   const [seniorPwdDiscountEnabled, setSeniorPwdDiscountEnabled] = useState(false);
+  const [messengerConnected, setMessengerConnected] = useState(false);
+  const [messengerPageId, setMessengerPageId] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -109,6 +113,8 @@ export default function SettingsPanel() {
       setVatShowOnReceipt(d.settings.vatShowOnReceipt ?? true);
       setTin(d.settings.tin ?? "");
       setSeniorPwdDiscountEnabled(d.settings.seniorPwdDiscountEnabled ?? false);
+      setMessengerConnected(d.settings.messengerConnected ?? false);
+      setMessengerPageId(d.settings.messengerPageId ?? "");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Load failed");
     } finally {
@@ -181,6 +187,11 @@ export default function SettingsPanel() {
     seniorPwdDiscountEnabled,
   });
 
+  const saveMessenger = () => saveSection({
+    messengerConnected,
+    messengerPageId: messengerPageId.trim() || null,
+  });
+
   const saveInvoices = () => toast("Invoice settings saved");
 
   if (loading) return <p className="text-muted">Loading…</p>;
@@ -251,6 +262,29 @@ export default function SettingsPanel() {
                   </div>
                   <div className="mt-3 d-flex justify-content-end">
                     <button className="btn btn-primary" type="button" disabled={saving} onClick={saveGeneral}>{saving ? "Saving…" : "Save general"}</button>
+                  </div>
+                </div>
+              </div>
+
+              {/* P3g: Website→Messenger bridge — portal status (suppress-send default). */}
+              <div className="card mb-4">
+                <div className="card-body">
+                  <h6 className="card-title small fw-bold">Messenger (website→Messenger bridge)</h6>
+                  <div className={`alert ${messengerConnected ? "alert-info" : "alert-secondary"} py-2 small mb-2`}>
+                    <i className="bi bi-messenger me-1"></i>
+                    <strong>Sends are suppressed</strong> until a Facebook App, Page tokens, and a public webhook are
+                    operator-approved — this is the safe default. The storefront shows this status honestly.
+                  </div>
+                  <div className="form-check form-switch mb-2">
+                    <input className="form-check-input" type="checkbox" id="messengerConnected" checked={messengerConnected} onChange={(e) => setMessengerConnected(e.target.checked)} />
+                    <label className="form-check-label" htmlFor="messengerConnected">Recorded as Messenger-connected <span className="text-muted small">(your intent — real credentials live in env vars, never the database)</span></label>
+                  </div>
+                  <div className="mb-2">
+                    <label className="form-label small">Messenger Page ID</label>
+                    <input className="form-control" placeholder="e.g. 1029384756" value={messengerPageId} onChange={(e) => setMessengerPageId(e.target.value)} />
+                  </div>
+                  <div className="mt-2 d-flex justify-content-end">
+                    <button className="btn btn-primary" type="button" disabled={saving} onClick={saveMessenger}>{saving ? "Saving…" : "Save messenger settings"}</button>
                   </div>
                 </div>
               </div>

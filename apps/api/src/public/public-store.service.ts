@@ -15,6 +15,18 @@ export type PublicStorePayload =
 export class PublicStoreService {
   private readonly catalog = new PrismaCatalogRepository();
 
+  /** Resolve a store id by slug + token (same gate as getStore); null on any failure. */
+  async resolveStoreId(slug: string, token?: string): Promise<string | null> {
+    const cleanSlug = slug?.trim().toLowerCase() ?? "";
+    if (!cleanSlug || !token) return null;
+    const link = await prisma.publicStoreLink.findUnique({
+      where: { slug: cleanSlug },
+      select: { id: true, token: true, status: true, storeId: true },
+    });
+    if (!link || link.status !== "ACTIVE" || link.token !== token) return null;
+    return link.storeId;
+  }
+
   /**
    * Resolve a storefront by slug + link token. Returns null when the link is
    * unknown, revoked, inactive, or the token is missing/wrong (all → 404 at the
