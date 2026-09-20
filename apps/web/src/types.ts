@@ -20,6 +20,13 @@ export interface ProductAddonDTO {
   options: { id: string; name: string; priceMinor: number }[];
 }
 
+export interface ProductRelationDTO {
+  id: string;
+  name: string;
+  priceMinor: number;
+  image: string | null;
+}
+
 export interface ProductDTO {
   id: string;
   sku: string;
@@ -27,6 +34,10 @@ export interface ProductDTO {
   description: string | null;
   /** integer minor units (cents) */
   priceMinor: number;
+  featured: boolean;
+  tags: string[];
+  related: ProductRelationDTO[];
+  upsell: ProductRelationDTO[];
   category: CategoryDTO | null;
   images: { url: string; sortOrder: number }[];
   /** quantityOnHand minus quantityReserved; null when unlimited */

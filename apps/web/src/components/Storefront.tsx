@@ -36,14 +36,20 @@ export default function Storefront({ store, products }: StorefrontProps) {
   // U4: catalog search + category filter (client-side over loaded products)
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("");
+  // P3d: tag filter + featured section
+  const [tag, setTag] = useState("");
 
   const categories = [...new Set(products.map((p) => p.category?.name).filter(Boolean))] as string[];
+  const allTags = [...new Set(products.flatMap((p) => p.tags ?? []))];
+  const featuredProducts = products.filter((p) => p.featured);
   const filteredProducts = products.filter((p) => {
     const q = search.trim().toLowerCase();
     const inSearch = !q || p.name.toLowerCase().includes(q) || p.description?.toLowerCase().includes(q) || (p.sku ?? "").toLowerCase().includes(q);
     const inCategory = !category || p.category?.name === category;
-    return inSearch && inCategory;
+    const inTag = !tag || (p.tags ?? []).includes(tag);
+    return inSearch && inCategory && inTag;
   });
+  const noFilter = search.trim() === "" && category === "" && tag === "";
 
   const productById = useCallback(
     () => new Map(products.map((p) => [p.id, p])),
@@ -258,6 +264,21 @@ export default function Storefront({ store, products }: StorefrontProps) {
           />
         ) : (
           <>
+            {/* P3d: curated Featured section (when no filter is active) */}
+            {noFilter && featuredProducts.length > 0 && (
+              <div className="mb-4">
+                <h5 className="h6 fw-bold text-uppercase text-muted mb-2">
+                  <i className="bi bi-star-fill me-1"></i>Featured
+                </h5>
+                <div className="row g-3">
+                  {featuredProducts.map((p) => (
+                    <div className="col-6 col-md-4 col-lg-3" key={p.id}>
+                      <ProductCard product={p} onAdd={(prod) => openPicker(prod)} />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             <div className="d-flex flex-wrap gap-2 align-items-center mb-3">
               <input
                 className="form-control form-control-sm"
@@ -282,6 +303,20 @@ export default function Storefront({ store, products }: StorefrontProps) {
                 </button>
               ))}
             </div>
+            {allTags.length > 0 && (
+              <div className="d-flex flex-wrap gap-2 align-items-center mb-2 small">
+                <span className="text-muted">Tags:</span>
+                {allTags.map((t) => (
+                  <button
+                    key={t}
+                    className={`btn btn-sm ${tag === t ? "btn-primary" : "btn-outline-primary"}`}
+                    onClick={() => setTag(tag === t ? "" : t)}
+                  >
+                    {t}
+                  </button>
+                ))}
+              </div>
+            )}
             {filteredProducts.length === 0 ? (
               <p className="text-muted text-center py-4">
                 <i className="bi bi-search fs-3 d-block mb-2"></i>
@@ -315,7 +350,9 @@ export default function Storefront({ store, products }: StorefrontProps) {
       {pickProduct && (
         <ProductPicker
           product={pickProduct}
+          products={products}
           onAdd={(p, opts) => { void addProduct(p, opts); setPickProduct(null); }}
+          onSwitch={(p) => setPickProduct(p)}
           onClose={() => setPickProduct(null)}
         />
       )}

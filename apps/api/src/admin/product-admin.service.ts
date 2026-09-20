@@ -13,8 +13,8 @@ export class ProductAdminService {
     return this.listFiltered(storeId, {});
   }
 
-  /** List with filters: search (name/SKU), category, price range, active status. */
-  async listFiltered(storeId: string, f: { search?: string; categoryId?: string; minPriceMinor?: number; maxPriceMinor?: number; active?: boolean }) {
+  /** List with filters: search (name/SKU), category, price range, active status, featured, tag. */
+  async listFiltered(storeId: string, f: { search?: string; categoryId?: string; minPriceMinor?: number; maxPriceMinor?: number; active?: boolean; featured?: boolean; tag?: string }) {
     const where: Record<string, unknown> = { storeId };
     if (f.search) {
       where.OR = [
@@ -30,6 +30,9 @@ export class ProductAdminService {
       if (f.maxPriceMinor !== undefined) (where.priceMinor as Record<string, unknown>).lte = f.maxPriceMinor;
     }
     if (f.active !== undefined) where.isActive = f.active;
+    // P3d: merchandising filters.
+    if (f.featured !== undefined) where.featured = f.featured;
+    if (f.tag) where.tags = { has: f.tag };
     const products = await prisma.product.findMany({
       where,
       orderBy: { createdAt: "asc" },
@@ -38,11 +41,15 @@ export class ProductAdminService {
         stockLevels: { select: { quantityOnHand: true, quantityReserved: true, reorderThreshold: true } },
         variants: { orderBy: { name: "asc" }, select: { id: true, name: true, sku: true, priceMinor: true, quantityOnHand: true, quantityReserved: true, isActive: true } },
         addons: { orderBy: { sortOrder: "asc" }, include: { options: { orderBy: { sortOrder: "asc" }, select: { id: true, name: true, priceMinor: true, isActive: true } } } },
+        relationsFrom: { orderBy: { sortOrder: "asc" }, select: { kind: true, targetProduct: { select: { id: true, name: true, priceMinor: true, isActive: true } } } },
       },
     });
     return products.map((p) => {
       const onHand = p.stockLevels.reduce((s, l) => s + l.quantityOnHand, 0);
       const reserved = p.stockLevels.reduce((s, l) => s + l.quantityReserved, 0);
+      const link = (kind: "related" | "upsell") => p.relationsFrom
+        .filter((r) => r.kind === kind)
+        .map((r) => ({ id: r.targetProduct.id, name: r.targetProduct.name, priceMinor: r.targetProduct.priceMinor, isActive: r.targetProduct.isActive }));
       return {
       id: p.id,
       sku: p.sku,
@@ -55,6 +62,10 @@ export class ProductAdminService {
       costMinor: p.costMinor,
       isActive: p.isActive,
       taxExempt: p.taxExempt,
+      featured: p.featured,
+      tags: p.tags,
+      related: link("related"),
+      upsell: link("upsell"),
       category: p.category,
       quantityOnHand: onHand,
       quantityReserved: reserved,
@@ -118,6 +129,8 @@ export class ProductAdminService {
         priceMinor: input.priceMinor,
         isActive: input.isActive ?? true,
         taxExempt: input.taxExempt ?? false,
+        featured: input.featured ?? false,
+        tags: (input.tags ?? []).map((t) => t.trim()),
         categoryId,
       },
     });
@@ -157,6 +170,24 @@ export class ProductAdminService {
       if (dup) return { ok: false, error: { type: "conflict", message: "A product with this barcode already exists" } };
     }
 
+    // P3d: validate related/upsell targets (same store, active, no self-link) BEFORE mutating.
+    const relationInputs = [
+      ["related", input.relatedProductIds],
+      ["upsell", input.upsellProductIds],
+    ] as const;
+    for (const [kind, ids] of relationInputs) {
+      if (ids === undefined) continue;
+      const clean = [...new Set(ids)];
+      if (clean.length > 12) return { ok: false, error: { type: "validation", errors: [`${kind}ProductIds cannot exceed 12`] } };
+      if (clean.includes(productId)) return { ok: false, error: { type: "validation", errors: [`A product cannot be ${kind === "related" ? "related" : "an upsell"} to itself`] } };
+      if (clean.length > 0) {
+        const found = await prisma.product.findMany({ where: { storeId, id: { in: clean }, isActive: true }, select: { id: true } });
+        const foundIds = new Set(found.map((x) => x.id));
+        const missing = clean.filter((id) => !foundIds.has(id));
+        if (missing.length > 0) return { ok: false, error: { type: "validation", errors: [`${kind} target not found or inactive`] } };
+      }
+    }
+
     await prisma.$transaction(async (tx) => {
       await tx.product.update({
         where: { id: productId },
@@ -170,11 +201,24 @@ export class ProductAdminService {
           priceMinor: input.priceMinor ?? product.priceMinor,
           isActive: input.isActive ?? product.isActive,
           taxExempt: input.taxExempt ?? product.taxExempt,
+          featured: input.featured ?? product.featured,
+          tags: input.tags !== undefined ? input.tags.map((t) => t.trim()) : product.tags,
           ...(input.categorySlug !== undefined
             ? { categoryId: input.categorySlug ? (await tx.category.findUnique({ where: { storeId_slug: { storeId, slug: input.categorySlug } } }))?.id ?? null : null }
             : {}),
         },
       });
+      // P3d: replace-all related/upsell links when supplied.
+      for (const [kind, ids] of relationInputs) {
+        if (ids === undefined) continue;
+        const clean = [...new Set(ids)];
+        await tx.productRelation.deleteMany({ where: { storeId, sourceProductId: productId, kind } });
+        if (clean.length > 0) {
+          await tx.productRelation.createMany({
+            data: clean.map((targetProductId, i) => ({ storeId, sourceProductId: productId, targetProductId, kind, sortOrder: i })),
+          });
+        }
+      }
       if (input.stock !== undefined) {
         // Update stock on the default warehouse (or warehouse-less legacy row) — first match. + ledger (ADJUST)
         const defaultWarehouse = await tx.warehouse.findFirst({ where: { storeId, isDefault: true } });

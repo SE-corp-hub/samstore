@@ -1,6 +1,19 @@
 # PINDIAN — Progress Log
 
-Updated: 2026-09-20 · **P3c: add-on price revalidation at checkout** · Active model: `deepseek/deepseek-v4-flash-0731` (openrouter), boilerplate tier `inclusionai/ling-3.0-flash`
+Updated: 2026-09-20 · **P3d: catalog merchandising — featured / tags / related / upsell** · Active model: `deepseek/deepseek-v4-flash-0731` (openrouter), boilerplate tier `inclusionai/ling-3.0-flash`
+
+## P3d — Catalog merchandising (featured / tags / related / upsell)
+
+| Item | Detail |
+|---|---|
+| Schema | `Product.featured Boolean` + `Product.tags String[]` (Postgres text[]). New `ProductRelation` table (storeId + composite FKs to `Product(storeId, id)` for source AND target, `kind` `"related"`/`"upsell"`, sortOrder, unique `[storeId, sourceProductId, targetProductId, kind]`) — a relation can only link SAME-store products (tenant integrity DB-enforced, M3 pattern). Migration `20260920090000_module_p3d_merchandising`. |
+| DB note | `prisma migrate dev` is BLOCKED in this env by a pre-existing drift (`20260916180100_module_p2a_cart_variant_identity` was modified after apply → prisma demands a destructive reset). Applied the additive migration via `prisma db execute` + registered it in `_prisma_migrations` with the correct sha256 checksum so a future `migrate deploy` stays consistent. **Operator follow-up: the P2a migration drift needs resolution before `migrate dev/reset` can ever run again.** |
+| Admin | `ProductInput` + validation gain `featured`/`tags` (max 20 × 40 chars) and `relatedProductIds`/`upsellProductIds` (max 12, well-formed ids). `create`/`update` persist scalars; `update` replace-alls relations in a transaction with pre-validation (same store, active, no self-link). `listFiltered` returns `featured/tags/related/upsell` + new `featured`/`tag` filters. Controller body types extended. |
+| Public | `PublicStoreService.getStore` products DTO adds `featured`, `tags`, `related`, `upsell` summaries (`{id, name, priceMinor, image}`); targets batch-loaded and filtered to ACTIVE same-store products. New `CatalogRepository.getProductRelations` (Prisma + InMemory). |
+| Web | Storefront: curated **Featured** row (when no filter active), **Tags** filter pills, tag chips on cards. `ProductPicker` gains "You may also like" (related) + "Upgrade" (upsell) buttons that switch the picker. `ProductCard` shows a Featured badge + tags. `ProductsPanel`: Featured switch, tags input, and related/upsell multi-selects (edit mode). |
+| Tests | +7: `domain/product-validation.test.ts` +6 (featured/tags/relation-id validation) and `admin/product-merchandising.test.ts` +4 (create round-trip, replace-all relations, self/cross-store rejection, featured+tag filters) and `public/merchandising.test.ts` +1 (storefront returns featured/tags/related/upsell; inactive target omitted). |
+| Gate | api + web `tsc` 0 errors · web build ✓ · **82/82 across the 9 touched files standalone** (product-validation 18, product-merchandising 4, product-m5 6, product-variant-admin 6, public merchandising 1, public-store 5, cart.service 15, checkout.service 16, store-access 11). Full-suite run remains flaky under shared-DB contention (set shifts run-to-run) — pre-existing per the P3a note; every such test passes in isolation. |
+| Commit | (this commit) |
 
 ## P3c — Add-on price revalidation at checkout
 

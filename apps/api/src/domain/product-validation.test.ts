@@ -68,3 +68,42 @@ test("soldByWeight must be boolean", () => {
   const r = validateProductInput({ name: "Rice", sku: "RICE-1", priceMinor: 5200, soldByWeight: "yes" as unknown as boolean });
   assert.equal(r.ok, false);
 });
+
+// P3d — merchandising: featured / tags / related / upsell
+test("featured + tags + relation ids pass", () => {
+  assert.deepEqual(
+    validateProductInput({
+      name: "Kape", sku: "KAPE-1", priceMinor: 100,
+      featured: true,
+      tags: ["new", "best seller"],
+      relatedProductIds: ["prod-aaaaaaaa", "prod-bbbbbbbb"],
+      upsellProductIds: ["prod-cccccccc"],
+    }),
+    { ok: true },
+  );
+});
+
+test("featured must be boolean", () => {
+  const r = validateProductInput({ name: "Kape", sku: "KAPE-1", priceMinor: 100, featured: "yes" as unknown as boolean });
+  assert.equal(r.ok, false);
+});
+
+test("too many tags fails", () => {
+  const r = validateProductInput({ name: "Kape", sku: "KAPE-1", priceMinor: 100, tags: Array.from({ length: 21 }, (_, i) => `t${i}`) });
+  assert.equal(r.ok, false);
+});
+
+test("blank or over-long tag fails", () => {
+  assert.equal(validateProductInput({ name: "Kape", sku: "KAPE-1", priceMinor: 100, tags: ["  "] }).ok, false);
+  assert.equal(validateProductInput({ name: "Kape", sku: "KAPE-1", priceMinor: 100, tags: ["x".repeat(41)] }).ok, false);
+});
+
+test("too many related/upsell ids fails", () => {
+  const many = Array.from({ length: 13 }, (_, i) => `prod-${String(i).padStart(8, "0")}`);
+  assert.equal(validateProductInput({ name: "Kape", sku: "KAPE-1", priceMinor: 100, relatedProductIds: many }).ok, false);
+  assert.equal(validateProductInput({ name: "Kape", sku: "KAPE-1", priceMinor: 100, upsellProductIds: many }).ok, false);
+});
+
+test("invalid relation id format fails", () => {
+  assert.equal(validateProductInput({ name: "Kape", sku: "KAPE-1", priceMinor: 100, relatedProductIds: ["short"] }).ok, false);
+});

@@ -40,6 +40,9 @@ export interface ProductRecord {
   images: string[];
   quantityOnHand: number;
   quantityReserved: number;
+  /** P3d: merchandising — feature flag + free-form display tags. */
+  featured: boolean;
+  tags: string[];
 }
 
 export interface ProductVariantRecord {
@@ -165,6 +168,12 @@ export interface CatalogRepository {
   getVariantsByProductIds(storeId: string, productIds: string[]): Promise<ProductVariantRecord[]>;
   /** P2a: add-on groups + active options for a product. */
   getProductAddons(storeId: string, productId: string): Promise<AddonRecord[]>;
+  /** P3d: related/upsell links for a set of products (same store), ordered by sortOrder. */
+  getProductRelations(
+    storeId: string,
+    sourceProductIds: string[],
+    kinds: ("related" | "upsell")[],
+  ): Promise<{ sourceProductId: string; kind: "related" | "upsell"; targetProductId: string }[]>;
 }
 
 export interface CartRepository {
@@ -264,6 +273,10 @@ export class InMemoryCatalogRepository implements CatalogRepository {
   }
   async getProductAddons(storeId: string, productId: string): Promise<AddonRecord[]> {
     return []; // InMemory test double: no add-on data
+  }
+
+  async getProductRelations(storeId: string, sourceProductIds: string[], kinds: ("related" | "upsell")[]): Promise<{ sourceProductId: string; kind: "related" | "upsell"; targetProductId: string }[]> {
+    return []; // InMemory test double: no relation data
   }
 }
 

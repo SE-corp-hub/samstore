@@ -117,6 +117,8 @@ export class PrismaCatalogRepository implements CatalogRepository {
       images: p.images.map((i) => i.url),
       quantityOnHand: onHand,
       quantityReserved: reserved,
+      featured: p.featured,
+      tags: p.tags,
     };
   }
 
@@ -217,6 +219,16 @@ export class PrismaCatalogRepository implements CatalogRepository {
       required: a.required,
       options: a.options.map((o) => ({ id: o.id, name: o.name, priceMinor: o.priceMinor, isActive: o.isActive })),
     }));
+  }
+
+  async getProductRelations(storeId: string, sourceProductIds: string[], kinds: ("related" | "upsell")[]): Promise<{ sourceProductId: string; kind: "related" | "upsell"; targetProductId: string }[]> {
+    if (sourceProductIds.length === 0) return [];
+    const rows = await prisma.productRelation.findMany({
+      where: { storeId, sourceProductId: { in: sourceProductIds }, kind: { in: kinds } },
+      orderBy: [{ sourceProductId: "asc" }, { sortOrder: "asc" }],
+      select: { sourceProductId: true, kind: true, targetProductId: true },
+    });
+    return rows.map((r) => ({ sourceProductId: r.sourceProductId, kind: r.kind as "related" | "upsell", targetProductId: r.targetProductId }));
   }
 }
 

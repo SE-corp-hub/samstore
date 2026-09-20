@@ -17,6 +17,10 @@ export interface AdminProduct {
   priceMinor: number;
   isActive: boolean;
   taxExempt: boolean;
+  featured: boolean;
+  tags: string[];
+  related: { id: string; name: string; priceMinor: number; isActive: boolean }[];
+  upsell: { id: string; name: string; priceMinor: number; isActive: boolean }[];
   category: { id: string; name: string; slug: string } | null;
   quantityOnHand: number;
   quantityReserved: number;
@@ -38,9 +42,14 @@ interface ProductForm {
   description: string;
   /** M4: VAT-exempt product (basic/zero-rated goods). */
   taxExempt: boolean;
+  /** P3d: merchandising — featured flag, tags (comma input), related/upsell id lists. */
+  featured: boolean;
+  tags: string;
+  related: string[];
+  upsell: string[];
 }
 
-const EMPTY_FORM: ProductForm = { name: "", sku: "", barcode: "", unit: "", soldByWeight: false, priceMinor: "", stock: "", categorySlug: "", description: "", taxExempt: false };
+const EMPTY_FORM: ProductForm = { name: "", sku: "", barcode: "", unit: "", soldByWeight: false, priceMinor: "", stock: "", categorySlug: "", description: "", taxExempt: false, featured: false, tags: "", related: [], upsell: [] };
 
 export default function ProductsPanel() {
   const [products, setProducts] = useState<AdminProduct[]>([]);
@@ -114,6 +123,10 @@ export default function ProductsPanel() {
       categorySlug: p.category?.slug ?? "",
       description: p.description ?? "",
       taxExempt: p.taxExempt ?? false,
+      featured: p.featured ?? false,
+      tags: (p.tags ?? []).join(", "),
+      related: p.related?.filter((r) => r.isActive).map((r) => r.id) ?? [],
+      upsell: p.upsell?.filter((r) => r.isActive).map((r) => r.id) ?? [],
     });
     setModal({ open: true, editing: p });
   };
@@ -135,6 +148,11 @@ export default function ProductsPanel() {
         categorySlug: form.categorySlug || undefined,
         description: form.description || undefined,
         taxExempt: form.taxExempt,
+        featured: form.featured,
+        tags: form.tags.split(",").map((t) => t.trim()).filter((t) => t.length > 0),
+        ...(modal.editing
+          ? { relatedProductIds: form.related, upsellProductIds: form.upsell }
+          : {}),
       };
       const res = await fetch(
         `${API_URL}/admin/products${modal.editing ? `/${modal.editing.id}` : ""}`,
@@ -357,6 +375,34 @@ export default function ProductsPanel() {
                       <label className="form-check-label" htmlFor="taxExempt">VAT-exempt product <span className="text-muted small">(basic/zero-rated goods — reported as non-VAT sales on the BIR slip)</span></label>
                     </div>
                     </div>
+                    {/* P3d: merchandising */}
+                    <div className="form-check form-switch mb-2">
+                      <input className="form-check-input" type="checkbox" id="featured" checked={form.featured} onChange={(e) => setForm({ ...form, featured: e.target.checked })} />
+                      <label className="form-check-label" htmlFor="featured">Featured <span className="text-muted small">(show in the storefront "Featured" section)</span></label>
+                    </div>
+                    <div className="mb-2">
+                      <label className="form-label small">Tags</label>
+                      <input className="form-control" placeholder="new, best seller" value={form.tags} onChange={(e) => setForm({ ...form, tags: e.target.value })} />
+                      <small className="text-muted d-block">Comma-separated display tags.</small>
+                    </div>
+                    {modal.editing && (
+                      <div className="mb-2">
+                        <label className="form-label small">Related / upsell</label>
+                        <div className="d-flex gap-2">
+                          <select className="form-select form-select-sm" multiple size={4} value={form.related} onChange={(e) => setForm({ ...form, related: [...e.target.selectedOptions].map((o) => o.value) })}>
+                            {products.filter((x) => x.id !== modal.editing?.id).map((x) => (
+                              <option key={x.id} value={x.id}>{x.name}</option>
+                            ))}
+                          </select>
+                          <select className="form-select form-select-sm" multiple size={4} value={form.upsell} onChange={(e) => setForm({ ...form, upsell: [...e.target.selectedOptions].map((o) => o.value) })}>
+                            {products.filter((x) => x.id !== modal.editing?.id).map((x) => (
+                              <option key={x.id} value={x.id}>{x.name}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <small className="text-muted d-block">Left = "You may also like", right = "Upgrade". Ctrl/Cmd-click to select multiple.</small>
+                      </div>
+                    )}
                   </div>
                   <div className="modal-footer">
                     <button type="button" className="btn btn-outline-secondary" onClick={() => setModal({ open: false, editing: null })}>Cancel</button>

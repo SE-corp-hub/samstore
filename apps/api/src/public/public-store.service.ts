@@ -68,18 +68,42 @@ export class PublicStoreService {
       list.push(v);
       byProduct.set(v.productId, list);
     }
+    // P3d: related/upsell links — targets must be ACTIVE same-store products; batch-loaded.
+    const relations = await this.catalog.getProductRelations(store.id, products.map((p) => p.id), ["related", "upsell"]);
+    const targetIds = [...new Set(relations.map((r) => r.targetProductId))];
+    const activeTargets = new Map(
+      (await this.catalog.getProductsByIds(store.id, targetIds))
+        .filter((t) => t.isActive)
+        .map((t) => [t.id, t]),
+    );
+    const linksByProduct = new Map<string, { kind: "related" | "upsell"; productId: string }[]>();
+    for (const r of relations) {
+      if (!activeTargets.has(r.targetProductId)) continue;
+      const list = linksByProduct.get(r.sourceProductId) ?? [];
+      list.push({ kind: r.kind, productId: r.targetProductId });
+      linksByProduct.set(r.sourceProductId, list);
+    }
+    const targetSummary = (id: string) => {
+      const t = activeTargets.get(id)!;
+      return { id: t.id, name: t.name, priceMinor: t.priceMinor, image: t.images[0] ?? null };
+    };
     return {
       closed: false,
       store: base,
       products: await Promise.all(products.map(async (p) => {
         const pv = byProduct.get(p.id) ?? [];
         const addons = await this.catalog.getProductAddons(store.id, p.id);
+        const links = (linksByProduct.get(p.id) ?? []).map((l) => ({ kind: l.kind, summary: targetSummary(l.productId) }));
         return {
           id: p.id,
           sku: p.sku,
           name: p.name,
           description: p.description,
           priceMinor: p.priceMinor,
+          featured: p.featured,
+          tags: p.tags,
+          related: links.filter((l) => l.kind === "related").map((l) => l.summary),
+          upsell: links.filter((l) => l.kind === "upsell").map((l) => l.summary),
           category: p.categoryName ? { id: "", name: p.categoryName, slug: "", sortOrder: 0 } : null,
           images: p.images.map((url, i) => ({ url, sortOrder: i })),
           availableQuantity: p.quantityOnHand - p.quantityReserved,

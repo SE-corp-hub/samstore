@@ -59,6 +59,14 @@ export interface ProductDTO {
   description: string | null;
   /** integer minor units */
   priceMinor: number;
+  /** P3d: show in the storefront "Featured" section. */
+  featured: boolean;
+  /** P3d: free-form display tags. */
+  tags: string[];
+  /** P3d: "You may also like" — same-store active products. */
+  related: ProductRelationDTO[];
+  /** P3d: upsell/"Upgrade" — same-store active products. */
+  upsell: ProductRelationDTO[];
   category: CategoryDTO | null;
   images: { url: string; sortOrder: number }[];
   /** quantityOnHand minus quantityReserved; null when unlimited */
@@ -67,6 +75,13 @@ export interface ProductDTO {
   variants: ProductVariantDTO[];
   /** P2a: optional add-on/modifier groups. */
   addons: ProductAddonDTO[];
+}
+
+export interface ProductRelationDTO {
+  id: string;
+  name: string;
+  priceMinor: number;
+  image: string | null;
 }
 
 export interface ProductVariantDTO {

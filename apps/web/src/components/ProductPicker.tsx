@@ -5,19 +5,27 @@ import type { ProductDTO, ProductVariantDTO } from "../types";
 
 interface ProductPickerProps {
   product: ProductDTO;
+  products?: ProductDTO[];
   onAdd: (product: ProductDTO, opts: { variantId?: string; addons?: { addonId: string; optionId: string }[] }) => void;
+  onSwitch?: (product: ProductDTO) => void;
   onClose: () => void;
 }
 
 const toPesos = (minor: number) => `₱${(minor / 100).toFixed(2)}`;
 
-export default function ProductPicker({ product, onAdd, onClose }: ProductPickerProps) {
+export default function ProductPicker({ product, products, onAdd, onSwitch, onClose }: ProductPickerProps) {
   const hasVariants = product.variants.length > 0;
   const hasAddons = product.addons.length > 0;
   const [variantId, setVariantId] = useState<string>(product.variants[0]?.id ?? "");
   const [picks, setPicks] = useState<Record<string, string>>({});
   const [qty, setQty] = useState(1);
   const [err, setErr] = useState<string | null>(null);
+
+  // P3d: related/upsell targets resolved to full products from the loaded catalog.
+  const resolveLinks = (ids: { id: string }[]) =>
+    (products ?? [])
+      .filter((p) => ids.some((r) => r.id === p.id) && p.id !== product.id)
+      .slice(0, 4);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
@@ -126,6 +134,37 @@ export default function ProductPicker({ product, onAdd, onClose }: ProductPicker
             <button type="button" className="btn btn-outline-secondary" onClick={onClose}>Cancel</button>
             <button type="button" className="btn btn-primary" onClick={submit}>Add to cart</button>
           </div>
+
+          {/* P3d: related ("You may also like") + upsell ("Upgrade") */}
+          {(() => {
+            const related = resolveLinks(product.related ?? []);
+            const upsell = resolveLinks(product.upsell ?? []);
+            if (related.length === 0 && upsell.length === 0) return null;
+            return (
+              <div className="modal-footer d-block text-start border-top">
+                {related.length > 0 && (
+                  <>
+                    <div className="small fw-semibold mb-1"><i className="bi bi-arrow-repeat me-1"></i>You may also like</div>
+                    {related.map((r) => (
+                      <button key={r.id} type="button" className="btn btn-outline-primary btn-sm me-1" onClick={() => onSwitch?.(r)}>
+                        {r.name} · {toPesos(r.priceMinor)}
+                      </button>
+                    ))}
+                  </>
+                )}
+                {upsell.length > 0 && (
+                  <>
+                    <div className="small fw-semibold mb-1"><i className="bi bi-arrow-up-circle me-1"></i>Upgrade</div>
+                    {upsell.map((r) => (
+                      <button key={r.id} type="button" className="btn btn-outline-primary btn-sm me-1" onClick={() => onSwitch?.(r)}>
+                        {r.name} · {toPesos(r.priceMinor)}
+                      </button>
+                    ))}
+                  </>
+                )}
+              </div>
+            );
+          })()}
         </div>
       </div>
     </div>

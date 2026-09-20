@@ -47,6 +47,8 @@ function makeProduct(over: Partial<ProductRecord> = {}): ProductRecord {
     images: ["https://cdn.example.test/img1.jpg"],
     quantityOnHand: 100,
     quantityReserved: 0,
+    featured: false,
+    tags: [],
     ...over,
   };
 }

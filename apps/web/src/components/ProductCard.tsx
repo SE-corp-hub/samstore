@@ -29,6 +29,11 @@ export default function ProductCard({ product, onAdd }: ProductCardProps) {
         ) : (
           <i className="bi bi-image text-secondary fs-1"></i>
         )}
+        {product.featured && (
+          <span className="badge text-bg-warning position-absolute top-0 start-0 m-1">
+            <i className="bi bi-star-fill me-1"></i>Featured
+          </span>
+        )}
       </div>
       <div className="card-body d-flex flex-column">
         <div className="d-flex justify-content-between align-items-start mb-1">
@@ -36,6 +41,11 @@ export default function ProductCard({ product, onAdd }: ProductCardProps) {
           <span className="badge text-bg-primary ms-2">{toPesos(product.priceMinor)}</span>
         </div>
         {product.category && <small className="text-muted">{product.category.name}</small>}
+        {product.tags?.length > 0 && (
+          <div className="d-flex flex-wrap gap-1 mt-1">
+            {product.tags.map((t) => <span key={t} className="badge text-bg-light border small">{t}</span>)}
+          </div>
+        )}
         {product.description && (
           <p className="card-text small text-muted mt-1 mb-2">{product.description}</p>
         )}

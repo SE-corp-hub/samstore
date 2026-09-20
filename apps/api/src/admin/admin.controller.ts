@@ -527,7 +527,7 @@ export class AdminController {
   @Post("products")
   async createProduct(
     @Req() req: Request & { user?: AuthPrincipal },
-    @Body() body: { name: string; sku: string; priceMinor: number; stock?: number; categorySlug?: string; description?: string; barcode?: string | null; unit?: string | null; soldByWeight?: boolean },
+    @Body() body: { name: string; sku: string; priceMinor: number; stock?: number; categorySlug?: string; description?: string; barcode?: string | null; unit?: string | null; soldByWeight?: boolean; featured?: boolean; tags?: string[] },
     @Headers("x-store-id") headerStoreId?: string,
   ) {
     const user = req.user;
@@ -544,7 +544,7 @@ export class AdminController {
   async updateProduct(
     @Req() req: Request & { user?: AuthPrincipal },
     @Param("id") id: string,
-    @Body() body: Partial<{ name: string; sku: string; priceMinor: number; stock?: number; categorySlug?: string; description?: string; isActive?: boolean; barcode?: string | null; unit?: string | null; soldByWeight?: boolean }>,
+    @Body() body: Partial<{ name: string; sku: string; priceMinor: number; stock?: number; categorySlug?: string; description?: string; isActive?: boolean; barcode?: string | null; unit?: string | null; soldByWeight?: boolean; featured?: boolean; tags?: string[]; relatedProductIds?: string[]; upsellProductIds?: string[] }>,
     @Headers("x-store-id") headerStoreId?: string,
   ) {
     const user = req.user;
