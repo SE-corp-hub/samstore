@@ -1,6 +1,20 @@
 # PINDIAN — Progress Log
 
-Updated: 2026-09-16 · **P3a: voucher engine v2 (percent / free-delivery / first-order / per-customer / scoped / stackable)** · Active model: `deepseek/deepseek-v4-flash-0731` (openrouter), boilerplate tier `inclusionai/ling-3.0-flash`
+Updated: 2026-09-20 · **P3b: statutory 20% Senior/PWD discount + DPA consent gate** · Active model: `deepseek/deepseek-v4-flash-0731` (openrouter), boilerplate tier `inclusionai/ling-3.0-flash`
+
+## P3b — Statutory 20% discount (Senior Citizen / PWD) + DPA consent
+
+| Item | Detail |
+|---|---|
+| Schema | `Order.statutoryType` (`senior`/`pwd`) + `statutoryId` + `statutoryName`; `StoreSettings.seniorPwdDiscountEnabled` (default false). Migration `20260916200000_module_p3b_statutory_discount`. |
+| Domain | `domain/statutory-discount.ts`: `statutoryDiscountMinor` (20% of subtotal, floored), `validateStatutoryClaim` (type ∈ senior/pwd, ID 3–32 alnum/dash, name 3–80 chars), `normalizeStatutoryId` (trim + upper). |
+| Checkout | `checkout.service.ts` step 1b: **DPA consent gate** — `consentGranted !== true` rejects every online order (`"Privacy consent is required to place an order"`). Step 6c-2: statutory claim validated, store toggle checked (else conflict), 20% applied to the SUBTOTAL only (delivery excluded), stacked after voucher/loyalty and capped so total ≥ 0; type/id/name persisted to order columns + snapshot. Customer-account checkouts also write an auditable `ConsentRecord` (scope `dpv1`, channel `web`, version `2026.09`, best-effort). |
+| Contracts | `CheckoutRequest` +` consentGranted?` + `statutoryType?`/`statutoryId?`/`statutoryName?`. |
+| Admin | `StoreSettings` carries `seniorPwdDiscountEnabled` (read + PATCH); `SettingsPanel` Tax/VAT card gains an "Accept the statutory 20% Senior Citizen / PWD discount" switch. |
+| Storefront | `CheckoutForm` step 1: Senior Citizen / PWD claim buttons + ID number + cardholder name (ID verified in person at delivery/pickup). Step 3 (review): statutory line + DPA consent checkbox gating "Place order". |
+| Tests | +11: `domain/statutory-discount.test.ts` (5: 20% math floored, rejects bad inputs, validate accept/reject, normalize) + `checkout/statutory-consent.test.ts` (6, real DB: consent required, senior 20% + captured on order, invalid claim rejected, store toggle off → conflict, stacks after voucher capped at remaining subtotal, ConsentRecord written). Ripple: added `consentGranted: true` to request builders in `checkout.service`, `checkout-address`, `voucher-v2`, `variant-cart`, `store-access` tests. |
+| Gate | api + web `tsc` 0 errors · web build ✓ · **53/53 tests across the 7 touched files pass standalone** (`statutory-discount` 5, `statutory-consent` 6, `checkout.service` 16, `checkout-address` 5, `voucher-v2` 6, `variant-cart` 4, `store-access` 11). Full-suite run remains flaky under shared-DB contention (failure set shifts run-to-run, e.g. worker/outbox, POS variant, stock-ledger) — pre-existing per the P3a note; every such test passes in isolation. |
+| Commit | (this commit) |
 
 ## P3a — Voucher engine v2
 

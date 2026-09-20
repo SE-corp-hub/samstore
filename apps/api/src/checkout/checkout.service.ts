@@ -13,6 +13,7 @@ import { taxColumnsFor } from "../domain/tax-store.js";
 import { normalizeIdempotencyKey, InvalidIdempotencyKeyError } from "../domain/idempotency.js";
 import { formatOrderNumber } from "../domain/order-number.js";
 import { InsufficientStockError } from "../domain/movements.js";
+import { statutoryDiscountMinor, validateStatutoryClaim, normalizeStatutoryId } from "../domain/statutory-discount.js";
 import { signClaimToken } from "../domain/claim-token.js";
 import type {
   CartRepository,
@@ -23,6 +24,7 @@ import type {
   OrderRecord,
 } from "../persistence/repositories.js";
 import { randomId } from "../persistence/repositories.js";
+import { prisma } from "../persistence/prisma-repositories.js"; // P3b: DPA consent audit record (best-effort)
 
 export type CheckoutResult = { ok: true; value: CheckoutResponse } | { ok: false; error: ApiError };
 
@@ -97,6 +99,14 @@ export class CheckoutService {
     const validation = validateCheckoutInput(request);
     if (!validation.ok) {
       return { ok: false, error: { type: "validation", errors: validation.errors } };
+    }
+
+    // 1b. P3b DPA consent gate: an order cannot be placed without the privacy consent.
+    if (request.consentGranted !== true) {
+      return {
+        ok: false,
+        error: { type: "validation", errors: ["Privacy consent is required to place an order"] },
+      };
     }
 
     // 2. Canonical idempotency key — checked BEFORE cart/order state so a retry
@@ -301,6 +311,35 @@ export class CheckoutService {
       loyaltyPoints = request.loyaltyPoints;
       discountMinor += redeemResult.discountMinor;
     }
+
+    // 6c-2. P3b statutory 20% discount (Senior Citizen / PWD): applies to the SUBTOTAL
+    // (delivery fee excluded), stacked after voucher/loyalty, capped so the total stays ≥ 0.
+    let statutory: { type: "senior" | "pwd"; id: string; name: string } | null = null;
+    if (request.statutoryType) {
+      if (!store.seniorPwdDiscountEnabled) {
+        return {
+          ok: false,
+          error: { type: "conflict", message: "This store does not accept statutory discounts" },
+        };
+      }
+      const statutoryErrors = validateStatutoryClaim({
+        statutoryType: request.statutoryType,
+        statutoryId: request.statutoryId,
+        statutoryName: request.statutoryName,
+      });
+      if (statutoryErrors.length > 0) {
+        return { ok: false, error: { type: "validation", errors: statutoryErrors } };
+      }
+      const claim = statutoryDiscountMinor(totals.subtotalMinor);
+      const cap = Math.max(0, totals.subtotalMinor - discountMinor);
+      const applied = Math.min(claim, cap);
+      discountMinor += applied;
+      statutory = {
+        type: request.statutoryType,
+        id: normalizeStatutoryId(request.statutoryId!),
+        name: request.statutoryName!.trim(),
+      };
+    }
     const finalTotal = totals.totalMinor - discountMinor;
 
     // 6d. Payment method: credit requires an approved customer within limit.
@@ -372,6 +411,7 @@ export class CheckoutService {
         paymentMethod,
         deliveryType,
         ...(phAddress ? { phAddress } : {}),
+        ...(statutory ? { statutory: { type: statutory.type, id: statutory.id, name: statutory.name } } : {}),
         ...(request.voucherCode ? { voucherCode: request.voucherCode.toUpperCase(), discountMinor } : {}),
         ...(loyaltyPoints > 0 ? { loyaltyPointsRedeemed: loyaltyPoints } : {}),
       },
@@ -394,6 +434,9 @@ export class CheckoutService {
       deliveryProvinceName: phAddress?.provinceName ?? null,
       deliveryCityName: phAddress?.cityName ?? null,
       deliveryBarangayName: phAddress?.barangayName ?? null,
+      statutoryType: statutory?.type ?? null,
+      statutoryId: statutory?.id ?? null,
+      statutoryName: statutory?.name ?? null,
       notes: request.notes?.trim() ?? null,
       claimToken,
       items,
@@ -468,6 +511,23 @@ export class CheckoutService {
     //     enqueue that could be lost. Nothing to do here.
     if (this.onOrderPlaced) {
       await this.onOrderPlaced(created);
+    }
+
+    // 10b. P3b DPA consent — record an auditable ConsentRecord for customer accounts
+    //     (guests have no identity; the checkbox gate still applies).
+    if (customerId) {
+      try {
+        await prisma.consentRecord.create({
+          data: {
+            customerId,
+            scope: "dpv1",
+            channel: "web",
+            granted: true,
+            version: "2026.09",
+            recordedBy: customerId,
+          },
+        });
+      } catch { /* best-effort audit trail — never fail a committed order */ }
     }
 
     return {

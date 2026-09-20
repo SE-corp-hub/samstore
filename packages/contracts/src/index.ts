@@ -196,6 +196,12 @@ export interface CheckoutRequest {
   provinceCode?: string;
   cityCode?: string;
   barangayCode?: string;
+  /** P3b: DPA consent — must be true to place an order; recorded for customer accounts. */
+  consentGranted?: boolean;
+  /** P3b: statutory 20% discount (Senior Citizen / PWD) — requires type + ID + cardholder name. */
+  statutoryType?: "senior" | "pwd";
+  statutoryId?: string;
+  statutoryName?: string;
   /** delivery | pickup (pickup: no delivery fee, address not required) — UI U5. */
   deliveryType?: "delivery" | "pickup";
   /** COD for guests/unapproved; "credit" allowed only for approved customers up to limit. */

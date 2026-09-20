@@ -35,6 +35,7 @@ interface StoreSettings {
     tin: string | null;
     dailySalesTargetMinor: number;
     hidePricePreOrder: boolean;
+    seniorPwdDiscountEnabled: boolean;
   };
 }
 
@@ -76,6 +77,7 @@ export default function SettingsPanel() {
   const [pricesIncludeVat, setPricesIncludeVat] = useState(true);
   const [vatShowOnReceipt, setVatShowOnReceipt] = useState(true);
   const [tin, setTin] = useState("");
+  const [seniorPwdDiscountEnabled, setSeniorPwdDiscountEnabled] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -106,6 +108,7 @@ export default function SettingsPanel() {
       setPricesIncludeVat(d.settings.pricesIncludeVat ?? true);
       setVatShowOnReceipt(d.settings.vatShowOnReceipt ?? true);
       setTin(d.settings.tin ?? "");
+      setSeniorPwdDiscountEnabled(d.settings.seniorPwdDiscountEnabled ?? false);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Load failed");
     } finally {
@@ -175,6 +178,7 @@ export default function SettingsPanel() {
     pricesIncludeVat,
     vatShowOnReceipt,
     tin: tin.trim() || null,
+    seniorPwdDiscountEnabled,
   });
 
   const saveInvoices = () => toast("Invoice settings saved");
@@ -378,6 +382,10 @@ export default function SettingsPanel() {
                       <div className="form-check form-switch">
                         <input className="form-check-input" type="checkbox" id="vatShowOnReceipt" checked={vatShowOnReceipt} onChange={(e) => setVatShowOnReceipt(e.target.checked)} />
                         <label className="form-check-label" htmlFor="vatShowOnReceipt">Show the VAT breakdown on printed receipts <span className="text-muted small">(hide it and the slip simply omits the VAT lines — totals never change)</span></label>
+                      </div>
+                      <div className="form-check form-switch">
+                        <input className="form-check-input" type="checkbox" id="seniorPwd" checked={seniorPwdDiscountEnabled} onChange={(e) => setSeniorPwdDiscountEnabled(e.target.checked)} />
+                        <label className="form-check-label" htmlFor="seniorPwd">Accept the statutory <strong>20% Senior Citizen / PWD discount</strong> <span className="text-muted small">(customers claim it at checkout; ID + name captured on the order)</span></label>
                       </div>
                       <div className="mt-2">
                         <label className="form-label small">TIN (printed on the slip)</label>

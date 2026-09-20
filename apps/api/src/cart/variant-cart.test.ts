@@ -191,6 +191,7 @@ test("checkout reserves VARIANT stock atomically and snapshots variant + add-ons
     deliveryAddressLine1: "1 P2 St",
     deliveryType: "delivery",
     paymentMethod: "cod",
+    consentGranted: true,
     idempotencyKey: `p2ck-${fx.cart.token}-${Date.now()}`,
   };
   const result = await checkoutService.checkout(req);

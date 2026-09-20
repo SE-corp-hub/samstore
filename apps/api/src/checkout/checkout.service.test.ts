@@ -71,6 +71,7 @@ function makeRequest(over: Partial<CheckoutRequest> = {}): CheckoutRequest {
     landmark: "Near the church",
     deliverySchedule: "Tomorrow 2pm-5pm",
     paymentMethod: "cod",
+    consentGranted: true,
     idempotencyKey: "checkout-abc-123",
     ...over,
   };
@@ -157,6 +158,7 @@ test("Module 5: voucher + loyalty + credit effects flow through the atomic call"
     customerName: "Loyal",
     customerPhone: "+639176543210",
     paymentMethod: "credit",
+    consentGranted: true,
     idempotencyKey: "loyal-checkout-1",
     loyaltyPoints: 100,
     customerToken: "cust-jwt-loyal",

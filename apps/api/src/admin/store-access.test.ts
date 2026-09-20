@@ -123,6 +123,7 @@ function makeRequest(over: Partial<CheckoutRequest> = {}): CheckoutRequest {
     deliveryAddressLine1: "123 Rizal Avenue",
     landmark: "Near the church",
     paymentMethod: "cod",
+    consentGranted: true,
     idempotencyKey: "checkout-abc-123",
     ...over,
   };

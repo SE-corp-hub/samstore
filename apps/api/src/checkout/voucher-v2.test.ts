@@ -154,6 +154,7 @@ function request(cartToken: string, over: Partial<CheckoutRequest> = {}): Checko
     deliveryAddressLine1: "1 P3 St",
     deliveryType: "delivery",
     paymentMethod: "cod",
+    consentGranted: true,
     idempotencyKey: `p3ck-${cartToken}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
     ...over,
   };

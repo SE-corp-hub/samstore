@@ -227,6 +227,8 @@ model StoreSettings {
   vatShowOnReceipt         Boolean  @default(true) // store owner may HIDE the VAT lines (decision #1b)
   tin                      String? // BIR taxpayer identification number, printed on the slip
   requireOpenShift         Boolean  @default(true) // N1: counter cash sales require an open register shift
+  // P3b: statutory 20% discount for Senior Citizens & PWDs (RA 9994 / RA 10754)
+  seniorPwdDiscountEnabled Boolean  @default(false)
   dailySalesTargetMinor    Int      @default(0) // Overview: daily sales target (0 = off)
   hidePricePreOrder        Boolean  @default(false) // Hide per-product prices in Pre Orders screen
   closedStoreMessage       String?
@@ -825,6 +827,10 @@ model Order {
   deliveryCityName     String?
   deliveryBarangayName String?
   notes                String?
+  // P3b: statutory 20% discount for Senior Citizens / PWDs — type, ID captured, name on card.
+  statutoryType        String? // senior | pwd
+  statutoryId          String?
+  statutoryName        String?
   acknowledgedAt       DateTime?
   createdAt            DateTime      @default(now())
   updatedAt            DateTime      @updatedAt

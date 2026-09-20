@@ -29,6 +29,7 @@ export interface StoreSettingsInput {
   tin?: string | null; // BIR taxpayer ID printed on the slip
   dailySalesTargetMinor?: number; // Overview: daily sales target (0 = off)
   hidePricePreOrder?: boolean; // P11: hide per-product prices in Pre Orders screen
+  seniorPwdDiscountEnabled?: boolean; // P3b: statutory 20% senior/PWD discount
 }
 
 export class StoreSettingsService {
@@ -73,6 +74,7 @@ export class StoreSettingsService {
         tin: store.settings?.tin ?? null,
         dailySalesTargetMinor: store.settings?.dailySalesTargetMinor ?? 0,
         hidePricePreOrder: store.settings?.hidePricePreOrder ?? false,
+        seniorPwdDiscountEnabled: store.settings?.seniorPwdDiscountEnabled ?? false,
       },
     };
   }
@@ -116,6 +118,7 @@ export class StoreSettingsService {
         ...(input.tin !== undefined ? { tin: input.tin } : {}),
         ...(input.dailySalesTargetMinor !== undefined ? { dailySalesTargetMinor: input.dailySalesTargetMinor } : {}),
         ...(input.hidePricePreOrder !== undefined ? { hidePricePreOrder: input.hidePricePreOrder } : {}),
+        ...(input.seniorPwdDiscountEnabled !== undefined ? { seniorPwdDiscountEnabled: input.seniorPwdDiscountEnabled } : {}),
       },
       create: {
         storeId,
@@ -135,6 +138,7 @@ export class StoreSettingsService {
         showVatLabel: input.showVatLabel ?? true,
         dailySalesTargetMinor: input.dailySalesTargetMinor ?? 0,
         hidePricePreOrder: input.hidePricePreOrder ?? false,
+        seniorPwdDiscountEnabled: input.seniorPwdDiscountEnabled ?? false,
       },
     });
     return { ok: true, value: { id: storeId } };

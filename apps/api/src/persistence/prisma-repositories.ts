@@ -45,6 +45,7 @@ type StoreWithSettings = NonNullable<Awaited<ReturnType<PrismaClient["store"]["f
     vatEnabled: boolean;
     vatRateBp: number;
     pricesIncludeVat: boolean;
+    seniorPwdDiscountEnabled: boolean;
   } | null;
 };
 
@@ -70,6 +71,7 @@ export class PrismaStoreRepository implements StoreRepository {
       vatEnabled: settings?.vatEnabled ?? true,
       vatRateBp: settings?.vatRateBp ?? 1200,
       pricesIncludeVat: settings?.pricesIncludeVat ?? true,
+      seniorPwdDiscountEnabled: settings?.seniorPwdDiscountEnabled ?? false,
       accentColor: s.accentColor,
       bannerText: s.bannerText,
       logoUrl: s.logoUrl,
@@ -381,6 +383,9 @@ export class PrismaOrderRepository implements OrderRepository {
       deliveryProvinceName: o.deliveryProvinceName ?? null,
       deliveryCityName: o.deliveryCityName ?? null,
       deliveryBarangayName: o.deliveryBarangayName ?? null,
+      statutoryType: o.statutoryType ?? null,
+      statutoryId: o.statutoryId ?? null,
+      statutoryName: o.statutoryName ?? null,
       items: o.items,
       createdAt: o.createdAt,
     };
@@ -427,6 +432,9 @@ export class PrismaOrderRepository implements OrderRepository {
           deliveryProvinceName: order.deliveryProvinceName ?? undefined,
           deliveryCityName: order.deliveryCityName ?? undefined,
           deliveryBarangayName: order.deliveryBarangayName ?? undefined,
+          statutoryType: order.statutoryType ?? undefined,
+          statutoryId: order.statutoryId ?? undefined,
+          statutoryName: order.statutoryName ?? undefined,
           storeCustomerId: order.storeCustomerId ?? undefined,
         },
       });
@@ -520,6 +528,9 @@ export class PrismaOrderRepository implements OrderRepository {
           deliveryProvinceName: order.deliveryProvinceName ?? undefined,
           deliveryCityName: order.deliveryCityName ?? undefined,
           deliveryBarangayName: order.deliveryBarangayName ?? undefined,
+          statutoryType: order.statutoryType ?? undefined,
+          statutoryId: order.statutoryId ?? undefined,
+          statutoryName: order.statutoryName ?? undefined,
           storeCustomerId: order.storeCustomerId ?? undefined,
         },
       });

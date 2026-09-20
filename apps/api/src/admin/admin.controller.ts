@@ -675,6 +675,7 @@ export class AdminController {
       allowGuestOrders?: boolean; orderingPaused?: boolean; closedStoreMessage?: string | null;
       minOrderAmountMinor?: number; deliveryFeeMinor?: number; deliveryEnabled?: boolean;
       pickupEnabled?: boolean; orderCutoff?: string | null; maxOpenOrdersPerCustomer?: number;
+      seniorPwdDiscountEnabled?: boolean;
     },
     @Headers("x-store-id") headerStoreId?: string,
   ) {

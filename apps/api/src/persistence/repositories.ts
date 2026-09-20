@@ -21,6 +21,8 @@ export interface StoreRecord {
   vatEnabled?: boolean;
   vatRateBp?: number;
   pricesIncludeVat?: boolean;
+  // P3b: statutory senior/PWD discount toggle
+  seniorPwdDiscountEnabled?: boolean;
   accentColor?: string | null;
   bannerText?: string | null;
   logoUrl?: string | null;
@@ -126,6 +128,10 @@ export interface OrderRecord {
   deliveryProvinceName?: string | null;
   deliveryCityName?: string | null;
   deliveryBarangayName?: string | null;
+  /** P3b: statutory 20% discount capture (senior/pwd + ID + cardholder name). */
+  statutoryType?: string | null;
+  statutoryId?: string | null;
+  statutoryName?: string | null;
   claimToken: string | null;
   items: {
     productId: string | null;

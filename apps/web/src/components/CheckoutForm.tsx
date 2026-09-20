@@ -75,6 +75,9 @@ export default function CheckoutForm({ cartToken, store, subtotalMinor, delivery
   const [paymentMethod, setPaymentMethod] = useState<"cod" | "credit">("cod");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // P3b: statutory 20% discount (Senior Citizen / PWD) + DPA consent
+  const [statutory, setStatutory] = useState<{ type: "" | "senior" | "pwd"; id: string; name: string }>({ type: "", id: "", name: "" });
+  const [consentGranted, setConsentGranted] = useState(false);
 
   // P1: PH address cascade
   const [regions, setRegions] = useState<PhRegionOption[]>([]);
@@ -225,6 +228,8 @@ export default function CheckoutForm({ cartToken, store, subtotalMinor, delivery
           voucherCode: form.voucherCode.trim() || undefined,
           customerToken: customerToken ?? undefined,
           loyaltyPoints: form.loyaltyPoints ? parseInt(form.loyaltyPoints, 10) : undefined,
+          consentGranted,
+          ...(statutory.type ? { statutoryType: statutory.type, statutoryId: statutory.id, statutoryName: statutory.name } : {}),
         }),
       });
       const data = await res.json();
@@ -387,6 +392,26 @@ export default function CheckoutForm({ cartToken, store, subtotalMinor, delivery
             <input className="form-control" value={form.notes} onChange={set("notes")} />
           </div>
 
+          {/* P3b: statutory 20% discount (Senior Citizen / PWD) */}
+          <div className="border rounded p-2 mb-3">
+            <div className="small fw-semibold mb-1">Statutory discount (20%)</div>
+            <div className="d-flex gap-2 mb-1">
+              <button type="button" className={`btn btn-sm ${statutory.type === "senior" ? "btn-primary" : "btn-outline-primary"}`} onClick={() => setStatutory({ type: statutory.type === "senior" ? "" : "senior", id: "", name: "" })}>Senior Citizen</button>
+              <button type="button" className={`btn btn-sm ${statutory.type === "pwd" ? "btn-primary" : "btn-outline-primary"}`} onClick={() => setStatutory({ type: statutory.type === "pwd" ? "" : "pwd", id: "", name: "" })}>PWD</button>
+            </div>
+            {statutory.type && (
+              <div className="row g-1">
+                <div className="col-5">
+                  <input className="form-control form-control-sm" placeholder="ID number" value={statutory.id} onChange={(e) => setStatutory({ ...statutory, id: e.target.value })} />
+                </div>
+                <div className="col-7">
+                  <input className="form-control form-control-sm" placeholder="Name on card" value={statutory.name} onChange={(e) => setStatutory({ ...statutory, name: e.target.value })} />
+                </div>
+                <small className="text-muted mt-1">20% off your subtotal — we&apos;ll verify your ID at {delivery ? "delivery" : "pickup"}.</small>
+              </div>
+            )}
+          </div>
+
           <div className="d-flex justify-content-between">
             <button type="button" className="btn btn-outline-secondary" onClick={onClose}>Back to cart</button>
             <button type="button" className="btn btn-primary" disabled={!form.customerName.trim() || !form.customerPhone.trim() || (delivery && (form.deliveryAddressLine1.trim().length < 5 || !addressComplete))}
@@ -448,15 +473,22 @@ export default function CheckoutForm({ cartToken, store, subtotalMinor, delivery
               <div className="d-flex justify-content-between"><span className="text-muted">{delivery ? "Delivery" : "Pickup"}</span>
                 <span>{delivery ? toPesos(fee) : "Free — self pickup"}</span></div>
               {form.voucherCode.trim() && <div className="d-flex justify-content-between text-success"><span>Voucher {form.voucherCode.toUpperCase()}</span><span>applies at checkout</span></div>}
+              {statutory.type && <div className="d-flex justify-content-between text-success"><span>Statutory discount ({statutory.type === "senior" ? "Senior" : "PWD"})</span><span>20% applies at checkout</span></div>}
               <hr className="my-2" />
               <div className="d-flex justify-content-between fw-bold"><span>Total</span><span>{toPesos(total)}</span></div>
               <div className="text-muted mt-1"><i className="bi bi-cash me-1"></i>{paymentMethod === "cod" ? "Cash on delivery" : "Pay on credit (utang)"}</div>
             </div>
           </div>
 
+          {/* P3b: DPA consent gate */}
+          <div className="form-check mb-2">
+            <input className="form-check-input" type="checkbox" id="dpconsent" checked={consentGranted} onChange={(e) => setConsentGranted(e.target.checked)} />
+            <label className="form-check-label small" htmlFor="dpconsent">I agree to the processing of my personal data for order fulfilment &amp; updates, per the Data Privacy Act (R.A. 10173).</label>
+          </div>
+
           <div className="d-flex justify-content-between">
             <button type="button" className="btn btn-outline-secondary" onClick={() => setStep(2)}>Back</button>
-            <button className="btn btn-success" type="button" disabled={submitting} onClick={submit}>
+            <button className="btn btn-success" type="button" disabled={submitting || !consentGranted} onClick={submit}>
               {submitting ? "Placing order…" : `Place order · ${toPesos(total)}`}
             </button>
           </div>
