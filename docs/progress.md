@@ -1,6 +1,18 @@
 # PINDIAN — Progress Log
 
-Updated: 2026-09-20 · **P3j: abandoned-cart recovery (expiry job + outbox)** · Active model: `deepseek/deepseek-v4-flash-0731` (openrouter), boilerplate tier `inclusionai/ling-3.0-flash`
+Updated: 2026-09-20 · **P4a: payment gateway interface + PayMongo sandbox + payment links + webhook lifecycle** · Active model: `deepseek/deepseek-v4-flash-0731` (openrouter), boilerplate tier `inclusionai/ling-3.0-flash`
+
+## P4a — Payments PH: gateway + payment links + webhook lifecycle (§16)
+
+| Item | Detail |
+|---|---|
+| Schema | `PaymentStatus` gains `RECEIVED`/`REVIEWED`/`REFUNDED`/`FAILED`. `Payment` gains `gateway`, `checkoutSessionId`, `checkoutUrl`, `status` (pending/paid/reviewed/failed), `proofData`, `proofMime`, `reviewedAt`, `reviewedBy`. New append-only `PaymentStatusHistory` (tenant-scoped). Migration `20260920130000_module_p4a_payments_gateway` (db-execute + registered). |
+| Gateway | `payments/gateway.ts` — `PaymentGateway` interface (`createCheckoutSession`, `verifyWebhookSignature`, `parseWebhookEvent`), `MockPaymentGateway` (deterministic, tests), `getGateway` registry. `payments/paymongo.adapter.ts` — `PayMongoGateway` D-marked `PENDING_CREDENTIALS`: `ready()` false without `PAYMONGO_SECRET_KEY`, returns sandbox placeholder URLs, HMAC-SHA256 webhook verification via `PAYMONGO_WEBHOOK_SECRET`, parses `payment.paid/failed`. **No raw card data ever touches the app — gateway-hosted checkout only.** |
+| Lifecycle | `PaymentsService.createGatewayPayment` (payment link → hosted checkout session + Payment row, no card data); `handleGatewayWebhook` (signature-verified, **idempotent** — a settled event is a no-op) moves order `PENDING→RECEIVED/FAILED` + writes history; `markPaymentReviewed` `RECEIVED→REVIEWED`; `refundOrder` now sets `REFUNDED` (+ history) and allows reviewed payments; `voidOrder` writes history. |
+| Endpoints | `POST /webhooks/paymongo` (public, signature-verified); `POST /admin/orders/:id/payment-link`; `POST /admin/orders/:id/payments/review`; `GET /admin/orders/:id/payments` now includes `statusHistory`. |
+| Tests | +4 `payments/p4-gateway.test.ts` (real DB): payment-link session + no-card-data; lifecycle pending→received→reviewed→refunded with 3 history rows + webhook idempotent replay; bad signature/payload rejected (order stays PENDING); failed webhook → FAILED. Ripple: `payments.service.test.ts` after() now sweeps `paymentStatusHistory`. |
+| Gate | api `tsc` 0 errors · **60/60 across the 6 touched files standalone** (p4-gateway 4, payments.service 10, split-payment 10, order-state 11, pos.service 21, pos-variant 4). Full-suite run 414 tests / 10 fail — the documented pre-existing flaky set (incl. the register-session class that hit `refundOrder`→`attachOpenSession` once; p4-gateway is green standalone). |
+| Commit | (this commit) |
 
 ## P3j — Abandoned-cart recovery
 

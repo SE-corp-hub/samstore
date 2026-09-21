@@ -79,7 +79,8 @@ export class PaymentsController {
     if (!rows) throw new HttpException({ type: "not_found", message: "Order not found" }, HttpStatus.NOT_FOUND);
     // N2: outstanding/settlement are computed from the rows, never stored.
     const summary = await this.splitSvc.summaryFor(storeId, id);
-    return { payments: rows, summary };
+    const statusHistory = await this.paymentsSvc.statusHistoryFor(id, storeId);
+    return { payments: rows, summary, statusHistory };
   }
 
   /** GET /admin/payment-methods — the store's tender methods (seeded on first use). */
@@ -106,6 +107,39 @@ export class PaymentsController {
     const result = await this.splitSvc.upsertMethod(storeId, dto);
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
     return { storeId, method: result.value };
+  }
+
+  /** POST /admin/orders/:id/payment-link — P4: create a gateway-hosted checkout (payment link). */
+  @Post("orders/:id/payment-link")
+  async paymentLink(
+    @Req() req: Request & { user?: AuthPrincipal },
+    @Param("id") id: string,
+    @Body() body: { gateway?: string; idempotencyKey?: string },
+    @Headers("x-store-id") headerStoreId?: string,
+  ) {
+    const user = req.user;
+    requireUser(user);
+    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
+    const result = await this.paymentsSvc.createGatewayPayment(id, storeId, body?.gateway ?? "paymongo", { idempotencyKey: body?.idempotencyKey });
+    if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
+    await cacheBust(cacheKey("orders", storeId));
+    return result.value;
+  }
+
+  /** POST /admin/orders/:id/payments/review — P4: mark a RECEIVED payment as reviewed. */
+  @Post("orders/:id/payments/review")
+  async reviewPayment(
+    @Req() req: Request & { user?: AuthPrincipal },
+    @Param("id") id: string,
+    @Headers("x-store-id") headerStoreId?: string,
+  ) {
+    const user = req.user;
+    requireUser(user);
+    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
+    const result = await this.paymentsSvc.markPaymentReviewed(id, storeId, user.sub);
+    if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
+    await cacheBust(cacheKey("orders", storeId));
+    return result.value;
   }
 
   /** PATCH /admin/orders/:id/void — void an unfulfilled POS sale. */

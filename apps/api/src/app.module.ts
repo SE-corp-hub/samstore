@@ -26,6 +26,7 @@ import { RegisterService, REGISTER_SERVICE } from "./registers/register.service.
 import { SplitPaymentService, SPLIT_PAYMENT_SERVICE } from "./payments/split-payment.service.js";
 import { PaymentsService, PAYMENTS_SERVICE } from "./payments/payments.service.js";
 import { PaymentsController } from "./payments/payments.controller.js";
+import { PaymentsWebhookController } from "./payments/payments-webhook.controller.js";
 import { CreditService, CREDIT_SERVICE } from "./credit/credit.service.js";
 import { CreditController } from "./credit/credit.controller.js";
 import { ExpensesService, EXPENSES_SERVICE } from "./expenses/expenses.service.js";
@@ -55,7 +56,7 @@ import {
 const CLAIM_SECRET = process.env.CLAIM_SIGNING_SECRET ?? "dev-only-in-memory-secret-0123456789";
 
 @Module({
-  controllers: [CheckoutController, PublicStoreController, CartController, AuthController, AdminController, OrderLookupController, CustomerAuthController, PosController, PaymentsController, CreditController, ExpensesController, PurchasesController, InventoryController, ReportsController, DeliveryController, HealthController, RegisterController, RolePermissionsController, AddressController],
+  controllers: [CheckoutController, PublicStoreController, CartController, AuthController, AdminController, OrderLookupController, CustomerAuthController, PosController, PaymentsController, PaymentsWebhookController, CreditController, ExpensesController, PurchasesController, InventoryController, ReportsController, DeliveryController, HealthController, RegisterController, RolePermissionsController, AddressController],
   providers: [
     {
       provide: DELIVERY_SERVICE,

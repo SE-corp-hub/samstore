@@ -50,6 +50,7 @@ after(async () => {
     const oid = orders.map((o) => o.id);
     if (oid.length) {
       await prisma.orderStatusHistory.deleteMany({ where: { orderId: { in: oid } } });
+      await prisma.paymentStatusHistory.deleteMany({ where: { orderId: { in: oid } } });
       await prisma.orderItem.deleteMany({ where: { orderId: { in: oid } } });
       await prisma.orderClaimToken.deleteMany({ where: { orderId: { in: oid } } });
       await prisma.payment.deleteMany({ where: { orderId: { in: oid } } });

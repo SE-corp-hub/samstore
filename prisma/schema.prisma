@@ -56,8 +56,12 @@ enum OrderStatus {
 
 enum PaymentStatus {
   PENDING // COD: awaiting collection at delivery
+  RECEIVED // P4: gateway notification or bank-transfer proof received (awaiting review)
   COLLECTED // COD: collected
+  REVIEWED // P4: operator reviewed the proof / gateway payment confirmed
   CANCELLED_REFUND // unused in slice; reserved
+  REFUNDED // P4: fully refunded
+  FAILED // P4: gateway payment failed
 }
 
 enum PlatformRole {
@@ -166,40 +170,41 @@ model Store {
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt
 
-  settings         StoreSettings?
-  publicLink       PublicStoreLink?
-  categories       Category[]
-  products         Product[]
-  stockLevels      StockLevel[]
-  productImages    ProductImage[]
-  productVariants  ProductVariant[] // P2a
-  productAddons    ProductAddon[] // P2a
-  productRelations ProductRelation[] // P3d: related/upsell links
-  carts            Cart[]
-  orders           Order[]
-  storeCustomers   StoreCustomer[]
-  memberships      StoreMembership[]
-  statusHistory    StoreStatusHistory[]
-  userStores       UserStore[]
-  counters         StoreCounter[]
-  auditLogs        AuditLog[]
-  vouchers         Voucher[]
-  loyaltyEntries   LoyaltyEntry[]
-  registers        Register[] // N1: cash drawer registers (one per store today)
-  registerSessions RegisterSession[]
-  cashMovements    CashMovement[]
-  paymentMethods   PaymentMethod[] // N2: per-store tender methods
-  notifications    NotificationLog[]
-  warehouses       Warehouse[]
-  stockTransfers   StockTransfer[]
-  payments         Payment[]
-  creditEntries    CreditEntry[]
-  expenses         Expense[]
-  purchases        Purchase[]
-  suppliers        Supplier[] // M6: vendor master per store
-  rolePermissions  RolePermission[] // M7: roles × permissions deny matrix
-  stockMovements   StockMovement[]
-  outboxEvents     OutboxEvent[]
+  settings               StoreSettings?
+  publicLink             PublicStoreLink?
+  categories             Category[]
+  products               Product[]
+  stockLevels            StockLevel[]
+  productImages          ProductImage[]
+  productVariants        ProductVariant[] // P2a
+  productAddons          ProductAddon[] // P2a
+  productRelations       ProductRelation[] // P3d: related/upsell links
+  carts                  Cart[]
+  orders                 Order[]
+  storeCustomers         StoreCustomer[]
+  memberships            StoreMembership[]
+  statusHistory          StoreStatusHistory[]
+  userStores             UserStore[]
+  counters               StoreCounter[]
+  auditLogs              AuditLog[]
+  vouchers               Voucher[]
+  loyaltyEntries         LoyaltyEntry[]
+  registers              Register[] // N1: cash drawer registers (one per store today)
+  registerSessions       RegisterSession[]
+  cashMovements          CashMovement[]
+  paymentMethods         PaymentMethod[] // N2: per-store tender methods
+  notifications          NotificationLog[]
+  warehouses             Warehouse[]
+  stockTransfers         StockTransfer[]
+  payments               Payment[]
+  creditEntries          CreditEntry[]
+  expenses               Expense[]
+  purchases              Purchase[]
+  suppliers              Supplier[] // M6: vendor master per store
+  rolePermissions        RolePermission[] // M7: roles × permissions deny matrix
+  stockMovements         StockMovement[]
+  outboxEvents           OutboxEvent[]
+  paymentStatusHistories PaymentStatusHistory[]
 }
 
 model StoreSettings {
@@ -568,6 +573,15 @@ model Payment {
   createdBy         String? // actor user id
   signatureData     String? // v4: finger-drawn signature (data-URL PNG) for utang collections
   signatureAt       DateTime? // v4: when the signature was captured
+  // P4: online payments — gateway reference, hosted-checkout URL, proof, review trail.
+  gateway           String? // "paymongo" | "bank_transfer" | null
+  checkoutSessionId String? // gateway session reference
+  checkoutUrl       String? // gateway-hosted checkout URL (customer pays there)
+  status            String           @default("pending") // gateway lifecycle: pending|paid|reviewed|failed
+  proofData         String? // bank-transfer proof (base64 image; validated size/type)
+  proofMime         String? // image/png | image/jpeg
+  reviewedAt        DateTime?
+  reviewedBy        String?
   registerSessionId String? // N1: cash drawer shift this tender belongs to (null = off-counter)
   registerSession   RegisterSession? @relation(fields: [registerSessionId], references: [id])
 
@@ -575,6 +589,28 @@ model Payment {
   @@index([orderId])
   @@index([registerSessionId])
   @@index([storeId, idempotencyKey])
+}
+
+// ─────────────────────────── Payment status history (P4) ───────────────────────────
+// Append-only audit of order payment-status transitions (pending→received→reviewed→
+// collected→refunded), tenant-scoped like every store-owned table.
+
+model PaymentStatusHistory {
+  id         String   @id @default(cuid())
+  storeId    String
+  store      Store    @relation(fields: [storeId], references: [id])
+  orderId    String
+  order      Order    @relation(fields: [storeId, orderId], references: [storeId, id])
+  paymentId  String?
+  fromStatus String
+  toStatus   String
+  reason     String?
+  actorType  String? // gateway | admin | system
+  actorId    String?
+  createdAt  DateTime @default(now())
+
+  @@index([storeId, orderId, createdAt])
+  @@index([storeId, paymentId])
 }
 
 // ─────────────────────────── Payment methods (N2) ───────────────────────────
@@ -878,18 +914,19 @@ model Order {
   createdAt            DateTime             @default(now())
   updatedAt            DateTime             @updatedAt
 
-  items             OrderItem[]
-  statusHistory     OrderStatusHistory[]
-  stockMovements    StockMovement[]
-  redemptions       VoucherRedemption[]
-  claimTokens       OrderClaimToken[]
-  payments          Payment[]
-  creditEntries     CreditEntry[]
-  storeCustomerId   String? // linked customer account (optional, guests = null)
-  storeCustomer     StoreCustomer?       @relation(fields: [storeCustomerId], references: [id])
-  loyaltyEntries    LoyaltyEntry[]
-  registerSessionId String? // N1: the cash drawer shift this counter sale belongs to (null = online/off-counter)
-  registerSession   RegisterSession?     @relation(fields: [registerSessionId], references: [id])
+  items                  OrderItem[]
+  statusHistory          OrderStatusHistory[]
+  stockMovements         StockMovement[]
+  redemptions            VoucherRedemption[]
+  claimTokens            OrderClaimToken[]
+  payments               Payment[]
+  creditEntries          CreditEntry[]
+  storeCustomerId        String? // linked customer account (optional, guests = null)
+  storeCustomer          StoreCustomer?         @relation(fields: [storeCustomerId], references: [id])
+  loyaltyEntries         LoyaltyEntry[]
+  registerSessionId      String? // N1: the cash drawer shift this counter sale belongs to (null = online/off-counter)
+  registerSession        RegisterSession?       @relation(fields: [registerSessionId], references: [id])
+  paymentStatusHistories PaymentStatusHistory[]
 
   @@unique([storeId, id]) // M3: composite target for tenant-consistent children
   @@index([storeId, status, createdAt])

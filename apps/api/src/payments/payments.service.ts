@@ -6,9 +6,11 @@
 // - Refund: negative Payment + order → CANCELLED with reason (audited).
 
 import { prisma } from "../persistence/prisma-repositories.js";
+import { randomId } from "../persistence/repositories.js";
 import { restoreStock } from "../domain/movements.js";
 import { RegisterService } from "../registers/register.service.js";
 import { LoyaltyService } from "../loyalty/loyalty.service.js";
+import { getGateway } from "./gateway.js";
 import type { ApiError } from "@sam-store/contracts";
 
 export type PaymentResult<T> = { ok: true; value: T } | { ok: false; error: ApiError };
@@ -52,6 +54,113 @@ export class PaymentsService {
       },
     });
     return { ok: true, value: { id: payment.id } };
+  }
+
+  // ─────────────────────────────── P4: gateway + payment links ───────────────────────────────
+
+  /** Create a gateway-hosted checkout (payment link) for an order. No card data stored. */
+  async createGatewayPayment(
+    orderId: string,
+    storeId: string,
+    gatewayName: string,
+    opts: { idempotencyKey?: string } = {},
+  ): Promise<PaymentResult<{ paymentId: string; checkoutUrl: string; checkoutSessionId: string }>> {
+    const order = await prisma.order.findFirst({ where: { id: orderId, storeId } });
+    if (!order) return { ok: false, error: { type: "not_found", message: "Order not found" } };
+    if (order.paymentStatus === "COLLECTED" || order.paymentStatus === "REFUNDED" || order.paymentStatus === "REVIEWED") {
+      return { ok: false, error: { type: "conflict", message: "Order is already settled" } };
+    }
+    const gateway = getGateway(gatewayName);
+    const idempotencyKey = opts.idempotencyKey ?? `pay-${randomId()}`;
+    const session = await gateway.createCheckoutSession({
+      amountMinor: order.totalMinor,
+      currency: order.currencyCode,
+      idempotencyKey,
+      referenceId: order.id,
+      description: `Order ${order.orderNumber}`,
+    });
+    const payment = await prisma.payment.create({
+      data: {
+        orderId,
+        storeId,
+        method: gatewayName,
+        amountMinor: order.totalMinor,
+        idempotencyKey,
+        gateway: gatewayName,
+        checkoutSessionId: session.checkoutSessionId,
+        checkoutUrl: session.checkoutUrl,
+        status: "pending",
+        type: "payment",
+      },
+    });
+    return { ok: true, value: { paymentId: payment.id, checkoutUrl: session.checkoutUrl, checkoutSessionId: session.checkoutSessionId } };
+  }
+
+  /** Process a gateway webhook — verified, parsed, IDEMPOTENT (a settled event is a no-op). */
+  async handleGatewayWebhook(
+    gatewayName: string,
+    rawBody: string,
+    signature: string | undefined,
+    payload: unknown,
+  ): Promise<PaymentResult<{ processed: boolean; paymentId?: string }>> {
+    const gateway = getGateway(gatewayName);
+    if (!gateway.verifyWebhookSignature(rawBody, signature)) {
+      return { ok: false, error: { type: "unauthorized", message: "Invalid webhook signature" } };
+    }
+    const event = gateway.parseWebhookEvent(payload);
+    if (!event) return { ok: false, error: { type: "validation", errors: ["Unparseable webhook payload"] } };
+
+    const payment = await prisma.payment.findFirst({ where: { orderId: event.referenceId, gateway: gatewayName } });
+    if (!payment) return { ok: false, error: { type: "not_found", message: "Payment session not found" } };
+    const target = event.paid ? "paid" : "failed";
+    if (payment.status === target) {
+      return { ok: true, value: { processed: false, paymentId: payment.id } }; // idempotent replay
+    }
+    const order = await prisma.order.findUnique({ where: { id: event.referenceId } });
+    if (!order) return { ok: false, error: { type: "not_found", message: "Order not found" } };
+
+    await prisma.$transaction(async (tx) => {
+      await tx.payment.update({ where: { id: payment.id }, data: { status: target } });
+      const to = event.paid ? "RECEIVED" : "FAILED";
+      await tx.order.update({ where: { id: order.id }, data: { paymentStatus: to } });
+      await tx.paymentStatusHistory.create({
+        data: {
+          storeId: order.storeId,
+          orderId: order.id,
+          paymentId: payment.id,
+          fromStatus: order.paymentStatus,
+          toStatus: to,
+          reason: event.eventType,
+          actorType: "gateway",
+          actorId: gatewayName,
+        },
+      });
+    });
+    return { ok: true, value: { processed: true, paymentId: payment.id } };
+  }
+
+  /** Mark a RECEIVED payment as reviewed by the operator (bank-transfer/gateway proof). */
+  async markPaymentReviewed(orderId: string, storeId: string, actorId: string): Promise<PaymentResult<{ id: string; status: string }>> {
+    const order = await prisma.order.findFirst({ where: { id: orderId, storeId } });
+    if (!order) return { ok: false, error: { type: "not_found", message: "Order not found" } };
+    if (order.paymentStatus !== "RECEIVED") {
+      return { ok: false, error: { type: "conflict", message: "Only received payments can be reviewed" } };
+    }
+    await prisma.$transaction(async (tx) => {
+      await tx.order.update({ where: { id: orderId }, data: { paymentStatus: "REVIEWED" } });
+      await tx.paymentStatusHistory.create({
+        data: { storeId, orderId, paymentId: null, fromStatus: "RECEIVED", toStatus: "REVIEWED", reason: null, actorType: "admin", actorId },
+      });
+    });
+    return { ok: true, value: { id: orderId, status: "REVIEWED" } };
+  }
+
+  /** Payment status history for an order (newest first). */
+  async statusHistoryFor(orderId: string, storeId: string) {
+    return prisma.paymentStatusHistory.findMany({
+      where: { orderId, storeId },
+      orderBy: { createdAt: "desc" },
+    });
   }
 
   /** Receipt view for an order (deterministic). */
@@ -153,6 +262,9 @@ export class PaymentsService {
       await tx.orderStatusHistory.create({
         data: { orderId, storeId, fromStatus: order.status, toStatus: "CANCELLED", reason: reason?.trim() ?? null, actorType: "pos_void", actorId },
       });
+      await tx.paymentStatusHistory.create({
+        data: { storeId, orderId, paymentId: null, fromStatus: order.paymentStatus, toStatus: "CANCELLED_REFUND", reason: `void: ${reason?.trim() ?? "same-day void"}`.slice(0, 200), actorType: "admin", actorId },
+      });
     });
     // P3h: claw back points earned for this order (idempotent; no-op when none earned).
     await this.loyalty.reverseForOrder(orderId, "order voided");
@@ -163,7 +275,9 @@ export class PaymentsService {
   async refundOrder(orderId: string, storeId: string, actorId: string, amountMinor?: number, reason?: string): Promise<PaymentResult<{ id: string; status: string }>> {
     const order = await prisma.order.findFirst({ where: { id: orderId, storeId } });
     if (!order) return { ok: false, error: { type: "not_found", message: "Order not found" } };
-    if (order.paymentStatus !== "COLLECTED") return { ok: false, error: { type: "conflict", message: "Only collected orders can be refunded" } };
+    if (order.paymentStatus !== "COLLECTED" && order.paymentStatus !== "REVIEWED") {
+      return { ok: false, error: { type: "conflict", message: "Only collected or reviewed payments can be refunded" } };
+    }
     if (order.status === "CANCELLED") return { ok: false, error: { type: "conflict", message: "Order is already cancelled (refunded)" } };
     const refundAmount = amountMinor ?? order.totalMinor;
     if (!Number.isInteger(refundAmount) || refundAmount <= 0) {
@@ -186,9 +300,12 @@ export class PaymentsService {
       await tx.payment.create({
         data: { orderId, storeId, method: "cash", amountMinor: -refundAmount, note: `REFUND: ${reason?.trim() ?? "customer refund"}`.slice(0, 200), type: "refund", createdBy: actorId, registerSessionId },
       });
-      await tx.order.update({ where: { id: orderId }, data: { status: "CANCELLED", paymentStatus: "CANCELLED_REFUND" } });
+      await tx.order.update({ where: { id: orderId }, data: { status: "CANCELLED", paymentStatus: "REFUNDED" } });
       await tx.orderStatusHistory.create({
         data: { orderId, storeId, fromStatus: order.status, toStatus: "CANCELLED", reason: reason?.trim() ?? null, actorType: "pos_refund", actorId },
+      });
+      await tx.paymentStatusHistory.create({
+        data: { storeId, orderId, paymentId: null, fromStatus: order.paymentStatus, toStatus: "REFUNDED", reason: `refund: ${reason?.trim() ?? "customer refund"}`.slice(0, 200), actorType: "admin", actorId },
       });
     });
     // P3h: claw back points earned for this order (idempotent; no-op when none earned).
