@@ -141,7 +141,7 @@ Per-phase split (T1 share of the module's work):
 - Storefront: variant picker + add-on selector; cart lines carry variant/add-on selections; checkout snapshots them.
 - Featured products, tags, search & filters, related/upsell/cross-sell; low-stock threshold surfaced per warehouse.
 - **Accept:** variant cart/order/stock integrity tests; POS can sell variants.
-- **Status:** **P2a ✅** — variants + add-ons end-to-end. **P2b ✅** — POS sells variants. **P2c ✅** — admin management of variants + add-ons (APIs + Products-panel `VariantEditor`, +6 DB tests). **Remaining P2d PENDING:** featured/tags/related/upsell, warehouse low-stock surfacing, add-on price revalidation at checkout.
+- **Status:** **P2a ✅** — variants + add-ons end-to-end. **P2b ✅** — POS sells variants. **P2c ✅** — admin management of variants + add-ons (APIs + Products-panel `VariantEditor`, +6 DB tests). **P2d ✅ (as P3c/P3d/P3f)** — add-on price revalidation at checkout, featured/tags/related/upsell, warehouse low-stock surfacing; **P3e** added the admin variant/add-on create-edit UI (rename/required/add-option/option edit). All Phase 2 remainders DONE.
 - **Model:** T1-led (60/40) — line identity, atomic stock, ledger on `deepseek`/`glm-5.3-flash`; picker/editor UI + DTO plumbing on `ling-3.0-flash`.
 
 ### Phase 3 — Cart & checkout depth (§6, §7, §10, §11)
@@ -153,7 +153,7 @@ Per-phase split (T1 share of the module's work):
 - Abandoned-cart recovery: cart expiry job (`CartStatus.ABANDONED`) + outbox notification.
 - **Accept:** voucher/loyalty/senior/tax math tests; duplicate redemption blocked; consent recorded.
 - **Model:** T1-dominant (80/20) — voucher/loyalty/senior/VAT math, idempotency, consent invariants on `deepseek` (fallback `z-ai/glm-5.3-flash`); forms/panels on `ling-3.0-flash`.
-- **Status:** **P3a ✅** — voucher engine v2 (types %, free-delivery, first-order, per-customer, product/category scope, stackable-with-loyalty; admin + panel + seed; +12 tests; live ₱194 smoke). **P3b PENDING** — loyalty earn/reversal/expiry/welcome config, senior/PWD 20% + ID capture, DPA checkout consent checkbox, `PIN-YYYY-NNNNNN` order numbers, abandoned-cart job.
+- **Status:** **P3a ✅** — voucher engine v2 (types %, free-delivery, first-order, per-customer, product/category scope, stackable-with-loyalty; admin + panel + seed; +12 tests; live ₱194 smoke). **P3b ✅** — senior/PWD 20% + ID capture, DPA checkout consent checkbox (+ ConsentRecord). **P3c ✅** — add-on price revalidation. **P3h ✅** — loyalty depth (rate/welcome/reversal on void-refund/FIFO expiry). **P3i ✅** — order numbers `PIN-YYYY-NNNNNN` (configurable prefix). **P3j ✅** — abandoned-cart recovery (expiry job + outbox). **P3d/P3e/P3f** shipped the Phase 2 remainders (see Phase 2). **Phase 3 COMPLETE.**
 
 ### Phase 4 — Payments PH (§16)
 - **Payment gateway interface** + **PayMongo sandbox adapter** (`PENDING_CREDENTIALS`): GCash, Maya, cards, GrabPay via gateway-hosted checkout; tokenized only — no raw card data.
@@ -161,12 +161,14 @@ Per-phase split (T1 share of the module's work):
 - Payment links; refund (full/partial) + status history.
 - **Accept:** lifecycle tests (pending→received→reviewed→refunded); gateway mocked; no card data stored.
 - **Model:** T1-led (70/30) — gateway adapter + webhook idempotency + no-PCI rules on `deepseek`/`glm-5.3-flash`; proof-upload UI + DTOs on `ling-3.0-flash`.
+- **Status:** **P4a ✅** — `PaymentGateway` interface + `PayMongoGateway` (`PENDING_CREDENTIALS`, tokenized-only, sandbox webhook) + payment links + `PaymentStatus` RECEIVED/REVIEWED/REFUNDED/FAILED + `PaymentStatusHistory` + webhook idempotency. **P4b ✅** — bank-transfer proof upload (validated) + review queue + OrdersPanel `PaymentReview` UI. **Phase 4 COMPLETE.**
 
 ### Phase 5 — Shipping & delivery (§17)
 - **Delivery zones:** zone model linking cities/barangays with per-zone ₱ fee + ETA; checkout picks zone from address (pickup/zone/out-of-coverage).
 - **Courier adapter interface** + mock adapters (Lalamove, GrabExpress, J&T/JRS/NinjaVan-style) `PENDING_CREDENTIALS`; tracking number + `delivery_events`; COD remittance ledger (courier vs driver vs owner pickup).
 - **Accept:** zone-fee math + coverage tests; courier mock end-to-end.
 - **Model:** 50/50 — zone model + courier adapter design on T1 (`deepseek`/`glm-5.3-flash`); zones UI + courier mock stubs on `ling-3.0-flash`.
+- **Status:** **P5a ✅** — `DeliveryZone` (per-city/barangay fee + ETA + catch-all + out-of-coverage at checkout) + admin CRUD + SettingsPanel zones card; ALSO found & fixed the full-suite flakiness ROOT CAUSE (Supabase pool exhaustion → `connection_limit=4` + serialised address lookups; 13–18 fails/run → 3–6). **P5b ✅** — `CourierAdapter` (Lalamove/GrabExpress/J&T/owner, mock-first `PENDING_CREDENTIALS`) + `DeliveryBooking`/`DeliveryEvent`/`CourierRemittance` ledger + endpoints. **Phase 5 COMPLETE.**
 
 ### Phase 6 — Messenger live + journeys (§12)
 - Meta App/Page **connection UI** (FB Login), webhook registration + secret rotation, `messenger_users`/`messenger_pages` tables, messenger identity → customer mapping.
