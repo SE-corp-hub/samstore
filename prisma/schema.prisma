@@ -124,6 +124,7 @@ model User {
   transfersRequested StockTransfer[]        @relation("TransferRequestedBy")
   transfersApproved  StockTransfer[]        @relation("TransferApprovedBy")
   passwordResets     PasswordResetHistory[]
+  conversations      Conversation[]
 }
 
 model UserStore {
@@ -183,6 +184,8 @@ model Store {
   deliveryBookings       DeliveryBooking[] // P5b: courier bookings + COD remittances
   messengerPage          MessengerPage? // P6a
   messengerUsers         MessengerUser[] // P6a
+  conversations          Conversation[] // P7: chatbot + agent conversations
+  cannedReplies          CannedReply[] // P7: agent canned replies
   carts                  Cart[]
   orders                 Order[]
   storeCustomers         StoreCustomer[]
@@ -540,6 +543,65 @@ model MessengerUser {
 
   @@unique([storeId, psid])
   @@index([storeId, optedIn])
+}
+
+// ─────────────────────────────── Chatbot conversations (P7) ───────────────────────────────
+// A conversation per customer contact (Messenger PSID or web). The chatbot engine
+// answers live-data-only; on low confidence it falls back to "I'll ask our staff"
+// and the conversation awaits an agent (unreadCount). Agent replies flip mode to
+// AGENT; every message carries the detected intent + confidence for the audit trail.
+
+model Conversation {
+  id              String   @id @default(cuid())
+  storeId         String
+  store           Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  channel         String   @default("messenger") // messenger | web
+  contactPsid     String? // messenger PSID
+  customerId      String?
+  status          String   @default("OPEN") // OPEN | AGENT | RESOLVED
+  mode            String   @default("BOT") // BOT | AGENT | MIXED
+  assignedAgentId String?
+  assignedAgent   User?    @relation(fields: [assignedAgentId], references: [id])
+  unreadCount     Int      @default(0)
+  title           String?
+  lastActivityAt  DateTime @default(now())
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  messages Message[]
+
+  @@unique([storeId, contactPsid]) // one open thread per contact per store
+  @@index([storeId, status, lastActivityAt])
+}
+
+model Message {
+  id             String       @id @default(cuid())
+  storeId        String
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender         String // customer | bot | agent
+  senderId       String? // psid | agent user id | "bot"
+  body           String
+  intent         String? // detected intent (audit)
+  confidence     Float? // 0..1 (audit)
+  createdAt      DateTime     @default(now())
+
+  @@index([storeId, conversationId, createdAt])
+}
+
+// ─────────────────────────────── Canned replies (P7) ───────────────────────────────
+// Store-owned quick replies for agents. Seeded with defaults; CRUD-managed.
+
+model CannedReply {
+  id        String   @id @default(cuid())
+  storeId   String
+  store     Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  label     String
+  body      String
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@unique([storeId, label])
 }
 
 // ─────────────────────────────── Warehouses / inventory ───────────────────────────────

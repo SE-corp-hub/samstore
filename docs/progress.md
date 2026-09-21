@@ -1,6 +1,17 @@
 # PINDIAN — Progress Log
 
-Updated: 2026-09-20 · **P6b: Messenger journey engine (§12)** · Active model: `deepseek/deepseek-v4-flash-0731` (openrouter), boilerplate tier `inclusionai/ling-3.0-flash`
+Updated: 2026-09-20 · **P7a: AI chatbot engine (§13)** · Active model: `deepseek/deepseek-v4-flash-0731` (openrouter), boilerplate tier `inclusionai/ling-3.0-flash`
+
+## P7a — Chatbot engine (live-data-only, Taglish, fallback→handoff)
+
+| Item | Detail |
+|---|---|
+| Schema | `Conversation` (storeId, channel, contactPsid, customerId, status OPEN/AGENT/RESOLVED, mode BOT/AGENT, assignedAgentId, unreadCount, title, lastActivityAt) + `Message` (sender customer/bot/agent, body, **intent + confidence audit**) + `CannedReply` (store-owned). Migration `20260920170000_module_p7a_chatbot` (db-execute + registered). |
+| Engine | `chatbot/engine.ts` — PURE. `classify` (Taglish keyword sets → greeting/menu/order_status/store_hours/store_info/loyalty/voucher; order-token regex; plausible product query; else fallback) + `answer` (live-context-only) + `answerProducts` (live catalog; **null on no-match → hand off, never invented**) + `FALLBACK_REPLY`. Confidence + `CONFIDENCE_THRESHOLD`. |
+| Service | `ChatbotService.handleCustomerMessage` — find-or-create Conversation (psid thread / customer thread), append customer + bot Messages (intent/confidence audit), on fallback or product-miss → `FALLBACK_REPLY` ("I'll ask our staff"), conversation → **AGENT** + unreadCount++. `POST /admin/chatbot/message` (test/compose entry; production entry is the Messenger webhook, `PENDING_CREDENTIALS`). Live order lookup by claim token (read-only). |
+| Tests | +4 `chatbot/chatbot.test.ts`: classify (Taglish intents + confidence + token), answers LIVE-DATA-ONLY (menu/hours live, unknown order never invented, product detail live price/stock, no-match → null), fallback hands off (AGENT + unread + 2-message audit with intent+confidence), product query answered from live catalog with audit. |
+| Gate | api `tsc` 0 errors · full-suite **440 tests / 3 fail** — the same 3 pre-existing residuals (worker/outbox ×2, pre-order), none this module's. |
+| Commit | (this commit) |
 
 ## P6b — Messenger journey engine
 
