@@ -304,10 +304,10 @@ export class PosService {
     }
     const finalTotal = Math.max(0, totals.totalMinor - discountMinor);
 
-    const store = await prisma.store.findUnique({ where: { id: storeId } });
+    const store = await prisma.store.findUnique({ where: { id: storeId }, include: { settings: true } });
     if (!store) return { ok: false, error: { type: "not_found", message: "Store not found" } };
     const seq = await this.sequences.nextOrderSequence(storeId);
-    const orderNumber = formatOrderNumber(store.slug, seq);
+    const orderNumber = formatOrderNumber(store.slug, seq, { prefix: store.settings?.orderNumberPrefix ?? undefined });
     const id = randomId();
 
     // M1: validate the tender list before opening the transaction (a counter sale settles in full).
@@ -361,10 +361,10 @@ export class PosService {
     const loaded = await this.loadProducts(storeId, input.items);
     if (!loaded.ok) return loaded;
     const { storeCustomerId: custId, displayName } = await this.resolveCustomer(storeId, input);
-    const store = await prisma.store.findUnique({ where: { id: storeId } });
+    const store = await prisma.store.findUnique({ where: { id: storeId }, include: { settings: true } });
     if (!store) return { ok: false, error: { type: "not_found", message: "Store not found" } };
     const seq = await this.sequences.nextOrderSequence(storeId);
-    const orderNumber = formatOrderNumber(store.slug, seq);
+    const orderNumber = formatOrderNumber(store.slug, seq, { prefix: store.settings?.orderNumberPrefix ?? undefined });
     const id = randomId();
     const { lines, totals } = loaded.value;
 
@@ -441,10 +441,10 @@ export class PosService {
     if (!custId) {
       return { ok: false, error: { type: "validation", errors: ["Pre-orders require a linked customer"] } };
     }
-    const store = await prisma.store.findUnique({ where: { id: storeId } });
+    const store = await prisma.store.findUnique({ where: { id: storeId }, include: { settings: true } });
     if (!store) return { ok: false, error: { type: "not_found", message: "Store not found" } };
     const seq = await this.sequences.nextOrderSequence(storeId);
-    const orderNumber = formatOrderNumber(store.slug, seq);
+    const orderNumber = formatOrderNumber(store.slug, seq, { prefix: store.settings?.orderNumberPrefix ?? undefined });
     const id = randomId();
     const { lines, totals } = loaded.value;
 

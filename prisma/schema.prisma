@@ -243,6 +243,9 @@ model StoreSettings {
   loyaltyPointsPerPeso      Int      @default(1)
   loyaltyWelcomeBonusPoints Int      @default(0)
   loyaltyExpiryMonths       Int      @default(0)
+  // P3i: order-number prefix — when set, numbers read PIN-YYYY-NNNNNN; null keeps the
+  // legacy <SLUG>-NNNNNN format (backward compatible).
+  orderNumberPrefix         String?
   createdAt                 DateTime @default(now())
   updatedAt                 DateTime @updatedAt
 }

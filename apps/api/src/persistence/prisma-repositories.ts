@@ -46,6 +46,7 @@ type StoreWithSettings = NonNullable<Awaited<ReturnType<PrismaClient["store"]["f
     vatRateBp: number;
     pricesIncludeVat: boolean;
     seniorPwdDiscountEnabled: boolean;
+    orderNumberPrefix: string | null;
   } | null;
 };
 
@@ -72,6 +73,7 @@ export class PrismaStoreRepository implements StoreRepository {
       vatRateBp: settings?.vatRateBp ?? 1200,
       pricesIncludeVat: settings?.pricesIncludeVat ?? true,
       seniorPwdDiscountEnabled: settings?.seniorPwdDiscountEnabled ?? false,
+      orderNumberPrefix: settings?.orderNumberPrefix ?? null,
       accentColor: s.accentColor,
       bannerText: s.bannerText,
       logoUrl: s.logoUrl,

@@ -373,7 +373,7 @@ export class CheckoutService {
 
     // 7. Order number from store-scoped sequence
     const seq = await this.sequences.nextOrderSequence(store.id);
-    const orderNumber = formatOrderNumber(store.slug, seq);
+    const orderNumber = formatOrderNumber(store.slug, seq, { prefix: store.orderNumberPrefix ?? undefined });
 
     // 8. Immutable line items (names/SKUs snapshot at purchase time)
     const items = revalidated.lines.map((line) => {

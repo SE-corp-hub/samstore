@@ -702,6 +702,7 @@ export class AdminController {
       seniorPwdDiscountEnabled?: boolean;
       messengerConnected?: boolean; messengerPageId?: string | null;
       loyaltyPointsPerPeso?: number; loyaltyWelcomeBonusPoints?: number; loyaltyExpiryMonths?: number;
+      orderNumberPrefix?: string | null;
     },
     @Headers("x-store-id") headerStoreId?: string,
   ) {

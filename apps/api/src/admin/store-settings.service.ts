@@ -37,6 +37,8 @@ export interface StoreSettingsInput {
   loyaltyPointsPerPeso?: number;
   loyaltyWelcomeBonusPoints?: number;
   loyaltyExpiryMonths?: number;
+  // P3i: order-number prefix (PIN-YYYY-NNNNNN when set).
+  orderNumberPrefix?: string | null;
 }
 
 export class StoreSettingsService {
@@ -87,6 +89,7 @@ export class StoreSettingsService {
         loyaltyPointsPerPeso: store.settings?.loyaltyPointsPerPeso ?? 1,
         loyaltyWelcomeBonusPoints: store.settings?.loyaltyWelcomeBonusPoints ?? 0,
         loyaltyExpiryMonths: store.settings?.loyaltyExpiryMonths ?? 0,
+        orderNumberPrefix: store.settings?.orderNumberPrefix ?? null,
       },
     };
   }
@@ -136,6 +139,7 @@ export class StoreSettingsService {
         ...(input.loyaltyPointsPerPeso !== undefined ? { loyaltyPointsPerPeso: input.loyaltyPointsPerPeso } : {}),
         ...(input.loyaltyWelcomeBonusPoints !== undefined ? { loyaltyWelcomeBonusPoints: input.loyaltyWelcomeBonusPoints } : {}),
         ...(input.loyaltyExpiryMonths !== undefined ? { loyaltyExpiryMonths: input.loyaltyExpiryMonths } : {}),
+        ...(input.orderNumberPrefix !== undefined ? { orderNumberPrefix: input.orderNumberPrefix } : {}),
       },
       create: {
         storeId,
@@ -161,6 +165,7 @@ export class StoreSettingsService {
         loyaltyPointsPerPeso: input.loyaltyPointsPerPeso ?? 1,
         loyaltyWelcomeBonusPoints: input.loyaltyWelcomeBonusPoints ?? 0,
         loyaltyExpiryMonths: input.loyaltyExpiryMonths ?? 0,
+        orderNumberPrefix: input.orderNumberPrefix ?? null,
       },
     });
     return { ok: true, value: { id: storeId } };

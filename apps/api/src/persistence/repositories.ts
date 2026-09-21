@@ -23,6 +23,8 @@ export interface StoreRecord {
   pricesIncludeVat?: boolean;
   // P3b: statutory senior/PWD discount toggle
   seniorPwdDiscountEnabled?: boolean;
+  /** P3i: order-number prefix — when set, numbers read PREFIX-YYYY-NNNNNN. */
+  orderNumberPrefix?: string | null;
   accentColor?: string | null;
   bannerText?: string | null;
   logoUrl?: string | null;

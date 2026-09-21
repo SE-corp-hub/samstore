@@ -1,6 +1,19 @@
 # PINDIAN — Progress Log
 
-Updated: 2026-09-20 · **P3h: loyalty depth — rate/welcome config, reversal on voids/refunds, FIFO expiry** · Active model: `deepseek/deepseek-v4-flash-0731` (openrouter), boilerplate tier `inclusionai/ling-3.0-flash`
+Updated: 2026-09-20 · **P3i: order numbers — PIN-YYYY-NNNNNN** · Active model: `deepseek/deepseek-v4-flash-0731` (openrouter), boilerplate tier `inclusionai/ling-3.0-flash`
+
+## P3i — Order numbers (`PIN-YYYY-NNNNNN`, configurable prefix)
+
+| Item | Detail |
+|---|---|
+| Gap fixed | Order numbers were hard-fixed to `<SLUG6>-NNNNNN` (e.g. `SAMSTO-000001`). The plan requires `PIN-YYYY-NNNNNN` via the per-store counter with a configurable prefix. |
+| Schema | `StoreSettings.orderNumberPrefix String?` — when set, numbers read `PREFIX-YYYY-NNNNNN`; null keeps the legacy slug format (backward compatible). Migration `20260920120000_module_p3i_order_numbers` (db-execute + registered). |
+| Domain | `formatOrderNumber(storeSlug, seq, { prefix? })` — configured prefix → `<PREFIX>-<YYYY>-<6-digit>` (year embedded from the calendar year); blank/empty prefix falls back to the legacy slug format. Prefix upper-cased, stripped, capped at 6 chars. |
+| Callers | `checkout.service` + POS `sell`/`hold`/`pre-order` pass the store's prefix (POS store reads now `include: { settings: true }`). `StoreRecord` carries `orderNumberPrefix`. |
+| Admin/Web | SettingsPanel **Order numbers** card (Orders tab) — prefix input + explanatory copy. Settings GET/PATCH carry the field. |
+| Tests | +7: `domain/order-number.test.ts` +4 (year embedded, upper/strip/truncate, blank falls back, seq validation) and `checkout/order-number.test.ts` +2 (real DB: configured → `PIN-YYYY-NNNNNN` through checkout; unset → legacy slug format). DB fixture's `after()` uses the resilient sweeper (try/catch + re-sweep of outbox/notification rows) after a full-suite FK leftover. |
+| Gate | api + web `tsc` 0 errors · web build ✓ · **64/64 across the 6 touched files standalone** (order-number 10, order-number DB 2, checkout.service 16, pos-variant 4, pos.service 21, store-access 11). Full-suite run 408 tests / 9 fail — all the documented pre-existing flaky set (checkout-address, markStatus, worker/outbox, POS refund/void, POS utang variant, purchases, reports); **order-number.test.ts no longer fails the suite**; every such test passes standalone. |
+| Commit | (this commit) |
 
 ## P3h — Loyalty-at-checkout depth (Plan Phase 3 remainder)
 

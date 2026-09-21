@@ -41,6 +41,7 @@ interface StoreSettings {
     loyaltyPointsPerPeso: number;
     loyaltyWelcomeBonusPoints: number;
     loyaltyExpiryMonths: number;
+    orderNumberPrefix: string | null;
   };
 }
 
@@ -88,6 +89,7 @@ export default function SettingsPanel() {
   const [loyaltyPointsPerPeso, setLoyaltyPointsPerPeso] = useState("1");
   const [loyaltyWelcomeBonusPoints, setLoyaltyWelcomeBonusPoints] = useState("0");
   const [loyaltyExpiryMonths, setLoyaltyExpiryMonths] = useState("0");
+  const [orderNumberPrefix, setOrderNumberPrefix] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -124,6 +126,7 @@ export default function SettingsPanel() {
       setLoyaltyPointsPerPeso((d.settings.loyaltyPointsPerPeso ?? 1).toString());
       setLoyaltyWelcomeBonusPoints((d.settings.loyaltyWelcomeBonusPoints ?? 0).toString());
       setLoyaltyExpiryMonths((d.settings.loyaltyExpiryMonths ?? 0).toString());
+      setOrderNumberPrefix(d.settings.orderNumberPrefix ?? "");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Load failed");
     } finally {
@@ -205,6 +208,10 @@ export default function SettingsPanel() {
     loyaltyPointsPerPeso: parseInt(loyaltyPointsPerPeso || "1", 10),
     loyaltyWelcomeBonusPoints: parseInt(loyaltyWelcomeBonusPoints || "0", 10),
     loyaltyExpiryMonths: parseInt(loyaltyExpiryMonths || "0", 10),
+  });
+
+  const saveOrderNumber = () => saveSection({
+    orderNumberPrefix: orderNumberPrefix.trim().toUpperCase() || null,
   });
 
   const saveInvoices = () => toast("Invoice settings saved");
@@ -429,6 +436,21 @@ export default function SettingsPanel() {
                   </div>
                   <div className="mt-3 d-flex justify-content-end">
                     <button className="btn btn-primary" type="button" disabled={saving} onClick={saveOrders}>{saving ? "Saving…" : "Save order settings"}</button>
+                  </div>
+                </div>
+              </div>
+
+              {/* P3i: order-number prefix — PIN-YYYY-NNNNNN when set. */}
+              <div className="card mb-4">
+                <div className="card-body">
+                  <h6 className="card-title small fw-bold">Order numbers</h6>
+                  <div className="mb-2">
+                    <label className="form-label small">Prefix (blank keeps the store-slug format)</label>
+                    <input className="form-control" placeholder="e.g. PIN" value={orderNumberPrefix} onChange={(e) => setOrderNumberPrefix(e.target.value)} maxLength={6} />
+                    <small className="text-muted d-block">When set, new order numbers read <strong>PREFIX-YYYY-NNNNNN</strong> (e.g. PIN-2026-000001).</small>
+                  </div>
+                  <div className="mt-2 d-flex justify-content-end">
+                    <button className="btn btn-primary" type="button" disabled={saving} onClick={saveOrderNumber}>{saving ? "Saving…" : "Save order-number settings"}</button>
                   </div>
                 </div>
               </div>
