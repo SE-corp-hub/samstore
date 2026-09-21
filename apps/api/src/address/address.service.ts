@@ -69,12 +69,10 @@ export class AddressService {
     cityCode: string,
     barangayCode: string,
   ): Promise<AddressResolution> {
-    const [region, province, city, barangay] = await Promise.all([
-      prisma.phRegion.findUnique({ where: { code: regionCode } }),
-      prisma.phProvince.findUnique({ where: { code: provinceCode } }),
-      prisma.phCity.findUnique({ where: { code: cityCode } }),
-      prisma.phBarangay.findUnique({ where: { code: barangayCode } }),
-    ]);
+    const region = await prisma.phRegion.findUnique({ where: { code: regionCode } });
+    const province = await prisma.phProvince.findUnique({ where: { code: provinceCode } });
+    const city = await prisma.phCity.findUnique({ where: { code: cityCode } });
+    const barangay = await prisma.phBarangay.findUnique({ where: { code: barangayCode } });
 
     if (!region || !province || !city || !barangay) {
       return { ok: false, message: "Address selection is invalid — please re-check your location" };

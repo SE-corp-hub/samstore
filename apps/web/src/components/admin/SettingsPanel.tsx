@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { API_URL } from "../../config";
 import { adminHeaders } from "../../lib/admin";
 import { toast } from "../../lib/toast";
+import DeliveryZonesCard from "./DeliveryZonesCard";
 
 interface StoreSettings {
   id: string;
@@ -454,6 +455,8 @@ export default function SettingsPanel() {
                   </div>
                 </div>
               </div>
+
+              <DeliveryZonesCard />
             </div>
           )}
 

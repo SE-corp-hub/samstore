@@ -1,6 +1,19 @@
 # PINDIAN — Progress Log
 
-Updated: 2026-09-20 · **P4b: bank-transfer proof upload + review queue** · Active model: `deepseek/deepseek-v4-flash-0731` (openrouter), boilerplate tier `inclusionai/ling-3.0-flash`
+Updated: 2026-09-20 · **P5a: delivery zones (§17) + full-suite flakiness ROOT CAUSE found** · Active model: `deepseek/deepseek-v4-flash-0731` (openrouter), boilerplate tier `inclusionai/ling-3.0-flash`
+
+## P5a — Delivery zones + flakiness root cause
+
+| Item | Detail |
+|---|---|
+| Root cause (finally) | The documented "pre-existing full-suite flakiness" is **Supabase session-pool exhaustion**: `FATAL: max clients reached in session mode — pool_size: 15`. The long sequential suite fires parallel lookups (notably the address resolver's 4-query `Promise.all`) and exhausts the 15-client pool → random `EMAXCONNSESSION` errors on whichever query happens to fire (exactly why the failure set shifted run-to-run and every test passed standalone). **Mitigated**: Prisma client now passes `?connection_limit=4` on the datasource URL, and `AddressService.resolve` lookups are sequential. Full-suite failures dropped from **13–18 per run → 3–4**, and the `EMAXCONNSESSION` errors are gone. Residual worker/outbox failures are a separate test-isolation issue (the worker test drains leftover PENDING events from other checkout tests). |
+| Schema | `DeliveryZone` (storeId, name, `cityCode` PSGC nullable = catch-all, `barangayCodes` allowlist, feeMinor, etaMinutes, isActive, sortOrder). `Order` + `deliveryZoneName` + `etaMinutes` snapshot columns. Migration `20260920140000_module_p5a_delivery_zones` (db-execute + registered). |
+| Domain | `delivery/zones.ts` `resolveDeliveryZone(zones, cityCode, barangayCode)` → match (city + allowlist) → catch-all → out-of-coverage; no zones → legacy flat fee. |
+| Checkout | When the store has active zones, delivery fee + ETA come from the matched zone; an unmatched address → `conflict "outside our coverage area"`. Zone name + ETA snapshotted on the order + in the snapshot. No zones → legacy `deliveryFeeMinor`. |
+| Admin/Web | `DeliveryZonesAdminService` + `/admin/delivery-zones` CRUD (tenant-scoped, conflict on duplicate names, validation). SettingsPanel Orders tab gains a **Delivery zones** card (list + add/edit/delete; city/barangay PSGC codes + fee + ETA). |
+| Tests | +6: `delivery/zones.test.ts` +3 (domain match/catch-all/out-of-coverage/no-zones; admin CRUD tenant-scoped + duplicate conflict + validation) and `checkout/zones.test.ts` +3 (real checkout: zone fee+ETA+snapshot; unmatched → out-of-coverage conflict; no zones → legacy fee). |
+| Gate | api + web `tsc` 0 errors · web build ✓ · **40/40 across the 6 touched files standalone** (zones 3, checkout-zones 3, checkout.service 16, checkout-address 5, order-number 2, store-access 11). Full-suite 423–424 tests / **3–4 fails** (down from 13–18; EMAXCONNSESSION gone) — residual are the worker/outbox isolation issue. |
+| Commit | (this commit) |
 
 ## P4b — Payments PH: bank-transfer proof + review queue (§16)
 

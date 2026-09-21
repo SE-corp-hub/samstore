@@ -179,6 +179,7 @@ model Store {
   productVariants        ProductVariant[] // P2a
   productAddons          ProductAddon[] // P2a
   productRelations       ProductRelation[] // P3d: related/upsell links
+  deliveryZones          DeliveryZone[] // P5a: per-zone delivery pricing/ETA
   carts                  Cart[]
   orders                 Order[]
   storeCustomers         StoreCustomer[]
@@ -427,6 +428,29 @@ model ProductRelation {
 
   @@unique([storeId, sourceProductId, targetProductId, kind])
   @@index([storeId, sourceProductId, kind])
+}
+
+// ─────────────────────────────── Delivery zones (P5a) ───────────────────────────────
+// Per-store delivery pricing by PH city (PSGC code) + optional barangay allowlist.
+// A null cityCode is a catch-all "everywhere else" zone. When a store configures
+// zones, delivery addresses that match nothing are OUT OF COVERAGE (rejected at
+// checkout); no zones at all keeps the legacy flat StoreSettings.deliveryFeeMinor.
+
+model DeliveryZone {
+  id            String   @id @default(cuid())
+  storeId       String
+  store         Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  name          String
+  cityCode      String? // PSGC city/municipality code; null = catch-all zone
+  barangayCodes String[] // optional allowlist within the city (empty = whole city)
+  feeMinor      Int
+  etaMinutes    Int      @default(45)
+  isActive      Boolean  @default(true)
+  sortOrder     Int      @default(0)
+  createdAt     DateTime @default(now())
+
+  @@unique([storeId, name])
+  @@index([storeId, isActive])
 }
 
 // ─────────────────────────────── Warehouses / inventory ───────────────────────────────
@@ -905,6 +929,9 @@ model Order {
   deliveryProvinceName String?
   deliveryCityName     String?
   deliveryBarangayName String?
+  // P5a: delivery zone snapshot (name + ETA) when the store prices by zone.
+  deliveryZoneName     String?
+  etaMinutes           Int?
   notes                String?
   // P3b: statutory 20% discount for Senior Citizens / PWDs — type, ID captured, name on card.
   statutoryType        String? // senior | pwd

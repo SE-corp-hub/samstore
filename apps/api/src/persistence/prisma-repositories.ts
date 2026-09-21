@@ -25,8 +25,17 @@ import { InsufficientStockError } from "../domain/movements.js";
 // defaults are 5s timeout / 2s max wait — a cold first request then dies with
 // P2028 ("Transaction already closed"). Raise both globally so every interactive
 // transaction in the codebase inherits a budget that fits remote latency.
+// connection_limit: the Supabase session pooler caps at 15 clients; capping the
+// Prisma client (default 4) keeps a long sequential test suite from exhausting the
+// pool with parallel lookups (root cause of the documented EMAXCONNSESSION flakes).
+const DATABASE_URL = process.env.DATABASE_URL ?? "";
+const pooledUrl = DATABASE_URL.includes("?")
+  ? `${DATABASE_URL}&connection_limit=4`
+  : `${DATABASE_URL}?connection_limit=4`;
+
 export const prisma = new PrismaClient({
   transactionOptions: { timeout: 30_000, maxWait: 15_000 },
+  datasources: { db: { url: pooledUrl } },
 });
 
 export const ORDER_SEQUENCE_KIND = "ORDER_SEQ";
@@ -397,6 +406,8 @@ export class PrismaOrderRepository implements OrderRepository {
       deliveryProvinceName: o.deliveryProvinceName ?? null,
       deliveryCityName: o.deliveryCityName ?? null,
       deliveryBarangayName: o.deliveryBarangayName ?? null,
+      deliveryZoneName: o.deliveryZoneName ?? null,
+      etaMinutes: o.etaMinutes ?? null,
       statutoryType: o.statutoryType ?? null,
       statutoryId: o.statutoryId ?? null,
       statutoryName: o.statutoryName ?? null,
@@ -446,6 +457,8 @@ export class PrismaOrderRepository implements OrderRepository {
           deliveryProvinceName: order.deliveryProvinceName ?? undefined,
           deliveryCityName: order.deliveryCityName ?? undefined,
           deliveryBarangayName: order.deliveryBarangayName ?? undefined,
+          deliveryZoneName: order.deliveryZoneName ?? undefined,
+          etaMinutes: order.etaMinutes ?? undefined,
           statutoryType: order.statutoryType ?? undefined,
           statutoryId: order.statutoryId ?? undefined,
           statutoryName: order.statutoryName ?? undefined,
@@ -542,6 +555,8 @@ export class PrismaOrderRepository implements OrderRepository {
           deliveryProvinceName: order.deliveryProvinceName ?? undefined,
           deliveryCityName: order.deliveryCityName ?? undefined,
           deliveryBarangayName: order.deliveryBarangayName ?? undefined,
+          deliveryZoneName: order.deliveryZoneName ?? undefined,
+          etaMinutes: order.etaMinutes ?? undefined,
           statutoryType: order.statutoryType ?? undefined,
           statutoryId: order.statutoryId ?? undefined,
           statutoryName: order.statutoryName ?? undefined,

@@ -25,6 +25,7 @@ import type {
 } from "../persistence/repositories.js";
 import { randomId } from "../persistence/repositories.js";
 import { prisma } from "../persistence/prisma-repositories.js"; // P3b: DPA consent audit record (best-effort)
+import { resolveDeliveryZone } from "../delivery/zones.js"; // P5a
 
 export type CheckoutResult = { ok: true; value: CheckoutResponse } | { ok: false; error: ApiError };
 
@@ -227,7 +228,6 @@ export class CheckoutService {
 
     // 5b. Delivery type (U5): pickup = no fee + no address required.
     const deliveryType = request.deliveryType ?? "delivery";
-    const deliveryFee = deliveryType === "pickup" ? 0 : store.deliveryFeeMinor;
 
     // 5c. P1 PH address: all-or-nothing codes, chain-validated, NAMES snapshotted.
     //     Adding ONLY the street line (no codes) keeps the legacy free-text path.
@@ -264,6 +264,34 @@ export class CheckoutService {
         return { ok: false, error: { type: "validation", errors: [resolved.message] } };
       }
       phAddress = resolved.names;
+    }
+
+    // 5d. P5a delivery zones: when the store prices by zone, the fee + ETA come from
+    //     the matched zone; an unmatched delivery address is OUT OF COVERAGE.
+    let deliveryFee = deliveryType === "pickup" ? 0 : store.deliveryFeeMinor;
+    let deliveryZoneName: string | null = null;
+    let etaMinutes: number | null = null;
+    if (deliveryType === "delivery") {
+      const zones = await prisma.deliveryZone.findMany({
+        where: { storeId: store.id, isActive: true },
+        orderBy: { sortOrder: "asc" },
+      });
+      if (zones.length > 0) {
+        const resolved = resolveDeliveryZone(
+          zones,
+          typeof request.cityCode === "string" ? request.cityCode.trim() : null,
+          typeof request.barangayCode === "string" ? request.barangayCode.trim() : null,
+        );
+        if (!resolved.resolved) {
+          return {
+            ok: false,
+            error: { type: "conflict", message: "This delivery address is outside our coverage area" },
+          };
+        }
+        deliveryFee = resolved.zone.feeMinor;
+        deliveryZoneName = resolved.zone.name;
+        etaMinutes = resolved.zone.etaMinutes;
+      }
     }
 
     // 6. Server-authoritative totals
@@ -421,6 +449,7 @@ export class CheckoutService {
         lines: revalidated.lines,
         items,
         priceChanges: revalidated.priceChanges,
+        ...(deliveryZoneName ? { deliveryZone: { name: deliveryZoneName, etaMinutes } } : {}),
         ...(revalidated.addonPriceChanges.length > 0 ? { addonPriceChanges: revalidated.addonPriceChanges } : {}),
         ...(revalidated.removedAddonOptionIds.length > 0 ? { removedAddonOptionIds: revalidated.removedAddonOptionIds } : {}),
         store: { slug: store.slug, name: store.name },
@@ -450,6 +479,8 @@ export class CheckoutService {
       deliveryProvinceName: phAddress?.provinceName ?? null,
       deliveryCityName: phAddress?.cityName ?? null,
       deliveryBarangayName: phAddress?.barangayName ?? null,
+      deliveryZoneName,
+      etaMinutes,
       statutoryType: statutory?.type ?? null,
       statutoryId: statutory?.id ?? null,
       statutoryName: statutory?.name ?? null,

@@ -133,6 +133,9 @@ export interface OrderRecord {
   deliveryProvinceName?: string | null;
   deliveryCityName?: string | null;
   deliveryBarangayName?: string | null;
+  /** P5a: delivery zone snapshot (name + ETA) when the store prices by zone. */
+  deliveryZoneName?: string | null;
+  etaMinutes?: number | null;
   /** P3b: statutory 20% discount capture (senior/pwd + ID + cardholder name). */
   statutoryType?: string | null;
   statutoryId?: string | null;
