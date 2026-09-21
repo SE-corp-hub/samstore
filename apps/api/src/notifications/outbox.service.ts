@@ -96,6 +96,19 @@ export class OutboxWorker {
           },
         });
         return;
+      case "campaign.send":
+        // P8: follow-up campaign broadcast (suppressed side effect until approved).
+        await prisma.notificationLog.create({
+          data: {
+            storeId: ev.storeId,
+            template: "campaign.send",
+            channel: "messenger",
+            recipient: typeof payload.psid === "string" ? payload.psid : null,
+            text: typeof payload.message === "string" ? payload.message : "Update from the store",
+            delivered: false,
+          },
+        });
+        return;
       default:
         // Unknown event types are treated as already-handled (no-op) so the
         // queue never gets stuck on an event this build doesn't understand.

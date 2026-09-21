@@ -1,6 +1,20 @@
 # PINDIAN — Progress Log
 
-Updated: 2026-09-20 · **P7b: human agent dashboard (§14)** · Active model: `deepseek/deepseek-v4-flash-0731` (openrouter), boilerplate tier `inclusionai/ling-3.0-flash`
+Updated: 2026-09-20 · **P8: CRM — aggregates, segmentation, campaigns (§15)** · Active model: `deepseek/deepseek-v4-flash-0731` (openrouter), boilerplate tier `inclusionai/ling-3.0-flash`
+
+## P8 — CRM & campaigns
+
+| Item | Detail |
+|---|---|
+| Schema | `StoreCustomer.tags` (CRM tagging) + `Campaign` (name, rule JSON, message, status DRAFT/SENT, recipientCount) + `CampaignRecipient` (per-customer enqueue **idempotency**). Migration `20260920180000_module_p8_crm` (db-execute + registered). |
+| Aggregates | `CrmService.aggregates(storeId)` — on-demand **live data only**: LTV (fulfilled orders only), orders count, AOV, last-order date + days-since, **favorite product** (top item name), tags, opted-in Messenger psid, credit balance. |
+| Segmentation | `segment(rows, rule)` — predefined+custom filters: `minOrders`, `minLtvMinor`, `maxDaysSinceLastOrder` (**at-risk/inactive**: ordered ≥ N days ago; never-ordered excluded), `hasCredit`, `tag`, `messengerOnly`. |
+| Campaigns | `createCampaign`/`listCampaigns`/`runCampaign`/`deleteCampaign`. **`runCampaign`** evaluates the segment → enqueues ONE `campaign.send` OutboxEvent per opted-in Messenger user (idempotent via `CampaignRecipient`, never double-enqueues) → marks SENT + recipientCount; re-run is a conflict. Outbox worker gains a `campaign.send` handler → suppressed `NotificationLog` row. |
+| Endpoints | `/admin/crm/customers`, `/admin/crm/customers/:id/tags`, `/admin/crm/segment`, `/admin/crm/campaigns` (GET/POST), `/admin/crm/campaigns/:id/run`, `/admin/crm/campaigns/:id` (DELETE) — tenant-scoped. |
+| Tests | +3 `crm/crm.test.ts` (real DB): aggregates compute LTV/AOV/orders/favorite from FULFILLED only (unfulfilled excluded); tags set/round-trip + segmentation filters (LTV/tag/credit/at-risk boundaries); campaign run idempotent + one `campaign.send` per opted-in user + SENT + worker drains → suppressed log + re-run conflict. Found & fixed an inverted at-risk rule while testing. |
+| Gate | api `tsc` 0 errors · full-suite **440 tests / 6 fail** — the pre-existing residual set (voucher-v2 ×3, worker/outbox ×2, pre-order ×1); none this module's, all pass standalone. |
+| Note | Admin CRM **panel** (segment explorer + campaign composer) is the T2 UI remainder — backend + tests shipped; panel pending (see PLAN Phase 8). |
+| Commit | (this commit) |
 
 ## P7b — Agent dashboard
 

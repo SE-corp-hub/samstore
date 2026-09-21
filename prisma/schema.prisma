@@ -212,6 +212,7 @@ model Store {
   stockMovements         StockMovement[]
   outboxEvents           OutboxEvent[]
   paymentStatusHistories PaymentStatusHistory[]
+  campaigns              Campaign[]
 }
 
 model StoreSettings {
@@ -602,6 +603,45 @@ model CannedReply {
   createdAt DateTime @default(now())
 
   @@unique([storeId, label])
+}
+
+// ─────────────────────────────── CRM campaigns (P8) ───────────────────────────────
+// A follow-up campaign targets a customer segment; running it evaluates the segment
+// live and enqueues one `campaign.send` OutboxEvent per OPTED-IN Messenger user
+// (suppressed until a live provider is approved). CampaignRecipient makes runs
+// idempotent (never double-enqueues a customer).
+
+model Campaign {
+  id             String    @id @default(cuid())
+  storeId        String
+  store          Store     @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  name           String
+  rule           Json // { minOrders?, minLtvMinor?, maxDaysSinceLastOrder?, hasCredit?, tag? }
+  message        String
+  status         String    @default("DRAFT") // DRAFT | SENT
+  sentAt         DateTime?
+  recipientCount Int       @default(0)
+  createdAt      DateTime  @default(now())
+
+  recipients CampaignRecipient[]
+
+  @@unique([storeId, name])
+  @@index([storeId, status])
+}
+
+model CampaignRecipient {
+  id              String        @id @default(cuid())
+  storeId         String
+  campaignId      String
+  campaign        Campaign      @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  storeCustomerId String
+  psid            String?
+  sent            Boolean       @default(false)
+  createdAt       DateTime      @default(now())
+  storeCustomer   StoreCustomer @relation(fields: [storeCustomerId], references: [id])
+
+  @@unique([storeId, campaignId, storeCustomerId])
+  @@index([storeId, storeCustomerId])
 }
 
 // ─────────────────────────────── Warehouses / inventory ───────────────────────────────
@@ -1186,13 +1226,16 @@ model StoreCustomer {
   creditApproved       Boolean                @default(false) // approved for utang (P3)
   creditLimitMinor     Int                    @default(0) // per-customer credit limit (0 = store default)
   creditBalanceMinor   Int                    @default(0) // open balance (positive = owes)
+  // P8: CRM tags (free-form, e.g. ["vip", "bday"]) + campaign recipients.
+  tags                 String[]               @default([])
   createdAt            DateTime               @default(now())
   updatedAt            DateTime               @updatedAt
 
-  orders    Order[]
-  loyalty   LoyaltyEntry[]
-  credit    CreditEntry[]
-  addresses StoreCustomerAddress[]
+  orders             Order[]
+  loyalty            LoyaltyEntry[]
+  credit             CreditEntry[]
+  addresses          StoreCustomerAddress[]
+  campaignRecipients CampaignRecipient[]
 
   @@unique([storeId, customerId])
   @@unique([storeId, id]) // M3: composite target for tenant-consistent children
