@@ -176,6 +176,7 @@ Per-phase split (T1 share of the module's work):
 - Adapter stays behind the interface; live calls only when credentials present (D-marked `PENDING_CREDENTIALS` otherwise).
 - **Accept:** webhook signature/verification tests; journey state machine tests; portal shows mock "send suppressed" status.
 - **Model:** T1-led (60/40) — journey state machine + webhook security on `deepseek`/`glm-5.3-flash`; template wiring + connection UI on `ling-3.0-flash`.
+- **Status:** **P6a ✅** — Messenger connection (`MessengerPage`/`MessengerUser`, token hash-only, webhook-token rotation, PSID→customer mapping, deep link, portal connect UI). **P6b ✅** — journey engine (pure live-data state machine: welcome→menu→category→product→track; templates; `MessengerJourneyService` dispatch via suppressed/mock; live order lookup by claim token, read-only). Sends stay suppressed/mock (`PENDING_CREDENTIALS`) until operator approval. **Phase 6 COMPLETE.**
 
 ### Phase 7 — AI chatbot + human agent dashboard (§13, §14)
 - **Conversation/message/assignment/agent tables** (tenant-scoped) + seed.
