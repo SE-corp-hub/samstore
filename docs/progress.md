@@ -1,6 +1,20 @@
 # PINDIAN — Progress Log
 
-Updated: 2026-09-20 · **P3i: order numbers — PIN-YYYY-NNNNNN** · Active model: `deepseek/deepseek-v4-flash-0731` (openrouter), boilerplate tier `inclusionai/ling-3.0-flash`
+Updated: 2026-09-20 · **P3j: abandoned-cart recovery (expiry job + outbox)** · Active model: `deepseek/deepseek-v4-flash-0731` (openrouter), boilerplate tier `inclusionai/ling-3.0-flash`
+
+## P3j — Abandoned-cart recovery
+
+| Item | Detail |
+|---|---|
+| Gap fixed | Carts carried a 7-day `expiresAt` but nothing ever marked them ABANDONED or triggered a follow-up — the plan's "cart expiry job + outbox notification" was missing. |
+| Service | `cart/recovery.service.ts` `CartRecoveryService.expireAbandoned(storeId)`: finds OPEN carts with `expiresAt < now` AND items, flips them to `ABANDONED` (guarded `updateMany` so a concurrently-converted cart is skipped) and enqueues ONE `cart.abandoned` outbox event per cart (payload: token, customerId, itemCount) in the same transaction. Returns `{ expired, enqueued }`. |
+| Worker | `OutboxWorker.handle` gains a `cart.abandoned` case → writes a suppressed `NotificationLog` row (channel messenger, template `cart.abandoned`) — the audit trail until a live Messenger/SMS provider is approved. |
+| Endpoint | `POST /admin/carts/expire` (tenant-scoped, ADMIN) — a cron/scheduler should call it daily. |
+| Tests | +2 `cart/recovery.service.test.ts` (real DB): expired OPEN cart → ABANDONED + PENDING outbox event + worker drains to a `cart.abandoned` NotificationLog row; fresh/CONVERTED/item-less carts untouched + run idempotent (second run 0). |
+| Gate | api `tsc` 0 errors · **24/24 across the 4 touched files standalone** (recovery 2, outbox 3, cart.service 15, variant-cart 4). Full-suite run 410 tests / 11 fail — all the documented pre-existing flaky set (variant-cart, checkout-address, consent, voucher, worker/outbox, POS refund/void, POS utang, pre-orders, purchases, reports); none this module's; every such test passes standalone. |
+| Commit | (this commit) |
+
+**Phase 3 (PLAN.md §6/§7/§10/§11) is now COMPLETE**: voucher engine v2 (P3a), senior/PWD + DPA consent (P3b), loyalty depth (P3h), order numbers `PIN-YYYY-NNNNNN` (P3i), abandoned-cart recovery (P3j). Next per the plan: **Phase 4 — Payments PH (§16).**
 
 ## P3i — Order numbers (`PIN-YYYY-NNNNNN`, configurable prefix)
 

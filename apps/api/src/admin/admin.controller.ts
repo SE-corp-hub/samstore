@@ -31,6 +31,7 @@ import { AnalyticsService } from "./analytics.service.js";
 import { TeamService } from "./team.service.js";
 import { WarehouseService } from "./warehouse.service.js";
 import { LoyaltyService } from "../loyalty/loyalty.service.js";
+import { CartRecoveryService } from "../cart/recovery.service.js";
 import { NOTIFICATIONS_SERVICE, type NotificationsService } from "../notifications/notifications.service.js";
 import { type OrderState, ORDER_STATES } from "../domain/order-state.js";
 
@@ -60,6 +61,7 @@ export class AdminController {
   private readonly team = new TeamService();
   private readonly warehouses = new WarehouseService();
   private readonly loyalty = new LoyaltyService();
+  private readonly cartsRecovery = new CartRecoveryService();
 
   constructor(
     @Inject(AUTH_SERVICE) private readonly auth: AuthService,
@@ -963,6 +965,16 @@ export class AdminController {
     const result = await this.loyalty.expirePoints(storeId);
     await cacheBust(cacheKey("customers", storeId));
     return result;
+  }
+
+  /** POST /admin/carts/expire - P3j: abandoned-cart recovery. Marks expired OPEN carts
+   *  ABANDONED and enqueues a cart.abandoned outbox event per cart. Cron-able. */
+  @Post("carts/expire")
+  async expireCarts(@Req() req: Request & { user?: AuthPrincipal }, @Headers("x-store-id") headerStoreId?: string) {
+    const user = req.user;
+    requireUser(user);
+    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
+    return this.cartsRecovery.expireAbandoned(storeId);
   }
 
   /** PATCH /admin/orders/:id/items — W1: stock-delta item edit (RECEIVED/CONFIRMED/ON_HOLD). */

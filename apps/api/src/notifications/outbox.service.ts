@@ -82,6 +82,20 @@ export class OutboxWorker {
           },
         });
         return;
+      case "cart.abandoned":
+        // P3j: abandoned-cart follow-up. Same suppressed side effect — the row is
+        // the audit trail until a live Messenger/SMS provider is operator-approved.
+        await prisma.notificationLog.create({
+          data: {
+            storeId: ev.storeId,
+            template: "cart.abandoned",
+            channel: "messenger",
+            recipient: typeof payload.customerId === "string" ? payload.customerId : null,
+            text: `Reminder: you have ${payload.itemCount ?? 0} item(s) waiting in your cart.`,
+            delivered: false,
+          },
+        });
+        return;
       default:
         // Unknown event types are treated as already-handled (no-op) so the
         // queue never gets stuck on an event this build doesn't understand.
