@@ -184,6 +184,7 @@ Per-phase split (T1 share of the module's work):
 - **Agent dashboard:** live/in-progress list, takeover, assign, human/bot toggle, canned replies, quick replies, tags, search, SLA + response-time indicators, unread counts, agent performance metrics (feed existing analytics).
 - **Accept:** fallback + handoff unit tests; chatbot returns only real data (tested against fixtures).
 - **Model:** T1-led (70/30) — chatbot live-data-only rules + fallback + handoff on `deepseek`/`glm-5.3-flash`; agent-dashboard CRUD on `ling-3.0-flash`.
+- **Status:** **P7a ✅** — `Conversation`/`Message`/`CannedReply` schema; `chatbot/engine.ts` (Taglish intents, confidence, `FALLBACK_REPLY`, product-search miss → handoff, **live-data-only**); `ChatbotService` (conversation memory, intent/confidence audit, fallback → AGENT + unread). **P7b ✅** — agent dashboard service+endpoints (list/thread/assign/takeover/resolve/reply, canned replies, metrics) + OrdersPanel **Chat inbox** UI. **Phase 7 COMPLETE.**
 
 ### Phase 8 — CRM & campaigns (§15)
 - Enriched `StoreCustomer` aggregates (LTV, AOV, favorite products, recency, tags, campaign source) computed on write + rollups job.

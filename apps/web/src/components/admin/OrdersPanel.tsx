@@ -11,6 +11,7 @@ import { adminHeaders, type AdminOrder, getAdminRole, roleCan } from "../../lib/
 import ReceiptModal from "./ReceiptModal";
 import SignaturePad from "./SignaturePad";
 import PaymentReview from "./PaymentReview";
+import ChatPanel from "./ChatPanel";
 import { toast } from "../../lib/toast";
 
 const ALLOWED: Record<string, string[]> = {
@@ -95,6 +96,7 @@ export default function OrdersPanel() {
   const [reason, setReason] = useState("");
   const [receiptOrder, setReceiptOrder] = useState<string | null>(null);
   const [reviewOpen, setReviewOpen] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
   const [confirmAction, setConfirmAction] = useState<{ orderId: string; kind: "void" | "refund" | "voidHold" } | null>(null);
   const [orderDetail, setOrderDetail] = useState<AdminOrder | null>(null);
   const [detailSignature, setDetailSignature] = useState<string | null>(null);
@@ -708,6 +710,11 @@ export default function OrdersPanel() {
                     <i className="bi bi-inboxes me-1"></i>Payment review
                   </button>
                 </li>
+                <li className="nav-item">
+                  <button className="nav-link" onClick={() => setChatOpen(true)}>
+                    <i className="bi bi-chat-dots me-1"></i>Chat inbox
+                  </button>
+                </li>
                 {TABS.map((t) => {
                                 const n = t.status ? t.status.reduce((s, st) => s + (counts[st] ?? 0), 0) : Object.values(counts).reduce((s, c) => s + c, 0);
                                 return (
@@ -994,6 +1001,7 @@ export default function OrdersPanel() {
 
       {receiptOrder && <ReceiptModal orderId={receiptOrder} onClose={() => setReceiptOrder(null)} />}
       {reviewOpen && <PaymentReview onClose={() => setReviewOpen(false)} onChanged={() => void load()} />}
+      {chatOpen && <ChatPanel onClose={() => setChatOpen(false)} onChanged={() => void load()} />}
 
             {/* Delivery confirm — payment collected on a delivery order: ask "for delivery?" then confirm */}
             {deliveryConfirm && (

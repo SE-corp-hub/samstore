@@ -1,6 +1,19 @@
 # PINDIAN — Progress Log
 
-Updated: 2026-09-20 · **P7a: AI chatbot engine (§13)** · Active model: `deepseek/deepseek-v4-flash-0731` (openrouter), boilerplate tier `inclusionai/ling-3.0-flash`
+Updated: 2026-09-20 · **P7b: human agent dashboard (§14)** · Active model: `deepseek/deepseek-v4-flash-0731` (openrouter), boilerplate tier `inclusionai/ling-3.0-flash`
+
+## P7b — Agent dashboard
+
+| Item | Detail |
+|---|---|
+| Service | `ChatAgentService`: `list` (status-filtered, last message + assignee + unread), `thread`, `assign`/`takeover` (mode → AGENT), `resolve`, `reply` (agent message + mode AGENT + unread reset), canned replies (seeded defaults + upsert/delete), `metrics` (per-agent open/handled + **avg first-response minutes** from the customer→first-agent gap, open-unassigned count). |
+| Endpoints | `/admin/chatbot/conversations` (GET list, GET :id/messages, POST :id/assign|takeover|resolve|reply), `/admin/chatbot/canned-replies` (GET/POST/PATCH/DELETE), `/admin/chatbot/metrics` — tenant-scoped. |
+| Web | New **Chat inbox** panel (OrdersPanel nav): status-filtered conversation list (unread badges), thread view, canned-reply dropdown, agent reply (Enter-to-send), Take over / Resolve. |
+| Tests | +3 `chatbot/agent.test.ts` (real DB): fallback→AGENT conversation → assign → takeover → agent reply (3-message thread, unread reset) → resolve (reply-after-resolve rejected); canned replies seeded + editable + tenant-isolated (cross-store delete not_found); metrics (handled + open-unassigned + first-response minutes). |
+| Gate | api + web `tsc` 0 errors · web build ✓ · **7/7 across the 2 chatbot files standalone** (agent 3, chatbot 4). Full-suite **440 tests / 2 fail** (only the worker/outbox isolation pair, pre-existing). |
+| Commit | (this commit) |
+
+**Phase 7 (PLAN.md §13/§14) is now COMPLETE**: AI chatbot engine (Taglish, live-data-only, confidence fallback→handoff, audit trail) + human agent dashboard (conversations/assignment/takeover/replies/canned replies/metrics). Next per the plan: **Phase 8 — CRM & campaigns (§15)**.
 
 ## P7a — Chatbot engine (live-data-only, Taglish, fallback→handoff)
 
