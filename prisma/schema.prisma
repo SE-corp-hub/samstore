@@ -180,6 +180,7 @@ model Store {
   productAddons          ProductAddon[] // P2a
   productRelations       ProductRelation[] // P3d: related/upsell links
   deliveryZones          DeliveryZone[] // P5a: per-zone delivery pricing/ETA
+  deliveryBookings       DeliveryBooking[] // P5b: courier bookings + COD remittances
   carts                  Cart[]
   orders                 Order[]
   storeCustomers         StoreCustomer[]
@@ -451,6 +452,57 @@ model DeliveryZone {
 
   @@unique([storeId, name])
   @@index([storeId, isActive])
+}
+
+// ─────────────────────────────── Courier bookings (P5b) ───────────────────────────────
+// Third-party courier (Lalamove/GrabExpress/J&T — mocks) OR owner-run delivery.
+// Tracks courier status via append-only DeliveryEvent rows; COD remittances are a
+// ledger (what the courier collected vs. handed over, recorded by the owner).
+
+model DeliveryBooking {
+  id             String   @id @default(cuid())
+  storeId        String
+  store          Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  orderId        String
+  order          Order    @relation(fields: [storeId, orderId], references: [storeId, id])
+  courier        String // lalamove | grabexpress | jt | owner
+  status         String   @default("created") // created|accepted|picked_up|delivered|failed|cancelled
+  trackingNumber String?
+  remoteId       String?
+  codMinor       Int      @default(0) // cash the courier collects on delivery
+  remittedMinor  Int      @default(0) // how much has been handed to the owner so far
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  events      DeliveryEvent[]
+  remittances CourierRemittance[]
+
+  @@index([storeId, createdAt])
+}
+
+model DeliveryEvent {
+  id        String          @id @default(cuid())
+  storeId   String
+  bookingId String
+  booking   DeliveryBooking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  status    String
+  note      String?
+  createdAt DateTime        @default(now())
+
+  @@index([storeId, bookingId])
+}
+
+model CourierRemittance {
+  id          String          @id @default(cuid())
+  storeId     String
+  bookingId   String
+  booking     DeliveryBooking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  amountMinor Int
+  note        String?
+  recordedBy  String?
+  createdAt   DateTime        @default(now())
+
+  @@index([storeId, bookingId])
 }
 
 // ─────────────────────────────── Warehouses / inventory ───────────────────────────────
@@ -954,6 +1006,7 @@ model Order {
   registerSessionId      String? // N1: the cash drawer shift this counter sale belongs to (null = online/off-counter)
   registerSession        RegisterSession?       @relation(fields: [registerSessionId], references: [id])
   paymentStatusHistories PaymentStatusHistory[]
+  deliveryBookings       DeliveryBooking[]
 
   @@unique([storeId, id]) // M3: composite target for tenant-consistent children
   @@index([storeId, status, createdAt])

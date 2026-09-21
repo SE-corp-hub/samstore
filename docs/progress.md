@@ -1,6 +1,20 @@
 # PINDIAN — Progress Log
 
-Updated: 2026-09-20 · **P5a: delivery zones (§17) + full-suite flakiness ROOT CAUSE found** · Active model: `deepseek/deepseek-v4-flash-0731` (openrouter), boilerplate tier `inclusionai/ling-3.0-flash`
+Updated: 2026-09-20 · **P5b: courier adapters + tracking + COD remittance ledger (§17)** · Active model: `deepseek/deepseek-v4-flash-0731` (openrouter), boilerplate tier `inclusionai/ling-3.0-flash`
+
+## P5b — Courier adapters + COD remittance
+
+| Item | Detail |
+|---|---|
+| Adapters | `delivery/couriers.ts` — `CourierAdapter` interface (`ready`, `createBooking`) + `MockCourierAdapter` (deterministic `MOCK-` tracking) + Lalamove/GrabExpress/J&T/owner adapters, each `PENDING_CREDENTIALS` (ready() reads `LALAMOVE_API_KEY` etc.; sandbox tracking labels; **no live API call ever without creds**). `getCourier(name)` registry. |
+| Schema | `DeliveryBooking` (courier, status, trackingNumber, remoteId, `codMinor`, `remittedMinor`), `DeliveryEvent` (append-only status rows), `CourierRemittance` (ledger). Migration `20260920150000_module_p5b_couriers` (db-execute + registered). |
+| Service | `DeliveryBookingService`: `createBooking` (adapter booking + initial `created` event), `addEvent` (validated statuses, terminal delivered/failed/cancelled block further events), `remit` (COB ledger, never exceeds outstanding cod), `list` (bookings + events + remittances + order summary). |
+| Endpoints | `POST /admin/orders/:id/delivery/booking`, `GET /admin/delivery/bookings?orderId=`, `POST /admin/delivery/bookings/:id/event`, `POST /admin/delivery/bookings/:id/remit` — all tenant-scoped. |
+| Tests | +2 `delivery/delivery-booking.test.ts` (real DB): mock courier end-to-end (booking → tracking → accepted/picked_up/delivered events → terminal blocks further events → partial + full COD remittance → over-remit rejected with outstanding message) and validation + tenant isolation (bad status, cross-store not_found, codMinor over total rejected). |
+| Gate | api `tsc` 0 errors · **30/30 across the 5 touched files standalone** (delivery-booking 2, zones 3, checkout-zones 3, checkout.service 16, delivery.service 6). Full-suite 426 tests / 6 fail — the residual pre-existing set (addon-revalidation hook, worker/outbox, POS utang, purchases, reports); pool-exhaustion fix keeps the band at 3–6 (was 13–18). |
+| Commit | (this commit) |
+
+**Phase 5 (PLAN.md §17) is now COMPLETE**: delivery zones (per-city/barangay fee + ETA + out-of-coverage) + courier adapters (Lalamove/GrabExpress/J&T/owner, mock-first `PENDING_CREDENTIALS`) + tracking/delivery events + COD remittance ledger (P5a/P5b). Next per the plan: **Phase 6 — Messenger live + journeys (§12)**.
 
 ## P5a — Delivery zones + flakiness root cause
 
