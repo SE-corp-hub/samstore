@@ -1,6 +1,20 @@
 # PINDIAN — Progress Log
 
-Updated: 2026-09-20 · **P6a: Messenger connection + identity mapping (§12)** · Active model: `deepseek/deepseek-v4-flash-0731` (openrouter), boilerplate tier `inclusionai/ling-3.0-flash`
+Updated: 2026-09-20 · **P6b: Messenger journey engine (§12)** · Active model: `deepseek/deepseek-v4-flash-0731` (openrouter), boilerplate tier `inclusionai/ling-3.0-flash`
+
+## P6b — Messenger journey engine
+
+| Item | Detail |
+|---|---|
+| Templates | `messenger/templates.ts` — pure reply builders (text+quick-replies, button, carousel, image) + standard menu replies. |
+| State machine | `messenger/journey.ts` — PURE `journeyTurn(state, input, ctx)` with **live-data-only** context (categories/products/order lookup): welcome → menu → category → product carousel → product detail (live price + stock) → track order (claim token) → live status via `resolveTracking` (verifyClaimToken → order, READ-ONLY, never marks the token used). Natural-text routing (category name / product search / token). Never invents stock, price, or status. |
+| Dispatch | `MessengerJourneyService.dispatch(storeId, psid, incoming)` — loads live catalog, runs the machine (per-psid in-memory session), upserts `MessengerUser` (lastSeenAt/opt-in), routes flattened templates through the suppressed/mock provider, writes `NotificationLog` audit rows. `flattenTemplate` serialises any template to provider text. |
+| Honest | Live Meta sends remain suppressed/mock — the engine produces the DATA a real provider would send; going live is operator-approved (`PENDING_CREDENTIALS`). |
+| Tests | +10: `messenger/journey.test.ts` +9 (welcome menu, menu payload, category→carousel with live stock, product detail live price, track prompt, valid token → live status, unknown token not invented, natural-text category/product routing) and `messenger/journey.service.test.ts` +1 (real DB dispatch → provider sent + MessengerUser upserted + audit rows). Fixed a real bug while testing: `replace("_"," ")` left `for_delivery` — now global. |
+| Gate | api `tsc` 0 errors · **30/30 across the 6 messenger files standalone** (journey 9, journey.service 1, connection 5, bridge 6, adapter 4, webhook-verification 5). Full-suite **440 tests / 2 fail** (best yet — down from 13–18 pre-pool-fix; residual = worker/outbox + pre-order isolation, pre-existing, pass standalone). |
+| Commit | (this commit) |
+
+**Phase 6 (PLAN.md §12) is now COMPLETE**: Messenger connection + identity mapping + deep link (P6a) + journey engine + webhook verification (P6b), all adapter-isolated with suppressed/mock sends. Next per the plan: **Phase 7 — AI chatbot + human agent dashboard (§13, §14)**.
 
 ## P6a — Messenger connection + identity mapping
 
