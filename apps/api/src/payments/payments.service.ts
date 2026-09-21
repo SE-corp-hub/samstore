@@ -163,6 +163,76 @@ export class PaymentsService {
     });
   }
 
+  /** P4b: review queue — orders awaiting operator review of a bank-transfer proof (RECEIVED). */
+  async reviewQueue(storeId: string) {
+    const orders = await prisma.order.findMany({
+      where: { storeId, paymentStatus: "RECEIVED" },
+      orderBy: { createdAt: "desc" },
+      take: 100,
+      select: {
+        id: true,
+        orderNumber: true,
+        totalMinor: true,
+        customerName: true,
+        paymentMethod: true,
+        createdAt: true,
+        payments: { where: { type: "payment" }, orderBy: { receivedAt: "desc" }, take: 1 },
+      },
+    });
+    return orders.map((o) => ({
+      id: o.id,
+      orderNumber: o.orderNumber,
+      totalMinor: o.totalMinor,
+      customerName: o.customerName,
+      paymentMethod: o.paymentMethod,
+      createdAt: o.createdAt.toISOString(),
+      payment: o.payments[0],
+    }));
+  }
+
+  /** P4b: submit a bank-transfer proof image (base64 data-URL) for an order. Validated,
+   *  stored on the bank-transfer Payment row, order → RECEIVED (from PENDING) with history. */
+  async submitBankProof(
+    orderId: string,
+    storeId: string,
+    actorId: string,
+    proofDataUrl: string,
+  ): Promise<PaymentResult<{ id: string; status: string }>> {
+    const order = await prisma.order.findFirst({ where: { id: orderId, storeId } });
+    if (!order) return { ok: false, error: { type: "not_found", message: "Order not found" } };
+    if (order.paymentStatus !== "PENDING") {
+      return { ok: false, error: { type: "conflict", message: "Only pending payments can accept a proof" } };
+    }
+
+    // Validate: must be a base64 data-URL image (png/jpeg), ≤ 2 MB decoded.
+    const match = /^data:(image\/(?:png|jpeg));base64,([A-Za-z0-9+/=]+)$/.exec(proofDataUrl?.trim() ?? "");
+    if (!match) {
+      return { ok: false, error: { type: "validation", errors: ["Proof must be a PNG or JPEG image (base64 data-URL)"] } };
+    }
+    const [, mime, b64] = match;
+    let bytes = 0;
+    try {
+      bytes = Buffer.from(b64 ?? "", "base64").length;
+    } catch {
+      return { ok: false, error: { type: "validation", errors: ["Proof image could not be decoded"] } };
+    }
+    if (bytes < 1 || bytes > 2 * 1024 * 1024) {
+      return { ok: false, error: { type: "validation", errors: ["Proof image must be between 1 byte and 2 MB"] } };
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.payment.updateMany({
+        where: { orderId, storeId, type: "payment" },
+        data: { proofData: proofDataUrl, proofMime: mime },
+      });
+      await tx.order.update({ where: { id: orderId }, data: { paymentStatus: "RECEIVED" } });
+      await tx.paymentStatusHistory.create({
+        data: { storeId, orderId, paymentId: null, fromStatus: "PENDING", toStatus: "RECEIVED", reason: "bank-transfer proof submitted", actorType: "admin", actorId },
+      });
+    });
+    return { ok: true, value: { id: orderId, status: "RECEIVED" } };
+  }
+
   /** Receipt view for an order (deterministic). */
   async receipt(orderId: string, storeId: string) {
     const order = await prisma.order.findFirst({

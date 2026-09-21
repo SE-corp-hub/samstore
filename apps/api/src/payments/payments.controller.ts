@@ -142,6 +142,32 @@ export class PaymentsController {
     return result.value;
   }
 
+  /** GET /admin/payments/review-queue — P4b: orders awaiting proof review (RECEIVED). */
+  @Get("payments/review-queue")
+  async reviewQueue(@Req() req: Request & { user?: AuthPrincipal }, @Headers("x-store-id") headerStoreId?: string) {
+    const user = req.user;
+    requireUser(user);
+    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
+    return { storeId, items: await this.paymentsSvc.reviewQueue(storeId) };
+  }
+
+  /** POST /admin/orders/:id/payments/proof — P4b: submit a bank-transfer proof image. */
+  @Post("orders/:id/payments/proof")
+  async submitProof(
+    @Req() req: Request & { user?: AuthPrincipal },
+    @Param("id") id: string,
+    @Body() body: { proofDataUrl: string },
+    @Headers("x-store-id") headerStoreId?: string,
+  ) {
+    const user = req.user;
+    requireUser(user);
+    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
+    const result = await this.paymentsSvc.submitBankProof(id, storeId, user.sub, body?.proofDataUrl ?? "");
+    if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
+    await cacheBust(cacheKey("orders", storeId));
+    return result.value;
+  }
+
   /** PATCH /admin/orders/:id/void — void an unfulfilled POS sale. */
   @Patch("orders/:id/void")
   async voidOrder(

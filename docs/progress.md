@@ -1,6 +1,19 @@
 # PINDIAN — Progress Log
 
-Updated: 2026-09-20 · **P4a: payment gateway interface + PayMongo sandbox + payment links + webhook lifecycle** · Active model: `deepseek/deepseek-v4-flash-0731` (openrouter), boilerplate tier `inclusionai/ling-3.0-flash`
+Updated: 2026-09-20 · **P4b: bank-transfer proof upload + review queue** · Active model: `deepseek/deepseek-v4-flash-0731` (openrouter), boilerplate tier `inclusionai/ling-3.0-flash`
+
+## P4b — Payments PH: bank-transfer proof + review queue (§16)
+
+| Item | Detail |
+|---|---|
+| Proof upload | `PaymentsService.submitBankProof(orderId, storeId, actorId, proofDataUrl)` — validates a base64 data-URL PNG/JPEG (≤ 2 MB decoded, mime-whitelisted), attaches `proofData`/`proofMime` to the bank-transfer `Payment` row, moves the order `PENDING→RECEIVED` + writes `PaymentStatusHistory` (`"bank-transfer proof submitted"`). Rejects non-images, oversized, and non-pending orders (`conflict`). |
+| Review queue | `reviewQueue(storeId)` — orders with `paymentStatus = RECEIVED` (latest payment + proof); `GET /admin/payments/review-queue`. `POST /admin/orders/:id/payments/proof` uploads; the P4a `.../payments/review` flips RECEIVED→REVIEWED. Full §16 lifecycle **pending→received→reviewed→refunded** is covered end-to-end. |
+| Web | New `PaymentReview` modal (OrdersPanel "Payment review" nav button): lists the queue, per-row proof file upload (client-side size/type check → base64) + Review button; every action reloads the orders list. |
+| Tests | +3 `payments/p4-bank-proof.test.ts` (real DB): valid proof → RECEIVED + image attached + queue lists it + history; invalid/oversized/wrong-mime rejected (order stays PENDING); full lifecycle proof→received→reviewed→refunded + a second proof on a refunded order → conflict. |
+| Gate | api + web `tsc` 0 errors · web build ✓ · **48/48 across the 5 touched files standalone** (p4-bank-proof 3, p4-gateway 4, payments.service 10, split-payment 10, pos.service 21). Full-suite run 417 tests / 13 fail — all the documented pre-existing flaky set; none this module's. |
+| Commit | (this commit) |
+
+**Phase 4 (PLAN.md §16) is now COMPLETE**: gateway interface + PayMongo sandbox adapter (`PENDING_CREDENTIALS`, tokenized-only, webhook idempotency) + payment links (P4a); bank-transfer proof + review queue + received/reviewed/refunded lifecycle + status history + admin UI (P4b). Next per the plan: **Phase 5 — Shipping & delivery (§17)**.
 
 ## P4a — Payments PH: gateway + payment links + webhook lifecycle (§16)
 
