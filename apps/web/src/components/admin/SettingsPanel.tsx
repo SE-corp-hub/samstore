@@ -87,6 +87,10 @@ export default function SettingsPanel() {
   const [seniorPwdDiscountEnabled, setSeniorPwdDiscountEnabled] = useState(false);
   const [messengerConnected, setMessengerConnected] = useState(false);
   const [messengerPageId, setMessengerPageId] = useState("");
+  // P6a: page connection
+  const [mpForm, setMpForm] = useState({ pageId: "", pageName: "", accessToken: "" });
+  const [mpDeepLink, setMpDeepLink] = useState("");
+  const [mpErr, setMpErr] = useState<string | null>(null);
   const [loyaltyPointsPerPeso, setLoyaltyPointsPerPeso] = useState("1");
   const [loyaltyWelcomeBonusPoints, setLoyaltyWelcomeBonusPoints] = useState("0");
   const [loyaltyExpiryMonths, setLoyaltyExpiryMonths] = useState("0");
@@ -205,6 +209,45 @@ export default function SettingsPanel() {
     messengerPageId: messengerPageId.trim() || null,
   });
 
+  const messengerCall = async (path: string, method: string, body?: unknown) => {
+    setMpErr(null);
+    try {
+      const res = await fetch(`${API_URL}${path}`, {
+        method,
+        headers: { ...adminHeaders(), ...(body !== undefined ? { "Content-Type": "application/json" } : {}) },
+        body: body !== undefined ? JSON.stringify(body) : undefined,
+      });
+      const d = await res.json().catch(() => null);
+      if (!res.ok) { setMpErr(d?.errors?.join(", ") ?? d?.message ?? "Request failed"); return null; }
+      return d;
+    } catch (e) {
+      setMpErr(e instanceof Error ? e.message : "Request failed");
+      return null;
+    }
+  };
+
+  const connectMessenger = async () => {
+    const d = await messengerCall("/admin/messenger/connect", "POST", mpForm);
+    if (!d) return;
+    setMpForm({ pageId: "", pageName: "", accessToken: "" });
+    setMessengerConnected(true);
+    setMessengerPageId(d.pageId);
+    void load();
+  };
+
+  const disconnectMessenger = async () => {
+    if (!(await messengerCall("/admin/messenger/disconnect", "POST"))) return;
+    setMessengerConnected(false);
+    setMessengerPageId("");
+    setMpDeepLink("");
+    void load();
+  };
+
+  const loadDeepLink = async () => {
+    const d = await messengerCall("/admin/messenger/deep-link", "GET");
+    if (d) setMpDeepLink(d.deepLink);
+  };
+
   const saveLoyalty = () => saveSection({
     loyaltyPointsPerPeso: parseInt(loyaltyPointsPerPeso || "1", 10),
     loyaltyWelcomeBonusPoints: parseInt(loyaltyWelcomeBonusPoints || "0", 10),
@@ -306,8 +349,32 @@ export default function SettingsPanel() {
                     <label className="form-label small">Messenger Page ID</label>
                     <input className="form-control" placeholder="e.g. 1029384756" value={messengerPageId} onChange={(e) => setMessengerPageId(e.target.value)} />
                   </div>
+                  {mpErr && <div className="alert alert-danger py-2 small">{mpErr}</div>}
+                  <div className="small fw-semibold mb-1">Connect a Messenger Page</div>
+                  {!messengerConnected ? (
+                    <div className="row g-1 mb-2">
+                      <div className="col-4"><input className="form-control form-control-sm" placeholder="Page ID" value={mpForm.pageId} onChange={(e) => setMpForm({ ...mpForm, pageId: e.target.value })} /></div>
+                      <div className="col-4"><input className="form-control form-control-sm" placeholder="Page name" value={mpForm.pageName} onChange={(e) => setMpForm({ ...mpForm, pageName: e.target.value })} /></div>
+                      <div className="col-4"><input className="form-control form-control-sm" type="password" placeholder="Page access token" value={mpForm.accessToken} onChange={(e) => setMpForm({ ...mpForm, accessToken: e.target.value })} /></div>
+                    </div>
+                  ) : (
+                    <div className="d-flex flex-wrap gap-2 align-items-center mb-2 small">
+                      <span className="badge text-bg-success">Connected</span>
+                      <button className="btn btn-sm btn-outline-primary" onClick={() => void loadDeepLink()}>Show deep link</button>
+                      {mpDeepLink && (
+                        <span className="text-muted">
+                          <code>{mpDeepLink}</code>
+                          <button className="btn btn-sm btn-outline-secondary ms-1" onClick={() => navigator.clipboard?.writeText(mpDeepLink)}>Copy</button>
+                        </span>
+                      )}
+                      <button className="btn btn-sm btn-outline-danger" onClick={() => void disconnectMessenger()}>Disconnect</button>
+                    </div>
+                  )}
                   <div className="mt-2 d-flex justify-content-end">
                     <button className="btn btn-primary" type="button" disabled={saving} onClick={saveMessenger}>{saving ? "Saving…" : "Save messenger settings"}</button>
+                    {!messengerConnected && (
+                      <button className="btn btn-outline-primary ms-2" type="button" disabled={!mpForm.pageId.trim() || !mpForm.pageName.trim() || !mpForm.accessToken.trim()} onClick={() => void connectMessenger()}>Connect page</button>
+                    )}
                   </div>
                 </div>
               </div>

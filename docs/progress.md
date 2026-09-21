@@ -1,6 +1,17 @@
 # PINDIAN — Progress Log
 
-Updated: 2026-09-20 · **P5b: courier adapters + tracking + COD remittance ledger (§17)** · Active model: `deepseek/deepseek-v4-flash-0731` (openrouter), boilerplate tier `inclusionai/ling-3.0-flash`
+Updated: 2026-09-20 · **P6a: Messenger connection + identity mapping (§12)** · Active model: `deepseek/deepseek-v4-flash-0731` (openrouter), boilerplate tier `inclusionai/ling-3.0-flash`
+
+## P6a — Messenger connection + identity mapping
+
+| Item | Detail |
+|---|---|
+| Schema | `MessengerPage` (storeId unique, pageId, pageName, `accessTokenHash`, `webhookVerifyTokenHash` — **hashes only, never the tokens**) + `MessengerUser` (storeId+psid, `customerId` FK → identity mapping, optedIn, lastSeenAt). Migration `20260920160000_module_p6a_messenger_connection` (db-execute + registered). |
+| Service | `MessengerConnectionService`: `getConnection` (portal status; provider always `suppressed` — honest), `connect` (validates + sha256-hashes the page token, sets `messengerConnected`/`pageId`), `disconnect`, `rotateWebhookToken` (high-entropy token returned ONCE, hash stored), `mapUser` (PSID→customer upsert), `listUsers`, `deepLink` (`https://m.me/<pageId>?ref=<slug>`). Live Graph/Send calls stay gated behind operator approval. |
+| Endpoints | `/admin/messenger` (status), `/connect`, `/disconnect`, `/rotate-webhook-token`, `/users` (POST/GET), `/deep-link` — tenant-scoped. SettingsPanel Messenger card gains a **Connect a Messenger Page** form + connected state (deep link + copy, disconnect). |
+| Tests | +5 `messenger/connection.test.ts` (real DB): token hashed-never-stored + disconnect clears; webhook token returned once + hash-only; PSID→customer upsert/opt-out + list; deep link requires connection + reflects slug; tenant isolation (store B sees no page/users). |
+| Gate | api + web `tsc` 0 errors · web build ✓ · **20/20 across the 4 messenger files standalone** (connection 5, bridge 6, adapter 4, webhook-verification 5). Full-suite 430 tests / 4 fail — the residual pre-existing set (worker/outbox, POS utang, reports); pool-exhaustion fix holds the band. |
+| Commit | (this commit) |
 
 ## P5b — Courier adapters + COD remittance
 

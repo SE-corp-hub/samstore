@@ -29,6 +29,7 @@ import { PaymentsController } from "./payments/payments.controller.js";
 import { PaymentsWebhookController } from "./payments/payments-webhook.controller.js";
 import { DeliveryZonesAdminController } from "./delivery/zones-admin.controller.js";
 import { DeliveryBookingsAdminController } from "./delivery/delivery-booking-admin.controller.js";
+import { MessengerConnectionAdminController } from "./messenger/connection-admin.controller.js";
 import { CreditService, CREDIT_SERVICE } from "./credit/credit.service.js";
 import { CreditController } from "./credit/credit.controller.js";
 import { ExpensesService, EXPENSES_SERVICE } from "./expenses/expenses.service.js";
@@ -58,7 +59,7 @@ import {
 const CLAIM_SECRET = process.env.CLAIM_SIGNING_SECRET ?? "dev-only-in-memory-secret-0123456789";
 
 @Module({
-  controllers: [CheckoutController, PublicStoreController, CartController, AuthController, AdminController, OrderLookupController, CustomerAuthController, PosController, PaymentsController, PaymentsWebhookController, DeliveryZonesAdminController, DeliveryBookingsAdminController, CreditController, ExpensesController, PurchasesController, InventoryController, ReportsController, DeliveryController, HealthController, RegisterController, RolePermissionsController, AddressController],
+  controllers: [CheckoutController, PublicStoreController, CartController, AuthController, AdminController, OrderLookupController, CustomerAuthController, PosController, PaymentsController, PaymentsWebhookController, DeliveryZonesAdminController, DeliveryBookingsAdminController, MessengerConnectionAdminController, CreditController, ExpensesController, PurchasesController, InventoryController, ReportsController, DeliveryController, HealthController, RegisterController, RolePermissionsController, AddressController],
   providers: [
     {
       provide: DELIVERY_SERVICE,
