@@ -213,6 +213,8 @@ model Store {
   outboxEvents           OutboxEvent[]
   paymentStatusHistories PaymentStatusHistory[]
   campaigns              Campaign[]
+  accounts               Account[]
+  journalEntries         JournalEntry[]
 }
 
 model StoreSettings {
@@ -642,6 +644,65 @@ model CampaignRecipient {
 
   @@unique([storeId, campaignId, storeCustomerId])
   @@index([storeId, storeCustomerId])
+}
+
+// P9: ERP double-entry ledger — chart of accounts + balancing journal entries.
+// Auto-posted from orders (sale + COGS), expenses, credit payments; every entry's
+// debits equal its credits (enforced). Tenant-scoped.
+
+enum AccountType {
+  ASSET
+  LIABILITY
+  EQUITY
+  REVENUE
+  EXPENSE
+}
+
+model Account {
+  id        String      @id @default(cuid())
+  storeId   String
+  store     Store       @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  code      String
+  name      String
+  type      AccountType
+  isActive  Boolean     @default(true)
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  journalLines JournalEntryLine[]
+
+  @@unique([storeId, code])
+  @@unique([storeId, name])
+}
+
+model JournalEntry {
+  id        String   @id @default(cuid())
+  storeId   String
+  store     Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  entryDate DateTime
+  reference String // order number / expense id / purchase id / manual
+  memo      String?
+  source    String   @default("manual") // sale | expense | credit_payment | manual
+  createdBy String?
+  createdAt DateTime @default(now())
+
+  lines JournalEntryLine[]
+
+  @@index([storeId, entryDate])
+  @@index([storeId, source])
+}
+
+model JournalEntryLine {
+  id          String       @id @default(cuid())
+  storeId     String
+  entryId     String
+  entry       JournalEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  accountId   String
+  account     Account      @relation(fields: [accountId], references: [id])
+  debitMinor  Int          @default(0)
+  creditMinor Int          @default(0)
+
+  @@index([storeId, accountId])
 }
 
 // ─────────────────────────────── Warehouses / inventory ───────────────────────────────

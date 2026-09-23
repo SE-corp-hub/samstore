@@ -1,6 +1,19 @@
 # PINDIAN — Progress Log
 
-Updated: 2026-09-20 · **P8: CRM — aggregates, segmentation, campaigns (§15)** · Active model: `deepseek/deepseek-v4-flash-0731` (openrouter), boilerplate tier `inclusionai/ling-3.0-flash`
+Updated: 2026-09-20 · **P9: ERP double-entry + BIR exports (§21/§24)** · Active model: `deepseek/deepseek-v4-flash-0731` (openrouter), boilerplate tier `inclusionai/ling-3.0-flash`
+
+## P9 — ERP depth + BIR
+
+| Item | Detail |
+|---|---|
+| Schema | `Account` (code/name/type ASSET·LIABILITY·EQUITY·REVENUE·EXPENSE) + `JournalEntry` (reference/source/memo/entryDate) + `JournalEntryLine` (debit/credit). Migration `20260920190000_module_p9a_erp` (db-execute + registered). |
+| Ledger | `erp/journal.service.ts` — `ensureChart` (9 default accounts), `postEntry` (manual, **enforces debits=credits>0**), `postOrder` (fulfilled → DR Cash / CR Sales + Delivery Revenue, + **COGS at latest product cost** DR COGS/CR Inventory; **idempotent** per order), `postExpense` (DR Operating Expenses/CR Cash, idempotent), `backfill` (posts all un-posted fulfilled orders + expenses), `trialBalance` (+ balanced flag), `incomeStatement` (revenue − COGS − expenses). |
+| Endpoints | `/admin/erp/accounts`, `/trial-balance`, `/income-statement`, `/entries` (manual), `/orders/:id/post`, `/backfill` — owner/manager, tenant-scoped. |
+| BIR | `erp/bir.service.ts` — **Sales Journal CSV** (Date, Receipt No, Customer, TIN, Gross Sales, VATable, VAT, Exempt, Discount — from frozen order VAT columns + store TIN) and **Cash Receipts Journal CSV** (per payment). `PendingEInvoiceAdapter` D-marked `PENDING_CREDENTIALS` (`ready()` from `BIR_CSF_CREDENTIALS`; `submitInvoice` throws honestly). Endpoints `/admin/bir/sales-journal`, `/cash-receipts-journal`, `/einvoice/status`. |
+| Tests | +7: `erp/journal.test.ts` +4 (chart seed + manual balancing rejected/ok; postOrder idempotent with correct P&L incl. COGS; unfulfilled rejected + backfill idempotent; expense post + P&L) and `erp/bir.test.ts` +3 (Sales Journal CSV with VAT/TIN + escaping; Cash Receipts CSV; e-invoice honestly pending + throws). |
+| Gate | api `tsc` 0 errors · full-suite **440 tests / 5 fail** — the pre-existing residual family (voucher/addon, worker/outbox, POS utang, pre-order, purchases); none this module's, all pass standalone. |
+| Note | The **ERP/BIR admin panel** (chart view, trial balance, income statement, CSV download buttons, e-invoice status) is the T2 UI remainder — backend + tests shipped. |
+| Commit | (this commit) |
 
 ## P8 — CRM & campaigns
 

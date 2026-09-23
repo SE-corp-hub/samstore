@@ -198,6 +198,7 @@ Per-phase split (T1 share of the module's work):
 - **BIR:** senior/PWD discount + receipt lines (done in P3), VAT-exempt handling, receipt/invoice print aligned to BIR format incl. TIN (`ReceiptModal`), **Sales Journal + Cash Receipts Journal CSV export**, e-invoice/CSF adapter `PENDING_CREDENTIALS`.
 - **Accept:** journal postings balance to zero; BIR slip print fixture verifies TIN/VAT/20% lines.
 - **Model:** T1-dominant (85/15) — double-entry, COGS, VAT/senior engine on `deepseek` (fallback `z-ai/glm-5.3-flash`); report screens + CSV exports on `ling-3.0-flash`.
+- **Status:** **P9 ✅ (backend)** — `Account`/`JournalEntry`/`JournalEntryLine` + `JournalService` (balancing postings, auto-post fulfilled orders + COGS + expenses, idempotent backfill, trial balance, income statement) + **BIR** Sales Journal / Cash Receipts Journal CSV exports + `PendingEInvoiceAdapter` (`PENDING_CREDENTIALS`). +7 tests. **Pending T2 remainder:** ERP/BIR admin panel (chart/trial balance/income statement/CSV download/e-invoice status). **Phase 9 mostly COMPLETE.**
 
 ### Phase 10 — Compliance & security hardening (§22)
 - DPA consent management + data-retention controls + **NPC breach-notification hooks**; CSRF, upload validation, output encoding; rate-limit coverage audit; audit-log completeness; security checklist written.
