@@ -95,8 +95,9 @@ export default function StoresPanel() {
   const [stores, setStores] = useState<StoreRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [form, setForm] = useState({ name: "", slug: "", ownerEmail: "" });
+  const [form, setForm] = useState({ name: "", slug: "", ownerEmail: "", ownerPhone: "" });
   const [saving, setSaving] = useState(false);
+  const [ownerCredentials, setOwnerCredentials] = useState<{ email: string; phone: string; tempPassword?: string } | null>(null);
 
   // Status change (suspend / reinstate / archive / close)
   const [statusTarget, setStatusTarget] = useState<{ store: StoreRow; action: StatusAction } | null>(null);
@@ -151,14 +152,15 @@ export default function StoresPanel() {
       const res = await fetch(`${API_URL}/admin/stores`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...adminHeaders() },
-        body: JSON.stringify({ name: form.name, slug: form.slug, ownerEmail: form.ownerEmail }),
+        body: JSON.stringify({ name: form.name, slug: form.slug, ownerEmail: form.ownerEmail, ownerPhone: form.ownerPhone }),
       });
       const data = await res.json();
       if (!res.ok) {
         setError(data?.errors?.join(", ") ?? data?.message ?? "Create failed");
         return;
       }
-      setForm({ name: "", slug: "", ownerEmail: "" });
+      setOwnerCredentials(data?.tempPassword ? { email: form.ownerEmail, phone: form.ownerPhone, tempPassword: data.tempPassword } : null);
+      setForm({ name: "", slug: "", ownerEmail: "", ownerPhone: "" });
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Create failed");
@@ -342,6 +344,13 @@ export default function StoresPanel() {
     <div>
       <h1 className="h4 mb-3">Stores</h1>
       {error && <div className="alert alert-danger py-2 small">{error}</div>}
+      {ownerCredentials && (
+        <div className="alert alert-warning small">
+          <strong>New owner account created.</strong> Share these credentials securely once, then ask the owner to change the password immediately.
+          <div className="mt-1"><code>{ownerCredentials.email}</code> / <code>{ownerCredentials.phone}</code> / <code>{ownerCredentials.tempPassword}</code></div>
+          <button className="btn btn-sm btn-outline-secondary mt-2" onClick={() => setOwnerCredentials(null)}>Dismiss</button>
+        </div>
+      )}
 
       <form onSubmit={create} className="card mb-4">
         <div className="card-body">
@@ -353,10 +362,13 @@ export default function StoresPanel() {
             <div className="col-md-3">
               <input className="form-control form-control-sm" placeholder="slug (e.g. my-store)" value={form.slug} onChange={(e) => setForm({ ...form, slug: e.target.value.toLowerCase().trim() })} required pattern="[a-z0-9-]{2,40}" />
             </div>
-            <div className="col-md-4">
-              <input className="form-control form-control-sm" type="email" placeholder="Owner email (registered admin)" value={form.ownerEmail} onChange={(e) => setForm({ ...form, ownerEmail: e.target.value })} required />
-            </div>
-            <div className="col-md-2">
+             <div className="col-md-3">
+               <input className="form-control form-control-sm" type="email" placeholder="Owner email (existing or new)" value={form.ownerEmail} onChange={(e) => setForm({ ...form, ownerEmail: e.target.value })} required />
+             </div>
+             <div className="col-md-3">
+               <input className="form-control form-control-sm" type="tel" placeholder="Owner phone (+639...)" value={form.ownerPhone} onChange={(e) => setForm({ ...form, ownerPhone: e.target.value })} required />
+             </div>
+             <div className="col-md-2">
               <button className="btn btn-primary btn-sm w-100" type="submit" disabled={saving}>
                 {saving ? "…" : "Create store"}
               </button>

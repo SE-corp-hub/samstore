@@ -287,9 +287,11 @@ export const REGISTER_DTO: ObjectRule = {
 export const CHANGE_PASSWORD_DTO: ObjectRule = {
   kind: "object",
   fields: {
-    email: { kind: "string", required: true, min: 3, max: 254 },
+    identifier: { kind: "string", required: false, min: 3, max: 254 },
+    email: { kind: "string", required: false, min: 3, max: 254 },
     currentPassword: { kind: "string", required: true, min: 1, max: 200, trim: false },
     newPassword: { kind: "string", required: true, min: 8, max: 200, trim: false },
+    newPasswordConfirm: { kind: "string", required: true, min: 8, max: 200, trim: false },
   },
 };
 

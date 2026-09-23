@@ -330,7 +330,7 @@ export class AdminController {
   @Post("stores")
   async createStore(
     @Req() req: Request & { user?: AuthPrincipal },
-    @Body() body: { name: string; slug: string; currencyCode?: string; timezone?: string; ownerEmail: string },
+    @Body() body: { name: string; slug: string; currencyCode?: string; timezone?: string; ownerEmail: string; ownerPhone: string },
   ) {
     const user = req.user;
         requireUser(user);

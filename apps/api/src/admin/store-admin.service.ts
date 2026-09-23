@@ -5,6 +5,7 @@ import bcrypt from "bcryptjs";
 import { prisma } from "../persistence/prisma-repositories.js";
 import { StoreRole, StoreStatus } from "@prisma/client";
 import type { ApiError } from "@sam-store/contracts";
+import { toE164 } from "../domain/phone.js";
 
 export type AdminResult<T> = { ok: true; value: T } | { ok: false; error: ApiError };
 
@@ -17,6 +18,7 @@ export interface CreateStoreInput {
   currencyCode?: string;
   timezone?: string;
   ownerEmail: string; // existing or new owner account
+  ownerPhone: string;
   ownerRole?: string;
 }
 
@@ -54,21 +56,26 @@ export class StoreAdminService {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(ownerEmail)) {
       return { ok: false, error: { type: "validation", errors: ["A valid owner email is required"] } };
     }
+    const ownerPhone = toE164(input.ownerPhone);
+    if (!ownerPhone) return { ok: false, error: { type: "validation", errors: ["A valid Philippine owner mobile number is required"] } };
     // Email identity is case-insensitive for onboarding; preserve the normalized
     // lowercase value only when creating a new account.
-    let owner = await prisma.user.findFirst({ where: { email: { equals: ownerEmail, mode: "insensitive" } } });
+    let owner = await prisma.user.findFirst({ where: { OR: [{ email: { equals: ownerEmail, mode: "insensitive" } }, { phone: ownerPhone }] } });
     let tempPassword: string | undefined;
     if (!owner) {
       tempPassword = randomBytes(9).toString("base64url");
       owner = await prisma.user.create({
         data: {
           email: ownerEmail,
+          phone: ownerPhone,
           passwordHash: await bcrypt.hash(tempPassword, 12),
           role: "OWNER",
           mustChangePassword: true,
         },
       });
     }
+    if (owner.phone && owner.phone !== ownerPhone) return { ok: false, error: { type: "conflict", message: "Owner email already belongs to a different mobile number" } };
+    if (!owner.phone) await prisma.user.update({ where: { id: owner.id }, data: { phone: ownerPhone } });
 
     const token = `lnk_${randomBytes(24).toString("base64url")}`;
     const store = await prisma.store.create({

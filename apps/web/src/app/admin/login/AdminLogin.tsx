@@ -13,6 +13,7 @@ export default function AdminLogin() {
   // Forced password change on first login.
   const [mustChange, setMustChange] = useState(false);
   const [newPassword, setNewPassword] = useState("");
+  const [newPasswordConfirm, setNewPasswordConfirm] = useState("");
   const [changeError, setChangeError] = useState<string | null>(null);
   const [changing, setChanging] = useState(false);
 
@@ -72,13 +73,17 @@ export default function AdminLogin() {
       setChangeError("Password must be at least 8 characters.");
       return;
     }
+    if (newPassword !== newPasswordConfirm) {
+      setChangeError("New passwords do not match.");
+      return;
+    }
     setChanging(true);
     setChangeError(null);
     try {
       const res = await fetch(`${API_URL}/auth/change-password`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: identifier, currentPassword: password, newPassword }),
+        body: JSON.stringify({ identifier, currentPassword: password, newPassword, newPasswordConfirm }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -98,6 +103,8 @@ export default function AdminLogin() {
   const backToLogin = () => {
     setMustChange(false);
     setChangeError(null);
+    setNewPassword("");
+    setNewPasswordConfirm("");
     setError(null);
   };
 
@@ -128,6 +135,18 @@ export default function AdminLogin() {
                   placeholder="At least 8 characters"
                 />
                 <div className="form-text small">Minimum 8 characters. You will be signed in with the new password.</div>
+              </div>
+              <div className="mb-3">
+                <label className="form-label small">Retype new password</label>
+                <input
+                  className="form-control"
+                  type="password"
+                  required
+                  minLength={8}
+                  value={newPasswordConfirm}
+                  onChange={(e) => setNewPasswordConfirm(e.target.value)}
+                  placeholder="Retype the new password"
+                />
               </div>
               <button className="btn btn-primary w-100" type="submit" disabled={changing}>
                 {changing ? "Updating…" : "Confirm"}

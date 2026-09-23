@@ -10,4 +10,16 @@
 | DELIVERY | Delivery queue | `/admin/delivery` only | Admin dashboard navigation |
 | CUSTOMER / guest | Storefront | Catalog, cart, checkout, order tracking | All admin routes |
 
+## Store Onboarding Flow
+
+1. A Platform Admin opens **Stores → Create a new store**.
+2. They enter store name, slug, owner email, and owner Philippine mobile number.
+3. If the owner is new, the API creates the account, assigns OWNER membership, sets `mustChangePassword`, and returns a one-time temporary password.
+4. The UI displays the email, phone, and temporary password once with a secure handoff warning.
+5. The owner signs in using email **or phone** plus the temporary password.
+6. First login requires a new password plus a matching confirmation field.
+7. After changing the password, the owner reaches the selected store dashboard and can use **Team** to create Manager/Staff/Sales Agent/Delivery accounts with the same one-time-password flow.
+
+The temporary password is never emailed or logged by the application; the Platform Admin owns the secure out-of-band handoff.
+
 The frontend hides tabs for usability; API tenant/role guards remain authoritative.

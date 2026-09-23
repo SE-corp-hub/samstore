@@ -2,6 +2,15 @@
 
 ## P10a — Privacy retention controls (§22)
 
+## Follow-up — Platform Admin owner onboarding
+
+| Item | Detail |
+|---|---|
+| Creation | Platform Admin store creation now requires owner email + PH mobile number. Existing users are linked; new owners are created with OWNER membership, `mustChangePassword=true`, and a one-time temporary password. The UI displays credentials once for secure out-of-band handoff. |
+| Login | Auth change-password accepts email or phone identifier; first-login UI requires **new password + retype confirmation** before redirecting to the dashboard. |
+| Staff flow | Existing Team invite flow remains the owner’s path for creating Manager/Staff/Sales Agent/Delivery accounts, also using one-time passwords and forced first-login change. |
+| Tests | Store creation tests cover new-owner credentials and existing-owner linking; auth/store-access tests pass. |
+
 ## Follow-up — Delivery zones, store onboarding, role navigation
 
 | Item | Detail |

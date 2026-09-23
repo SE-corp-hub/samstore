@@ -20,7 +20,7 @@ after(async () => {
 });
 
 test("Platform Admin store creation creates a new owner login with one-time credentials", async () => {
-  const result = await service.create({ name: "New Staging Store", slug: `${run}-new`, ownerEmail: `${run.toLowerCase()}@example.test` });
+  const result = await service.create({ name: "New Staging Store", slug: `${run}-new`, ownerEmail: `${run.toLowerCase()}@example.test`, ownerPhone: "+639171234567" });
   assert.equal(result.ok, true);
   if (!result.ok) return;
   storeIds.push(result.value.id);
@@ -38,7 +38,7 @@ test("Platform Admin store creation creates a new owner login with one-time cred
 test("existing owner email is linked without generating a second user", async () => {
   const user = await prisma.user.create({ data: { email: `${run}-existing@example.test`, passwordHash: "hash", role: "OWNER" } });
   userIds.push(user.id);
-  const result = await service.create({ name: "Existing Owner Store", slug: `${run}-existing`, ownerEmail: user.email! });
+  const result = await service.create({ name: "Existing Owner Store", slug: `${run}-existing`, ownerEmail: user.email!, ownerPhone: "+639171234568" });
   assert.equal(result.ok, true);
   if (!result.ok) return;
   storeIds.push(result.value.id);

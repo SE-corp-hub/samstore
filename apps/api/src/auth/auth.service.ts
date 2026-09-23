@@ -219,15 +219,20 @@ export class AuthService {
    * flag, and returns a fresh token.
    */
   async changePassword(input: {
-    email: string;
+    identifier?: string;
+    email?: string;
     currentPassword: string;
     newPassword: string;
+    newPasswordConfirm?: string;
   }): Promise<AuthResult<{ token: string; user: AuthUserSummary }>> {
-    const email = input.email?.trim().toLowerCase() ?? "";
+    const identifier = (input.identifier ?? input.email ?? "").trim();
     if (!input.newPassword || input.newPassword.length < 8) {
       return { ok: false, error: { type: "validation", errors: ["Password must be at least 8 characters"] } };
     }
-    const user = await this.repo.findByEmail(email);
+    if (input.newPassword !== (input.newPasswordConfirm ?? input.newPassword)) {
+      return { ok: false, error: { type: "validation", errors: ["New passwords do not match"] } };
+    }
+    const user = await this.repo.findByIdentifier(identifier);
     if (!user) return { ok: false, error: { type: "unauthorized", message: "Invalid phone/email or password" } };
     const valid = await verifyPassword(input.currentPassword ?? "", user.passwordHash);
     if (!valid) return { ok: false, error: { type: "unauthorized", message: "Current password is incorrect" } };
