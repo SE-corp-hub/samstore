@@ -1,0 +1,246 @@
+openapi: 3.0.3
+info:
+  title: PINDIAN Commerce API
+  version: 0.1.0
+  description: >-
+    Multi-tenant Philippine commerce API. All admin endpoints require a bearer
+    JWT plus X-Store-Id. Public store endpoints require slug + high-entropy token.
+    Payment, Messenger, courier, e-invoice, and NPC adapters remain mock or
+    PENDING_CREDENTIALS until operator approval.
+servers:
+  - url: http://localhost:4100
+    description: Local API
+tags:
+  - name: Public
+  - name: Auth
+  - name: Cart
+  - name: Checkout
+  - name: Orders
+  - name: Payments
+  - name: Delivery
+  - name: Messenger
+  - name: CRM
+  - name: ERP
+  - name: Privacy
+paths:
+  /health:
+    get:
+      tags: [Public]
+      summary: Health status
+      responses:
+        '200': { description: Healthy }
+  /public/stores/{slug}:
+    get:
+      tags: [Public]
+      summary: Resolve a public store and active catalog
+      parameters:
+        - { $ref: '#/components/parameters/Slug' }
+        - { $ref: '#/components/parameters/PublicToken' }
+      responses:
+        '200': { description: Storefront payload }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /public/stores/{slug}/messenger/opt-in:
+    post:
+      tags: [Messenger]
+      summary: Token-gated website-to-Messenger opt-in
+      parameters:
+        - { $ref: '#/components/parameters/Slug' }
+        - { $ref: '#/components/parameters/PublicToken' }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                psid: { type: string, maxLength: 300 }
+                text: { type: string, maxLength: 640 }
+      responses:
+        '200': { description: Suppressed/mock portal status }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /admin/settings:
+    get:
+      tags: [Orders, Messenger, CRM]
+      summary: Read tenant settings
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/StoreId' }]
+      responses: { '200': { description: Settings } }
+    patch:
+      tags: [Orders, Messenger, CRM]
+      summary: Update tenant settings
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/StoreId' }]
+      requestBody: { $ref: '#/components/requestBodies/JsonObject' }
+      responses: { '200': { description: Updated } }
+  /admin/checkout:
+    post:
+      tags: [Checkout]
+      summary: Create an order from a server-repriced cart
+      security: [{ bearerAuth: [] }]
+      requestBody: { $ref: '#/components/requestBodies/JsonObject' }
+      responses: { '200': { description: Checkout response } }
+  /admin/orders/{id}/payment-link:
+    post:
+      tags: [Payments]
+      summary: Create a gateway-hosted payment link
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/OrderId' }, { $ref: '#/components/parameters/StoreId' }]
+      requestBody: { $ref: '#/components/requestBodies/JsonObject' }
+      responses: { '200': { description: Hosted checkout URL } }
+  /admin/orders/{id}/payments/proof:
+    post:
+      tags: [Payments]
+      summary: Submit validated bank-transfer proof
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/OrderId' }, { $ref: '#/components/parameters/StoreId' }]
+      requestBody: { $ref: '#/components/requestBodies/JsonObject' }
+      responses: { '200': { description: Payment moved to RECEIVED } }
+  /admin/orders/{id}/payments/review:
+    post:
+      tags: [Payments]
+      summary: Review a received payment
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/OrderId' }, { $ref: '#/components/parameters/StoreId' }]
+      responses: { '200': { description: Payment moved to REVIEWED } }
+  /admin/payments/review-queue:
+    get:
+      tags: [Payments]
+      summary: List payments awaiting review
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/StoreId' }]
+      responses: { '200': { description: Review queue } }
+  /webhooks/paymongo:
+    post:
+      tags: [Payments]
+      summary: PayMongo webhook (signature verified, idempotent)
+      requestBody: { $ref: '#/components/requestBodies/JsonObject' }
+      responses: { '200': { description: Acknowledged } }
+  /admin/delivery-zones:
+    get:
+      tags: [Delivery]
+      summary: List delivery zones
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/StoreId' }]
+      responses: { '200': { description: Zones } }
+    post:
+      tags: [Delivery]
+      summary: Create a delivery zone
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/StoreId' }]
+      requestBody: { $ref: '#/components/requestBodies/JsonObject' }
+      responses: { '200': { description: Created } }
+  /admin/delivery/bookings:
+    get:
+      tags: [Delivery]
+      summary: List courier bookings and remittance events
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/StoreId' }]
+      responses: { '200': { description: Bookings } }
+  /admin/orders/{id}/delivery/booking:
+    post:
+      tags: [Delivery]
+      summary: Create a mock/PENDING_CREDENTIALS courier booking
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/OrderId' }, { $ref: '#/components/parameters/StoreId' }]
+      requestBody: { $ref: '#/components/requestBodies/JsonObject' }
+      responses: { '200': { description: Tracking number + booking } }
+  /admin/messenger:
+    get:
+      tags: [Messenger]
+      summary: Messenger portal status
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/StoreId' }]
+      responses: { '200': { description: Suppressed/mock status } }
+  /admin/messenger/connect:
+    post:
+      tags: [Messenger]
+      summary: Record a Messenger Page connection (token hash-only)
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/StoreId' }]
+      requestBody: { $ref: '#/components/requestBodies/JsonObject' }
+      responses: { '200': { description: Connected intent recorded } }
+  /admin/chatbot/conversations:
+    get:
+      tags: [Messenger]
+      summary: Agent conversation inbox
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/StoreId' }]
+      responses: { '200': { description: Conversations } }
+  /admin/chatbot/conversations/{id}/reply:
+    post:
+      tags: [Messenger]
+      summary: Agent reply and takeover
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/ConversationId' }, { $ref: '#/components/parameters/StoreId' }]
+      requestBody: { $ref: '#/components/requestBodies/JsonObject' }
+      responses: { '200': { description: Message created } }
+  /admin/crm/customers:
+    get:
+      tags: [CRM]
+      summary: Customer aggregates and segments source data
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/StoreId' }]
+      responses: { '200': { description: CRM aggregates } }
+  /admin/crm/campaigns/{id}/run:
+    post:
+      tags: [CRM]
+      summary: Evaluate a segment and enqueue an idempotent campaign
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }, { $ref: '#/components/parameters/StoreId' }]
+      responses: { '200': { description: Campaign run result } }
+  /admin/erp/trial-balance:
+    get:
+      tags: [ERP]
+      summary: Balanced trial balance
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/StoreId' }]
+      responses: { '200': { description: Trial balance } }
+  /admin/bir/sales-journal:
+    get:
+      tags: [ERP]
+      summary: BIR Sales Journal CSV payload
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/StoreId' }, { name: from, in: query, schema: { type: string, format: date } }, { name: to, in: query, schema: { type: string, format: date } }]
+      responses: { '200': { description: CSV content + filename } }
+  /admin/privacy/retention:
+    get:
+      tags: [Privacy]
+      summary: Preview retention purge
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/StoreId' }]
+      responses: { '200': { description: Eligible counts } }
+  /admin/security/incidents:
+    get:
+      tags: [Privacy]
+      summary: List security incidents
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/StoreId' }]
+      responses: { '200': { description: Incident list } }
+    post:
+      tags: [Privacy]
+      summary: Create a security incident
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/StoreId' }]
+      requestBody: { $ref: '#/components/requestBodies/JsonObject' }
+      responses: { '200': { description: Incident created + audit entry } }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    StoreId: { name: X-Store-Id, in: header, required: true, schema: { type: string } }
+    Slug: { name: slug, in: path, required: true, schema: { type: string } }
+    PublicToken: { name: token, in: query, required: true, schema: { type: string } }
+    OrderId: { name: id, in: path, required: true, schema: { type: string } }
+    ConversationId: { name: id, in: path, required: true, schema: { type: string } }
+  requestBodies:
+    JsonObject:
+      required: true
+      content:
+        application/json:
+          schema: { type: object, additionalProperties: true }
+  responses:
+    NotFound:
+      description: Tenant-safe not found

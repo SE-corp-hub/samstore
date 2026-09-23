@@ -212,6 +212,7 @@ Per-phase split (T1 share of the module's work):
 - Setup guides: Meta App+webhook, PayMongo, couriers (Lalamove/GrabExpress), SMS, BIR e-invoice; extend `docs/deployment.md`.
 - **Accept:** `docker compose up` boots stack; Swagger renders at `/docs`; CI renders from repo workflow file.
 - **Model:** T2-dominant (80/20) — OpenAPI volume + setup guides on `ling-3.0-flash`; Docker/CI edge decisions on T1 (`deepseek`/`glm-5.3-flash`).
+- **Status:** **P11a ✅** — maintained `docs/openapi.yaml` covering public/admin/checkout/payments/delivery/Messenger/CRM/ERP/privacy routes; deployment guide updated with P4–P10 env/operator requirements. Remaining: full endpoint schema coverage, generated Swagger UI, Docker Compose/nginx/worker artifacts, and CI/deployment setup guides.
 
 ### Phase 12 — Full E2E + production readiness (§26, §28)
 - **Required two-store PH scenario:** create *Lola's Sari-Sari* & *Kape PH* → separate owners/catalogs/public links → browse as guest → cart → voucher → loyalty redeem → guest checkout → payment update → inventory reserve → delivery update → Messenger notify (mock) → **verify Store A cannot read Store B** → customer sees only own orders → print BIR-style receipt.

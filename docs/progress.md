@@ -10,6 +10,14 @@
 | Gate | api/web typecheck clean; P10a test 3/3. |
 | Commit | (this commit) |
 
+## P11a — OpenAPI + deployment contract (§25/§27)
+
+| Item | Detail |
+|---|---|
+| OpenAPI | Added `docs/openapi.yaml` covering the major public/admin/checkout/payment/delivery/Messenger/CRM/ERP/privacy endpoints, tenant bearer/header requirements, and honest mock/PENDING_CREDENTIALS behavior. |
+| Deployment | `docs/deployment.md` now lists Phase 4–10 environment/operator requirements (PayMongo, couriers, BIR CSF, Redis, security checklist) and points to the API contract. No local Docker was run, per project rules. |
+| Status | P11a complete; generated Swagger UI, full endpoint schema expansion, Docker Compose/nginx/worker artifacts, and CI/deployment setup guides remain. |
+
 ## P10c — NPC breach-notification hooks (§22)
 
 | Item | Detail |

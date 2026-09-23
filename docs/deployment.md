@@ -53,3 +53,19 @@ at Vercel and share `https://yourdomain.com/sam-store` as the canonical public o
 - Order flow: open storefront → add to cart → checkout → order number.
 - Admin: register/login → orders, products, settings tabs work.
 - `npx prisma migrate status` reports "up to date".
+
+## 6. API contract and operators
+
+- OpenAPI contract: `docs/openapi.yaml`. Keep it updated when adding endpoints; the
+  contract intentionally marks payment, courier, Messenger, e-invoice, and NPC
+  integrations as mock/PENDING_CREDENTIALS until operator approval.
+- Phase 4 payment env vars: `PAYMONGO_SECRET_KEY`, `PAYMONGO_WEBHOOK_SECRET`.
+  Without them, payment links remain sandbox/PENDING_CREDENTIALS and no live card
+  traffic is attempted.
+- Phase 5 courier env vars: `LALAMOVE_API_KEY`, `GRABEXPRESS_API_KEY`, `JT_API_KEY`.
+  Without them, booking adapters return clearly-labelled sandbox tracking values.
+- Phase 9 BIR env var: `BIR_CSF_CREDENTIALS`. Without it, e-invoice submission
+  returns `PENDING_CREDENTIALS` rather than a fake success.
+- Phase 10: review `docs/security-checklist.md` before production. Configure Redis
+  for shared rate limits and resolve the pre-existing Prisma migration checksum
+  drift before using `migrate dev/reset`.
