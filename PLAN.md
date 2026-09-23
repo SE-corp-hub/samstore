@@ -141,7 +141,7 @@ Per-phase split (T1 share of the module's work):
 - Storefront: variant picker + add-on selector; cart lines carry variant/add-on selections; checkout snapshots them.
 - Featured products, tags, search & filters, related/upsell/cross-sell; low-stock threshold surfaced per warehouse.
 - **Accept:** variant cart/order/stock integrity tests; POS can sell variants.
-- **Status:** **P2a ✅** — variants + add-ons end-to-end. **P2b ✅** — POS sells variants. **P2c ✅** — admin management of variants + add-ons (APIs + Products-panel `VariantEditor`, +6 DB tests). **P2d ✅ (as P3c/P3d/P3f)** — add-on price revalidation at checkout, featured/tags/related/upsell, warehouse low-stock surfacing; **P3e** added the admin variant/add-on create-edit UI (rename/required/add-option/option edit). All Phase 2 remainders DONE.
+- **Status:** **P2a ✅** — variants + add-ons end-to-end. **P2b ✅** — POS sells variants. **P2c ✅** — admin management of variants + add-ons (APIs + Products-panel `VariantEditor`, +6 DB tests). **P2d ✅ (as P3c/P3d/P3f)** — add-on price revalidation at checkout, featured/tags/related/upsell, warehouse low-stock surfacing; **P3e** added the admin variant/add-on create-edit UI (rename/required/add-option/option edit). **Follow-up now complete:** Delivery Zones UI/API diagnostics and Platform Admin store onboarding/role navigation work. All Phase 2 remainders DONE.
 - **Model:** T1-led (60/40) — line identity, atomic stock, ledger on `deepseek`/`glm-5.3-flash`; picker/editor UI + DTO plumbing on `ling-3.0-flash`.
 
 ### Phase 3 — Cart & checkout depth (§6, §7, §10, §11)

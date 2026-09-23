@@ -2,6 +2,15 @@
 
 ## P10a — Privacy retention controls (§22)
 
+## Follow-up — Delivery zones, store onboarding, role navigation
+
+| Item | Detail |
+|---|---|
+| Delivery zones | DeliveryZonesCard now surfaces API status/errors instead of silently showing an empty list when loading fails. Backend CRUD remains tenant/ADMIN guarded; zone and checkout coverage tests pass. |
+| Platform store onboarding | Platform Admin store creation now accepts an existing **or new** owner email. New owner accounts receive a one-time temporary password and `mustChangePassword=true`; existing users are linked without creating duplicates. The UI explains the credential handoff. |
+| Role UX | Navigation matrix added at `docs/role-navigation.md`; tabs tightened by role: platform admin gets platform controls, owners get full store operations, managers get operational/finance controls, staff gets daily operations, sales agents get orders/customers/CRM/reports, delivery is redirected to `/admin/delivery`. API guards remain authoritative. |
+| Tests | Added store creation tests for new-owner temporary credentials and existing-owner linking; typechecks pass. |
+
 ## P12 — Two-store fixture preparation
 
 | Item | Detail |

@@ -42,6 +42,7 @@ URLs to `.phase12.env.local` (gitignored). It never deletes existing data.
 ## Product/Compliance Review
 
 - [ ] Two separate stores cannot read or mutate one another's data.
+- [ ] Role navigation matrix reviewed against `docs/role-navigation.md`; direct URL/API authorization tested for every role.
 - [ ] Guest checkout, pickup, delivery-zone coverage, voucher, loyalty, payment proof, and refund paths reviewed.
 - [ ] BIR receipt, Sales Journal, Cash Receipts Journal, VAT, tax-exempt, and statutory-discount output reviewed.
 - [ ] DPA consent, retention, incident, audit-log, and breach runbooks reviewed.

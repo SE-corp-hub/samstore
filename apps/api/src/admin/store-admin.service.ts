@@ -1,6 +1,7 @@
 // Store admin service — multi-store: create stores, assign owners, list.
 
 import { randomBytes } from "node:crypto";
+import bcrypt from "bcryptjs";
 import { prisma } from "../persistence/prisma-repositories.js";
 import { StoreRole, StoreStatus } from "@prisma/client";
 import type { ApiError } from "@sam-store/contracts";
@@ -15,7 +16,7 @@ export interface CreateStoreInput {
   slug: string;
   currencyCode?: string;
   timezone?: string;
-  ownerEmail: string; // existing User (store owner) to bind
+  ownerEmail: string; // existing or new owner account
   ownerRole?: string;
 }
 
@@ -38,7 +39,7 @@ export class StoreAdminService {
   }
 
   /** Create a store + settings + public link + bind the owner membership. */
-  async create(input: CreateStoreInput): Promise<AdminResult<{ id: string }>> {
+  async create(input: CreateStoreInput): Promise<AdminResult<{ id: string; ownerUserId: string; ownerEmail: string; tempPassword?: string }>> {
     const name = input.name?.trim() ?? "";
     const slug = input.slug?.trim().toLowerCase() ?? "";
     if (name.length < 2) return { ok: false, error: { type: "validation", errors: ["Store name must be at least 2 characters"] } };
@@ -49,8 +50,25 @@ export class StoreAdminService {
     const existingSlug = await prisma.store.findUnique({ where: { slug } });
     if (existingSlug) return { ok: false, error: { type: "conflict", message: "A store with this slug already exists" } };
 
-    const owner = await prisma.user.findUnique({ where: { email: input.ownerEmail.toLowerCase() } });
-    if (!owner) return { ok: false, error: { type: "not_found", message: "Owner email must be a registered admin user" } };
+    const ownerEmail = input.ownerEmail?.trim().toLowerCase() ?? "";
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(ownerEmail)) {
+      return { ok: false, error: { type: "validation", errors: ["A valid owner email is required"] } };
+    }
+    // Email identity is case-insensitive for onboarding; preserve the normalized
+    // lowercase value only when creating a new account.
+    let owner = await prisma.user.findFirst({ where: { email: { equals: ownerEmail, mode: "insensitive" } } });
+    let tempPassword: string | undefined;
+    if (!owner) {
+      tempPassword = randomBytes(9).toString("base64url");
+      owner = await prisma.user.create({
+        data: {
+          email: ownerEmail,
+          passwordHash: await bcrypt.hash(tempPassword, 12),
+          role: "OWNER",
+          mustChangePassword: true,
+        },
+      });
+    }
 
     const token = `lnk_${randomBytes(24).toString("base64url")}`;
     const store = await prisma.store.create({
@@ -62,12 +80,12 @@ export class StoreAdminService {
         status: "ACTIVE",
         settings: { create: {} },
         publicLink: { create: { slug, token } },
-        userStores: {
-          create: { userId: owner.id, role: (input.ownerRole ?? "OWNER") as StoreRole },
-        },
-      },
-    });
-    return { ok: true, value: { id: store.id } };
+         userStores: {
+           create: { userId: owner.id, role: (input.ownerRole ?? "OWNER") as StoreRole },
+         },
+       },
+     });
+    return { ok: true, value: { id: store.id, ownerUserId: owner.id, ownerEmail, ...(tempPassword ? { tempPassword } : {}) } };
   }
 
   /** v6 A1 — set the store's access status (suspend/reinstate/archive/close). Audited via StoreStatusHistory. */

@@ -31,9 +31,10 @@ export default function DeliveryZonesCard() {
     try {
       const r = await fetch(`${API_URL}/admin/delivery-zones`, { headers: adminHeaders() });
       const d = await r.json();
+      if (!r.ok) throw new Error(d?.errors?.join(", ") ?? d?.message ?? `Loading zones failed (${r.status})`);
       setZones(d?.zones ?? []);
-    } catch {
-      setErr("Couldn't load delivery zones");
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Couldn't load delivery zones");
     }
   };
 
@@ -55,7 +56,7 @@ export default function DeliveryZonesCard() {
         { method: editId ? "PATCH" : "POST", headers: { ...adminHeaders(), "Content-Type": "application/json" }, body: JSON.stringify(body) },
       );
       const d = await res.json();
-      if (!res.ok) { setErr(d?.errors?.join(", ") ?? d?.message ?? "Save failed"); return; }
+      if (!res.ok) { setErr(d?.errors?.join(", ") ?? d?.message ?? `Save failed (${res.status})`); return; }
       setForm({ name: "", cityCode: "", barangays: "", fee: "", eta: "45" });
       setEditId(null);
       void load();

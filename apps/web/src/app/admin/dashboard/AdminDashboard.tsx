@@ -49,6 +49,10 @@ export default function AdminDashboard() {
       return;
     }
     const r = getAdminRole();
+    if (r === "DELIVERY") {
+      router.replace("/admin/delivery");
+      return;
+    }
     setRole(r);
     setTab(defaultTabFor(r));
     setAuthed(true);
@@ -70,8 +74,12 @@ export default function AdminDashboard() {
           // (OWNER/…) — the JWT global role can lag it (e.g. an owner whose global
           // role is still STORE_OWNER or a stale STAFF after promotion).
           const member = data.stores.find((s: MyStore) => s.id === getAdminStoreId());
-          if (member?.role) {
-            setRole(isOwnerRole(member.role) ? "OWNER" : member.role);
+           if (member?.role) {
+             if (member.role === "DELIVERY") {
+               router.replace("/admin/delivery");
+               return;
+             }
+             setRole(isOwnerRole(member.role) ? "OWNER" : member.role);
             setTab(defaultTabFor(isOwnerRole(member.role) ? "OWNER" : member.role));
           }
         }
