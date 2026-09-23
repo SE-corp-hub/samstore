@@ -2,6 +2,14 @@
 
 ## P10a — Privacy retention controls (§22)
 
+## P11d — OpenAPI CI contract gate (§25)
+
+| Item | Detail |
+|---|---|
+| CI | Added `scripts/check-openapi.mjs` + `npm run check:openapi`; the quality workflow now checks 17 critical public/admin/payment/delivery/Messenger/CRM/ERP/privacy paths are represented in `docs/openapi.yaml`. |
+| Gate | OpenAPI check passed; full workspace typecheck passed. |
+| Commit | (this commit) |
+
 ## P11c — Container deployment topology (§27)
 
 | Item | Detail |

@@ -34,6 +34,8 @@ jobs:
         run: npm run typecheck
       - name: Secret / PII scan (filenames only)
         run: npm run check:secrets
+      - name: OpenAPI contract smoke-check
+        run: npm run check:openapi
       - name: Build
         run: npm run build
 
