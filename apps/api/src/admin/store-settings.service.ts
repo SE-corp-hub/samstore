@@ -39,6 +39,7 @@ export interface StoreSettingsInput {
   loyaltyExpiryMonths?: number;
   // P3i: order-number prefix (PIN-YYYY-NNNNNN when set).
   orderNumberPrefix?: string | null;
+  privacyRetentionDays?: number;
 }
 
 export class StoreSettingsService {
@@ -90,6 +91,7 @@ export class StoreSettingsService {
         loyaltyWelcomeBonusPoints: store.settings?.loyaltyWelcomeBonusPoints ?? 0,
         loyaltyExpiryMonths: store.settings?.loyaltyExpiryMonths ?? 0,
         orderNumberPrefix: store.settings?.orderNumberPrefix ?? null,
+        privacyRetentionDays: store.settings?.privacyRetentionDays ?? 0,
       },
     };
   }
@@ -140,6 +142,7 @@ export class StoreSettingsService {
         ...(input.loyaltyWelcomeBonusPoints !== undefined ? { loyaltyWelcomeBonusPoints: input.loyaltyWelcomeBonusPoints } : {}),
         ...(input.loyaltyExpiryMonths !== undefined ? { loyaltyExpiryMonths: input.loyaltyExpiryMonths } : {}),
         ...(input.orderNumberPrefix !== undefined ? { orderNumberPrefix: input.orderNumberPrefix } : {}),
+        ...(input.privacyRetentionDays !== undefined ? { privacyRetentionDays: input.privacyRetentionDays } : {}),
       },
       create: {
         storeId,
@@ -166,6 +169,7 @@ export class StoreSettingsService {
         loyaltyWelcomeBonusPoints: input.loyaltyWelcomeBonusPoints ?? 0,
         loyaltyExpiryMonths: input.loyaltyExpiryMonths ?? 0,
         orderNumberPrefix: input.orderNumberPrefix ?? null,
+        privacyRetentionDays: input.privacyRetentionDays ?? 0,
       },
     });
     return { ok: true, value: { id: storeId } };

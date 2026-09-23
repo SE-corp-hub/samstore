@@ -32,6 +32,7 @@ import { TeamService } from "./team.service.js";
 import { WarehouseService } from "./warehouse.service.js";
 import { LoyaltyService } from "../loyalty/loyalty.service.js";
 import { CartRecoveryService } from "../cart/recovery.service.js";
+import { PrivacyRetentionService } from "../privacy/retention.service.js";
 import { NOTIFICATIONS_SERVICE, type NotificationsService } from "../notifications/notifications.service.js";
 import { type OrderState, ORDER_STATES } from "../domain/order-state.js";
 
@@ -62,6 +63,7 @@ export class AdminController {
   private readonly warehouses = new WarehouseService();
   private readonly loyalty = new LoyaltyService();
   private readonly cartsRecovery = new CartRecoveryService();
+  private readonly privacyRetention = new PrivacyRetentionService();
 
   constructor(
     @Inject(AUTH_SERVICE) private readonly auth: AuthService,
@@ -705,6 +707,7 @@ export class AdminController {
       messengerConnected?: boolean; messengerPageId?: string | null;
       loyaltyPointsPerPeso?: number; loyaltyWelcomeBonusPoints?: number; loyaltyExpiryMonths?: number;
       orderNumberPrefix?: string | null;
+      privacyRetentionDays?: number;
     },
     @Headers("x-store-id") headerStoreId?: string,
   ) {
@@ -715,6 +718,28 @@ export class AdminController {
         if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
         await cacheBust(cacheKey("settings", storeId));
         return { ...result.value, storeId };
+  }
+
+  /** GET /admin/privacy/retention — dry-run preview. */
+  @Get("privacy/retention")
+  async retentionPreview(@Req() req: Request & { user?: AuthPrincipal }, @Headers("x-store-id") headerStoreId?: string) {
+    const user = req.user;
+    requireUser(user);
+    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.VIEW);
+    const result = await this.privacyRetention.preview(storeId);
+    if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
+    return { storeId, ...result.value };
+  }
+
+  /** POST /admin/privacy/retention/purge — explicit, audited purge. */
+  @Post("privacy/retention/purge")
+  async retentionPurge(@Req() req: Request & { user?: AuthPrincipal }, @Headers("x-store-id") headerStoreId?: string) {
+    const user = req.user;
+    requireUser(user);
+    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.OWNER_MANAGER);
+    const result = await this.privacyRetention.purge(storeId, user.sub);
+    if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
+    return result.value;
   }
 
   /** PATCH /admin/store-link — update store link branding (P8). */

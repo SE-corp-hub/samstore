@@ -1,5 +1,15 @@
 # PINDIAN — Progress Log
 
+## P10a — Privacy retention controls (§22)
+
+| Item | Detail |
+|---|---|
+| Controls | `StoreSettings.privacyRetentionDays` (0 = disabled), `GET /admin/privacy/retention` preview, explicit audited `POST /admin/privacy/retention/purge`. Purge removes old Messenger conversations/messages only; **ConsentRecord rows are retained** for DPA audit. |
+| Web | SettingsPanel Privacy retention card: retention days, preview eligible counts, explicit purge confirmation. |
+| Tests | +3 real-DB tests: preview/purge + audit + consent retention, disabled retention refuses destructive action, tenant isolation. |
+| Gate | api/web typecheck clean; P10a test 3/3. |
+| Commit | (this commit) |
+
 Updated: 2026-09-20 · **P9: ERP double-entry + BIR exports (§21/§24)** · Active model: `deepseek/deepseek-v4-flash-0731` (openrouter), boilerplate tier `inclusionai/ling-3.0-flash`
 
 ## P9 — ERP depth + BIR

@@ -43,6 +43,7 @@ interface StoreSettings {
     loyaltyWelcomeBonusPoints: number;
     loyaltyExpiryMonths: number;
     orderNumberPrefix: string | null;
+    privacyRetentionDays: number;
   };
 }
 
@@ -95,6 +96,7 @@ export default function SettingsPanel() {
   const [loyaltyWelcomeBonusPoints, setLoyaltyWelcomeBonusPoints] = useState("0");
   const [loyaltyExpiryMonths, setLoyaltyExpiryMonths] = useState("0");
   const [orderNumberPrefix, setOrderNumberPrefix] = useState("");
+  const [privacyRetentionDays, setPrivacyRetentionDays] = useState("0");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -132,6 +134,7 @@ export default function SettingsPanel() {
       setLoyaltyWelcomeBonusPoints((d.settings.loyaltyWelcomeBonusPoints ?? 0).toString());
       setLoyaltyExpiryMonths((d.settings.loyaltyExpiryMonths ?? 0).toString());
       setOrderNumberPrefix(d.settings.orderNumberPrefix ?? "");
+      setPrivacyRetentionDays((d.settings.privacyRetentionDays ?? 0).toString());
     } catch (e) {
       setError(e instanceof Error ? e.message : "Load failed");
     } finally {
@@ -257,6 +260,23 @@ export default function SettingsPanel() {
   const saveOrderNumber = () => saveSection({
     orderNumberPrefix: orderNumberPrefix.trim().toUpperCase() || null,
   });
+
+  const savePrivacy = () => saveSection({ privacyRetentionDays: parseInt(privacyRetentionDays || "0", 10) });
+
+  const privacyPreview = async () => {
+    const res = await fetch(`${API_URL}/admin/privacy/retention`, { headers: adminHeaders() });
+    const d = await res.json();
+    if (res.ok) toast(`${d.conversations} conversation(s), ${d.messages} message(s) eligible for purge`);
+    else toast(d?.message ?? "Retention preview failed");
+  };
+
+  const privacyPurge = async () => {
+    if (!window.confirm("Purge old Messenger conversations and messages? Consent records are retained.")) return;
+    const res = await fetch(`${API_URL}/admin/privacy/retention/purge`, { method: "POST", headers: adminHeaders() });
+    const d = await res.json();
+    if (res.ok) toast(`Purged ${d.deletedConversations} conversation(s) and ${d.deletedMessages} message(s)`);
+    else toast(d?.message ?? "Retention purge failed");
+  };
 
   const saveInvoices = () => toast("Invoice settings saved");
 
@@ -401,6 +421,29 @@ export default function SettingsPanel() {
                   </div>
                   <div className="mt-2 d-flex justify-content-end">
                     <button className="btn btn-primary" type="button" disabled={saving} onClick={saveLoyalty}>{saving ? "Saving…" : "Save loyalty settings"}</button>
+                  </div>
+                </div>
+              </div>
+              {/* P10a: explicit privacy retention control. Consent records are never purged. */}
+              <div className="card mb-4">
+                <div className="card-body">
+                  <h6 className="card-title small fw-bold">Privacy retention</h6>
+                  <p className="text-muted small">Controls old Messenger conversation/message cleanup. <strong>Consent records are retained</strong> for DPA audit.</p>
+                  <div className="row g-2 align-items-end">
+                    <div className="col-md-4">
+                      <label className="form-label small">Retain conversations (days)</label>
+                      <input className="form-control" type="number" min="0" max="3650" value={privacyRetentionDays} onChange={(e) => setPrivacyRetentionDays(e.target.value)} />
+                      <small className="text-muted">0 = disabled; purge is always explicit.</small>
+                    </div>
+                    <div className="col-auto">
+                      <button className="btn btn-outline-secondary" type="button" onClick={() => void privacyPreview()}>Preview eligible data</button>
+                    </div>
+                    <div className="col-auto">
+                      <button className="btn btn-outline-danger" type="button" onClick={() => void privacyPurge()}>Purge old messages</button>
+                    </div>
+                    <div className="col-12 d-flex justify-content-end">
+                      <button className="btn btn-primary" type="button" disabled={saving} onClick={savePrivacy}>{saving ? "Saving…" : "Save privacy settings"}</button>
+                    </div>
                   </div>
                 </div>
               </div>

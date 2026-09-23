@@ -263,6 +263,8 @@ model StoreSettings {
   // P3i: order-number prefix — when set, numbers read PIN-YYYY-NNNNNN; null keeps the
   // legacy <SLUG>-NNNNNN format (backward compatible).
   orderNumberPrefix         String?
+  // P10a: 0 = disabled; otherwise old Messenger conversation/message data is purgeable.
+  privacyRetentionDays      Int            @default(0)
   createdAt                 DateTime       @default(now())
   updatedAt                 DateTime       @updatedAt
 }
