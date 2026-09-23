@@ -9,6 +9,8 @@
 
 import "reflect-metadata";
 import express, { type Request, type Response, type NextFunction } from "express";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import { NestFactory } from "@nestjs/core";
 import { AppModule } from "./app.module.js";
 import { rateLimitOk, clientKey } from "./security/rate-limit.js";
@@ -49,6 +51,33 @@ async function bootstrap() {
 
   app.use(express.json({ limit: "5mb" }));
   app.use(express.urlencoded({ extended: true, limit: "5mb" }));
+
+  // P11b: dependency-free Swagger UI backed by the checked-in OpenAPI contract.
+  // Production requires an explicit opt-in so the API surface is not exposed by
+  // accident; the contract itself remains in docs/openapi.yaml for CI/review.
+  const docsEnabled = NODE_ENV !== "production" || process.env.API_DOCS_ENABLED === "true";
+  if (docsEnabled) {
+    const http = app.getHttpAdapter().getInstance();
+    http.get("/docs/openapi.yaml", async (_req: Request, res: Response) => {
+      try {
+        const candidates = [
+          path.resolve(process.cwd(), "docs/openapi.yaml"),
+          path.resolve(process.cwd(), "../../docs/openapi.yaml"),
+        ];
+        let body: string | null = null;
+        for (const file of candidates) {
+          try { body = await readFile(file, "utf8"); break; } catch { /* try next location */ }
+        }
+        if (body === null) { res.status(404).type("text").send("OpenAPI contract not found"); return; }
+        res.type("text/yaml").send(body);
+      } catch {
+        res.status(500).type("text").send("OpenAPI contract unavailable");
+      }
+    });
+    http.get("/docs", (_req: Request, res: Response) => {
+      res.type("html").send(`<!doctype html><html><head><title>PINDIAN API Docs</title><link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css"></head><body><div id="swagger-ui"></div><script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script><script>window.ui=SwaggerUIBundle({url:'/docs/openapi.yaml',dom_id:'#swagger-ui'});</script></body></html>`);
+    });
+  }
 
   // Observability: request id (echoed back) + one structured REDACTED log line per
   // request. `req.path` excludes the query string on purpose — public links carry

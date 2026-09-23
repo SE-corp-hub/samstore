@@ -2,6 +2,14 @@
 
 ## P10a — Privacy retention controls (§22)
 
+## P11b — Swagger UI runtime route (§25)
+
+| Item | Detail |
+|---|---|
+| API docs | Added dependency-free `/docs` Swagger UI backed by the checked-in `/docs/openapi.yaml` contract. `/docs/openapi.yaml` is served by the API. Production exposure is opt-in only via `API_DOCS_ENABLED=true`; development exposes it by default. |
+| Gate | API typecheck clean. No local Docker run (forbidden by project rules). |
+| Commit | (this commit) |
+
 | Item | Detail |
 |---|---|
 | Controls | `StoreSettings.privacyRetentionDays` (0 = disabled), `GET /admin/privacy/retention` preview, explicit audited `POST /admin/privacy/retention/purge`. Purge removes old Messenger conversations/messages only; **ConsentRecord rows are retained** for DPA audit. |
