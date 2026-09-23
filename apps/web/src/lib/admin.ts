@@ -114,6 +114,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { id: "customers", label: "Customers", icon: "bi-people-fill" },
       { id: "vouchers", label: "Vouchers", icon: "bi-ticket-perforated" },
       { id: "crm", label: "CRM", icon: "bi-people-heart" },
+      { id: "erp", label: "ERP & BIR", icon: "bi-journal-check" },
     ],
   },
   {
@@ -142,11 +143,11 @@ export const NAV_GROUPS: NavGroup[] = [
 export const TABS_BY_ROLE: Record<string, string[]> = {
   // M7: OWNER is the tenant (store membership) role; STORE_OWNER is the legacy global
   // role — both are store owners and must see the same surface.
-  STORE_OWNER: ["overview", "pos", "preorders", "orders", "utang", "products", "inventory", "expenses", "purchases", "team", "customers", "vouchers", "crm", "analytics", "reports", "settings", "storelink", "warehouses", "stores", "maintenance", "useraccess"],
-  OWNER: ["overview", "pos", "preorders", "orders", "utang", "products", "inventory", "expenses", "purchases", "team", "customers", "vouchers", "crm", "analytics", "reports", "settings", "storelink", "warehouses", "stores", "maintenance", "useraccess"],
-  PLATFORM_ADMIN: ["overview", "pos", "preorders", "orders", "utang", "products", "inventory", "expenses", "purchases", "team", "customers", "vouchers", "crm", "analytics", "reports", "settings", "storelink", "warehouses", "stores", "maintenance", "useraccess"],
-  MANAGER: ["overview", "pos", "preorders", "orders", "utang", "products", "inventory", "expenses", "purchases", "team", "customers", "vouchers", "crm", "analytics", "reports", "settings", "warehouses", "maintenance"],
-  STAFF: ["overview", "pos", "preorders", "orders", "utang", "products", "inventory", "expenses", "purchases", "team", "customers", "vouchers", "crm", "analytics", "reports", "settings", "warehouses", "maintenance"],
+  STORE_OWNER: ["overview", "pos", "preorders", "orders", "utang", "products", "inventory", "expenses", "purchases", "team", "customers", "vouchers", "crm", "erp", "analytics", "reports", "settings", "storelink", "warehouses", "stores", "maintenance", "useraccess"],
+  OWNER: ["overview", "pos", "preorders", "orders", "utang", "products", "inventory", "expenses", "purchases", "team", "customers", "vouchers", "crm", "erp", "analytics", "reports", "settings", "storelink", "warehouses", "stores", "maintenance", "useraccess"],
+  PLATFORM_ADMIN: ["overview", "pos", "preorders", "orders", "utang", "products", "inventory", "expenses", "purchases", "team", "customers", "vouchers", "crm", "erp", "analytics", "reports", "settings", "storelink", "warehouses", "stores", "maintenance", "useraccess"],
+  MANAGER: ["overview", "pos", "preorders", "orders", "utang", "products", "inventory", "expenses", "purchases", "team", "customers", "vouchers", "crm", "erp", "analytics", "reports", "settings", "warehouses", "maintenance"],
+  STAFF: ["overview", "pos", "preorders", "orders", "utang", "products", "inventory", "expenses", "purchases", "team", "customers", "vouchers", "crm", "erp", "analytics", "reports", "settings", "warehouses", "maintenance"],
   SALES_AGENT: ["orders", "team", "reports"],
   DELIVERY: [],
 };
