@@ -28,6 +28,7 @@
     "check:secrets": "node scripts/check-secrets.mjs",
     "check:openapi": "node scripts/check-openapi.mjs",
     "audit:openapi": "node scripts/audit-openapi.mjs",
+    "generate:openapi-inventory": "node scripts/generate-openapi-route-inventory.mjs",
     "test:cov": "node scripts/run-tests.mjs --coverage",
     "reconcile": "tsx scripts/reconcile.ts",
     "fixtures:cleanup": "tsx scripts/cleanup-test-fixtures.ts"

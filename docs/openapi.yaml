@@ -10,6 +10,9 @@ info:
 servers:
   - url: http://localhost:4100
     description: Local API
+externalDocs:
+  description: Complete generated controller-route inventory
+  url: /docs/openapi-route-inventory.yaml
 tags:
   - name: Public
   - name: Auth

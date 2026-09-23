@@ -2,6 +2,15 @@
 
 ## P10a — Privacy retention controls (§22)
 
+## P11f — Complete controller route inventory (§25)
+
+| Item | Detail |
+|---|---|
+| Inventory | `npm run generate:openapi-inventory` scans all controller decorators and generated `docs/openapi-route-inventory.yaml` with **209 route entries**, generic responses, and bearer security metadata for admin paths. |
+| Runtime | `/docs/openapi-route-inventory.yaml` is served alongside Swagger UI; detailed high-risk schemas remain in `docs/openapi.yaml`. |
+| Gate | Generator ran successfully; workspace typecheck remains green. |
+| Commit | (this commit) |
+
 ## P11e — OpenAPI route coverage audit (§25)
 
 | Item | Detail |

@@ -76,6 +76,22 @@ async function bootstrap() {
         res.status(500).type("text").send("OpenAPI contract unavailable");
       }
     });
+    http.get("/docs/openapi-route-inventory.yaml", async (_req: Request, res: Response) => {
+      try {
+        const candidates = [
+          path.resolve(process.cwd(), "docs/openapi-route-inventory.yaml"),
+          path.resolve(process.cwd(), "../../docs/openapi-route-inventory.yaml"),
+        ];
+        let body: string | null = null;
+        for (const file of candidates) {
+          try { body = await readFile(file, "utf8"); break; } catch { /* try next location */ }
+        }
+        if (body === null) { res.status(404).type("text").send("OpenAPI route inventory not found"); return; }
+        res.type("text/yaml").send(body);
+      } catch {
+        res.status(500).type("text").send("OpenAPI route inventory unavailable");
+      }
+    });
     http.get("/docs", (_req: Request, res: Response) => {
       res.type("html").send(`<!doctype html><html><head><title>PINDIAN API Docs</title><link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css"></head><body><div id="swagger-ui"></div><script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script><script>window.ui=SwaggerUIBundle({url:'/docs/openapi.yaml',dom_id:'#swagger-ui'});</script></body></html>`);
     });
