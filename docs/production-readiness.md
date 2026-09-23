@@ -12,6 +12,15 @@ deliberately explicit: skipped/manual checks are not represented as passing.
 - [ ] Full Playwright suite against deployed API + web.
 - [ ] Required two-store PH scenario (`10-two-store-ph-scenario.spec.ts`).
 
+Fixture helper:
+
+```cmd
+call npm.cmd run prepare:phase12
+```
+
+This creates two disposable stores with separate catalogs and writes tokenized E2E
+URLs to `.phase12.env.local` (gitignored). It never deletes existing data.
+
 ## Operator Environment
 
 - [ ] Managed Postgres backup/restore drill completed.

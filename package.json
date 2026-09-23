@@ -30,6 +30,7 @@
     "audit:openapi": "node scripts/audit-openapi.mjs",
     "generate:openapi-inventory": "node scripts/generate-openapi-route-inventory.mjs",
     "check:deployment": "node scripts/check-deployment.mjs",
+    "prepare:phase12": "tsx scripts/prepare-phase12-fixtures.ts",
     "test:cov": "node scripts/run-tests.mjs --coverage",
     "reconcile": "tsx scripts/reconcile.ts",
     "fixtures:cleanup": "tsx scripts/cleanup-test-fixtures.ts"

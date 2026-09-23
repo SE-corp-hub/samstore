@@ -2,6 +2,14 @@
 
 ## P10a — Privacy retention controls (§22)
 
+## P12 — Two-store fixture preparation
+
+| Item | Detail |
+|---|---|
+| Fixture helper | Added `npm run prepare:phase12`: creates two disposable stores with separate public links/catalogs/stock and writes tokenized URLs to the gitignored `.phase12.env.local`. It never deletes existing data. |
+| E2E | Replaced the placeholder two-store spec with a real opt-in browse→cart→checkout flow for both stores plus a cross-token isolation check. Enable with `PH_E2E_TWO_STORE=1` and the generated URLs. |
+| Status | Still operator pending: requires staging API/web servers and a disposable managed database. |
+
 ## P12 — Production readiness checklist (§26/§28)
 
 | Item | Detail |
