@@ -77,3 +77,4 @@ at Vercel and share `https://yourdomain.com/sam-store` as the canonical public o
 - The Compose file intentionally has **no local Postgres or Redis service**. Set managed `DATABASE_URL` and optional `REDIS_URL` through the operator's secret manager.
 - Build files: `docker/api.Dockerfile`, `docker/web.Dockerfile`, `docker/worker.Dockerfile`; reverse proxy: `docker/nginx.conf`.
 - Do not run this topology against production until migrations, backups, TLS termination, health checks, and secret injection are operator-reviewed.
+- Run `npm run audit:openapi` before releases to see controller routes that still need detailed OpenAPI path/schema documentation. The command is an audit report, not a fabricated pass.

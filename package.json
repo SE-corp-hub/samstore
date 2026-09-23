@@ -27,6 +27,7 @@
     "lint": "eslint apps/api/src apps/web/src && npm run typecheck && npm run check:secrets",
     "check:secrets": "node scripts/check-secrets.mjs",
     "check:openapi": "node scripts/check-openapi.mjs",
+    "audit:openapi": "node scripts/audit-openapi.mjs",
     "test:cov": "node scripts/run-tests.mjs --coverage",
     "reconcile": "tsx scripts/reconcile.ts",
     "fixtures:cleanup": "tsx scripts/cleanup-test-fixtures.ts"

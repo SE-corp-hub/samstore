@@ -2,6 +2,15 @@
 
 ## P10a — Privacy retention controls (§22)
 
+## P11e — OpenAPI route coverage audit (§25)
+
+| Item | Detail |
+|---|---|
+| Audit | Added `npm run audit:openapi`, which scans Nest controller decorators and reports route paths missing from `docs/openapi.yaml`. It is intentionally an audit report, not a fabricated green gate. |
+| Deployment | Deployment docs now require running the audit before releases. |
+| Gate | Audit command + workspace typecheck pass. |
+| Commit | (this commit) |
+
 ## P11d — OpenAPI CI contract gate (§25)
 
 | Item | Detail |
