@@ -191,7 +191,7 @@ Per-phase split (T1 share of the module's work):
 - **Segmentation** (predefined + custom rules) and **follow-up campaigns** enqueued via `OutboxEvent` (Messenger broadcast where permitted; mock/suppressed until connected).
 - **Accept:** segmentation query tests; campaign enqueue idempotent.
 - **Model:** T2-dominant (60/40) — segmentation queries + aggregates on T1 (`deepseek`/`glm-5.3-flash`); panels + campaign plumbing on `ling-3.0-flash`.
-- **Status:** **P8 ✅ (backend)** — `StoreCustomer.tags` + `CrmService` aggregates (LTV/AOV/recency/favorite, fulfilled-only), `segment` (minOrders/minLtv/at-risk days/credit/tag/messengerOnly), `Campaign` + `CampaignRecipient` (idempotent `campaign.send` enqueue per opted-in user → outbox worker suppressed log). +3 DB tests. **Pending T2 remainder:** admin CRM panel (segment explorer + campaign composer UI). **Phase 8 mostly COMPLETE.**
+- **Status:** **P8 ✅** — `StoreCustomer.tags` + `CrmService` aggregates (LTV/AOV/recency/favorite, fulfilled-only), `segment` (minOrders/minLtv/at-risk days/credit/tag/messengerOnly), `Campaign` + `CampaignRecipient` (idempotent `campaign.send` enqueue per opted-in user → outbox worker suppressed log). +3 DB tests. Admin **CRM panel** (customers table + tags, segment explorer, campaign composer/run) now shipped. **Phase 8 COMPLETE.**
 
 ### Phase 9 — ERP depth + BIR (§21, §24)
 - **Chart of accounts + journal entries** (double-entry) auto-posted from sales, purchases, expenses, credit payments; COGS at inventory valuation; gross-margin per product/store; cash-flow report. (Modular: hidden unless owner enables.)

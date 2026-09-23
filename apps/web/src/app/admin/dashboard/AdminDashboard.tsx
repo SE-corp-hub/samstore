@@ -14,6 +14,7 @@ import SettingsPanel from "../../../components/admin/SettingsPanel";
 import VouchersPanel from "../../../components/admin/VouchersPanel";
 import StoresPanel from "../../../components/admin/StoresPanel";
 import CustomersPanel from "../../../components/admin/CustomersPanel";
+import CrmPanel from "../../../components/admin/CrmPanel";
 import AnalyticsPanel from "../../../components/admin/AnalyticsPanel";
 import MaintenancePanel from "../../../components/admin/MaintenancePanel";
 import TeamPanel from "../../../components/admin/TeamPanel";
@@ -113,6 +114,7 @@ export default function AdminDashboard() {
       case "vouchers": return <VouchersPanel />;
       case "team": return <TeamPanel />;
       case "customers": return <CustomersPanel />;
+case "crm": return <CrmPanel />;
       case "analytics": return <AnalyticsPanel />;
       case "maintenance": return <MaintenancePanel />;
       case "useraccess": return <UserAccessPanel />;
