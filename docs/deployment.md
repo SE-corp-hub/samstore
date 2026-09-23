@@ -79,3 +79,4 @@ at Vercel and share `https://yourdomain.com/sam-store` as the canonical public o
 - Do not run this topology against production until migrations, backups, TLS termination, health checks, and secret injection are operator-reviewed.
 - Run `npm run audit:openapi` before releases to see controller routes that still need detailed OpenAPI path/schema documentation. The command is an audit report, not a fabricated pass.
 - Run `npm run generate:openapi-inventory` to refresh `docs/openapi-route-inventory.yaml`; this generated artifact contains every discovered controller route with generic responses, while `docs/openapi.yaml` remains the hand-authored high-risk contract.
+- Run `npm run check:deployment` in CI to validate required Docker/nginx/Compose artifacts without starting containers. Operator validation still requires managed infrastructure, TLS, backups, and secret-manager review.

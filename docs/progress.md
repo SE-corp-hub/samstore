@@ -2,6 +2,14 @@
 
 ## P10a — Privacy retention controls (§22)
 
+## P11g — Static deployment artifact validation (§27)
+
+| Item | Detail |
+|---|---|
+| CI | Added `npm run check:deployment`; verifies required Dockerfiles/nginx/Compose/docs, separate worker wiring, managed-database posture, and API image setup without running Docker. |
+| Gate | Deployment artifact check passed; workspace typecheck remains green. Operator-run Docker/TLS/secret/migration validation remains intentionally manual. |
+| Commit | (this commit) |
+
 ## P11f — Complete controller route inventory (§25)
 
 | Item | Detail |
