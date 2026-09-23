@@ -2,6 +2,15 @@
 
 ## P10a — Privacy retention controls (§22)
 
+## P11c — Container deployment topology (§27)
+
+| Item | Detail |
+|---|---|
+| Artifacts | `docker/api.Dockerfile`, `docker/web.Dockerfile`, `docker/worker.Dockerfile`, `docker/nginx.conf`, `docker-compose.yml`. The Compose topology runs API, web, nginx, and a separate outbox worker. |
+| Safety | No local Postgres/Redis service is defined; managed services remain required. API embedded worker is disabled in Compose to prevent duplicate polling. Docker was not run locally per project rules. |
+| Gate | API + web typecheck clean. |
+| Commit | (this commit) |
+
 ## P11b — Swagger UI runtime route (§25)
 
 | Item | Detail |

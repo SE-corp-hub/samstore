@@ -69,3 +69,11 @@ at Vercel and share `https://yourdomain.com/sam-store` as the canonical public o
 - Phase 10: review `docs/security-checklist.md` before production. Configure Redis
   for shared rate limits and resolve the pre-existing Prisma migration checksum
   drift before using `migrate dev/reset`.
+
+## 7. Container topology (operator-only)
+
+`docker-compose.yml` defines `nginx`, `web`, `api`, and a separate `worker` for the transactional outbox. The API disables its embedded worker in this topology via `OUTBOX_WORKER_EMBEDDED=false`.
+
+- The Compose file intentionally has **no local Postgres or Redis service**. Set managed `DATABASE_URL` and optional `REDIS_URL` through the operator's secret manager.
+- Build files: `docker/api.Dockerfile`, `docker/web.Dockerfile`, `docker/worker.Dockerfile`; reverse proxy: `docker/nginx.conf`.
+- Do not run this topology against production until migrations, backups, TLS termination, health checks, and secret injection are operator-reviewed.
