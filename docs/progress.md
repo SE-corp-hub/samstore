@@ -10,6 +10,14 @@
 | Gate | api/web typecheck clean; P10a test 3/3. |
 | Commit | (this commit) |
 
+## P10b — Security & DPA checklist (§22)
+
+| Item | Detail |
+|---|---|
+| Audit | Documented implemented controls and explicit pending operator/deployment work in `docs/security-checklist.md`: tenant guards, claim tokens, DPA consent, retention, no-PCI gateway posture, proof validation, webhook signatures, rate limits, body caps, security headers, secret hygiene, CSP/CORS/CSRF/NPC/E2E follow-ups. |
+| Finding | Public/auth/cart/checkout rate limiting, 5 MB body caps, request-id redaction, basic security headers, and payment proof validation are already active. Live-provider credentials remain suppressed/PENDING_CREDENTIALS. |
+| Commit | (this commit) |
+
 Updated: 2026-09-20 · **P9: ERP double-entry + BIR exports (§21/§24)** · Active model: `deepseek/deepseek-v4-flash-0731` (openrouter), boilerplate tier `inclusionai/ling-3.0-flash`
 
 ## P9 — ERP depth + BIR

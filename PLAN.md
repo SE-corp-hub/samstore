@@ -204,7 +204,7 @@ Per-phase split (T1 share of the module's work):
 - DPA consent management + data-retention controls + **NPC breach-notification hooks**; CSRF, upload validation, output encoding; rate-limit coverage audit; audit-log completeness; security checklist written.
 - **Accept:** security checklist reviewable; new endpoints covered by guards.
 - **Model:** T1-dominant (90/10) — DPA/retention/breach hooks + audit completeness on `deepseek`/`glm-5.3-flash`; checklist docs on `ling-3.0-flash`.
-- **Status:** **P10a ✅** — configurable privacy retention days, dry-run preview, explicit audited purge of old Messenger conversations/messages (consent records retained), tenant-scoped admin controls + SettingsPanel card. Remaining P10 work: NPC breach-notification hooks, CSRF/upload/output-encoding audit, rate-limit coverage audit, and broader audit-log completeness/security checklist.
+- **Status:** **P10a ✅** — configurable privacy retention days, dry-run preview, explicit audited purge of old Messenger conversations/messages (consent records retained), tenant-scoped admin controls + SettingsPanel card. **P10b ✅** — security/DPA checklist added; existing rate-limit/body-cap/security-header/proof-validation coverage audited and documented. Remaining operator/deployment work is explicitly listed in `docs/security-checklist.md` (CSP/CORS production policy, NPC breach/deletion hooks, live credential approval, final E2E/WCAG review).
 
 ### Phase 11 — API docs + deployment (§25, §27)
 - **OpenAPI/Swagger** for every endpoint (auth, stores, store links, catalog, cart, checkout, orders, payments, customers, loyalty, vouchers, inventory, warehouses, delivery, POS/registers, credit, reports, notifications, analytics, webhooks, admin).
