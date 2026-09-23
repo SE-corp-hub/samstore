@@ -186,6 +186,7 @@ model Store {
   messengerUsers         MessengerUser[] // P6a
   conversations          Conversation[] // P7: chatbot + agent conversations
   cannedReplies          CannedReply[] // P7: agent canned replies
+  securityIncidents      SecurityIncident[] // P10: DPA/NPC incident hooks
   carts                  Cart[]
   orders                 Order[]
   storeCustomers         StoreCustomer[]
@@ -607,6 +608,23 @@ model CannedReply {
   createdAt DateTime @default(now())
 
   @@unique([storeId, label])
+}
+
+model SecurityIncident {
+  id         String    @id @default(cuid())
+  storeId    String
+  store      Store     @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  title      String
+  severity   String // LOW | MEDIUM | HIGH | CRITICAL
+  status     String    @default("OPEN") // OPEN | CONTAINED | RESOLVED
+  details    Json?
+  detectedAt DateTime  @default(now())
+  notifiedAt DateTime?
+  notifiedBy String?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@index([storeId, status, createdAt])
 }
 
 // ─────────────────────────────── CRM campaigns (P8) ───────────────────────────────

@@ -10,6 +10,16 @@
 | Gate | api/web typecheck clean; P10a test 3/3. |
 | Commit | (this commit) |
 
+## P10c — NPC breach-notification hooks (§22)
+
+| Item | Detail |
+|---|---|
+| Incident records | `SecurityIncident` (severity/status/details/detectedAt/notified fields), tenant-scoped. `SecurityIncidentService` creates incidents with AuditLog entries, contains incidents with before/after audit, and lists them. |
+| NPC hook | `PendingNpcBreachNotifier` is an explicit `PENDING_OPERATOR` boundary: it never claims a notification was delivered. `POST /admin/security/incidents/:id/npc-notify` returns a reference + pending status and audits the attempt. |
+| Tests | +3 real-DB tests: audited creation + pending NPC status, containment + tenant isolation, notifier readiness honesty. |
+| Gate | api typecheck clean; P10c test 3/3. |
+| Commit | (this commit) |
+
 ## P10b — Security & DPA checklist (§22)
 
 | Item | Detail |

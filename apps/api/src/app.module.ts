@@ -35,6 +35,7 @@ import { ChatAgentAdminController } from "./chatbot/agent-admin.controller.js";
 import { CrmAdminController } from "./crm/crm-admin.controller.js";
 import { ErpAdminController } from "./erp/erp-admin.controller.js";
 import { BirAdminController } from "./erp/bir-admin.controller.js";
+import { SecurityIncidentAdminController } from "./security/breach-admin.controller.js";
 import { CreditService, CREDIT_SERVICE } from "./credit/credit.service.js";
 import { CreditController } from "./credit/credit.controller.js";
 import { ExpensesService, EXPENSES_SERVICE } from "./expenses/expenses.service.js";
@@ -64,7 +65,7 @@ import {
 const CLAIM_SECRET = process.env.CLAIM_SIGNING_SECRET ?? "dev-only-in-memory-secret-0123456789";
 
 @Module({
-  controllers: [CheckoutController, PublicStoreController, CartController, AuthController, AdminController, OrderLookupController, CustomerAuthController, PosController, PaymentsController, PaymentsWebhookController, DeliveryZonesAdminController, DeliveryBookingsAdminController, MessengerConnectionAdminController, ChatbotAdminController, ChatAgentAdminController, CrmAdminController, ErpAdminController, BirAdminController, CreditController, ExpensesController, PurchasesController, InventoryController, ReportsController, DeliveryController, HealthController, RegisterController, RolePermissionsController, AddressController],
+    controllers: [CheckoutController, PublicStoreController, CartController, AuthController, AdminController, OrderLookupController, CustomerAuthController, PosController, PaymentsController, PaymentsWebhookController, DeliveryZonesAdminController, DeliveryBookingsAdminController, MessengerConnectionAdminController, ChatbotAdminController, ChatAgentAdminController, CrmAdminController, ErpAdminController, BirAdminController, SecurityIncidentAdminController, CreditController, ExpensesController, PurchasesController, InventoryController, ReportsController, DeliveryController, HealthController, RegisterController, RolePermissionsController, AddressController],
   providers: [
     {
       provide: DELIVERY_SERVICE,
