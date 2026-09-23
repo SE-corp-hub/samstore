@@ -220,6 +220,7 @@ Per-phase split (T1 share of the module's work):
 - Deliverables: source, schema+ER, OpenAPI, Messenger impl, dashboards (multi-store admin/store-owner/customer/agent), storefront, chatbot, catalog, cart/checkout, orders, inventory, CRM, loyalty, vouchers, payments, shipping, notifications, analytics, ERP-lite, Docker files, manuals (user/store-owner/super-admin), deployment guide, test report, security & DPA checklist.
 - **Accept:** E2E green; checklist reviewed; git tag + summary.
 - **Model:** T2-led (60/40) — E2E test scaffolding on `ling-3.0-flash`; E2E failure triage + production-readiness review on T1 (`deepseek`/`glm-5.3-flash`).
+- **Status:** **P12 pending operator** — existing Playwright critical-path suite covers health/login/storefront checkout/pickup/POS/split-pay/stock/receipt. Added `docs/production-readiness.md` and an explicit opt-in two-store scenario stub; it intentionally does not claim a pass until two isolated stores, running servers, managed DB, and operator-approved provider fixtures exist.
 
 ---
 

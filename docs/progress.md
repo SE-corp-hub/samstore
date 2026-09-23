@@ -2,6 +2,16 @@
 
 ## P10a — Privacy retention controls (§22)
 
+## P12 — Production readiness checklist (§26/§28)
+
+| Item | Detail |
+|---|---|
+| Existing E2E | Nine Playwright critical-path specs already cover API health, login, storefront checkout/claim, pickup, responsive keyboard, POS shift, split payment, stock adjustment, and receipt printing. |
+| Two-store scenario | Added opt-in `apps/api/e2e/10-two-store-ph-scenario.spec.ts`; it is skipped unless `PH_E2E_TWO_STORE=1` and operator-provisioned Store A/B URLs exist. It refuses to claim a pass until the real fixtures are supplied. |
+| Checklist | Added `docs/production-readiness.md`: managed DB/Redis/backups/TLS/CORS/secrets, provider approvals, tenant isolation, P1–P11 product review, DPA/security, mobile/WCAG, and Messenger suppression review. |
+| Status | **P12 pending operator** — cannot be fully passed from this workspace without running API/web, two isolated stores, managed infrastructure, and approved provider fixtures. |
+| Commit | (this commit) |
+
 ## P11g — Static deployment artifact validation (§27)
 
 | Item | Detail |
