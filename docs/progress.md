@@ -1,5 +1,14 @@
 # PINDIAN — Progress Log
 
+## Follow-up — Checkout E2E and request validation
+
+| Item | Detail |
+|---|---|
+| Address checkout | Connected PH address labels to their selects; the E2E helper now chooses a seeded address within an active delivery zone. The demo store's unsupported Bauan zone was retargeted to seeded Batangas City (fee and ETA preserved; the unmatched barangay allowlist cleared). |
+| Checkout DTO | Allowed the existing consent, PH address, and statutory-discount request fields with runtime type/bounds validation; added strict DTO acceptance/rejection coverage. |
+| E2E | Specs 03 and 04 passed together after the fixes. |
+| Verification | Workspace typecheck passed; security validator tests 9/9; payment gateway tests 4/4; E2E 03/04 passed together. Full lint completed with warnings and no errors; secret scan reported 0 high-severity findings. Web production build passed after stopping the dev server to avoid sharing `.next`. |
+
 ## Follow-up — E2E 06–09 stabilization
 
 | Item | Detail |

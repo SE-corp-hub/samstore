@@ -220,6 +220,16 @@ export const CHECKOUT_DTO: ObjectRule = {
     customerPhone: { kind: "string", required: true, min: 7, max: 32 },
     deliveryType: { kind: "string", values: ["delivery", "pickup"] },
     paymentMethod: { kind: "string", values: ["cod", "credit"] },
+    // P1 PH address cascade fields; service validates all-or-none and resolves them tenant-independently.
+    regionCode: { kind: "string", max: 64 },
+    provinceCode: { kind: "string", max: 64 },
+    cityCode: { kind: "string", max: 64 },
+    barangayCode: { kind: "string", max: 64 },
+    // P3b privacy/discount inputs; consent truth and statutory business rules stay in CheckoutService.
+    consentGranted: { kind: "bool" },
+    statutoryType: { kind: "string", values: ["senior", "pwd"] },
+    statutoryId: { kind: "string", max: 32 },
+    statutoryName: { kind: "string", max: 80 },
     idempotencyKey: { kind: "string", required: true, min: 8, max: 200 },
     deliveryAddressLine1: { kind: "string", max: 200 },
     deliveryAddressLine2: { kind: "string", max: 200 },

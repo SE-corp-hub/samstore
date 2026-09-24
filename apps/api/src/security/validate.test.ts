@@ -128,6 +128,11 @@ test("CHECKOUT_DTO: accepts a real payload, rejects junk before any DB work", ()
       customerPhone: "+639171234567",
       deliveryType: "delivery",
       paymentMethod: "cod",
+      regionCode: "130000000",
+      provinceCode: "137400000",
+      cityCode: "137404000",
+      barangayCode: "137404001",
+      consentGranted: true,
       idempotencyKey: "idem-abcdef123456",
       deliveryAddressLine1: "12 Mabini St",
       loyaltyPoints: 100,
@@ -141,6 +146,8 @@ test("CHECKOUT_DTO: accepts a real payload, rejects junk before any DB work", ()
     { cartToken: "cart-abcdef123456", customerName: "Juan", customerPhone: "+639171234567", idempotencyKey: "idem-abcdef123456", deliveryType: "rocket" }, // enum
     { cartToken: "cart-abcdef123456", customerName: "Juan", customerPhone: "+639171234567", idempotencyKey: "idem-abcdef123456", loyaltyPoints: -5 }, // negative points
     { cartToken: "cart-abcdef123456", customerName: "Juan", customerPhone: "+639171234567", idempotencyKey: "idem-abcdef123456", totalMinor: 1 }, // client-supplied total
+    { cartToken: "cart-abcdef123456", customerName: "Juan", customerPhone: "+639171234567", idempotencyKey: "idem-abcdef123456", consentGranted: "yes" }, // consent is boolean
+    { cartToken: "cart-abcdef123456", customerName: "Juan", customerPhone: "+639171234567", idempotencyKey: "idem-abcdef123456", statutoryType: "student" }, // statutory enum
     { cartToken: "cart-abcdef123456", customerName: "Juan", customerPhone: "+639171234567" }, // missing idempotencyKey
   ];
   for (const bad of bads) {

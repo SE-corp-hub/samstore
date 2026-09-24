@@ -312,8 +312,9 @@ export default function CheckoutForm({ cartToken, store, subtotalMinor, delivery
           {delivery ? (
             <>
               <div className="mb-2">
-                <label className="form-label small">Region *</label>
+                <label className="form-label small" htmlFor="checkoutRegion">Region *</label>
                 <select
+                  id="checkoutRegion"
                   className={selectClassName}
                   value={region.code}
                   onChange={(e) => onRegionSelect(e.target.value)}
@@ -326,8 +327,9 @@ export default function CheckoutForm({ cartToken, store, subtotalMinor, delivery
                 </select>
               </div>
               <div className="mb-2">
-                <label className="form-label small">Province *</label>
+                <label className="form-label small" htmlFor="checkoutProvince">Province *</label>
                 <select
+                  id="checkoutProvince"
                   className={selectClassName}
                   value={province.code}
                   onChange={(e) => onProvinceSelect(e.target.value)}
@@ -340,8 +342,9 @@ export default function CheckoutForm({ cartToken, store, subtotalMinor, delivery
                 </select>
               </div>
               <div className="mb-2">
-                <label className="form-label small">City / Municipality *</label>
+                <label className="form-label small" htmlFor="checkoutCity">City / Municipality *</label>
                 <select
+                  id="checkoutCity"
                   className={selectClassName}
                   value={city.code}
                   onChange={(e) => onCitySelect(e.target.value)}
@@ -354,8 +357,9 @@ export default function CheckoutForm({ cartToken, store, subtotalMinor, delivery
                 </select>
               </div>
               <div className="mb-2">
-                <label className="form-label small">Barangay *</label>
+                <label className="form-label small" htmlFor="checkoutBarangay">Barangay *</label>
                 <select
+                  id="checkoutBarangay"
                   className={selectClassName}
                   value={barangay.code}
                   onChange={(e) => onBarangaySelect(e.target.value)}

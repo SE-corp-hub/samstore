@@ -1,13 +1,14 @@
 // E2E 03 — critical path: storefront → add to cart → delivery checkout (COD)
 // → order placed → public claim-token readback (single-use claim semantics).
 import { test, expect } from "@playwright/test";
-import { API, apiLogin, fetchPublicLink, ensureStorefrontStock, pickFirstPhAddress } from "./helpers.js";
+import { API, apiLogin, fetchPublicLink, ensureStorefrontStock, pickCoveredPhAddress } from "./helpers.js";
 
 const ORDER_NUMBER = /SAMSTO-\d+/i;
 
 test.use({ permissions: ["clipboard-read", "clipboard-write"] });
 
 test("customer order journey: menu → cart → checkout → placed → claimable", async ({ page, request }) => {
+  test.setTimeout(180_000); // delivery address resolution + remote-DB order transaction
   // Self-healing fixture: repeated runs consume demo stock, which would leave every Add
   // button disabled and fail this spec for a reason unrelated to the code under test.
   await ensureStorefrontStock(request);
@@ -26,7 +27,7 @@ test("customer order journey: menu → cart → checkout → placed → claimabl
   const count = await addButtons.count();
   expect(count, "storefront needs ≥1 in-stock product (seed data)").toBeGreaterThan(0);
   await addButtons.first().click();
-  await expect(page.getByRole("button", { name: /cart/i }).first().locator(".badge")).toBeVisible();
+  await expect(page.getByRole("button", { name: /Cart\s+1/ }).first()).toBeVisible({ timeout: 45_000 });
 
   // 2. Open the cart drawer → Checkout.
   await page.getByRole("button", { name: /cart/i }).first().click();
@@ -37,7 +38,7 @@ test("customer order journey: menu → cart → checkout → placed → claimabl
   // 3. Checkout step 1 "Contact" — delivery selected by default; fill contact + address.
     await page.locator('input:not([placeholder])').first().fill("E2E Tester");
     await page.getByPlaceholder("+63...").fill("+639178456123");
-    await pickFirstPhAddress(page);
+    await pickCoveredPhAddress(page, request);
     await page.getByPlaceholder("e.g. 123 Mabini St.").fill("E2E Test Street 123");
     await page.getByRole("button", { name: "Continue" }).click();
 
@@ -52,9 +53,8 @@ test("customer order journey: menu → cart → checkout → placed → claimabl
 
   // 4. Success screen shows the order number; grab THIS order's claim token from the
   //    Copy-tracking-token button's clipboard payload (fresh + unused every run).
-    // The POST is state-changing against a remote DB; under full-suite load the success screen
-    // can take well over 25s to render even though the order is already created server-side.
-    await expect(page.getByText("Order placed!")).toBeVisible({ timeout: 60_000 });
+    // Delivery checkout resolves the PH address chain and persists against the remote DB.
+    await expect(page.getByText("Order placed!")).toBeVisible({ timeout: 120_000 });
     const orderNumber = (await page.getByText(ORDER_NUMBER).first().textContent())?.trim();
     expect(orderNumber).toMatch(ORDER_NUMBER);
     await page.locator("button", { hasText: "Copy tracking token" }).click();

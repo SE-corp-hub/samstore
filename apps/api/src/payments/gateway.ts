@@ -4,6 +4,7 @@
 // the mock powers tests and demos. Honest status everywhere (AGENTS.md).
 
 import { randomBytes } from "node:crypto";
+import { PayMongoGateway } from "./paymongo.adapter.js";
 
 export interface CheckoutSessionInput {
   amountMinor: number;
@@ -74,7 +75,7 @@ export class MockPaymentGateway implements PaymentGateway {
 
 const registry: Record<string, () => PaymentGateway> = {
   mock: () => new MockPaymentGateway(),
-  paymongo: () => new (require("./paymongo.adapter.js").PayMongoGateway)(),
+  paymongo: () => new PayMongoGateway(),
 };
 
 export function getGateway(name: string): PaymentGateway {

@@ -24,6 +24,84 @@ export async function pickFirstPhAddress(page: Page) {
   }
 }
 
+/** Select a PH address that the current store's configured delivery zones accept. */
+export async function pickCoveredPhAddress(page: Page, request: APIRequestContext) {
+  const token = await apiLogin(request);
+  const authHeaders = { Authorization: `Bearer ${token}` };
+  const settingsRes = await request.get(`${API}/admin/settings`, { headers: authHeaders });
+  if (settingsRes.status() !== 200) throw new Error(`could not load store settings for E2E address selection: HTTP ${settingsRes.status()}`);
+  const settings = await settingsRes.json();
+  const storeId = (settings.storeId ?? settings.id) as string | undefined;
+  if (!storeId) throw new Error("store settings did not return a store id for E2E address selection");
+
+  const zonesRes = await request.get(`${API}/admin/delivery-zones`, {
+    headers: { ...authHeaders, "X-Store-Id": storeId },
+  });
+  if (zonesRes.status() !== 200) throw new Error(`could not load delivery zones for E2E address selection: HTTP ${zonesRes.status()}`);
+  const zonesBody = await zonesRes.json();
+  const zones = (zonesBody.zones ?? zonesBody.value?.zones ?? []) as {
+    isActive: boolean;
+    cityCode: string | null;
+    barangayCodes: string[];
+  }[];
+  const activeZones = zones.filter((zone) => zone.isActive);
+
+  // No zones preserves the legacy flat-fee behavior; a catch-all accepts any address.
+  if (activeZones.length === 0 || activeZones.some((zone) => zone.cityCode === null)) {
+    await pickFirstPhAddress(page);
+    return;
+  }
+
+  const getAddressList = async <T>(path: string): Promise<T[]> => {
+    const res = await request.get(`${API}${path}`);
+    if (res.status() !== 200) throw new Error(`PH address lookup failed: HTTP ${res.status()} for ${path}`);
+    return (await res.json()) as T[];
+  };
+  type AddressOption = { code: string; name: string };
+  const regions = await getAddressList<AddressOption>("/public/address/regions");
+  const matchedZoneCityCodes = new Set<string>();
+
+  for (const region of regions) {
+    const provinces = await getAddressList<AddressOption>(`/public/address/provinces?region=${encodeURIComponent(region.code)}`);
+    for (const province of provinces) {
+      const cities = await getAddressList<AddressOption>(`/public/address/cities?province=${encodeURIComponent(province.code)}`);
+      for (const city of cities) {
+        const cityZones = activeZones.filter((zone) => zone.cityCode === city.code);
+        if (cityZones.length === 0) continue;
+        matchedZoneCityCodes.add(city.code);
+        const barangays = await getAddressList<AddressOption>(`/public/address/barangays?city=${encodeURIComponent(city.code)}`);
+        const barangay = cityZones
+          .flatMap((zone) => zone.barangayCodes.length > 0
+            ? barangays.filter((candidate) => zone.barangayCodes.includes(candidate.code))
+            : barangays)
+          .find(Boolean);
+        if (!barangay) continue;
+
+        const chain = [
+          ["Region", region.code],
+          ["Province", province.code],
+          ["City / Municipality", city.code],
+          ["Barangay", barangay.code],
+        ] as const;
+        for (const [label, code] of chain) {
+          const escapedLabel = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+          const select = page.getByLabel(new RegExp(`^${escapedLabel}`));
+          await select.waitFor({ state: "visible", timeout: 15_000 });
+          await select.locator(`option[value="${code}"]`).waitFor({ state: "attached", timeout: 15_000 });
+          await select.selectOption(code);
+        }
+        return;
+      }
+    }
+  }
+
+  throw new Error(
+    `no seeded PH address matches the store's configured delivery zones; ` +
+    `zone city codes: ${activeZones.map((zone) => zone.cityCode).join(", ")}; ` +
+    `matching seeded city codes: ${[...matchedZoneCityCodes].join(", ") || "none"}`,
+  );
+}
+
 /** POST /auth/login → returns { token, ... }. Retries: a pooled DB can throw one transient 5xx. */
 export async function apiLogin(request: APIRequestContext) {
   let last = "";
