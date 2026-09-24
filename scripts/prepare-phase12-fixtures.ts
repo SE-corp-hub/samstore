@@ -17,7 +17,14 @@ async function createStore(label: string, sku: string, productName: string) {
       slug,
       name: label === "a" ? "Lola's Sari-Sari" : "Kape PH",
       publicLink: { create: { slug, token } },
-      settings: { create: { allowGuestOrders: true, deliveryFeeMinor: 5000, pickupEnabled: true } },
+      settings: {
+        create: {
+          allowGuestOrders: true,
+          deliveryFeeMinor: 5000,
+          pickupEnabled: true,
+          orderNumberPrefix: `P12${label.toUpperCase()}`,
+        },
+      },
     },
   });
   const category = await prisma.category.create({ data: { storeId: store.id, name: label === "a" ? "Pantry" : "Coffee", slug: `${label}-${run}`, sortOrder: 0 } });

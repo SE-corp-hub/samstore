@@ -41,18 +41,18 @@
 
 | Item | Detail |
 |---|---|
-| Fixture helper | Added `npm run prepare:phase12`: creates two disposable stores with separate public links/catalogs/stock and writes tokenized URLs to the gitignored `.phase12.env.local`. It never deletes existing data. |
-| E2E | Replaced the placeholder two-store spec with a real opt-in browse→cart→checkout flow for both stores plus a cross-token isolation check. Enable with `PH_E2E_TWO_STORE=1` and the generated URLs. |
-| Status | Still operator pending: requires staging API/web servers and a disposable managed database. |
+| Fixture helper | `npm run prepare:phase12` creates two disposable stores with separate public links/catalogs/stock and distinct order-number prefixes, then writes tokenized URLs to the gitignored `.phase12.env.local`. It never deletes existing data. |
+| E2E | The opt-in two-store spec runs browse→cart→checkout for both stores and verifies that Store A's token cannot unlock Store B. |
+| Status | Passed against the local web/API and managed database: Store A and Store B completed independent checkouts and the cross-token isolation check passed. |
 
 ## P12 — Production readiness checklist (§26/§28)
 
 | Item | Detail |
 |---|---|
-| Existing E2E | Nine Playwright critical-path specs already cover API health, login, storefront checkout/claim, pickup, responsive keyboard, POS shift, split payment, stock adjustment, and receipt printing. |
-| Two-store scenario | Added opt-in `apps/api/e2e/10-two-store-ph-scenario.spec.ts`; it is skipped unless `PH_E2E_TWO_STORE=1` and operator-provisioned Store A/B URLs exist. It refuses to claim a pass until the real fixtures are supplied. |
+| Existing E2E | Ten Playwright specs cover API health, login, storefront checkout/claim, pickup, responsive keyboard, POS shift, split payment, stock adjustment, receipt printing, and two-store isolation. |
+| Two-store scenario | `apps/api/e2e/10-two-store-ph-scenario.spec.ts` passed with prepared Store A/B fixtures; the token cross-access check returned Store B as unavailable when using Store A's token. |
 | Checklist | Added `docs/production-readiness.md`: managed DB/Redis/backups/TLS/CORS/secrets, provider approvals, tenant isolation, P1–P11 product review, DPA/security, mobile/WCAG, and Messenger suppression review. |
-| Status | **P12 pending operator** — cannot be fully passed from this workspace without running API/web, two isolated stores, managed infrastructure, and approved provider fixtures. |
+| Status | Two-store E2E passed locally against the managed database; overall **P12 remains pending operator** for remaining production-readiness infrastructure and provider-approval gates. |
 | Commit | (this commit) |
 
 ## P11g — Static deployment artifact validation (§27)
