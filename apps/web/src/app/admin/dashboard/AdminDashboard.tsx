@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   getAdminToken, getAdminStoreId, setAdminStoreId, getAdminRole,
@@ -41,6 +41,7 @@ export default function AdminDashboard() {
   const [email, setEmail] = useState("");
   const [tab, setTab] = useState("overview");
   const [mobileNav, setMobileNav] = useState(false);
+  const userNavigated = useRef(false);
 
   useEffect(() => {
     const token = getAdminToken();
@@ -80,7 +81,7 @@ export default function AdminDashboard() {
                return;
              }
              setRole(isOwnerRole(member.role) ? "OWNER" : member.role);
-            setTab(defaultTabFor(isOwnerRole(member.role) ? "OWNER" : member.role));
+            if (!userNavigated.current) setTab(defaultTabFor(isOwnerRole(member.role) ? "OWNER" : member.role));
           }
         }
       })
@@ -152,7 +153,7 @@ case "erp": return <ErpPanel />;
                 <li className="nav-item" key={item.id}>
                   <button
                     className={`nav-link w-100 text-start d-flex align-items-center gap-2 ${tab === item.id ? "active bg-primary text-white" : "text-body"}`}
-                    onClick={() => { setTab(item.id); setMobileNav(false); }}
+                    onClick={() => { userNavigated.current = true; setTab(item.id); setMobileNav(false); }}
                   >
                     <i className={`bi ${item.icon}`}></i>
                     <span>{item.label}</span>
