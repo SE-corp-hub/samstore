@@ -16,7 +16,7 @@ test.describe("two-store PH production scenario", () => {
     await page.getByRole("button", { name: /cart/i }).first().click();
     await page.getByRole("button", { name: /^Checkout ·/ }).click();
     await page.locator('input[placeholder="+63..."]').fill("+639178456123");
-    await page.locator('input[placeholder="House no. & street"]').fill("Phase 12 Test Street 123");
+    await page.locator('input[placeholder="e.g. 123 Mabini St."]').fill("Phase 12 Test Street 123");
     await page.locator('input:not([placeholder])').first().fill("Phase 12 Tester");
     await page.getByRole("button", { name: "Continue" }).click();
     await page.getByRole("button", { name: "Review order" }).click();

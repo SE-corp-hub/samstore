@@ -47,7 +47,7 @@ test("M3: the receipt shows every tender and prints as a 57 mm slip", async ({ p
 
   // ── The slip itself ──
   await page.goto("/admin/login");
-  await page.locator('input[type="email"]').fill(ADMIN_EMAIL);
+  await page.locator('input[placeholder="0917 123 4567 or owner@store.com"]').fill(ADMIN_EMAIL);
   await page.locator('input[type="password"]').fill(ADMIN_PASSWORD);
   await page.getByRole("button", { name: /sign\s?in|login/i }).first().click();
   await expect(page).toHaveURL(/\/admin\/dashboard/, { timeout: 25_000 });

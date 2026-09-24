@@ -42,7 +42,7 @@ test("admin dashboard fits every viewport and is keyboard reachable", async ({ p
     await page.setViewportSize({ width: vp.width, height: vp.height });
     await page.goto("/admin/login");
     // Keyboard-only path: fill the form, submit with Enter (no mouse).
-    await page.locator('input[type="email"]').fill(ADMIN_EMAIL);
+    await page.locator('input[placeholder="0917 123 4567 or owner@store.com"]').fill(ADMIN_EMAIL);
     await page.locator('input[type="password"]').fill(ADMIN_PASSWORD);
     await page.keyboard.press("Enter");
     await expect(page).toHaveURL(/\/admin\/dashboard/, { timeout: 25_000 });

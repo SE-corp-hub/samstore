@@ -37,7 +37,7 @@ test("customer order journey: menu → cart → checkout → placed → claimabl
   // 3. Checkout step 1 "Contact" — delivery selected by default; fill contact + address.
     await page.locator('input:not([placeholder])').first().fill("E2E Tester");
     await page.getByPlaceholder("+63...").fill("+639178456123");
-    await page.getByPlaceholder("House no. & street").fill("E2E Test Street 123");
+    await page.getByPlaceholder("e.g. 123 Mabini St.").fill("E2E Test Street 123");
     await page.getByRole("button", { name: "Continue" }).click();
 
     // Step 2 "Payment" — COD is the default; continue to review.

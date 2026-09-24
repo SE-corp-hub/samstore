@@ -1,9 +1,18 @@
 // Shared helpers for the critical-path E2E suite.
-import { APIRequestContext } from "@playwright/test";
+import { APIRequestContext, Page, expect } from "@playwright/test";
 
 export const API = "http://localhost:4100";
 export const ADMIN_EMAIL = "admin@samstore.test";
 export const ADMIN_PASSWORD = "admin-pass-123"; // seeded demo credential (prisma/seed.ts)
+
+/** Browser admin login — the current form uses a single "Phone or email" identifier field. */
+export async function loginAs(page: Page, identifier: string, password: string) {
+  await page.goto("/admin/login");
+  await page.locator('input[placeholder="0917 123 4567 or owner@store.com"]').fill(identifier);
+  await page.locator('input[type="password"]').fill(password);
+  await page.getByRole("button", { name: /sign\s?in|login/i }).first().click();
+  await expect(page).toHaveURL(/\/admin\/(dashboard|delivery)/, { timeout: 20_000 });
+}
 
 /** POST /auth/login → returns { token, ... }. Retries: a pooled DB can throw one transient 5xx. */
 export async function apiLogin(request: APIRequestContext) {

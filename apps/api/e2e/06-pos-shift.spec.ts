@@ -5,7 +5,7 @@ import { ADMIN_EMAIL, ADMIN_PASSWORD, API, apiLogin } from "./helpers.js";
 
 async function login(page: import("@playwright/test").Page) {
   await page.goto("/admin/login");
-  await page.locator('input[type="email"]').fill(ADMIN_EMAIL);
+  await page.locator('input[placeholder="0917 123 4567 or owner@store.com"]').fill(ADMIN_EMAIL);
   await page.locator('input[type="password"]').fill(ADMIN_PASSWORD);
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(/\/admin\/dashboard/, { timeout: 25_000 });

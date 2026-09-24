@@ -41,7 +41,7 @@ test("M1.4: the Pay modal settles a hold with a cash + gcash split", async ({ pa
 
   // ── The staff flow in the browser ──
   await page.goto("/admin/login");
-  await page.locator('input[type="email"]').fill(ADMIN_EMAIL);
+  await page.locator('input[placeholder="0917 123 4567 or owner@store.com"]').fill(ADMIN_EMAIL);
   await page.locator('input[type="password"]').fill(ADMIN_PASSWORD);
   await page.getByRole("button", { name: /sign\s?in|login/i }).first().click();
   await expect(page).toHaveURL(/\/admin\/dashboard/, { timeout: 20_000 });

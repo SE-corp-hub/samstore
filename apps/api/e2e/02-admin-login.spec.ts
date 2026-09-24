@@ -1,12 +1,9 @@
 // E2E 02 — staff login → admin dashboard.
 import { test, expect } from "@playwright/test";
-import { ADMIN_EMAIL, ADMIN_PASSWORD } from "./helpers.js";
+import { ADMIN_EMAIL, ADMIN_PASSWORD, loginAs } from "./helpers.js";
 
 test("admin login with seeded demo credentials opens the dashboard", async ({ page }) => {
-  await page.goto("/admin/login");
-  await page.locator('input[type="email"]').fill(ADMIN_EMAIL);
-  await page.locator('input[type="password"]').fill(ADMIN_PASSWORD);
-  await page.getByRole("button", { name: /sign\s?in|login/i }).first().click();
+  await loginAs(page, ADMIN_EMAIL, ADMIN_PASSWORD);
 
   // First-login guard would show a password-change form instead — fail loudly.
   await expect(page.getByText(/At least 8 characters/i)).not.toBeVisible();
