@@ -46,39 +46,42 @@ test("M1.4: the Pay modal settles a hold with a cash + gcash split", async ({ pa
   await page.getByRole("button", { name: /sign\s?in|login/i }).first().click();
   await expect(page).toHaveURL(/\/admin\/dashboard/, { timeout: 20_000 });
 
-  // The sidebar items are buttons whose accessible name includes the count badge.
+  // Open Orders and find the hold created for this run.
   await page.getByRole("button", { name: /Orders/ }).first().click();
   const search = page.getByPlaceholder(/Search order/i).first();
   await expect(search).toBeVisible({ timeout: 15_000 });
   await search.fill(hold.orderNumber);
 
-  // ON_HOLD rows live under the On Process pipeline tab; icon glyphs prefix the names.
-  const onProcess = page.getByRole("button", { name: /On Process/ }).first();
-  if (await onProcess.isVisible().catch(() => false)) await onProcess.click();
+  // ON_HOLD rows live under On Process. Wait for the filtered order rather than
+  // clicking the unrelated "Payment review" button while the list is loading.
+  await page.getByRole("button", { name: /^On Process(?:\s+\d+)?$/ }).click();
+  const holdRow = page.getByRole("row").filter({ hasText: hold.orderNumber });
+  await expect(holdRow).toBeVisible({ timeout: 30_000 });
 
-  // The hold row exposes Pay (ON_HOLD orders are handled by dedicated buttons).
-  const payButton = page.getByRole("button", { name: /Pay/ }).first();
-  await expect(payButton).toBeVisible({ timeout: 15_000 });
-  await payButton.click();
+  // The held order exposes its own Pay action.
+  await holdRow.getByRole("button", { name: /Pay$/ }).click();
 
-  await expect(page.locator("#splitPayToggle")).toBeVisible({ timeout: 10_000 });
-  await page.locator("#splitPayToggle").check();
+  const payDialog = page.getByRole("dialog", { name: new RegExp(`^Complete ${hold.orderNumber}`) });
+  await expect(payDialog).toBeVisible();
+  await payDialog.getByRole("checkbox", { name: /Split payment/ }).check();
 
-  const row0 = page.locator("#tender-row-0");
+  const row0 = payDialog.locator("#tender-row-0");
   await expect(row0).toBeVisible();
   await row0.locator("select").selectOption("cash");
   await row0.locator('input[type="number"]').first().fill((cashMinor / 100).toFixed(2));
 
-  await page.getByRole("button", { name: /Add tender/i }).click();
-  const row1 = page.locator("#tender-row-1");
+  await payDialog.getByRole("button", { name: /Add tender/i }).click();
+  const row1 = payDialog.locator("#tender-row-1");
   await expect(row1).toBeVisible();
-  await row1.locator("select").selectOption("gcash");
+  const gcashSelect = row1.locator("select");
+  await expect(gcashSelect.locator('option[value="gcash"]')).toHaveCount(1, { timeout: 10_000 });
+  await gcashSelect.selectOption("gcash");
   await row1.locator('input[type="number"]').first().fill((gcashMinor / 100).toFixed(2));
   await row1.locator('input[placeholder*="reference" i]').fill("GC-E2E-07");
 
   // The modal shows the split is settled before submitting.
-  await expect(page.getByText(/Fully tendered/i)).toBeVisible({ timeout: 10_000 });
-  await page.getByRole("button", { name: "Complete", exact: true }).click();
+  await expect(payDialog.getByText(/Fully tendered/i)).toBeVisible({ timeout: 10_000 });
+  await payDialog.getByRole("button", { name: "Complete", exact: true }).click();
 
   // ── Server truth: two tender rows, one per method ──
   await expect

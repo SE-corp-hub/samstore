@@ -1,5 +1,13 @@
 # PINDIAN — Progress Log
 
+## Follow-up — E2E 06–09 stabilization
+
+| Item | Detail |
+|---|---|
+| Split payment | Scoped the Pay action to the held-order row and allowed the icon-prefixed accessible name; the spec now addresses the matching payment dialog and waits for GCash tender options. |
+| Stock adjustment | Replaced a capped movement-count comparison with polling for this run's unique ledger reason, avoiding flaky missing/capped counts. |
+| Gate | Playwright 06, 07, and 09 passed in the combined run; 08 passed in a focused rerun. Workspace typecheck passed. |
+
 ## P10a — Privacy retention controls (§22)
 
 ## Follow-up — Platform Admin owner onboarding

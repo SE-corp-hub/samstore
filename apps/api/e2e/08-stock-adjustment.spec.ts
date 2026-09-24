@@ -10,9 +10,7 @@ test("M2: an inventory adjustment writes a reasoned ledger row", async ({ page, 
   const storeId = (await mineRes.json()).stores?.[0]?.id as string;
   const headers = { Authorization: `Bearer ${token}`, "X-Store-Id": storeId };
   expect(storeId).toBeTruthy();
-
-  const before = await request.get(`${API}/admin/stock/movements?limit=500`, { headers });
-  const beforeCount = (await before.json()).count as number;
+  const reason = `E2E M2 adjustment ${Date.now()}`;
 
   // ── The staff flow: Inventory → Adjust on a real product → save ──
   await page.goto("/admin/login");
@@ -31,21 +29,25 @@ test("M2: an inventory adjustment writes a reasoned ledger row", async ({ page, 
   const modal = page.locator("#adjustModalTitle");
   await expect(modal).toBeVisible({ timeout: 10_000 });
   await page.locator("#adjustQty").fill("3");
-  await page.locator("#adjustReason").fill("E2E M2 adjustment");
+  await page.locator("#adjustReason").fill(reason);
   await page.getByRole("button", { name: /Save adjustment/ }).click();
 
-  // ── Server truth: a new ADJUST movement carrying the reason ──
+  // ── Server truth: this run's ADJUST movement carries its unique reason ──
   await expect
     .poll(async () => {
-      const res = await request.get(`${API}/admin/stock/movements?limit=500`, { headers });
-      if (res.status() !== 200) return beforeCount;
-      return ((await res.json()).count as number);
+      const res = await request.get(`${API}/admin/stock/movements?limit=100`, { headers });
+      if (res.status() !== 200) return false;
+      const body = await res.json();
+      const movements = body.movements ?? body.value?.movements ?? [];
+      return movements.some((movement: { note?: string | null }) => movement.note === reason);
     }, { timeout: 90_000, intervals: [1000, 2000, 4000] })
-    .toBeGreaterThan(beforeCount);
+    .toBe(true);
 
-  const after = await request.get(`${API}/admin/stock/movements?limit=5`, { headers });
-  const movements = (await after.json()).movements as { type: string; delta: number; note: string | null; actor: string | null; balanceAfter: number | null }[];
-  const mine = movements.find((m) => m.note === "E2E M2 adjustment");
+  const after = await request.get(`${API}/admin/stock/movements?limit=100`, { headers });
+  expect(after.status(), "stock movement history request succeeds").toBe(200);
+  const afterBody = await after.json();
+  const movements = (afterBody.movements ?? afterBody.value?.movements ?? []) as { type: string; delta: number; note: string | null; actor: string | null; balanceAfter: number | null }[];
+  const mine = movements.find((m) => m.note === reason);
   expect(mine, "the adjustment is on the ledger").toBeTruthy();
   expect(mine?.type).toBe("ADJUST");
   expect(mine?.delta).toBe(3);
@@ -54,5 +56,5 @@ test("M2: an inventory adjustment writes a reasoned ledger row", async ({ page, 
 
   // The panel's own history view shows it (the row is visible with its reason).
   await page.getByRole("button", { name: /Stock flow/ }).click();
-  await expect(page.getByText("E2E M2 adjustment").first()).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText(reason).first()).toBeVisible({ timeout: 15_000 });
 });
