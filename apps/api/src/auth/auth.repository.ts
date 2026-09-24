@@ -1,6 +1,7 @@
 // Auth repository — user persistence.
 
 import { prisma } from "../persistence/prisma-repositories.js";
+import { toE164 } from "../domain/phone.js";
 import { StoreRole } from "@prisma/client";
 
 export interface AuthUserRecord {
@@ -54,7 +55,9 @@ export class PrismaAuthRepository implements AuthRepository {
 
   /** Resolves by normalized phone (E.164) first, else by lowercased email. */
   async findByIdentifier(identifier: string): Promise<AuthUserRecord | null> {
-    const id = (identifier ?? "").trim().toLowerCase();
+    const raw = (identifier ?? "").trim();
+    const phone = toE164(raw);
+    const id = phone || raw.toLowerCase();
     if (!id) return null;
     const u = await prisma.user.findFirst({
       where: { OR: [{ email: id }, { phone: id }] },
