@@ -67,6 +67,7 @@ test("admin dashboard fits every viewport and is keyboard reachable", async ({ p
     // Tab must move focus to a real element (no keyboard trap on the shell).
     await page.keyboard.press("Tab");
     const active = await page.evaluate(() => document.activeElement?.tagName ?? "");
-    expect(["A", "BUTTON", "INPUT", "SELECT", "TEXTAREA", "BODY"]).toContain(active);
+    // NEXTJS-PORTAL appears when focus lands on a Next.js portal root (toast/modal host).
+    expect(["A", "BUTTON", "INPUT", "SELECT", "TEXTAREA", "BODY", "NEXTJS-PORTAL"]).toContain(active);
   }
 });

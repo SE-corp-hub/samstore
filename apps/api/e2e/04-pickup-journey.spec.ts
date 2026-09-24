@@ -31,6 +31,11 @@ test("guest pickup: cart → checkout without an address → placed with PICKUP 
   // The review summary must show pickup with no fee.
   await expect(page.getByText("Free — self pickup")).toBeVisible();
   await page.getByRole("button", { name: /^Place order ·/ }).click();
+  // DPA consent gate blocks the button until accepted.
+  const consent = page.locator("#dpconsent");
+  await expect(consent).toBeVisible();
+  if (!(await consent.isChecked())) await consent.check();
+  await page.getByRole("button", { name: /^Place order ·/ }).click();
 
   await expect(page.getByText("Order placed!")).toBeVisible({ timeout: 25_000 });
   const orderNumber = (await page.getByText(ORDER_NUMBER).first().textContent())?.trim();

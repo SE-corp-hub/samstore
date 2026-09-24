@@ -1,7 +1,7 @@
 // E2E 03 — critical path: storefront → add to cart → delivery checkout (COD)
 // → order placed → public claim-token readback (single-use claim semantics).
 import { test, expect } from "@playwright/test";
-import { API, apiLogin, fetchPublicLink, ensureStorefrontStock } from "./helpers.js";
+import { API, apiLogin, fetchPublicLink, ensureStorefrontStock, pickFirstPhAddress } from "./helpers.js";
 
 const ORDER_NUMBER = /SAMSTO-\d+/i;
 
@@ -37,6 +37,7 @@ test("customer order journey: menu → cart → checkout → placed → claimabl
   // 3. Checkout step 1 "Contact" — delivery selected by default; fill contact + address.
     await page.locator('input:not([placeholder])').first().fill("E2E Tester");
     await page.getByPlaceholder("+63...").fill("+639178456123");
+    await pickFirstPhAddress(page);
     await page.getByPlaceholder("e.g. 123 Mabini St.").fill("E2E Test Street 123");
     await page.getByRole("button", { name: "Continue" }).click();
 
@@ -44,7 +45,9 @@ test("customer order journey: menu → cart → checkout → placed → claimabl
     await expect(page.getByText("Cash on delivery", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Review order" }).click();
 
-    // Step 3 "Pay" — review summary confirms Cash on delivery, then place.
+    // Step 3 "Pay" — review summary confirms Cash on delivery, accept the DPA consent, then place.
+    const consent = page.locator("#dpconsent");
+    if (!(await consent.isChecked())) await consent.check();
     await page.getByRole("button", { name: /^Place order ·/ }).click();
 
   // 4. Success screen shows the order number; grab THIS order's claim token from the

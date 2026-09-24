@@ -14,6 +14,16 @@ export async function loginAs(page: Page, identifier: string, password: string) 
   await expect(page).toHaveURL(/\/admin\/(dashboard|delivery)/, { timeout: 20_000 });
 }
 
+/** Select the first real PH address from the cascading region→province→city→barangay selects. */
+export async function pickFirstPhAddress(page: Page) {
+  for (const label of ["Region", "Province", "City / Municipality", "Barangay"]) {
+    const select = page.getByLabel(new RegExp(`^${label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+    await select.waitFor({ state: "visible", timeout: 15_000 });
+    await select.locator("option").nth(1).waitFor({ state: "attached", timeout: 15_000 });
+    await select.selectOption({ index: 1 });
+  }
+}
+
 /** POST /auth/login → returns { token, ... }. Retries: a pooled DB can throw one transient 5xx. */
 export async function apiLogin(request: APIRequestContext) {
   let last = "";
