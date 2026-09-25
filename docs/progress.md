@@ -1,5 +1,14 @@
 # PINDIAN — Progress Log
 
+## Follow-up — Product creation cost and category capture
+
+| Item | Detail |
+|---|---|
+| Pricing | Products now label retail selling price separately from unit acquisition cost; cost is stored in minor units and continues to update from completed purchases. |
+| Categories | New products can create a store-scoped category inline; category, product, opening stock, and its RECEIPT ledger movement are committed atomically. Duplicate names return a conflict rather than renaming an existing category. |
+| Tests | Product M5 integration tests 8/8; low-stock admin tests 5/5; product-validation tests 20/20. Workspace typecheck and targeted lint passed. |
+| Verification | Production web build passed after stopping the dev server to avoid sharing `.next`. |
+
 ## Follow-up — Checkout E2E and request validation
 
 | Item | Detail |

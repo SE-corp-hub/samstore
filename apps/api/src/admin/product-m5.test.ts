@@ -28,9 +28,13 @@ async function makeStore() {
 
 after(async () => {
   if (createdProductIds.length > 0) {
+    await prisma.stockMovement.deleteMany({ where: { productId: { in: createdProductIds } } });
+    await prisma.stockLevel.deleteMany({ where: { productId: { in: createdProductIds } } });
+    await prisma.productRelation.deleteMany({ where: { sourceProductId: { in: createdProductIds } } });
     await prisma.product.deleteMany({ where: { id: { in: createdProductIds } } });
   }
   if (createdStoreIds.length > 0) {
+    await prisma.category.deleteMany({ where: { storeId: { in: createdStoreIds } } });
     await prisma.store.deleteMany({ where: { id: { in: createdStoreIds } } });
   }
   await prisma.$disconnect();
@@ -183,4 +187,59 @@ test("duplicate barcode on update (excluding self) is rejected", async () => {
   // Setting the SAME barcode back on c1 (its own value) must not conflict.
   const self = await svc.update(store.id, c1.value.id, { barcode: "4801313131313", unit: "pack" });
   assert.equal(self.ok, true);
+});
+
+test("new product captures unit cost and creates its category with opening stock", async () => {
+  const store = await makeStore();
+  const c = await svc.create(store.id, {
+    name: "Jasmine Rice 25kg",
+    sku: tag("rice-25kg"),
+    priceMinor: 350000,
+    costMinor: 300000,
+    stock: 2,
+    categoryName: "Rice 25kg",
+  } as Parameters<typeof svc.create>[1]);
+  assert.equal(c.ok, true);
+  if (!c.ok) return;
+  createdProductIds.push(c.value.id);
+
+  const product = await prisma.product.findFirst({ where: { id: c.value.id, storeId: store.id }, include: { category: true } });
+  assert.equal(product?.priceMinor, 350000, "selling price remains independent of cost");
+  assert.equal(product?.costMinor, 300000, "unit acquisition cost is stored on the product");
+  assert.equal(product?.category?.name, "Rice 25kg");
+
+  const level = await prisma.stockLevel.findFirst({ where: { storeId: store.id, productId: c.value.id } });
+  assert.equal(level?.quantityOnHand, 2);
+  const opening = await prisma.stockMovement.findFirst({ where: { storeId: store.id, productId: c.value.id } });
+  assert.equal(opening?.delta, 2);
+  assert.equal(opening?.type, "RECEIPT");
+});
+
+test("new categories are tenant-scoped and duplicate names are not silently renamed", async () => {
+  const storeA = await makeStore();
+  const storeB = await makeStore();
+  const a = await svc.create(storeA.id, {
+    name: "Rice A", sku: tag("rice-a"), priceMinor: 350000, categoryName: "Rice Packs",
+  } as Parameters<typeof svc.create>[1]);
+  const b = await svc.create(storeB.id, {
+    name: "Rice B", sku: tag("rice-b"), priceMinor: 350000, categoryName: "Rice Packs",
+  } as Parameters<typeof svc.create>[1]);
+  assert.equal(a.ok, true);
+  assert.equal(b.ok, true);
+  if (!a.ok || !b.ok) return;
+  createdProductIds.push(a.value.id, b.value.id);
+
+  const [productA, productB] = await Promise.all([
+    prisma.product.findUnique({ where: { id: a.value.id }, include: { category: true } }),
+    prisma.product.findUnique({ where: { id: b.value.id }, include: { category: true } }),
+  ]);
+  assert.equal(productA?.category?.storeId, storeA.id);
+  assert.equal(productB?.category?.storeId, storeB.id);
+  assert.notEqual(productA?.categoryId, productB?.categoryId);
+
+  const duplicate = await svc.create(storeA.id, {
+    name: "Rice C", sku: tag("rice-c"), priceMinor: 350000, categoryName: "Rice Packs",
+  } as Parameters<typeof svc.create>[1]);
+  assert.equal(duplicate.ok, false);
+  if (!duplicate.ok) assert.equal(duplicate.error.type, "conflict");
 });

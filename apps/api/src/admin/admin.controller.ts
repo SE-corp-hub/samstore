@@ -531,13 +531,13 @@ export class AdminController {
   @Post("products")
   async createProduct(
     @Req() req: Request & { user?: AuthPrincipal },
-    @Body() body: { name: string; sku: string; priceMinor: number; stock?: number; categorySlug?: string; description?: string; barcode?: string | null; unit?: string | null; soldByWeight?: boolean; featured?: boolean; tags?: string[]; reorderThreshold?: number },
+    @Body() body: { name: string; sku: string; priceMinor: number; costMinor?: number; stock?: number; categorySlug?: string; categoryName?: string; description?: string; barcode?: string | null; unit?: string | null; soldByWeight?: boolean; featured?: boolean; tags?: string[]; reorderThreshold?: number },
     @Headers("x-store-id") headerStoreId?: string,
   ) {
     const user = req.user;
     requireUser(user);
     const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
-    const result = await this.productsAdmin.create(storeId, body);
+    const result = await this.productsAdmin.create(storeId, body, user.sub);
         if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
         await cacheBust(cacheKey("products", storeId));
         return result.value;
@@ -548,7 +548,7 @@ export class AdminController {
   async updateProduct(
     @Req() req: Request & { user?: AuthPrincipal },
     @Param("id") id: string,
-    @Body() body: Partial<{ name: string; sku: string; priceMinor: number; stock?: number; categorySlug?: string; description?: string; isActive?: boolean; barcode?: string | null; unit?: string | null; soldByWeight?: boolean; featured?: boolean; tags?: string[]; relatedProductIds?: string[]; upsellProductIds?: string[]; reorderThreshold?: number }>,
+    @Body() body: Partial<{ name: string; sku: string; priceMinor: number; costMinor: number; stock?: number; categorySlug?: string; description?: string; isActive?: boolean; barcode?: string | null; unit?: string | null; soldByWeight?: boolean; featured?: boolean; tags?: string[]; relatedProductIds?: string[]; upsellProductIds?: string[]; reorderThreshold?: number }>,
     @Headers("x-store-id") headerStoreId?: string,
   ) {
     const user = req.user;

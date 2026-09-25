@@ -24,6 +24,24 @@ test("negative or fractional price fails", () => {
   assert.equal(validateProductInput({ name: "Kape", sku: "SKU-1", priceMinor: 10.5 }).ok, false);
 });
 
+test("selling price and optional acquisition cost are separate non-negative minor-unit values", () => {
+  assert.deepEqual(
+    validateProductInput({ name: "Rice", sku: "RICE-1", priceMinor: 350000, costMinor: 300000 }),
+    { ok: true },
+  );
+  assert.equal(validateProductInput({ name: "Rice", sku: "RICE-1", priceMinor: 350000, costMinor: -1 }).ok, false);
+  assert.equal(validateProductInput({ name: "Rice", sku: "RICE-1", priceMinor: 350000, costMinor: 10.5 }).ok, false);
+});
+
+test("inline category names are bounded, slugifiable, and exclusive with an existing category slug", () => {
+  assert.deepEqual(
+    validateProductInput({ name: "Rice", sku: "RICE-1", priceMinor: 350000, categoryName: "25kg Rice" }),
+    { ok: true },
+  );
+  assert.equal(validateProductInput({ name: "Rice", sku: "RICE-1", priceMinor: 350000, categoryName: "!@#" }).ok, false);
+  assert.equal(validateProductInput({ name: "Rice", sku: "RICE-1", priceMinor: 350000, categoryName: "25kg Rice", categorySlug: "rice" }).ok, false);
+});
+
 test("negative stock fails", () => {
   assert.equal(validateProductInput({ name: "Kape", sku: "SKU-1", priceMinor: 100, stock: -1 }).ok, false);
 });

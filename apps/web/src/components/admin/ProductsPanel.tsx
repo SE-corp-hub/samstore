@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { API_URL } from "../../config";
-import { getAdminToken, adminHeaders } from "../../lib/admin";
+import { adminHeaders } from "../../lib/admin";
 import LabelSheet from "./LabelSheet";
 import VariantEditor from "./VariantEditor";
 
@@ -15,6 +15,7 @@ export interface AdminProduct {
   unit: string | null;
   soldByWeight: boolean;
   priceMinor: number;
+  costMinor: number;
   isActive: boolean;
   taxExempt: boolean;
   featured: boolean;
@@ -37,8 +38,10 @@ interface ProductForm {
   unit: string;
   soldByWeight: boolean;
   priceMinor: string; // pesos input, converted to minor units
+  costMinor: string; // acquisition cost in pesos, converted to minor units
   stock: string;
   categorySlug: string;
+  categoryName: string;
   description: string;
   /** M4: VAT-exempt product (basic/zero-rated goods). */
   taxExempt: boolean;
@@ -51,7 +54,7 @@ interface ProductForm {
   reorderThreshold: string;
 }
 
-const EMPTY_FORM: ProductForm = { name: "", sku: "", barcode: "", unit: "", soldByWeight: false, priceMinor: "", stock: "", categorySlug: "", description: "", taxExempt: false, featured: false, tags: "", related: [], upsell: [], reorderThreshold: "" };
+const EMPTY_FORM: ProductForm = { name: "", sku: "", barcode: "", unit: "", soldByWeight: false, priceMinor: "", costMinor: "", stock: "", categorySlug: "", categoryName: "", description: "", taxExempt: false, featured: false, tags: "", related: [], upsell: [], reorderThreshold: "" };
 
 export default function ProductsPanel() {
   const [products, setProducts] = useState<AdminProduct[]>([]);
@@ -60,6 +63,7 @@ export default function ProductsPanel() {
   const [error, setError] = useState<string | null>(null);
   const [modal, setModal] = useState<{ open: boolean; editing: AdminProduct | null }>({ open: false, editing: null });
   const [form, setForm] = useState<ProductForm>(EMPTY_FORM);
+  const [creatingCategory, setCreatingCategory] = useState(false);
   const [saving, setSaving] = useState(false);
   // P7 filters
   const [search, setSearch] = useState("");
@@ -73,8 +77,6 @@ export default function ProductsPanel() {
   const [labelOpen, setLabelOpen] = useState(false);
   // P2c: variant + add-on management modal
   const [optionsFor, setOptionsFor] = useState<AdminProduct | null>(null);
-
-  const token = () => getAdminToken();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -110,6 +112,7 @@ export default function ProductsPanel() {
 
   const openCreate = () => {
     setForm(EMPTY_FORM);
+    setCreatingCategory(false);
     setModal({ open: true, editing: null });
   };
 
@@ -121,8 +124,10 @@ export default function ProductsPanel() {
       unit: p.unit ?? "",
       soldByWeight: p.soldByWeight ?? false,
       priceMinor: (p.priceMinor / 100).toString(),
+      costMinor: (p.costMinor / 100).toString(),
       stock: p.quantityOnHand.toString(),
       categorySlug: p.category?.slug ?? "",
+      categoryName: "",
       description: p.description ?? "",
       taxExempt: p.taxExempt ?? false,
       featured: p.featured ?? false,
@@ -131,6 +136,7 @@ export default function ProductsPanel() {
       upsell: p.upsell?.filter((r) => r.isActive).map((r) => r.id) ?? [],
       reorderThreshold: (p.reorderThreshold || 0).toString(),
     });
+    setCreatingCategory(false);
     setModal({ open: true, editing: p });
   };
 
@@ -147,8 +153,10 @@ export default function ProductsPanel() {
         unit: form.unit.trim() || null,
         soldByWeight: form.soldByWeight,
         priceMinor,
+        costMinor: form.costMinor.trim() === "" ? undefined : Math.round(parseFloat(form.costMinor) * 100),
         stock: form.stock === "" ? undefined : parseInt(form.stock, 10),
-        categorySlug: form.categorySlug || undefined,
+        categorySlug: creatingCategory ? undefined : form.categorySlug || undefined,
+        categoryName: !modal.editing && creatingCategory ? form.categoryName.trim() || undefined : undefined,
         description: form.description || undefined,
         taxExempt: form.taxExempt,
         featured: form.featured,
@@ -259,7 +267,8 @@ export default function ProductsPanel() {
               </th>
               <th>Product</th>
               <th>SKU</th>
-              <th className="text-end">Price</th>
+              <th className="text-end">Selling price</th>
+              <th className="text-end">Unit cost</th>
               <th className="text-end">Stock</th>
               <th>Category</th>
               <th>Status</th>
@@ -290,6 +299,7 @@ export default function ProductsPanel() {
                   {p.barcode && <div className="text-muted text-opacity-75" style={{ fontSize: "0.8em" }} title="Barcode">{p.barcode}</div>}
                 </td>
                 <td className="text-end">{toPesos(p.priceMinor)}</td>
+                <td className="text-end text-muted">{toPesos(p.costMinor)}</td>
                 <td className={`text-end ${p.reorderThreshold > 0 && p.availableQuantity <= p.reorderThreshold ? "text-danger fw-semibold" : ""}`}>
                   {p.availableQuantity}
                   {p.reorderThreshold > 0 && <small className="text-muted"> ≤{p.reorderThreshold}</small>}
@@ -354,27 +364,44 @@ export default function ProductsPanel() {
                       <label className="form-check-label small" htmlFor="soldByWeight">Sold per weight (kilo) <span className="text-muted">— decimal quantity on a future module; pricing stays per-unit for now</span></label>
                     </div>
                     <div className="row">
-                      <div className="col-4 mb-2">
-                        <label className="form-label small">Price (₱) *</label>
-                        <input className="form-control" required type="number" step="0.01" min="0" value={form.priceMinor} onChange={(e) => setForm({ ...form, priceMinor: e.target.value })} />
+                      <div className="col-6 mb-2">
+                        <label className="form-label small" htmlFor="productSellingPrice">Selling price (₱) per unit *</label>
+                        <input id="productSellingPrice" className="form-control" required type="number" step="0.01" min="0" value={form.priceMinor} onChange={(e) => setForm({ ...form, priceMinor: e.target.value })} />
                       </div>
-                      <div className="col-4 mb-2">
-                        <label className="form-label small">Stock</label>
+                      <div className="col-6 mb-2">
+                        <label className="form-label small" htmlFor="productUnitCost">Unit acquisition cost (₱)</label>
+                        <input id="productUnitCost" className="form-control" type="number" step="0.01" min="0" value={form.costMinor} onChange={(e) => setForm({ ...form, costMinor: e.target.value })} />
+                        <small className="text-muted">Purchases update this to the latest received cost.</small>
+                      </div>
+                    </div>
+                    <div className="row">
+                      <div className="col-6 mb-2">
+                        <label className="form-label small">Opening stock</label>
                         <input className="form-control" type="number" min="0" value={form.stock} onChange={(e) => setForm({ ...form, stock: e.target.value })} />
                       </div>
-                      <div className="col-4 mb-2">
+                      <div className="col-6 mb-2">
                         <label className="form-label small">Reorder at</label>
                         <input className="form-control" type="number" min="0" placeholder="0" title="Flag LOW stock at or below this on-hand qty" value={form.reorderThreshold} onChange={(e) => setForm({ ...form, reorderThreshold: e.target.value })} />
                       </div>
                     </div>
                     <div className="mb-2">
                       <label className="form-label small">Category</label>
-                      <select className="form-select" value={form.categorySlug} onChange={(e) => setForm({ ...form, categorySlug: e.target.value })}>
-                        <option value="">— none —</option>
-                        {categories.map((c) => (
-                          <option key={c.id} value={c.slug}>{c.name}</option>
-                        ))}
-                      </select>
+                      {creatingCategory && !modal.editing ? (
+                        <div className="input-group">
+                          <input className="form-control" autoFocus required maxLength={80} placeholder="New category name" value={form.categoryName} onChange={(e) => setForm({ ...form, categoryName: e.target.value })} />
+                          <button type="button" className="btn btn-outline-secondary" onClick={() => { setCreatingCategory(false); setForm({ ...form, categoryName: "" }); }}>Choose existing</button>
+                        </div>
+                      ) : (
+                        <>
+                          <select className="form-select" value={form.categorySlug} onChange={(e) => setForm({ ...form, categorySlug: e.target.value })}>
+                            <option value="">— none —</option>
+                            {categories.map((c) => (
+                              <option key={c.id} value={c.slug}>{c.name}</option>
+                            ))}
+                          </select>
+                          {!modal.editing && <button type="button" className="btn btn-link btn-sm px-0" onClick={() => { setCreatingCategory(true); setForm({ ...form, categorySlug: "", categoryName: "" }); }}>+ Create category</button>}
+                        </>
+                      )}
                     </div>
                     <div className="mb-2">
                       <label className="form-label small">Description</label>

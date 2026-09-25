@@ -91,8 +91,8 @@ export class ProductAdminService {
     });
   }
 
-  /** Create a product (with optional category by slug + initial stock). */
-  async create(storeId: string, input: ProductInput): Promise<AdminResult<{ id: string }>> {
+  /** Create a product (optional existing/new category, unit cost, and opening stock). */
+  async create(storeId: string, input: ProductInput, actorId?: string): Promise<AdminResult<{ id: string }>> {
     const validation = validateProductInput(input);
     if (!validation.ok) return { ok: false, error: { type: "validation", errors: validation.errors } };
 
@@ -108,47 +108,73 @@ export class ProductAdminService {
       if (dup) return { ok: false, error: { type: "conflict", message: "A product with this barcode already exists" } };
     }
 
-    let categoryId: string | null = null;
-    if (input.categorySlug) {
-      const category = await prisma.category.findUnique({
-        where: { storeId_slug: { storeId, slug: input.categorySlug } },
-      });
-      if (!category) return { ok: false, error: { type: "not_found", message: "Category not found" } };
-      categoryId = category.id;
-    }
+    return prisma.$transaction(async (tx): Promise<AdminResult<{ id: string }>> => {
+      let categoryId: string | null = null;
+      if (input.categorySlug) {
+        const category = await tx.category.findUnique({
+          where: { storeId_slug: { storeId, slug: input.categorySlug.trim() } },
+        });
+        if (!category) return { ok: false, error: { type: "not_found", message: "Category not found" } };
+        categoryId = category.id;
+      } else if (input.categoryName?.trim()) {
+        const name = input.categoryName.trim();
+        const slug = slugify(name);
+        const existing = await tx.category.findUnique({ where: { storeId_slug: { storeId, slug } } });
+        if (existing) {
+          return { ok: false, error: { type: "conflict", message: "That category already exists — choose it from the category list" } };
+        }
+        const category = await tx.category.create({ data: { storeId, name, slug } });
+        categoryId = category.id;
+      }
 
-    const product = await prisma.product.create({
-      data: {
-        storeId,
-        sku: input.sku.trim(),
-        name: input.name.trim(),
-        description: input.description?.trim() ?? null,
-        barcode,
-        unit: input.unit?.trim() || null,
-        soldByWeight: input.soldByWeight ?? false,
-        priceMinor: input.priceMinor,
-        isActive: input.isActive ?? true,
-        taxExempt: input.taxExempt ?? false,
-        featured: input.featured ?? false,
-        tags: (input.tags ?? []).map((t) => t.trim()),
-        categoryId,
-      },
-    });
-
-    // Stock: attach to the store's default warehouse (or a legacy warehouse-less row if none).
-    if (input.stock !== undefined) {
-      const defaultWarehouse = await prisma.warehouse.findFirst({ where: { storeId, isDefault: true } });
-      await prisma.stockLevel.create({
+      const product = await tx.product.create({
         data: {
           storeId,
-          productId: product.id,
-          warehouseId: defaultWarehouse?.id ?? null,
-          quantityOnHand: input.stock,
-          reorderThreshold: input.reorderThreshold ?? 0,
+          sku: input.sku.trim(),
+          name: input.name.trim(),
+          description: input.description?.trim() ?? null,
+          barcode,
+          unit: input.unit?.trim() || null,
+          soldByWeight: input.soldByWeight ?? false,
+          priceMinor: input.priceMinor,
+          costMinor: input.costMinor ?? 0,
+          isActive: input.isActive ?? true,
+          taxExempt: input.taxExempt ?? false,
+          featured: input.featured ?? false,
+          tags: (input.tags ?? []).map((t) => t.trim()),
+          categoryId,
         },
       });
-    }
-    return { ok: true, value: { id: product.id } };
+
+      // Opening stock and its ledger receipt are committed with the product/category.
+      if (input.stock !== undefined || input.reorderThreshold !== undefined) {
+        const defaultWarehouse = await tx.warehouse.findFirst({ where: { storeId, isDefault: true } });
+        const openingStock = input.stock ?? 0;
+        const level = await tx.stockLevel.create({
+          data: {
+            storeId,
+            productId: product.id,
+            warehouseId: defaultWarehouse?.id ?? null,
+            quantityOnHand: openingStock,
+            reorderThreshold: input.reorderThreshold ?? 0,
+          },
+        });
+        if (openingStock > 0) {
+          await recordMovement(tx, {
+            storeId,
+            productId: product.id,
+            warehouseId: level.warehouseId,
+            delta: openingStock,
+            type: "RECEIPT",
+            createdBy: actorId ?? null,
+            note: "Opening stock at product creation",
+            balanceAfter: openingStock,
+          });
+        }
+      }
+
+      return { ok: true, value: { id: product.id } };
+    }, { timeout: 30_000 });
   }
 
   /** Update a product (price, name, description, stock, category, active). */
@@ -200,6 +226,7 @@ export class ProductAdminService {
           unit: input.unit !== undefined ? (input.unit?.trim() || null) : product.unit,
           soldByWeight: input.soldByWeight ?? product.soldByWeight,
           priceMinor: input.priceMinor ?? product.priceMinor,
+          costMinor: input.costMinor ?? product.costMinor,
           isActive: input.isActive ?? product.isActive,
           taxExempt: input.taxExempt ?? product.taxExempt,
           featured: input.featured ?? product.featured,

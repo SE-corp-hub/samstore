@@ -4,8 +4,12 @@ export interface ProductInput {
   name: string;
   sku: string;
   priceMinor: number;
+  /** Optional acquisition cost per sellable unit, in minor currency units. */
+  costMinor?: number;
   stock?: number;
   categorySlug?: string | null;
+  /** New category to create atomically with a new product. */
+  categoryName?: string | null;
   description?: string | null;
   isActive?: boolean;
   /** M4: a VAT-exempt product (basic/zero-rated goods) — reported as non-VAT sales. */
@@ -47,6 +51,22 @@ export function validateProductInput(input: ProductInput): ProductValidation {
 
   if (!Number.isInteger(input.priceMinor) || input.priceMinor < 0) {
     errors.push("priceMinor must be a non-negative integer");
+  }
+
+  if (input.costMinor !== undefined && (!Number.isInteger(input.costMinor) || input.costMinor < 0)) {
+    errors.push("costMinor must be a non-negative integer");
+  }
+
+  if (input.categoryName !== undefined && input.categoryName !== null) {
+    const categoryName = input.categoryName.trim();
+    if (categoryName.length < 2 || categoryName.length > 80) {
+      errors.push("categoryName must be 2-80 characters");
+    } else if (!slugify(categoryName)) {
+      errors.push("categoryName must include letters or numbers");
+    }
+  }
+  if (input.categoryName?.trim() && input.categorySlug?.trim()) {
+    errors.push("provide categoryName or categorySlug, not both");
   }
 
   if (input.stock !== undefined) {
