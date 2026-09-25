@@ -1,5 +1,16 @@
 # PINDIAN — Progress Log
 
+## Follow-up — Inventory stock conversion
+
+| Item | Detail |
+|---|---|
+| Pack measures | Products and variants carry acquisition cost and pack contents in a shared base unit (`g`, `ml`, or `each`). Same-family, same-unit items can convert; configured families/sizes cannot change while stock is on hand or reserved. |
+| Conversion flow | Inventory converts between standalone SKUs or variants in the same configured family/base unit, accepts actual output count, enforces maximum yield, records shortfall as reasoned waste, and displays paired ledger legs. |
+| Integrity | Tenant-scoped, idempotent, reservation-aware, serializable, and atomic across source/output stock, weighted cost transfer, conversion record, movements, and audit log. |
+| Migration | Additive migrations `20260925150000_inventory_conversions`, `20260925160000_stock_conversion_idempotency`, and `20260925170000_stock_conversion_families` applied. |
+| Tests | Conversion math 3/3; conversion integration/tenant/family tests 5/5; conversion UI E2E 11 passed; Product M5 8/8; variant admin 7/7; product validation 22/22; stock adjustment 6/6; low-stock 5/5; DTO validation 10/10. |
+| Gate | Workspace typecheck and full lint passed (warnings only); secret scan had 0 high-severity findings; web production build passed after stopping the dev server. |
+
 ## Follow-up — Product creation cost and category capture
 
 | Item | Detail |

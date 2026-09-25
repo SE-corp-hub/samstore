@@ -369,6 +369,22 @@ export const STOCK_ADJUST_DTO: ObjectRule = {
   },
 };
 
+export const STOCK_CONVERSION_DTO: ObjectRule = {
+  kind: "object",
+  fields: {
+    idempotencyKey: { kind: "string", required: true, min: 8, max: 200 },
+    sourceProductId: { kind: "string", required: true, min: 6, max: 64 },
+    sourceVariantId: { kind: "string", min: 6, max: 64 },
+    destinationProductId: { kind: "string", required: true, min: 6, max: 64 },
+    destinationVariantId: { kind: "string", min: 6, max: 64 },
+    warehouseId: { kind: "string", min: 6, max: 64 },
+    sourceQuantity: { kind: "int", required: true, min: 1, max: 1_000_000 },
+    outputQuantity: { kind: "int", required: true, min: 1, max: 1_000_000 },
+    reason: { kind: "string", required: true, min: 3, max: 200 },
+    wasteReason: { kind: "string", max: 200 },
+  },
+};
+
 export const PAYMENT_METHOD_DTO: ObjectRule = {
   kind: "object",
   fields: {

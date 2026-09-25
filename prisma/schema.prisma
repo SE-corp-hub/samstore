@@ -211,6 +211,7 @@ model Store {
   suppliers              Supplier[] // M6: vendor master per store
   rolePermissions        RolePermission[] // M7: roles × permissions deny matrix
   stockMovements         StockMovement[]
+  stockConversions       StockConversion[]
   outboxEvents           OutboxEvent[]
   paymentStatusHistories PaymentStatusHistory[]
   campaigns              Campaign[]
@@ -311,26 +312,29 @@ model Category {
 }
 
 model Product {
-  id           String    @id @default(cuid())
-  storeId      String
-  store        Store     @relation(fields: [storeId], references: [id])
-  categoryId   String?
-  category     Category? @relation(fields: [categoryId], references: [id])
-  sku          String
-  name         String
-  description  String?
-  barcode      String? // M5: scannable GTIN/EAN/UPC; store-scoped unique; POS search + labels
-  unit         String? // M5: display unit, e.g. "pc", "pack", "kilo", "bottle"
-  soldByWeight Boolean   @default(false) // M5: per-kilo item; decimal qty deferred (integer-only this module)
-  priceMinor   Int // integer minor units; NEVER float
-  taxExempt    Boolean   @default(false) // M4: VAT-exempt line (e.g. basic goods / zero-rated)
-  costMinor    Int       @default(0) // latest purchase cost (P5) — feeds COGS/profit (P10)
-  isActive     Boolean   @default(true)
+  id                    String    @id @default(cuid())
+  storeId               String
+  store                 Store     @relation(fields: [storeId], references: [id])
+  categoryId            String?
+  category              Category? @relation(fields: [categoryId], references: [id])
+  sku                   String
+  name                  String
+  description           String?
+  barcode               String? // M5: scannable GTIN/EAN/UPC; store-scoped unique; POS search + labels
+  unit                  String? // M5: display unit, e.g. "pc", "pack", "kilo", "bottle"
+  soldByWeight          Boolean   @default(false) // M5: per-kilo item; decimal qty deferred (integer-only this module)
+  stockBaseUnit         String? // e.g. g, ml, each; required with stockBaseQuantity for conversion
+  stockBaseQuantity     Int? // content represented by one product stock unit in stockBaseUnit
+  stockConversionFamily String? // only products in the same family may be converted into one another
+  priceMinor            Int // integer minor units; NEVER float
+  taxExempt             Boolean   @default(false) // M4: VAT-exempt line (e.g. basic goods / zero-rated)
+  costMinor             Int       @default(0) // latest purchase cost (P5) — feeds COGS/profit (P10)
+  isActive              Boolean   @default(true)
   // P3d: merchandising — featured flag + free-form display tags (store-scoped via the row).
-  featured     Boolean   @default(false)
-  tags         String[]  @default([])
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  featured              Boolean   @default(false)
+  tags                  String[]  @default([])
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
 
   images         ProductImage[]
   variants       ProductVariant[]
@@ -367,19 +371,21 @@ model ProductImage {
 // checkout through the same atomic path (StockMovement rows carry variantId for audit).
 
 model ProductVariant {
-  id               String   @id @default(cuid())
-  storeId          String
-  store            Store    @relation(fields: [storeId], references: [id])
-  productId        String
-  product          Product  @relation(fields: [storeId, productId], references: [storeId, id], onDelete: Cascade)
-  name             String
-  sku              String
-  priceMinor       Int // absolute price for this variant (server-authoritative)
-  quantityOnHand   Int      @default(0)
-  quantityReserved Int      @default(0)
-  isActive         Boolean  @default(true)
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  id                String   @id @default(cuid())
+  storeId           String
+  store             Store    @relation(fields: [storeId], references: [id])
+  productId         String
+  product           Product  @relation(fields: [storeId, productId], references: [storeId, id], onDelete: Cascade)
+  name              String
+  sku               String
+  priceMinor        Int // absolute price for this variant (server-authoritative)
+  costMinor         Int      @default(0) // acquisition cost per variant stock unit
+  stockBaseQuantity Int? // overrides Product.stockBaseQuantity; unit comes from parent Product
+  quantityOnHand    Int      @default(0)
+  quantityReserved  Int      @default(0)
+  isActive          Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
   @@unique([storeId, sku])
   @@unique([storeId, id]) // M3: composite target for tenant-consistent children
@@ -1452,26 +1458,64 @@ model AuditLog {
 // receipt/transfer that changes a StockLevel. The balances are derived facts;
 // this ledger is the source for reconciliation (Module 4 consumes + writes it).
 model StockMovement {
-  id           String     @id @default(cuid())
+  id           String           @id @default(cuid())
   storeId      String
-  store        Store      @relation(fields: [storeId], references: [id])
+  store        Store            @relation(fields: [storeId], references: [id])
   productId    String
-  product      Product    @relation(fields: [storeId, productId], references: [storeId, id])
+  product      Product          @relation(fields: [storeId, productId], references: [storeId, id])
   variantId    String? // P2a: variant-level movements (null = product-level)
   warehouseId  String?
-  warehouse    Warehouse? @relation(fields: [warehouseId], references: [id])
+  warehouse    Warehouse?       @relation(fields: [warehouseId], references: [id])
   delta        Int // signed: +receipt/-sale/-reserve/+release/+adjust ...
   type         String // RESERVE | RELEASE | CONSUME | ADJUST | RECEIPT | TRANSFER_IN | TRANSFER_OUT | VOID_RESTORE
   orderId      String?
-  order        Order?     @relation(fields: [orderId], references: [id])
+  order        Order?           @relation(fields: [orderId], references: [id])
+  conversionId String?
+  conversion   StockConversion? @relation(fields: [conversionId], references: [id], onDelete: SetNull)
   note         String?
   createdBy    String?
   balanceAfter Int? // stock-level balance after applying this movement (reconcilable)
-  createdAt    DateTime   @default(now())
+  createdAt    DateTime         @default(now())
 
   @@unique([storeId, id]) // composite target for future child refs
+  @@index([storeId, conversionId])
   @@index([storeId, productId, createdAt])
   @@index([storeId, type, createdAt])
+}
+
+// One atomic repack/transform operation (source decrement + output increment).
+// BASE amounts are integer grams, milliliters, or eaches; actual yield and any
+// unaccounted remainder are recorded for audit and cost allocation.
+model StockConversion {
+  id                      String          @id @default(cuid())
+  storeId                 String
+  store                   Store           @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  sourceProductId         String
+  sourceVariantId         String?
+  destinationProductId    String
+  destinationVariantId    String?
+  warehouseId             String?
+  sourceQuantity          Int
+  outputQuantity          Int
+  stockBaseUnit           String
+  conversionFamily        String
+  sourceBaseQuantity      Int
+  destinationBaseQuantity Int
+  wasteBaseQuantity       Int             @default(0)
+  sourceValueMinor        Int             @default(0)
+  outputValueMinor        Int             @default(0)
+  wasteValueMinor         Int             @default(0)
+  reason                  String
+  wasteReason             String?
+  createdBy               String
+  idempotencyKey          String          @unique
+  sourceBalanceAfter      Int             @default(0)
+  outputBalanceAfter      Int             @default(0)
+  createdAt               DateTime        @default(now())
+  movements               StockMovement[]
+
+  @@unique([storeId, id])
+  @@index([storeId, createdAt])
 }
 
 // Transactional OUTBOX for external side effects (notifications etc.).

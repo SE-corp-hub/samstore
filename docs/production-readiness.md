@@ -10,7 +10,7 @@ deliberately explicit: skipped/manual checks are not represented as passing.
 - [x] Unit and DB-backed module tests.
 - [x] Playwright critical-path specs exist under `apps/api/e2e/`.
 - [ ] Full Playwright suite against deployed API + web.
-- [ ] Required two-store PH scenario (`10-two-store-ph-scenario.spec.ts`).
+- [x] Required two-store PH scenario (`10-two-store-ph-scenario.spec.ts`) passed against prepared fixtures with local API/web and the managed database.
 
 Fixture helper:
 

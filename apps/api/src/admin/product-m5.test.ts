@@ -198,6 +198,9 @@ test("new product captures unit cost and creates its category with opening stock
     costMinor: 300000,
     stock: 2,
     categoryName: "Rice 25kg",
+    stockBaseUnit: "g",
+    stockBaseQuantity: 25000,
+    stockConversionFamily: "rice",
   } as Parameters<typeof svc.create>[1]);
   assert.equal(c.ok, true);
   if (!c.ok) return;
@@ -207,6 +210,12 @@ test("new product captures unit cost and creates its category with opening stock
   assert.equal(product?.priceMinor, 350000, "selling price remains independent of cost");
   assert.equal(product?.costMinor, 300000, "unit acquisition cost is stored on the product");
   assert.equal(product?.category?.name, "Rice 25kg");
+  assert.equal(product?.stockBaseUnit, "g");
+  assert.equal(product?.stockBaseQuantity, 25000);
+  assert.equal(product?.stockConversionFamily, "rice");
+  const packSizeChange = await svc.update(store.id, c.value.id, { stockBaseQuantity: 20000 });
+  assert.equal(packSizeChange.ok, false, "configured size cannot change while stock is on hand");
+  if (!packSizeChange.ok) assert.equal(packSizeChange.error.type, "conflict");
 
   const level = await prisma.stockLevel.findFirst({ where: { storeId: store.id, productId: c.value.id } });
   assert.equal(level?.quantityOnHand, 2);

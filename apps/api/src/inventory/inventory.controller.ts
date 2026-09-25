@@ -3,8 +3,8 @@ import { JwtAuthGuard, type AuthPrincipal } from "../auth/auth.guard.js";
 import { resolveTenant, TENANT_ROLES } from "../auth/tenant-context.js";
 import { prisma } from "../persistence/prisma-repositories.js";
 import { cacheBust, cacheGet, cacheKey, cacheSet } from "../persistence/ttl-cache.js";
-import { assertDto, STOCK_ADJUST_DTO } from "../security/validate.js";
-import { INVENTORY_SERVICE, InventoryService } from "./inventory.service.js";
+import { assertDto, STOCK_ADJUST_DTO, STOCK_CONVERSION_DTO } from "../security/validate.js";
+import { INVENTORY_SERVICE, InventoryService, type InventoryConversionInput } from "./inventory.service.js";
 
 function statusFor(error: { type: string }): HttpStatus {
   switch (error.type) {
@@ -62,6 +62,22 @@ export class InventoryController {
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
     await cacheBust(cacheKey("inventory", storeId)); // the panel must not show the pre-adjust balance
     return result.value;
+  }
+
+  /** POST /admin/stock/conversions — atomically consume one SKU/variant and produce another. */
+  @Post("stock/conversions")
+  async convert(
+    @Req() req: Request & { user?: AuthPrincipal },
+    @Body() body: InventoryConversionInput,
+    @Headers("x-store-id") headerStoreId?: string,
+  ) {
+    const user = req.user;
+    if (!user) throw new HttpException({ type: "unauthorized", message: "Not authenticated" }, HttpStatus.UNAUTHORIZED);
+    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.OWNER_MANAGER);
+    const dto = assertDto<InventoryConversionInput>(body ?? {}, STOCK_CONVERSION_DTO);
+    const result = await this.inventorySvc.convert(storeId, user.sub, dto);
+    if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
+    return { ...result.value, storeId };
   }
 
   /** GET /admin/stock/movements — the raw stock ledger (any type), newest first. */

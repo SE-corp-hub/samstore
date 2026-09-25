@@ -17,6 +17,7 @@ export interface MovementInput {
   delta: number;
   type: string; // RESERVE | RELEASE | CONSUME | ADJUST | RECEIPT | TRANSFER_IN | TRANSFER_OUT | VOID_RESTORE
   orderId?: string | null;
+  conversionId?: string | null;
   createdBy?: string | null;
   note?: string | null;
   balanceAfter?: number | null;
@@ -33,6 +34,7 @@ export async function recordMovement(tx: MovementTx, m: MovementInput): Promise<
       delta: m.delta,
       type: m.type,
       orderId: m.orderId ?? null,
+      conversionId: m.conversionId ?? null,
       createdBy: m.createdBy ?? null,
       note: m.note ?? null,
       balanceAfter: m.balanceAfter ?? null,

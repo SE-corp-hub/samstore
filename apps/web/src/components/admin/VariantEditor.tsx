@@ -7,12 +7,14 @@ import { useEffect, useState } from "react";
 import { API_URL } from "../../config";
 import { adminHeaders } from "../../lib/admin";
 
-export interface AdminVariant { id: string; name: string; sku: string; priceMinor: number; quantityOnHand: number; availableQuantity: number; isActive: boolean }
+export interface AdminVariant { id: string; name: string; sku: string; priceMinor: number; costMinor: number; stockBaseQuantity: number | null; quantityOnHand: number; availableQuantity: number; isActive: boolean }
 export interface AdminAddonOption { id: string; name: string; priceMinor: number; isActive: boolean }
 export interface AdminAddon { id: string; name: string; required: boolean; options: AdminAddonOption[] }
 export interface VariantEditableProduct {
   id: string;
   name: string;
+  stockBaseUnit: string | null;
+  stockBaseQuantity: number | null;
   variants: AdminVariant[];
   addons: AdminAddon[];
 }
@@ -24,9 +26,9 @@ interface VariantEditorProps {
 }
 
 export default function VariantEditor({ product, onClose, onChanged }: VariantEditorProps) {
-  const [variants, setVariants] = useState<AdminVariant[]>(product.variants);
-  const [addons, setAddons] = useState<AdminAddon[]>(product.addons);
-  const [vForm, setVForm] = useState({ name: "", sku: "", price: "", stock: "" });
+  const variants = product.variants;
+  const addons = product.addons;
+  const [vForm, setVForm] = useState({ name: "", sku: "", price: "", cost: "", stock: "", stockBaseQuantity: "" });
   const [aForm, setAForm] = useState({ name: "", optionName: "", optionPrice: "" });
   // P3e: per-group "add an option" forms.
   const [addOpt, setAddOpt] = useState<Record<string, { name: string; price: string }>>({});
@@ -55,10 +57,12 @@ export default function VariantEditor({ product, onClose, onChanged }: VariantEd
       const res = await api(`/admin/products/${product.id}/variants`, "POST", {
         name: vForm.name.trim(), sku: vForm.sku.trim(),
         priceMinor: Math.round(parseFloat(vForm.price || "0") * 100),
+        costMinor: Math.round(parseFloat(vForm.cost || "0") * 100),
+        ...(vForm.stockBaseQuantity ? { stockBaseQuantity: parseInt(vForm.stockBaseQuantity, 10) } : {}),
         quantityOnHand: vForm.stock ? parseInt(vForm.stock, 10) : 0,
       });
       if (!res.ok) { const d = await res.json().catch(() => null); setErr(fail(res, d)); return; }
-      setVForm({ name: "", sku: "", price: "", stock: "" });
+      setVForm({ name: "", sku: "", price: "", cost: "", stock: "", stockBaseQuantity: "" });
       onChanged();
       close();
     } finally { setBusy(false); }
@@ -167,8 +171,13 @@ export default function VariantEditor({ product, onClose, onChanged }: VariantEd
                   <span className="text-muted flex-fill text-truncate">{v.sku}</span>
                   <input type="number" className="form-control form-control-sm" style={{ width: 84 }} min={0} step={0.01}
                     defaultValue={(v.priceMinor / 100).toFixed(2)} title="price (pesos)" onBlur={(e) => setPrice(v.id, Math.round(parseFloat(e.target.value || "0") * 100))} />
+                  <input type="number" className="form-control form-control-sm" style={{ width: 84 }} min={0} step={0.01}
+                    defaultValue={(v.costMinor / 100).toFixed(2)} title="unit acquisition cost (pesos)" onBlur={(e) => saveVar(v.id, { costMinor: Math.round(parseFloat(e.target.value || "0") * 100) })} />
                   <input type="number" className="form-control form-control-sm" style={{ width: 76 }} min={0}
                     defaultValue={v.quantityOnHand} title="on hand" onBlur={(e) => setStock(v.id, parseInt(e.target.value, 10) || 0)} />
+                  {product.stockBaseUnit && <input type="number" className="form-control form-control-sm" style={{ width: 84 }} min={1} step={1}
+                    defaultValue={v.stockBaseQuantity ?? ""} title={`contents (${product.stockBaseUnit})`} placeholder={product.stockBaseUnit}
+                    onBlur={(e) => saveVar(v.id, { stockBaseQuantity: e.target.value ? parseInt(e.target.value, 10) : null })} />}
                   <div className="form-check form-switch" title={v.isActive ? "active" : "inactive"}>
                     <input className="form-check-input" type="checkbox" id={`vact-${v.id}`} defaultChecked={v.isActive} onChange={(e) => toggleVar(v.id, e.target.checked)} />
                     <label className="form-check-label small" htmlFor={`vact-${v.id}`}></label>
@@ -180,8 +189,10 @@ export default function VariantEditor({ product, onClose, onChanged }: VariantEd
             <div className="row g-1 mb-3">
               <div className="col"><input className="form-control form-control-sm" placeholder="Variant name (e.g. Large)" value={vForm.name} onChange={(e) => setVForm({ ...vForm, name: e.target.value })} /></div>
               <div className="col"><input className="form-control form-control-sm" placeholder="SKU" value={vForm.sku} onChange={(e) => setVForm({ ...vForm, sku: e.target.value })} /></div>
-              <div className="col-2"><input className="form-control form-control-sm" type="number" min={0} step={0.01} placeholder="Price" value={vForm.price} onChange={(e) => setVForm({ ...vForm, price: e.target.value })} /></div>
-              <div className="col-2"><input className="form-control form-control-sm" type="number" min={0} placeholder="Qty" value={vForm.stock} onChange={(e) => setVForm({ ...vForm, stock: e.target.value })} /></div>
+              <div className="col-2"><input className="form-control form-control-sm" type="number" min={0} step={0.01} placeholder="Sale ₱" value={vForm.price} onChange={(e) => setVForm({ ...vForm, price: e.target.value })} /></div>
+              <div className="col-2"><input className="form-control form-control-sm" type="number" min={0} step={0.01} placeholder="Cost ₱" value={vForm.cost} onChange={(e) => setVForm({ ...vForm, cost: e.target.value })} /></div>
+              <div className="col-1"><input className="form-control form-control-sm" type="number" min={0} placeholder="Qty" value={vForm.stock} onChange={(e) => setVForm({ ...vForm, stock: e.target.value })} /></div>
+              {product.stockBaseUnit && <div className="col-2"><input className="form-control form-control-sm" type="number" min={1} step={1} placeholder={`Size (${product.stockBaseUnit})`} value={vForm.stockBaseQuantity} onChange={(e) => setVForm({ ...vForm, stockBaseQuantity: e.target.value })} /></div>}
               <div className="col-auto"><button className="btn btn-primary btn-sm" disabled={busy || !vForm.name.trim() || !vForm.sku.trim()} onClick={addVariant}>Add variant</button></div>
             </div>
 

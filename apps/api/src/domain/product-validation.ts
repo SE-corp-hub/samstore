@@ -10,6 +10,11 @@ export interface ProductInput {
   categorySlug?: string | null;
   /** New category to create atomically with a new product. */
   categoryName?: string | null;
+  /** Standardized contents per sellable unit, for safe stock conversion. */
+  stockBaseUnit?: string | null;
+  stockBaseQuantity?: number | null;
+  /** Conversion family prevents unrelated same-unit goods from being transformed. */
+  stockConversionFamily?: string | null;
   description?: string | null;
   isActive?: boolean;
   /** M4: a VAT-exempt product (basic/zero-rated goods) — reported as non-VAT sales. */
@@ -67,6 +72,23 @@ export function validateProductInput(input: ProductInput): ProductValidation {
   }
   if (input.categoryName?.trim() && input.categorySlug?.trim()) {
     errors.push("provide categoryName or categorySlug, not both");
+  }
+
+  const stockBaseUnit = input.stockBaseUnit?.trim() ?? "";
+  const hasStockBaseQuantity = input.stockBaseQuantity !== undefined && input.stockBaseQuantity !== null;
+  const stockConversionFamily = input.stockConversionFamily?.trim() ?? "";
+  if (stockBaseUnit && !["g", "ml", "each"].includes(stockBaseUnit)) {
+    errors.push("stockBaseUnit must be g, ml, or each");
+  }
+  if (hasStockBaseQuantity && (!Number.isInteger(input.stockBaseQuantity) || (input.stockBaseQuantity ?? 0) < 1 || (input.stockBaseQuantity ?? 0) > 1_000_000_000)) {
+    errors.push("stockBaseQuantity must be an integer from 1 to 1000000000");
+  }
+  if (hasStockBaseQuantity && !stockBaseUnit) errors.push("stockBaseUnit is required when stockBaseQuantity is set");
+  if (stockConversionFamily && (stockConversionFamily.length < 2 || stockConversionFamily.length > 60 || !slugify(stockConversionFamily))) {
+    errors.push("stockConversionFamily must be 2-60 slugifiable characters");
+  }
+  if (Boolean(stockBaseUnit) !== Boolean(stockConversionFamily)) {
+    errors.push("stockBaseUnit and stockConversionFamily must be provided together");
   }
 
   if (input.stock !== undefined) {

@@ -6,6 +6,7 @@ import {
   checkDto,
   CHECKOUT_DTO,
   CART_ADD_DTO,
+  STOCK_CONVERSION_DTO,
   LOGIN_DTO,
   REGISTER_DTO,
   type ObjectRule,
@@ -170,4 +171,19 @@ test("CART_ADD_DTO / LOGIN_DTO / REGISTER_DTO guard their boundaries", () => {
   assert.equal(checkDto({ email: "a@b.co", password: "password1", storeId: "x" }, REGISTER_DTO).ok, false);
   assert.equal(checkDto({ email: "a@b.co", password: "short" }, REGISTER_DTO).ok, false);
   assert.equal(checkDto({ email: "a@b.co" }, REGISTER_DTO).ok, false);
+});
+
+test("STOCK_CONVERSION_DTO accepts a bounded conversion and rejects client extras or invalid quantities", () => {
+  const valid = {
+    idempotencyKey: "convert-test-123",
+    sourceProductId: "product-source-123",
+    sourceVariantId: "variant-source-123",
+    destinationProductId: "product-dest-123",
+    sourceQuantity: 1,
+    outputQuantity: 5,
+    reason: "Repacked rice",
+  };
+  assert.equal(checkDto(valid, STOCK_CONVERSION_DTO).ok, true);
+  assert.equal(checkDto({ ...valid, outputQuantity: 0 }, STOCK_CONVERSION_DTO).ok, false);
+  assert.equal(checkDto({ ...valid, actorId: "client-supplied" }, STOCK_CONVERSION_DTO).ok, false);
 });

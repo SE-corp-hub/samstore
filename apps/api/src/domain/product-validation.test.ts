@@ -42,6 +42,27 @@ test("inline category names are bounded, slugifiable, and exclusive with an exis
   assert.equal(validateProductInput({ name: "Rice", sku: "RICE-1", priceMinor: 350000, categoryName: "25kg Rice", categorySlug: "rice" }).ok, false);
 });
 
+test("conversion pack measures need a supported base unit and positive integer contents", () => {
+  assert.deepEqual(
+    validateProductInput({ name: "Rice", sku: "RICE-1", priceMinor: 350000, stockBaseUnit: "g", stockBaseQuantity: 25000, stockConversionFamily: "rice" }),
+    { ok: true },
+  );
+  assert.equal(validateProductInput({ name: "Rice family", sku: "RICEFAM-1", priceMinor: 0, stockBaseUnit: "g", stockConversionFamily: "rice" }).ok, true, "variant parent may define a unit before each variant's pack size");
+  assert.equal(validateProductInput({ name: "Rice", sku: "RICE-1", priceMinor: 350000, stockBaseQuantity: 25000 }).ok, false);
+  assert.equal(validateProductInput({ name: "Rice", sku: "RICE-1", priceMinor: 350000, stockBaseUnit: "kg", stockBaseQuantity: 25 }).ok, false);
+  assert.equal(validateProductInput({ name: "Rice", sku: "RICE-1", priceMinor: 350000, stockBaseUnit: "g", stockBaseQuantity: 0 }).ok, false);
+});
+
+test("stock conversion contents require a supported base unit and positive integer quantity", () => {
+  assert.deepEqual(
+    validateProductInput({ name: "Rice", sku: "RICE-1", priceMinor: 350000, stockBaseUnit: "g", stockBaseQuantity: 25000, stockConversionFamily: "rice" }),
+    { ok: true },
+  );
+  assert.equal(validateProductInput({ name: "Rice", sku: "RICE-1", priceMinor: 350000, stockBaseUnit: "g", stockBaseQuantity: 25000 }).ok, false, "conversion family is required");
+  assert.equal(validateProductInput({ name: "Rice", sku: "RICE-1", priceMinor: 350000, stockBaseUnit: "kg", stockBaseQuantity: 25, stockConversionFamily: "rice" }).ok, false);
+  assert.equal(validateProductInput({ name: "Rice", sku: "RICE-1", priceMinor: 350000, stockBaseUnit: "g", stockBaseQuantity: 0, stockConversionFamily: "rice" }).ok, false);
+});
+
 test("negative stock fails", () => {
   assert.equal(validateProductInput({ name: "Kape", sku: "SKU-1", priceMinor: 100, stock: -1 }).ok, false);
 });

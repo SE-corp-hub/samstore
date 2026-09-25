@@ -531,7 +531,7 @@ export class AdminController {
   @Post("products")
   async createProduct(
     @Req() req: Request & { user?: AuthPrincipal },
-    @Body() body: { name: string; sku: string; priceMinor: number; costMinor?: number; stock?: number; categorySlug?: string; categoryName?: string; description?: string; barcode?: string | null; unit?: string | null; soldByWeight?: boolean; featured?: boolean; tags?: string[]; reorderThreshold?: number },
+    @Body() body: { name: string; sku: string; priceMinor: number; costMinor?: number; stock?: number; categorySlug?: string; categoryName?: string; stockBaseUnit?: string | null; stockBaseQuantity?: number | null; stockConversionFamily?: string | null; description?: string; barcode?: string | null; unit?: string | null; soldByWeight?: boolean; featured?: boolean; tags?: string[]; reorderThreshold?: number },
     @Headers("x-store-id") headerStoreId?: string,
   ) {
     const user = req.user;
@@ -540,6 +540,7 @@ export class AdminController {
     const result = await this.productsAdmin.create(storeId, body, user.sub);
         if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
         await cacheBust(cacheKey("products", storeId));
+        await cacheBust(cacheKey("inventory", storeId));
         return result.value;
   }
 
@@ -548,7 +549,7 @@ export class AdminController {
   async updateProduct(
     @Req() req: Request & { user?: AuthPrincipal },
     @Param("id") id: string,
-    @Body() body: Partial<{ name: string; sku: string; priceMinor: number; costMinor: number; stock?: number; categorySlug?: string; description?: string; isActive?: boolean; barcode?: string | null; unit?: string | null; soldByWeight?: boolean; featured?: boolean; tags?: string[]; relatedProductIds?: string[]; upsellProductIds?: string[]; reorderThreshold?: number }>,
+    @Body() body: Partial<{ name: string; sku: string; priceMinor: number; costMinor: number; stock?: number; categorySlug?: string; stockBaseUnit?: string | null; stockBaseQuantity?: number | null; stockConversionFamily?: string | null; description?: string; isActive?: boolean; barcode?: string | null; unit?: string | null; soldByWeight?: boolean; featured?: boolean; tags?: string[]; relatedProductIds?: string[]; upsellProductIds?: string[]; reorderThreshold?: number }>,
     @Headers("x-store-id") headerStoreId?: string,
   ) {
     const user = req.user;
@@ -557,6 +558,7 @@ export class AdminController {
     const result = await this.productsAdmin.update(storeId, id, body);
         if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
         await cacheBust(cacheKey("products", storeId));
+        await cacheBust(cacheKey("inventory", storeId));
         return result.value;
       }
 
@@ -568,6 +570,8 @@ export class AdminController {
     const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
     const result = await this.productsAdmin.remove(storeId, id);
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
+    await cacheBust(cacheKey("products", storeId));
+    await cacheBust(cacheKey("inventory", storeId));
     return result.value;
   }
 
@@ -575,25 +579,27 @@ export class AdminController {
 
   /** POST /admin/products/:id/variants — create a variant on a product. */
   @Post("products/:id/variants")
-  async addVariant(@Req() req: Request & { user?: AuthPrincipal }, @Param("id") id: string, @Body() body: { name: string; sku: string; priceMinor: number; quantityOnHand?: number }, @Headers("x-store-id") headerStoreId?: string) {
+  async addVariant(@Req() req: Request & { user?: AuthPrincipal }, @Param("id") id: string, @Body() body: { name: string; sku: string; priceMinor: number; costMinor?: number; stockBaseQuantity?: number; quantityOnHand?: number }, @Headers("x-store-id") headerStoreId?: string) {
     const user = req.user;
     requireUser(user);
     const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
-    const result = await this.productsAdmin.addVariant(storeId, id, body);
+    const result = await this.productsAdmin.addVariant(storeId, id, body, user.sub);
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
     await cacheBust(cacheKey("products", storeId));
+    await cacheBust(cacheKey("inventory", storeId));
     return result.value;
   }
 
   /** PATCH /admin/products/variants/:variantId — update a variant (incl. set on-hand stock). */
   @Patch("products/variants/:variantId")
-  async updateVariant(@Req() req: Request & { user?: AuthPrincipal }, @Param("variantId") variantId: string, @Body() body: Partial<{ name: string; sku: string; priceMinor: number; isActive: boolean; quantityOnHand: number }>, @Headers("x-store-id") headerStoreId?: string) {
+  async updateVariant(@Req() req: Request & { user?: AuthPrincipal }, @Param("variantId") variantId: string, @Body() body: Partial<{ name: string; sku: string; priceMinor: number; costMinor: number; stockBaseQuantity: number | null; isActive: boolean; quantityOnHand: number }>, @Headers("x-store-id") headerStoreId?: string) {
     const user = req.user;
     requireUser(user);
     const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
     const result = await this.productsAdmin.updateVariant(storeId, variantId, body);
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
     await cacheBust(cacheKey("products", storeId));
+    await cacheBust(cacheKey("inventory", storeId));
     return result.value;
   }
 
@@ -606,6 +612,7 @@ export class AdminController {
     const result = await this.productsAdmin.deleteVariant(storeId, variantId);
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
     await cacheBust(cacheKey("products", storeId));
+    await cacheBust(cacheKey("inventory", storeId));
     return result.value;
   }
 

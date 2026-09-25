@@ -43,6 +43,31 @@ test("addVariant creates a variant with opening stock + RECEIPT movement", async
   assert.equal(mv?.delta, 10);
 });
 
+test("variant keeps a unit cost and pack size for conversion under its parent's base unit", async () => {
+  const fx = await makeStore("packsize");
+  await prisma.product.update({ where: { id: fx.product.id }, data: { stockBaseUnit: "g", stockConversionFamily: "rice" } });
+  const created = await svc.addVariant(fx.store.id, fx.product.id, {
+    name: "5 kg bag", sku: "PACK-5KG", priceMinor: 90000, costMinor: 70000,
+    stockBaseQuantity: 5000, quantityOnHand: 2,
+  });
+  assert.equal(created.ok, true);
+  if (!created.ok) return;
+  const variant = await prisma.productVariant.findUnique({ where: { id: created.value.id } });
+  assert.ok(variant);
+  assert.equal(variant?.costMinor, 70000);
+  assert.equal(variant?.stockBaseQuantity, 5000);
+  const resizeWithStock = await svc.updateVariant(fx.store.id, variant.id, { stockBaseQuantity: 1000 });
+  assert.equal(resizeWithStock.ok, false, "variant pack size is immutable while stock is on hand");
+  if (!resizeWithStock.ok) assert.equal(resizeWithStock.error.type, "conflict");
+
+  const noUnit = await makeStore("missingunit");
+  const rejected = await svc.addVariant(noUnit.store.id, noUnit.product.id, {
+    name: "Invalid pack", sku: "PACK-NOUNIT", priceMinor: 1000, stockBaseQuantity: 1000,
+  });
+  assert.equal(rejected.ok, false);
+  if (!rejected.ok) assert.equal(rejected.error.type, "validation");
+});
+
 test("updateVariant sets price/name and absolute stock with an ADJUST movement", async () => {
   const fx = await makeStore("bravo");
   const created = await svc.addVariant(fx.store.id, fx.product.id, { name: "Small", sku: "BRAVO-SM", priceMinor: 9000, quantityOnHand: 5 });

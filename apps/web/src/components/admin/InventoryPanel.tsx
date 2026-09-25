@@ -8,11 +8,30 @@ interface InvItem {
   id: string; name: string; sku: string; category: string | null;
   quantityOnHand: number; quantityReserved: number; availableQuantity: number;
   reorderThreshold: number; costMinor: number; valueMinor: number; status: "in" | "low" | "out";
+  stockBaseUnit: string | null; stockBaseQuantity: number | null;
+  stockConversionFamily: string | null;
+  stockLevels: { warehouseId: string | null; quantityOnHand: number; quantityReserved: number }[];
+  variants: { id: string; name: string; sku: string; costMinor: number; stockBaseQuantity: number | null; quantityOnHand: number; quantityReserved: number; availableQuantity: number; isActive: boolean }[];
 }
 interface Warehouse { id: string; name: string; isDefault: boolean }
 interface Category { id: string; name: string }
+interface ConversionOption {
+  key: string;
+  productId: string;
+  variantId?: string;
+  label: string;
+  sku: string;
+  baseUnit: string;
+  baseQuantity: number;
+  conversionFamily: string;
+  available: number;
+}
 
 const toPesos = (m: number) => `₱${(m / 100).toFixed(2)}`;
+const formatBaseQty = (qty: number, unit: string) => {
+  if ((unit === "g" || unit === "ml") && qty % 1000 === 0) return `${qty / 1000} ${unit === "g" ? "kg" : "L"}`;
+  return `${qty} ${unit}`;
+};
 const STATUS_BADGE: Record<string, string> = { in: "text-bg-success", low: "text-bg-warning", out: "text-bg-danger" };
 
 export default function InventoryPanel() {
@@ -67,9 +86,23 @@ export default function InventoryPanel() {
   const [adjustError, setAdjustError] = useState<string | null>(null);
   const [historyProduct, setHistoryProduct] = useState("");
   const [history, setHistory] = useState<{
-    id: string; productName: string; sku: string | null; delta: number; type: string;
-    note: string | null; balanceAfter: number | null; actor: string | null; createdAt: string;
+    id: string; productName: string; sku: string | null; variantName?: string | null; variantSku?: string | null; delta: number; type: string;
+    note: string | null; balanceAfter: number | null; actor: string | null; createdAt: string; conversionId?: string | null;
   }[]>([]);
+  const [conversionOpen, setConversionOpen] = useState(false);
+  const [conversionItems, setConversionItems] = useState<InvItem[]>([]);
+  const [conversionWarehouses, setConversionWarehouses] = useState<Warehouse[]>([]);
+  const [conversionWarehouseId, setConversionWarehouseId] = useState("__none__");
+  const [sourceKey, setSourceKey] = useState("");
+  const [destinationKey, setDestinationKey] = useState("");
+  const [sourceQuantity, setSourceQuantity] = useState("1");
+  const [outputQuantity, setOutputQuantity] = useState("");
+  const [conversionReason, setConversionReason] = useState("");
+  const [wasteReason, setWasteReason] = useState("");
+  const [conversionIdempotencyKey, setConversionIdempotencyKey] = useState<string | null>(null);
+  const [conversionBusy, setConversionBusy] = useState(false);
+  const [conversionError, setConversionError] = useState<string | null>(null);
+  const [conversionMessage, setConversionMessage] = useState<string | null>(null);
 
   const loadHistory = useCallback(async () => {
     const q = new URLSearchParams({ limit: "100" });
@@ -118,6 +151,131 @@ export default function InventoryPanel() {
     }
   };
 
+  const openConversion = async () => {
+    setConversionError(null);
+    setConversionMessage(null);
+    try {
+      const res = await fetch(`${API_URL}/admin/inventory`, { headers: adminHeaders() });
+      if (!res.ok) throw new Error("Could not load conversion stock items");
+      const data = await res.json();
+      const allWarehouses = (data.warehouses ?? []) as Warehouse[];
+      setConversionItems((data.items ?? []) as InvItem[]);
+      setConversionWarehouses(allWarehouses);
+      setConversionWarehouseId(warehouseId || allWarehouses.find((w) => w.isDefault)?.id || allWarehouses[0]?.id || "__none__");
+      setSourceKey("");
+      setDestinationKey("");
+      setSourceQuantity("1");
+      setOutputQuantity("");
+      setConversionReason("");
+      setWasteReason("");
+      setConversionIdempotencyKey(null);
+      setConversionOpen(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not load conversion stock items");
+    }
+  };
+
+  const conversionOptions: ConversionOption[] = conversionItems.flatMap((item) => {
+    const productLevel = conversionWarehouseId === "__none__"
+      ? item.stockLevels.find((level) => level.warehouseId === null)
+      : item.stockLevels.find((level) => level.warehouseId === conversionWarehouseId);
+    const options: ConversionOption[] = [];
+    if (item.stockBaseUnit && item.stockBaseQuantity && item.stockConversionFamily) {
+      options.push({
+        key: `product:${item.id}`,
+        productId: item.id,
+        label: item.name,
+        sku: item.sku,
+        baseUnit: item.stockBaseUnit,
+        baseQuantity: item.stockBaseQuantity,
+        conversionFamily: item.stockConversionFamily,
+        available: (productLevel?.quantityOnHand ?? 0) - (productLevel?.quantityReserved ?? 0),
+      });
+    }
+    for (const variant of item.variants ?? []) {
+      const baseQuantity = variant.stockBaseQuantity ?? item.stockBaseQuantity;
+      if (!item.stockBaseUnit || !item.stockConversionFamily || !baseQuantity || !variant.isActive) continue;
+      options.push({
+        key: `variant:${variant.id}`,
+        productId: item.id,
+        variantId: variant.id,
+        label: `${item.name} — ${variant.name}`,
+        sku: variant.sku,
+        baseUnit: item.stockBaseUnit,
+        baseQuantity,
+        conversionFamily: item.stockConversionFamily,
+        available: variant.availableQuantity,
+      });
+    }
+    return options;
+  });
+
+  const sourceOption = conversionOptions.find((item) => item.key === sourceKey);
+  const destinationOption = conversionOptions.find((item) => item.key === destinationKey);
+  const sourceQtyNumber = Number.parseInt(sourceQuantity, 10);
+  const outputQtyNumber = Number.parseInt(outputQuantity, 10);
+  const maxOutputQuantity = sourceOption && destinationOption
+    && sourceOption.baseUnit === destinationOption.baseUnit
+    && Number.isInteger(sourceQtyNumber) && sourceQtyNumber > 0
+    ? Math.floor((sourceQtyNumber * sourceOption.baseQuantity) / destinationOption.baseQuantity)
+    : 0;
+  const wasteBaseQuantity = sourceOption && destinationOption
+    && Number.isInteger(sourceQtyNumber) && sourceQtyNumber > 0
+    && Number.isInteger(outputQtyNumber) && outputQtyNumber > 0
+    ? sourceQtyNumber * sourceOption.baseQuantity - outputQtyNumber * destinationOption.baseQuantity
+    : 0;
+
+  const submitConversion = async () => {
+    if (!sourceOption || !destinationOption) { setConversionError("Choose both a source and an output item"); return; }
+    if (sourceKey === destinationKey) { setConversionError("Source and output must be different stock items"); return; }
+    if (!Number.isInteger(sourceQtyNumber) || sourceQtyNumber < 1 || sourceQtyNumber > sourceOption.available) {
+      setConversionError(`Enter a source quantity from 1 to ${sourceOption.available} available`); return;
+    }
+    if (!Number.isInteger(outputQtyNumber) || outputQtyNumber < 1 || outputQtyNumber > maxOutputQuantity) {
+      setConversionError(`Output quantity must be 1–${maxOutputQuantity} based on the pack contents`); return;
+    }
+    if (conversionReason.trim().length < 3) { setConversionError("A conversion reason is required (3+ characters)"); return; }
+    if (wasteBaseQuantity > 0 && wasteReason.trim().length < 3) { setConversionError("Explain the leftover/waste (3+ characters)"); return; }
+
+    setConversionBusy(true);
+    setConversionError(null);
+    const idempotencyKey = conversionIdempotencyKey ?? (typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID()
+      : `convert-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    setConversionIdempotencyKey(idempotencyKey);
+    try {
+      const res = await fetch(`${API_URL}/admin/stock/conversions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...adminHeaders() },
+        body: JSON.stringify({
+          idempotencyKey,
+          sourceProductId: sourceOption.productId,
+          sourceVariantId: sourceOption.variantId,
+          destinationProductId: destinationOption.productId,
+          destinationVariantId: destinationOption.variantId,
+          warehouseId: conversionWarehouseId === "__none__" ? undefined : conversionWarehouseId,
+          sourceQuantity: sourceQtyNumber,
+          outputQuantity: outputQtyNumber,
+          reason: conversionReason.trim(),
+          wasteReason: wasteBaseQuantity > 0 ? wasteReason.trim() : undefined,
+        }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        setConversionError(data?.message ?? (Array.isArray(data?.errors) ? data.errors.join("; ") : "Conversion failed"));
+        return;
+      }
+      setConversionMessage(`Converted ${sourceQtyNumber} ${sourceOption.label} into ${outputQtyNumber} ${destinationOption.label}${wasteBaseQuantity > 0 ? ` · ${formatBaseQty(wasteBaseQuantity, sourceOption.baseUnit)} recorded as waste` : ""}.`);
+      setConversionOpen(false);
+      await load();
+      if (view === "history") await loadHistory();
+    } catch (e) {
+      setConversionError(e instanceof Error ? e.message : "Conversion failed");
+    } finally {
+      setConversionBusy(false);
+    }
+  };
+
   return (
     <div>
       <h1 className="h4 mb-3"><i className="bi bi-boxes me-2"></i>Inventory</h1>
@@ -159,15 +317,21 @@ export default function InventoryPanel() {
       <div className="alert alert-primary py-2 small d-flex justify-content-between align-items-center flex-wrap gap-2">
         <span><strong>{items.length}</strong> products</span>
         <span>Inventory value (cost): <strong>{toPesos(totalValue)}</strong></span>
-        <div className="btn-group btn-group-sm" role="group" aria-label="Inventory view">
-          <button type="button" className={`btn ${view === "stock" ? "btn-primary" : "btn-outline-primary"}`} onClick={() => setView("stock")}>
-            <i className="bi bi-boxes me-1"></i>Stock
+        <div className="d-flex gap-2">
+          <button type="button" className="btn btn-sm btn-outline-success" onClick={() => void openConversion()}>
+            <i className="bi bi-arrow-left-right me-1"></i>Convert stock
           </button>
-          <button type="button" className={`btn ${view === "history" ? "btn-primary" : "btn-outline-primary"}`} onClick={() => setView("history")}>
-            <i className="bi bi-clock-history me-1"></i>Stock flow
-          </button>
+          <div className="btn-group btn-group-sm" role="group" aria-label="Inventory view">
+            <button type="button" className={`btn ${view === "stock" ? "btn-primary" : "btn-outline-primary"}`} onClick={() => setView("stock")}>
+              <i className="bi bi-boxes me-1"></i>Stock
+            </button>
+            <button type="button" className={`btn ${view === "history" ? "btn-primary" : "btn-outline-primary"}`} onClick={() => setView("history")}>
+              <i className="bi bi-clock-history me-1"></i>Stock flow
+            </button>
+          </div>
         </div>
       </div>
+      {conversionMessage && <div className="alert alert-success py-2 small">{conversionMessage}</div>}
 
       {view === "history" ? (
         <div>
@@ -199,8 +363,11 @@ export default function InventoryPanel() {
                 {history.map((m) => (
                   <tr key={m.id}>
                     <td className="small text-muted">{new Date(m.createdAt).toLocaleString()}</td>
-                    <td className="small">{m.productName}{m.sku ? <span className="text-muted"> · {m.sku}</span> : null}</td>
-                    <td><span className="badge text-bg-secondary">{m.type}</span></td>
+                    <td className="small">{m.productName}{m.variantName ? ` — ${m.variantName}` : ""}{(m.variantSku ?? m.sku) ? <span className="text-muted"> · {m.variantSku ?? m.sku}</span> : null}</td>
+                    <td>
+                      <span className="badge text-bg-secondary">{m.type}</span>
+                      {m.conversionId && <small className="d-block text-muted" title={m.conversionId}>Conv. {m.conversionId.slice(0, 8)}</small>}
+                    </td>
                     <td className={`text-end fw-semibold ${m.delta < 0 ? "text-danger" : "text-success"}`}>{m.delta > 0 ? `+${m.delta}` : m.delta}</td>
                     <td className="text-end">{m.balanceAfter ?? "—"}</td>
                     <td className="small">{m.note ?? "—"}</td>
@@ -294,6 +461,87 @@ export default function InventoryPanel() {
                   <button type="button" className="btn btn-outline-secondary" onClick={() => setAdjust(null)}>Cancel</button>
                   <button type="button" className="btn btn-primary" disabled={adjustBusy} onClick={() => void submitAdjust()}>
                     {adjustBusy ? "Saving…" : "Save adjustment"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div className="modal-backdrop fade show"></div>
+        </>
+      )}
+
+      {conversionOpen && (
+        <>
+          <div className="modal fade show d-block" tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="conversionModalTitle">
+            <div className="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-lg">
+              <div className="modal-content">
+                <div className="modal-header">
+                  <h5 className="modal-title" id="conversionModalTitle"><i className="bi bi-arrow-left-right me-1"></i>Convert stock</h5>
+                  <button type="button" className="btn-close" aria-label="Close" onClick={() => setConversionOpen(false)}></button>
+                </div>
+                <div className="modal-body">
+                  <p className="small text-muted">Convert available stock between products or variants. The system calculates the maximum output from each item's configured pack contents; reserved stock cannot be converted.</p>
+                  {conversionError && <div className="alert alert-danger py-2 small">{conversionError}</div>}
+                  {conversionOptions.length === 0 ? (
+                    <div className="alert alert-warning small">No stock items have conversion unit and contents configured. Set these in Products first.</div>
+                  ) : (
+                    <>
+                      <div className="mb-3">
+                        <label className="form-label small" htmlFor="conversionWarehouse">Warehouse</label>
+                        <select id="conversionWarehouse" className="form-select form-select-sm" value={conversionWarehouseId} onChange={(e) => { setConversionWarehouseId(e.target.value); setConversionIdempotencyKey(null); }}>
+                          {conversionWarehouses.length === 0 && <option value="__none__">No warehouse</option>}
+                          {conversionWarehouses.map((warehouse) => <option key={warehouse.id} value={warehouse.id}>{warehouse.name}{warehouse.isDefault ? " (default)" : ""}</option>)}
+                          <option value="__none__">Warehouse-less stock</option>
+                        </select>
+                      </div>
+                      <div className="row g-2">
+                        <div className="col-md-6">
+                          <label className="form-label small" htmlFor="conversionSource">Convert from</label>
+                          <select id="conversionSource" className="form-select" value={sourceKey} onChange={(e) => { setSourceKey(e.target.value); setOutputQuantity(""); setConversionIdempotencyKey(null); }}>
+                            <option value="">Select source item…</option>
+                            {conversionOptions.map((item) => <option key={item.key} value={item.key}>{item.label} · {item.sku} · {formatBaseQty(item.baseQuantity, item.baseUnit)} · {item.available} available</option>)}
+                          </select>
+                          {sourceOption && <small className="text-muted">Available here: {sourceOption.available}</small>}
+                        </div>
+                        <div className="col-md-6">
+                          <label className="form-label small" htmlFor="conversionDestination">Convert into</label>
+                          <select id="conversionDestination" className="form-select" value={destinationKey} onChange={(e) => { setDestinationKey(e.target.value); setOutputQuantity(""); setConversionIdempotencyKey(null); }}>
+                            <option value="">Select output item…</option>
+                            {conversionOptions.filter((item) => item.key !== sourceKey && (!sourceOption || (item.baseUnit === sourceOption.baseUnit && item.conversionFamily === sourceOption.conversionFamily))).map((item) => <option key={item.key} value={item.key}>{item.label} · {item.sku} · {formatBaseQty(item.baseQuantity, item.baseUnit)}</option>)}
+                          </select>
+                          {destinationOption && <small className="text-muted">Current stock here: {destinationOption.available}</small>}
+                        </div>
+                      </div>
+                      <div className="row g-2 mt-1">
+                        <div className="col-md-6">
+                          <label className="form-label small" htmlFor="conversionSourceQty">Source quantity</label>
+                          <input id="conversionSourceQty" className="form-control" type="number" min="1" max={sourceOption?.available ?? 1} step="1" value={sourceQuantity} onChange={(e) => { setSourceQuantity(e.target.value); setConversionIdempotencyKey(null); }} />
+                        </div>
+                        <div className="col-md-6">
+                          <label className="form-label small" htmlFor="conversionOutputQty">Actual output quantity</label>
+                          <input id="conversionOutputQty" className="form-control" type="number" min="1" max={maxOutputQuantity || undefined} step="1" value={outputQuantity} onChange={(e) => { setOutputQuantity(e.target.value); setConversionIdempotencyKey(null); }} />
+                          <small className="text-muted">Maximum possible: {maxOutputQuantity} unit(s)</small>
+                        </div>
+                      </div>
+                      {wasteBaseQuantity > 0 && sourceOption && <div className="alert alert-warning py-2 small mt-2 mb-2">Remainder recorded as waste: {formatBaseQty(wasteBaseQuantity, sourceOption.baseUnit)}.</div>}
+                      <div className="mt-2">
+                        <label className="form-label small" htmlFor="conversionReason">Conversion reason</label>
+                        <input id="conversionReason" className="form-control" maxLength={200} value={conversionReason} onChange={(e) => { setConversionReason(e.target.value); setConversionIdempotencyKey(null); }} placeholder="e.g. Repacked rice for retail sale" />
+                      </div>
+                      {wasteBaseQuantity > 0 && (
+                        <div className="mt-2">
+                          <label className="form-label small" htmlFor="conversionWasteReason">Waste/loss reason *</label>
+                          <input id="conversionWasteReason" className="form-control" required maxLength={200} value={wasteReason} onChange={(e) => { setWasteReason(e.target.value); setConversionIdempotencyKey(null); }} placeholder="e.g. Spillage during repacking" />
+                        </div>
+                      )}
+                      <div className="small text-muted mt-2">Both stock movements and the conversion audit record are saved together. The remaining material is recorded as waste when actual output is below the maximum.</div>
+                    </>
+                  )}
+                </div>
+                <div className="modal-footer">
+                  <button type="button" className="btn btn-outline-secondary" onClick={() => setConversionOpen(false)}>Cancel</button>
+                  <button type="button" className="btn btn-success" disabled={conversionBusy || conversionOptions.length === 0} onClick={() => void submitConversion()}>
+                    {conversionBusy ? "Converting…" : "Confirm conversion"}
                   </button>
                 </div>
               </div>

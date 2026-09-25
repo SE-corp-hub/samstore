@@ -39,7 +39,7 @@ export class ProductAdminService {
       include: {
         category: { select: { id: true, name: true, slug: true } },
         stockLevels: { select: { quantityOnHand: true, quantityReserved: true, reorderThreshold: true } },
-        variants: { orderBy: { name: "asc" }, select: { id: true, name: true, sku: true, priceMinor: true, quantityOnHand: true, quantityReserved: true, isActive: true } },
+        variants: { orderBy: { name: "asc" }, select: { id: true, name: true, sku: true, priceMinor: true, costMinor: true, stockBaseQuantity: true, quantityOnHand: true, quantityReserved: true, isActive: true } },
         addons: { orderBy: { sortOrder: "asc" }, include: { options: { orderBy: { sortOrder: "asc" }, select: { id: true, name: true, priceMinor: true, isActive: true } } } },
         relationsFrom: { orderBy: { sortOrder: "asc" }, select: { kind: true, targetProduct: { select: { id: true, name: true, priceMinor: true, isActive: true } } } },
       },
@@ -58,6 +58,9 @@ export class ProductAdminService {
       barcode: p.barcode,
       unit: p.unit,
       soldByWeight: p.soldByWeight,
+      stockBaseUnit: p.stockBaseUnit,
+      stockBaseQuantity: p.stockBaseQuantity,
+      stockConversionFamily: p.stockConversionFamily,
       priceMinor: p.priceMinor,
       costMinor: p.costMinor,
       isActive: p.isActive,
@@ -76,6 +79,8 @@ export class ProductAdminService {
         name: v.name,
         sku: v.sku,
         priceMinor: v.priceMinor,
+        costMinor: v.costMinor,
+        stockBaseQuantity: v.stockBaseQuantity,
         quantityOnHand: v.quantityOnHand,
         quantityReserved: v.quantityReserved,
         availableQuantity: v.quantityOnHand - v.quantityReserved,
@@ -135,7 +140,10 @@ export class ProductAdminService {
           description: input.description?.trim() ?? null,
           barcode,
           unit: input.unit?.trim() || null,
-          soldByWeight: input.soldByWeight ?? false,
+        soldByWeight: input.soldByWeight ?? false,
+          stockBaseUnit: input.stockBaseUnit?.trim() || null,
+          stockBaseQuantity: input.stockBaseQuantity ?? null,
+          stockConversionFamily: input.stockConversionFamily?.trim().toLowerCase() || null,
           priceMinor: input.priceMinor,
           costMinor: input.costMinor ?? 0,
           isActive: input.isActive ?? true,
@@ -179,16 +187,31 @@ export class ProductAdminService {
 
   /** Update a product (price, name, description, stock, category, active). */
   async update(storeId: string, productId: string, input: Partial<ProductInput>): Promise<AdminResult<{ id: string }>> {
+    const product = await prisma.product.findFirst({ where: { id: productId, storeId } });
+    if (!product) return { ok: false, error: { type: "not_found", message: "Product not found" } };
+
     const validation = validateProductInput({
       name: input.name ?? "xx",
       sku: input.sku ?? "xx",
       priceMinor: input.priceMinor ?? 0,
+      stockBaseUnit: input.stockBaseUnit !== undefined ? input.stockBaseUnit : product.stockBaseUnit,
+      stockBaseQuantity: input.stockBaseQuantity !== undefined ? input.stockBaseQuantity : product.stockBaseQuantity,
+      stockConversionFamily: input.stockConversionFamily !== undefined ? input.stockConversionFamily : product.stockConversionFamily,
       ...input,
     } as ProductInput);
     if (!validation.ok) return { ok: false, error: { type: "validation", errors: validation.errors } };
 
-    const product = await prisma.product.findFirst({ where: { id: productId, storeId } });
-    if (!product) return { ok: false, error: { type: "not_found", message: "Product not found" } };
+    const nextStockBaseUnit = input.stockBaseUnit !== undefined ? (input.stockBaseUnit?.trim() || null) : product.stockBaseUnit;
+    const nextStockBaseQuantity = input.stockBaseQuantity !== undefined ? input.stockBaseQuantity : product.stockBaseQuantity;
+    const nextConversionFamily = input.stockConversionFamily !== undefined ? (input.stockConversionFamily?.trim().toLowerCase() || null) : product.stockConversionFamily;
+    if (product.stockBaseUnit && (nextStockBaseUnit !== product.stockBaseUnit || nextStockBaseQuantity !== product.stockBaseQuantity || nextConversionFamily !== product.stockConversionFamily)) {
+      const [levels, variants] = await Promise.all([
+        prisma.stockLevel.findMany({ where: { storeId, productId }, select: { quantityOnHand: true, quantityReserved: true } }),
+        prisma.productVariant.findMany({ where: { storeId, productId }, select: { quantityOnHand: true, quantityReserved: true } }),
+      ]);
+      const hasStock = [...levels, ...variants].some((row) => row.quantityOnHand > 0 || row.quantityReserved > 0);
+      if (hasStock) return { ok: false, error: { type: "conflict", message: "Cannot change a configured stock measure while inventory or reservations exist" } };
+    }
 
     // M5: barcode uniqueness on edit — exclude self, allow clearing.
     const barcode = input.barcode !== undefined ? (input.barcode?.trim() || null) : undefined;
@@ -225,6 +248,9 @@ export class ProductAdminService {
           barcode: barcode !== undefined ? barcode : product.barcode,
           unit: input.unit !== undefined ? (input.unit?.trim() || null) : product.unit,
           soldByWeight: input.soldByWeight ?? product.soldByWeight,
+          stockBaseUnit: input.stockBaseUnit !== undefined ? (input.stockBaseUnit?.trim() || null) : product.stockBaseUnit,
+          stockBaseQuantity: input.stockBaseQuantity !== undefined ? input.stockBaseQuantity : product.stockBaseQuantity,
+          stockConversionFamily: input.stockConversionFamily !== undefined ? (input.stockConversionFamily?.trim().toLowerCase() || null) : product.stockConversionFamily,
           priceMinor: input.priceMinor ?? product.priceMinor,
           costMinor: input.costMinor ?? product.costMinor,
           isActive: input.isActive ?? product.isActive,
@@ -330,26 +356,34 @@ export class ProductAdminService {
   // ─────────────────────────────── Variants (P2c admin) ───────────────────────────────
 
   /** Create a variant on a store product (own SKU/name/price + opening stock). */
-  async addVariant(storeId: string, productId: string, input: { name: string; sku: string; priceMinor: number; quantityOnHand?: number }): Promise<AdminResult<{ id: string }>> {
+  async addVariant(storeId: string, productId: string, input: { name: string; sku: string; priceMinor: number; costMinor?: number; stockBaseQuantity?: number; quantityOnHand?: number }, actorId?: string): Promise<AdminResult<{ id: string }>> {
     const name = input.name?.trim();
     const sku = input.sku?.trim();
     if (!name || name.length > 80) return { ok: false, error: { type: "validation", errors: ["name is required (max 80 chars)"] } };
     if (!sku || sku.length > 64) return { ok: false, error: { type: "validation", errors: ["sku is required (max 64 chars)"] } };
     if (!Number.isInteger(input.priceMinor) || input.priceMinor < 0) return { ok: false, error: { type: "validation", errors: ["priceMinor must be a non-negative integer"] } };
+    if (input.costMinor !== undefined && (!Number.isInteger(input.costMinor) || input.costMinor < 0)) return { ok: false, error: { type: "validation", errors: ["costMinor must be a non-negative integer"] } };
+    if (input.stockBaseQuantity !== undefined && (!Number.isInteger(input.stockBaseQuantity) || input.stockBaseQuantity < 1)) return { ok: false, error: { type: "validation", errors: ["stockBaseQuantity must be a positive integer"] } };
     if (input.quantityOnHand !== undefined && (!Number.isInteger(input.quantityOnHand) || input.quantityOnHand < 0)) return { ok: false, error: { type: "validation", errors: ["quantityOnHand must be a non-negative integer"] } };
 
-    const product = await prisma.product.findFirst({ where: { id: productId, storeId } });
+    const product = await prisma.product.findFirst({ where: { id: productId, storeId }, select: { id: true, stockBaseUnit: true } });
     if (!product) return { ok: false, error: { type: "not_found", message: "Product not found" } };
+    if (input.stockBaseQuantity !== undefined && !product.stockBaseUnit) return { ok: false, error: { type: "validation", errors: ["set the product stock base unit before configuring a variant size"] } };
     const dup = await prisma.productVariant.findFirst({ where: { storeId, sku } });
     if (dup) return { ok: false, error: { type: "conflict", message: "A variant with this SKU already exists" } };
 
     const opening = input.quantityOnHand ?? 0;
     const v = await prisma.$transaction(async (tx) => {
       const created = await tx.productVariant.create({
-        data: { storeId, productId, name, sku, priceMinor: input.priceMinor, quantityOnHand: opening, quantityReserved: 0 },
+        data: {
+          storeId, productId, name, sku, priceMinor: input.priceMinor,
+          costMinor: input.costMinor ?? 0,
+          stockBaseQuantity: input.stockBaseQuantity ?? null,
+          quantityOnHand: opening, quantityReserved: 0,
+        },
       });
       if (opening > 0) {
-        await recordMovement(tx, { storeId, productId, variantId: created.id, delta: opening, type: "RECEIPT", createdBy: "admin", balanceAfter: opening });
+        await recordMovement(tx, { storeId, productId, variantId: created.id, delta: opening, type: "RECEIPT", createdBy: actorId ?? null, note: "Opening variant stock", balanceAfter: opening });
       }
       return created;
     }, { timeout: 30_000 });
@@ -357,7 +391,7 @@ export class ProductAdminService {
   }
 
   /** Update a variant (name/sku/price/active and/or set the on-hand count with an ADJUST ledger row). */
-  async updateVariant(storeId: string, variantId: string, input: { name?: string; sku?: string; priceMinor?: number; isActive?: boolean; quantityOnHand?: number }): Promise<AdminResult<{ id: string }>> {
+  async updateVariant(storeId: string, variantId: string, input: { name?: string; sku?: string; priceMinor?: number; costMinor?: number; stockBaseQuantity?: number | null; isActive?: boolean; quantityOnHand?: number }): Promise<AdminResult<{ id: string }>> {
     const v = await prisma.productVariant.findFirst({ where: { id: variantId, storeId } });
     if (!v) return { ok: false, error: { type: "not_found", message: "Variant not found" } };
     if (input.sku !== undefined) {
@@ -367,6 +401,16 @@ export class ProductAdminService {
       if (dup) return { ok: false, error: { type: "conflict", message: "A variant with this SKU already exists" } };
     }
     if (input.priceMinor !== undefined && (!Number.isInteger(input.priceMinor) || input.priceMinor < 0)) return { ok: false, error: { type: "validation", errors: ["priceMinor must be a non-negative integer"] } };
+    if (input.costMinor !== undefined && (!Number.isInteger(input.costMinor) || input.costMinor < 0)) return { ok: false, error: { type: "validation", errors: ["costMinor must be a non-negative integer"] } };
+    if (input.stockBaseQuantity !== undefined && input.stockBaseQuantity !== null && (!Number.isInteger(input.stockBaseQuantity) || input.stockBaseQuantity < 1)) return { ok: false, error: { type: "validation", errors: ["stockBaseQuantity must be a positive integer"] } };
+    if (input.stockBaseQuantity !== undefined && input.stockBaseQuantity !== null) {
+      const product = await prisma.product.findFirst({ where: { id: v.productId, storeId }, select: { stockBaseUnit: true } });
+      if (!product?.stockBaseUnit) return { ok: false, error: { type: "validation", errors: ["set the product stock base unit before configuring a variant size"] } };
+    }
+    if (input.stockBaseQuantity !== undefined && input.stockBaseQuantity !== v.stockBaseQuantity && v.stockBaseQuantity !== null
+      && (v.quantityOnHand > 0 || v.quantityReserved > 0)) {
+      return { ok: false, error: { type: "conflict", message: "Cannot change a configured variant pack size while stock or reservations exist" } };
+    }
 
     // Stock set: absolute on-hand count with a guarded write + ADJUST movement.
     if (input.quantityOnHand !== undefined) {
@@ -389,6 +433,8 @@ export class ProductAdminService {
         ...(input.name !== undefined ? { name: input.name.trim() } : {}),
         ...(input.sku !== undefined ? { sku: input.sku.trim() } : {}),
         ...(input.priceMinor !== undefined ? { priceMinor: input.priceMinor } : {}),
+        ...(input.costMinor !== undefined ? { costMinor: input.costMinor } : {}),
+        ...(input.stockBaseQuantity !== undefined ? { stockBaseQuantity: input.stockBaseQuantity } : {}),
         ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
       },
     });

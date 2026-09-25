@@ -38,11 +38,14 @@ export async function cacheSet(key: string, value: unknown, ttlMs: number = DEFA
 }
 
 /**
- * Removes every cached entry whose key starts with `prefix` (e.g. "products", "customers").
+ * Removes every cached entry for a namespace (e.g. "products", "customers").
+ * Call sites may pass either the namespace or a full cacheKey; both forms resolve
+ * to the same registry so store-scoped cached reads cannot outlive their writes.
  * Redis has no prefix-DEL, so a small registry set tracks the keys per prefix.
  */
-export async function cacheBust(prefix: string): Promise<void> {
+export async function cacheBust(keyOrNamespace: string): Promise<void> {
   const r = redisClient();
+  const prefix = keyOrNamespace.split(":")[0] ?? keyOrNamespace;
   const registryKey = `__reg:${prefix}`;
   const members = (await r.get<string[]>(registryKey)) ?? [];
   if (members.length > 0) {
