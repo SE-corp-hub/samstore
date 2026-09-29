@@ -42,8 +42,9 @@ interface ProductForm {
   soldByWeight: boolean;
   priceMinor: string; // pesos input, converted to minor units
   costMinor: string; // acquisition cost in pesos, converted to minor units
-  stockBaseUnit: string;
-  stockBaseQuantity: string;
+  conversionEnabled: boolean;
+  packageSize: string;
+  packageUnit: string;
   stockConversionFamily: string;
   stock: string;
   categorySlug: string;
@@ -60,12 +61,25 @@ interface ProductForm {
   reorderThreshold: string;
 }
 
-const EMPTY_FORM: ProductForm = { name: "", sku: "", barcode: "", unit: "", soldByWeight: false, priceMinor: "", costMinor: "", stockBaseUnit: "", stockBaseQuantity: "", stockConversionFamily: "", stock: "", categorySlug: "", categoryName: "", description: "", taxExempt: false, featured: false, tags: "", related: [], upsell: [], reorderThreshold: "" };
+const EMPTY_FORM: ProductForm = { name: "", sku: "", barcode: "", unit: "", soldByWeight: false, priceMinor: "", costMinor: "", conversionEnabled: false, packageSize: "", packageUnit: "kg", stockConversionFamily: "", stock: "", categorySlug: "", categoryName: "", description: "", taxExempt: false, featured: false, tags: "", related: [], upsell: [], reorderThreshold: "" };
 const formatStockSize = (quantity: number, unit: string) => {
   if ((unit === "g" || unit === "ml") && quantity % 1000 === 0) {
     return `${quantity / 1000} ${unit === "g" ? "kg" : "L"}`;
   }
   return `${quantity} ${unit}`;
+};
+const stockMeasureFromBase = (unit: string | null, quantity: number | null) => {
+  if (unit === "g") return quantity && quantity % 1000 === 0 ? { packageSize: String(quantity / 1000), packageUnit: "kg" } : { packageSize: quantity?.toString() ?? "", packageUnit: "g" };
+  if (unit === "ml") return quantity && quantity % 1000 === 0 ? { packageSize: String(quantity / 1000), packageUnit: "L" } : { packageSize: quantity?.toString() ?? "", packageUnit: "ml" };
+  if (unit === "each") return { packageSize: quantity?.toString() ?? "", packageUnit: "each" };
+  return { packageSize: "", packageUnit: "kg" };
+};
+const stockMeasureToBase = (packageSize: string, packageUnit: string) => {
+  const size = Number.parseFloat(packageSize);
+  if (!Number.isFinite(size) || size <= 0) return { stockBaseUnit: packageUnit === "ml" || packageUnit === "L" ? "ml" : packageUnit === "each" ? "each" : "g", stockBaseQuantity: null };
+  const factor = packageUnit === "kg" || packageUnit === "L" ? 1000 : 1;
+  const stockBaseUnit = packageUnit === "ml" || packageUnit === "L" ? "ml" : packageUnit === "each" ? "each" : "g";
+  return { stockBaseUnit, stockBaseQuantity: Math.round(size * factor) };
 };
 
 export default function ProductsPanel() {
@@ -129,6 +143,7 @@ export default function ProductsPanel() {
   };
 
   const openEdit = (p: AdminProduct) => {
+    const measure = stockMeasureFromBase(p.stockBaseUnit, p.stockBaseQuantity);
     setForm({
       name: p.name,
       sku: p.sku,
@@ -137,8 +152,9 @@ export default function ProductsPanel() {
       soldByWeight: p.soldByWeight ?? false,
       priceMinor: (p.priceMinor / 100).toString(),
       costMinor: (p.costMinor / 100).toString(),
-      stockBaseUnit: p.stockBaseUnit ?? "",
-      stockBaseQuantity: p.stockBaseQuantity?.toString() ?? "",
+      conversionEnabled: Boolean(p.stockBaseUnit),
+      packageSize: measure.packageSize,
+      packageUnit: measure.packageUnit,
       stockConversionFamily: p.stockConversionFamily ?? "",
       stock: p.quantityOnHand.toString(),
       categorySlug: p.category?.slug ?? "",
@@ -161,6 +177,7 @@ export default function ProductsPanel() {
     setError(null);
     try {
       const priceMinor = Math.round(parseFloat(form.priceMinor) * 100);
+      const measure = form.conversionEnabled ? stockMeasureToBase(form.packageSize, form.packageUnit) : { stockBaseUnit: null, stockBaseQuantity: null };
       const payload = {
         name: form.name,
         sku: form.sku,
@@ -169,9 +186,9 @@ export default function ProductsPanel() {
         soldByWeight: form.soldByWeight,
         priceMinor,
         costMinor: form.costMinor.trim() === "" ? undefined : Math.round(parseFloat(form.costMinor) * 100),
-        stockBaseUnit: form.stockBaseUnit || null,
-        stockBaseQuantity: form.stockBaseQuantity === "" ? null : parseInt(form.stockBaseQuantity, 10),
-        stockConversionFamily: form.stockConversionFamily.trim() || null,
+        stockBaseUnit: measure.stockBaseUnit,
+        stockBaseQuantity: measure.stockBaseQuantity,
+        stockConversionFamily: form.conversionEnabled ? form.stockConversionFamily.trim() || null : null,
         stock: form.stock === "" ? undefined : parseInt(form.stock, 10),
         categorySlug: creatingCategory ? undefined : form.categorySlug || undefined,
         categoryName: !modal.editing && creatingCategory ? form.categoryName.trim() || undefined : undefined,
@@ -379,27 +396,33 @@ export default function ProductsPanel() {
                         <input className="form-control" placeholder="pc · pack · kilo · bottle" value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value })} />
                       </div>
                     </div>
-                    <div className="row">
-                      <div className="col-6 mb-2">
-                        <label className="form-label small" htmlFor="stockBaseUnit">Conversion base unit</label>
-                        <select id="stockBaseUnit" className="form-select" value={form.stockBaseUnit} onChange={(e) => setForm({ ...form, stockBaseUnit: e.target.value, stockBaseQuantity: e.target.value ? form.stockBaseQuantity : "", stockConversionFamily: e.target.value ? form.stockConversionFamily : "" })}>
-                          <option value="">Not configured</option>
-                          <option value="g">Grams (g)</option>
-                          <option value="ml">Milliliters (ml)</option>
-                          <option value="each">Each</option>
-                        </select>
-                      </div>
-                      <div className="col-6 mb-2">
-                        <label className="form-label small" htmlFor="stockBaseQuantity">Contents per unit</label>
-                        <input id="stockBaseQuantity" className="form-control" type="number" min="1" step="1" disabled={!form.stockBaseUnit} value={form.stockBaseQuantity} onChange={(e) => setForm({ ...form, stockBaseQuantity: e.target.value })} placeholder="e.g. 25000" />
-                      </div>
-                      <small className="text-muted">For conversion, a 25 kg sack is 25,000 g. A variant-only parent may set the base unit and define each variant's size separately.</small>
+                    <div className="form-check form-switch mb-2">
+                      <input className="form-check-input" type="checkbox" id="enableStockConversion" checked={form.conversionEnabled}
+                        onChange={(e) => setForm({ ...form, conversionEnabled: e.target.checked, ...(!e.target.checked ? { packageSize: "", stockConversionFamily: "" } : {}) })} />
+                      <label className="form-check-label small" htmlFor="enableStockConversion">Enable stock conversion</label>
                     </div>
-                    {form.stockBaseUnit && <div className="mb-2">
-                      <label className="form-label small" htmlFor="stockConversionFamily">Conversion family *</label>
-                      <input id="stockConversionFamily" className="form-control" required maxLength={60} value={form.stockConversionFamily} onChange={(e) => setForm({ ...form, stockConversionFamily: e.target.value })} placeholder="e.g. rice" />
-                      <small className="text-muted">Only items in the same family and base unit can be converted together.</small>
-                    </div>}
+                    {form.conversionEnabled && (
+                      <div className="row g-2 mb-2">
+                        <div className="col-md-5">
+                          <label className="form-label small" htmlFor="stockConversionFamily">Conversion family *</label>
+                          <input id="stockConversionFamily" className="form-control" required maxLength={60} value={form.stockConversionFamily} onChange={(e) => setForm({ ...form, stockConversionFamily: e.target.value })} placeholder="e.g. rice" />
+                        </div>
+                        <div className="col-md-7">
+                          <label className="form-label small" htmlFor="packageSize">Package size</label>
+                          <div className="input-group">
+                            <input id="packageSize" className="form-control" type="number" min={form.packageUnit === "kg" || form.packageUnit === "L" ? "0.001" : "1"} step={form.packageUnit === "kg" || form.packageUnit === "L" ? "0.001" : "1"} value={form.packageSize} onChange={(e) => setForm({ ...form, packageSize: e.target.value })} placeholder="e.g. 25" />
+                            <select className="form-select" style={{ maxWidth: 110 }} aria-label="Package size unit" value={form.packageUnit} onChange={(e) => setForm({ ...form, packageUnit: e.target.value, packageSize: "" })}>
+                              <option value="kg">kg</option>
+                              <option value="g">g</option>
+                              <option value="L">L</option>
+                              <option value="ml">ml</option>
+                              <option value="each">each</option>
+                            </select>
+                          </div>
+                          <small className="text-muted">Example: enter 25 kg for a 25 kg sack, 5 kg for a 5 kg bag. Leave blank for a product that only tracks sizes as variants.</small>
+                        </div>
+                      </div>
+                    )}
                     <div className="form-check form-switch mb-2">
                       <input className="form-check-input" type="checkbox" id="soldByWeight" checked={form.soldByWeight} onChange={(e) => setForm({ ...form, soldByWeight: e.target.checked })} />
                       <label className="form-check-label small" htmlFor="soldByWeight">Sold per weight (kilo) <span className="text-muted">— decimal quantity on a future module; pricing stays per-unit for now</span></label>
