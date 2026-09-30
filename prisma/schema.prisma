@@ -1266,7 +1266,15 @@ model OrderItem {
   sku            String
   unitPriceMinor Int
   quantity       Int
-  lineTotalMinor Int // unitPriceMinor * quantity (excludes add-on costs; add-on total is on the Order totals)
+  lineTotalMinor Int // unitPriceMinor * quantity (excludes add-on costs; the line total is on the Order totals)
+  // Counter price override audit. The catalog price is authoritative by default;
+  // these columns exist only when staff deliberately sold the line at another
+  // price, so a receipt or an audit can explain it. Never set for online checkout.
+  priceOverridden     Boolean   @default(false)
+  priceOverrideReason String?
+  priceOverriddenById String? // actor id (mirrors OrderStatusHistory.actorId)
+  priceOverriddenAt   DateTime?
+  catalogUnitPriceMinor Int? // the catalog/variant price the override deviated from
 }
 
 model OrderStatusHistory {

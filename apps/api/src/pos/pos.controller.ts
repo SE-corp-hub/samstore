@@ -97,12 +97,24 @@ export class PosController {
     return { ...result.value, storeId };
   }
 
-  /** PATCH /admin/pos/holds/:id/items — replace a held order's lines (stock delta, totals recomputed). */
+  /** PATCH /admin/pos/holds/:id/items — replace a held order's lines (stock delta, totals + VAT recomputed). */
   @Patch("holds/:id/items")
   async holdItems(@Req() req: Request & { user?: AuthPrincipal }, @Param("id") id: string, @Body() body: PosHoldItemsRequest, @Headers("x-store-id") headerStoreId?: string) {
     const user = req.user!;
     const storeId = await this.guardAndStore(req, headerStoreId);
-    const result = await this.pos.replaceItems(storeId, user.sub, id, body);
+    const result = await this.pos.replaceItems(storeId, user.sub, id, body, { source: "pos" });
+    if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
+    return { ...result.value, storeId };
+  }
+
+  /** PATCH /admin/pos/preorders/:id/items — the Pre-Orders tab "Edit" action: change
+   *  quantities and (bounded, reasoned) prices of an ON_HOLD pre-order draft. Scoped to
+   *  PRE_ORDER drafts so it can never re-price a POS hold. */
+  @Patch("preorders/:id/items")
+  async preorderItems(@Req() req: Request & { user?: AuthPrincipal }, @Param("id") id: string, @Body() body: PosHoldItemsRequest, @Headers("x-store-id") headerStoreId?: string) {
+    const user = req.user!;
+    const storeId = await this.guardAndStore(req, headerStoreId);
+    const result = await this.pos.replaceItems(storeId, user.sub, id, body, { source: "PRE_ORDER" });
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
     return { ...result.value, storeId };
   }

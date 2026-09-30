@@ -253,6 +253,15 @@ export interface PosSellItem {
   quantity: number;
   /** P2b: optional variant of the product (own price + own stock counters). */
   variantId?: string;
+  /**
+   * Counter price override (minor units, whole number 0..100_000_000 = ₱1,000,000).
+   * Omit it and the live catalog price is used. A value that DIFFERS from the
+   * catalog price (variant price for a variant line) requires `priceOverrideReason`
+   * and is recorded on the order item with the actor and a timestamp.
+   */
+  unitPriceMinorOverride?: number;
+  /** Required (3–140 chars) whenever `unitPriceMinorOverride` deviates from the catalog price. */
+  priceOverrideReason?: string;
 }
 
 export interface PosTender {

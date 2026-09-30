@@ -11,6 +11,7 @@ import { deductStock, restoreStock as restoreStockLedger } from "../domain/movem
 import { RegisterService } from "../registers/register.service.js";
 import { PrismaOrderSequenceRepository } from "../persistence/prisma-repositories.js";
 import { computeOrderTotals } from "../domain/pricing.js";
+import { resolveLinePrice } from "../domain/price-override.js";
 import { taxColumnsFor } from "../domain/tax-store.js";
 import { formatOrderNumber } from "../domain/order-number.js";
 import { randomId } from "../persistence/repositories.js";
@@ -23,7 +24,18 @@ export type PosResult<T> = { ok: true; value: T } | { ok: false; error: ApiError
 
 export const POS_SERVICE = Symbol("POS_SERVICE");
 
-export interface LoadedLine { productId: string; variantId: string | null; variantName: string | null; quantity: number; unitPriceMinor: number; name: string; sku: string }
+/** The stock identity of a line — all the ledger writers need, and nothing more. */
+export interface StockLine { productId: string; variantId: string | null; quantity: number }
+
+export interface LoadedLine {
+  productId: string; variantId: string | null; variantName: string | null; quantity: number; unitPriceMinor: number;
+  name: string; sku: string;
+  /** The catalog/variant price the line was measured against (audit). */
+  catalogUnitPriceMinor: number;
+  /** True only when staff deliberately sold this line at a different price. */
+  priceOverridden: boolean;
+  priceOverrideReason: string | null;
+}
 
 export class PosService {
   private readonly sequences = new PrismaOrderSequenceRepository();
@@ -80,33 +92,56 @@ export class PosService {
         }
       }
     }
+    // Effective line prices FIRST: the catalog price wins unless staff overrode it,
+    // and an override must be bounded + reasoned (domain/price-override). Totals are
+    // then derived from the EFFECTIVE prices so a price change is never lost.
+    const lines: LoadedLine[] = [];
+    for (const it of items) {
+      const p = products.find((x) => x.id === it.productId)!;
+      const v = it.variantId ? variantMap.get(it.variantId) : null;
+      const catalogUnitPriceMinor = v?.priceMinor ?? p.priceMinor;
+      let price;
+      try {
+        price = resolveLinePrice({
+          catalogUnitPriceMinor,
+          override: it.unitPriceMinorOverride,
+          reason: it.priceOverrideReason,
+        });
+      } catch (e) {
+        return { ok: false, error: { type: "validation", errors: [e instanceof Error ? e.message : "Invalid price"] } };
+      }
+      lines.push({
+        productId: p.id,
+        variantId: v?.id ?? null,
+        variantName: v?.name ?? null,
+        quantity: it.quantity,
+        unitPriceMinor: price.unitPriceMinor,
+        catalogUnitPriceMinor: price.catalogUnitPriceMinor,
+        priceOverridden: price.overridden,
+        priceOverrideReason: price.reason,
+        name: p.name,
+        sku: v?.sku ?? p.sku,
+      });
+    }
+
     let totals;
     try {
       totals = computeOrderTotals({
-        lines: items.map((it) => {
-          const p = products.find((x) => x.id === it.productId)!;
-          const v = it.variantId ? variantMap.get(it.variantId) : null;
-          return { unitPriceMinor: v?.priceMinor ?? p.priceMinor, quantity: it.quantity };
-        }),
+        lines: lines.map((l) => ({ unitPriceMinor: l.unitPriceMinor, quantity: l.quantity })),
       });
     } catch (e) {
       return { ok: false, error: { type: "conflict", message: e instanceof Error ? e.message : "Invalid pricing" } };
     }
-    const lines: LoadedLine[] = items.map((it) => {
-      const p = products.find((x) => x.id === it.productId)!;
-      const v = it.variantId ? variantMap.get(it.variantId) : null;
-      return { productId: p.id, variantId: v?.id ?? null, variantName: v?.name ?? null, quantity: it.quantity, unitPriceMinor: v?.priceMinor ?? p.priceMinor, name: p.name, sku: v?.sku ?? p.sku };
-    });
     return { ok: true, value: { products, lines, totals } };
   }
 
   /** Decrement stock for a set of lines (prefer default warehouse, then any level) + ledger. */
-  private async decrementStock(tx: any, storeId: string, lines: LoadedLine[], opts: { orderId?: string | null; createdBy?: string | null } = {}) {
+  private async decrementStock(tx: any, storeId: string, lines: StockLine[], opts: { orderId?: string | null; createdBy?: string | null } = {}) {
     await deductStock(tx, storeId, lines, { type: "CONSUME", orderId: opts.orderId, createdBy: opts.createdBy });
   }
 
   /** Increment stock back for a set of lines (void / cancel) + ledger. */
-  private async restoreStock(tx: any, storeId: string, lines: LoadedLine[], opts: { orderId?: string | null; createdBy?: string | null } = {}) {
+  private async restoreStock(tx: any, storeId: string, lines: StockLine[], opts: { orderId?: string | null; createdBy?: string | null } = {}) {
     await restoreStockLedger(tx, storeId, lines, { type: "RELEASE", orderId: opts.orderId, createdBy: opts.createdBy });
   }
 
@@ -160,6 +195,9 @@ export class PosService {
       productId: l.productId, productName: l.name, sku: l.sku, unitPriceMinor: l.unitPriceMinor,
       variantId: l.variantId, variantName: l.variantName, // P2b
       quantity: l.quantity, lineTotalMinor: l.unitPriceMinor * l.quantity,
+      // Counter price override audit — the reason a receipt can explain this price.
+      priceOverridden: l.priceOverridden, priceOverrideReason: l.priceOverrideReason,
+      catalogUnitPriceMinor: l.catalogUnitPriceMinor,
     }));
     // M4: freeze the VAT breakdown with the sale. POS orders carry no delivery fee, and the
     // discount (voucher/loyalty) is applied to the VATable base before tax.
@@ -188,8 +226,20 @@ export class PosService {
         registerSessionId: data.registerSessionId ?? null, // N1
       },
     });
+    const overriddenAt = new Date();
     await tx.orderItem.createMany({
-      data: items.map((i) => ({ orderId: data.id, storeId, productId: i.productId, productName: i.productName, sku: i.sku, variantId: i.variantId ?? null, variantName: i.variantName ?? null, unitPriceMinor: i.unitPriceMinor, quantity: i.quantity, lineTotalMinor: i.lineTotalMinor })),
+      data: items.map((i) => ({
+        orderId: data.id, storeId, productId: i.productId, productName: i.productName, sku: i.sku,
+        variantId: i.variantId ?? null, variantName: i.variantName ?? null, unitPriceMinor: i.unitPriceMinor,
+        quantity: i.quantity, lineTotalMinor: i.lineTotalMinor,
+        // The audit columns are written ONLY for a deliberate deviation, so a plain
+        // sale keeps every column null/false and reports nothing unusual.
+        priceOverridden: i.priceOverridden,
+        priceOverrideReason: i.priceOverrideReason,
+        priceOverriddenById: i.priceOverridden ? actorId : null,
+        priceOverriddenAt: i.priceOverridden ? overriddenAt : null,
+        catalogUnitPriceMinor: i.priceOverridden ? i.catalogUnitPriceMinor : null,
+      })),
     });
     await tx.orderStatusHistory.create({ data: { orderId: data.id, storeId, toStatus: data.status, actorType: "pos", actorId: actorId } });
   }
@@ -470,7 +520,9 @@ export class PosService {
       },
       orderBy: { createdAt: "desc" },
       include: {
-        items: { select: { productId: true, productName: true, sku: true, unitPriceMinor: true, quantity: true, lineTotalMinor: true } },
+        // variantId/variantName + the override audit travel back so the Edit modal
+        // can re-send the exact same lines (and show why a price was changed).
+        items: { select: { productId: true, productName: true, sku: true, variantId: true, variantName: true, unitPriceMinor: true, quantity: true, lineTotalMinor: true, priceOverridden: true, priceOverrideReason: true } },
         storeCustomer: { include: { customer: { select: { name: true } } } },
       },
     }).then((rows) => rows.map((o) => ({
@@ -525,18 +577,39 @@ export class PosService {
     };
   }
 
-  async replaceItems(storeId: string, actorId: string, holdId: string, input: PosHoldItemsRequest): Promise<PosResult<{ id: string; totalMinor: number; lines: LoadedLine[] }>> {
+  /**
+   * Replace the lines of an ON_HOLD counter order (POS hold or pre-order draft).
+   * `opts.source` scopes which kind of draft this route may edit, so a POS hold can
+   * never be re-priced through the pre-order route (and vice versa). Line prices come
+   * from loadProducts, which honours a bounded + reasoned counter override.
+   */
+  async replaceItems(storeId: string, actorId: string, holdId: string, input: PosHoldItemsRequest, opts?: { source?: "pos" | "PRE_ORDER" }): Promise<PosResult<{ id: string; totalMinor: number; lines: LoadedLine[] }>> {
     if (!this.validateItems(input.items)) {
       return { ok: false, error: { type: "validation", errors: ["At least one item with positive quantity is required"] } };
     }
-    const hold = await prisma.order.findFirst({ where: { storeId, id: holdId, status: "ON_HOLD" } });
-    if (!hold) return { ok: false, error: { type: "not_found", message: "Held order not found" } };
+    const hold = await prisma.order.findFirst({ where: { storeId, id: holdId, status: "ON_HOLD", ...(opts?.source ? { source: opts.source } : {}) } });
+    if (!hold) {
+      return {
+        ok: false,
+        error: { type: "not_found", message: opts?.source === "PRE_ORDER" ? "Pre-order not found" : "Held order not found" },
+      };
+    }
 
     const loaded = await this.loadProducts(storeId, input.items);
     if (!loaded.ok) return loaded;
-    const oldItems = await prisma.orderItem.findMany({ where: { orderId: holdId } });
-    const oldLines: LoadedLine[] = oldItems.map((i) => ({ productId: i.productId ?? "", variantId: i.variantId ?? null, variantName: i.variantName ?? null, quantity: i.quantity, unitPriceMinor: i.unitPriceMinor, name: i.productName, sku: i.sku }));
+    // Only the stock identity of the previous lines matters here (restore delta).
+    const oldLines = (await prisma.orderItem.findMany({ where: { orderId: holdId } })).map((i) => ({
+      productId: i.productId ?? "", variantId: i.variantId ?? null, quantity: i.quantity,
+    }));
     const { lines, totals } = loaded.value;
+    // M4: a re-price changes the VAT base — re-freeze it instead of keeping the
+    // columns from the previous total (the receipt prints these).
+    const taxCols = await taxColumnsFor(
+      storeId,
+      lines.map((l) => ({ productId: l.productId, lineTotalMinor: l.unitPriceMinor * l.quantity })),
+      { discountMinor: hold.discountMinor, deliveryFeeMinor: 0 },
+    );
+    const overriddenAt = new Date();
 
     await prisma.$transaction(async (tx) => {
       // Restore stock for removed lines, decrement for added (delta approach).
@@ -546,10 +619,18 @@ export class PosService {
       await tx.orderItem.createMany({
         data: lines.map((l) => ({
           orderId: holdId, storeId, productId: l.productId, productName: l.name, sku: l.sku,
+          // The variant identity must survive an edit, or a variant line silently
+          // becomes a plain product line.
+          variantId: l.variantId, variantName: l.variantName,
           unitPriceMinor: l.unitPriceMinor, quantity: l.quantity, lineTotalMinor: l.unitPriceMinor * l.quantity,
+          priceOverridden: l.priceOverridden,
+          priceOverrideReason: l.priceOverrideReason,
+          priceOverriddenById: l.priceOverridden ? actorId : null,
+          priceOverriddenAt: l.priceOverridden ? overriddenAt : null,
+          catalogUnitPriceMinor: l.priceOverridden ? l.catalogUnitPriceMinor : null,
         })),
       });
-      await tx.order.update({ where: { id: holdId }, data: { subtotalMinor: totals.subtotalMinor, totalMinor: totals.totalMinor, snapshot: { lines, source: "pos", paymentMethod: "cash" } as object } });
+      await tx.order.update({ where: { id: holdId }, data: { subtotalMinor: totals.subtotalMinor, totalMinor: totals.totalMinor, snapshot: { lines, source: hold.source.toLowerCase(), paymentMethod: hold.paymentMethod } as object, ...taxCols } });
       await tx.orderStatusHistory.create({ data: { orderId: holdId, storeId, fromStatus: "ON_HOLD", toStatus: "ON_HOLD", reason: "items edited", actorType: "pos", actorId: actorId } });
     }, { timeout: 30_000 });
     return { ok: true, value: { id: holdId, totalMinor: totals.totalMinor, lines } };
@@ -567,13 +648,20 @@ export class PosService {
     let totalMinor = hold.totalMinor;
     let lines: LoadedLine[] = [];
     if (input.items) {
-      const replaced = await this.replaceItems(storeId, actorId, holdId, { items: input.items });
+      const replaced = await this.replaceItems(storeId, actorId, holdId, { items: input.items }, { source: "pos" });
       if (!replaced.ok) return replaced;
       totalMinor = replaced.value.totalMinor;
       lines = replaced.value.lines;
     } else {
       const items = await prisma.orderItem.findMany({ where: { orderId: holdId } });
-      lines = items.map((i) => ({ productId: i.productId ?? "", variantId: i.variantId ?? null, variantName: i.variantName ?? null, quantity: i.quantity, unitPriceMinor: i.unitPriceMinor, name: i.productName, sku: i.sku }));
+      // Re-read the STORED prices so completing a hold never re-prices it, and carry
+      // the override audit forward.
+      lines = items.map((i) => ({
+        productId: i.productId ?? "", variantId: i.variantId ?? null, variantName: i.variantName ?? null,
+        quantity: i.quantity, unitPriceMinor: i.unitPriceMinor, name: i.productName, sku: i.sku,
+        catalogUnitPriceMinor: i.catalogUnitPriceMinor ?? i.unitPriceMinor,
+        priceOverridden: i.priceOverridden, priceOverrideReason: i.priceOverrideReason,
+      }));
     }
 
     const { storeCustomerId: custId, displayName } = input.paymentMethod === "credit"
@@ -685,7 +773,7 @@ export class PosService {
     const hold = await prisma.order.findFirst({ where: { storeId, id: holdId, status: "ON_HOLD" } });
     if (!hold) return { ok: false, error: { type: "not_found", message: "Held order not found" } };
     const items = await prisma.orderItem.findMany({ where: { orderId: holdId } });
-    const lines: LoadedLine[] = items.map((i) => ({ productId: i.productId ?? "", variantId: i.variantId ?? null, variantName: i.variantName ?? null, quantity: i.quantity, unitPriceMinor: i.unitPriceMinor, name: i.productName, sku: i.sku }));
+    const lines: StockLine[] = items.map((i) => ({ productId: i.productId ?? "", variantId: i.variantId ?? null, quantity: i.quantity }));
 
     await prisma.$transaction(async (tx) => {
       await this.restoreStock(tx, storeId, lines, { orderId: holdId, createdBy: actorId });

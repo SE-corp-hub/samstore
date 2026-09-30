@@ -17,9 +17,9 @@ import ReceiptModal from "./ReceiptModal";
 interface Preorder {
   id: string; orderNumber: string; customerName: string; storeCustomerId: string | null;
   status: string; totalMinor: number; createdAt: string; dueAt: string | null;
-  items: { productId: string; productName: string; unitPriceMinor: number; quantity: number; lineTotalMinor: number }[];
+  items: { productId: string; productName: string; unitPriceMinor: number; quantity: number; lineTotalMinor: number; variantId?: string | null; variantName?: string | null; priceOverridden?: boolean }[];
 }
-interface EditLine { productId: string; productName: string; quantity: number; unitPriceMinor: number }
+interface EditLine { productId: string; productName: string; quantity: number; unitPriceMinor: number; variantId?: string | null; variantName?: string | null }
 interface PosProduct {
   id: string; name: string; sku: string; priceMinor: number;
   availableQuantity: number; category: { name: string } | null;
@@ -151,6 +151,10 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
   // Edit modal
   const [editPre, setEditPre] = useState<{ id: string; orderNumber: string; lines: EditLine[] } | null>(null);
   const [editAddId, setEditAddId] = useState("");
+  // Counter price override: the line price the modal holds, and one reason for every
+  // line that deviates from the catalog (mirrors the server rule).
+  const [editPrices, setEditPrices] = useState<Record<string, number>>({});
+  const [editReason, setEditReason] = useState("");
   // Delete/void modal
   const [confirmVoid, setConfirmVoid] = useState<{ id: string; orderNumber: string } | null>(null);
   const [voidReason, setVoidReason] = useState("");
@@ -229,14 +233,45 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
   const openPreEdit = (p: Preorder) => {
     setEditPre(null);
     setEditAddId("");
+    setEditPrices({});
+    setEditReason("");
     fetch(`${API_URL}/admin/orders/${p.id}`, { headers: adminHeaders() })
       .then((r) => r.json())
       .then((d) => setEditPre({
         id: p.id,
         orderNumber: p.orderNumber,
-        lines: (d?.items ?? []).map((i: any) => ({ productId: i.productId ?? "", productName: i.productName, quantity: i.quantity, unitPriceMinor: i.unitPriceMinor })),
+        lines: (d?.items ?? []).map((i: any) => ({
+          productId: i.productId ?? "",
+          productName: i.productName,
+          quantity: i.quantity,
+          unitPriceMinor: i.unitPriceMinor,
+          variantId: i.variantId ?? null,
+          variantName: i.variantName ?? null,
+        })),
       }))
       .catch(() => setError("Could not load pre-order items"));
+  };
+
+  /** The catalog (or variant) price a line is compared against. */
+  const catalogPriceFor = (productId: string, variantId?: string | null) => {
+    const product = buildProducts.find((x) => x.id === productId);
+    if (!product) return 0;
+    if (!variantId) return product.priceMinor;
+    const variant = (product as unknown as { variants?: { id: string; priceMinor: number }[] }).variants?.find((v) => v.id === variantId);
+    return variant?.priceMinor ?? product.priceMinor;
+  };
+
+  const editLinePrice = (l: EditLine) => editPrices[`${l.productId}|${l.variantId ?? ""}`] ?? l.unitPriceMinor;
+  const editIsOverridden = (l: EditLine) => editLinePrice(l) !== catalogPriceFor(l.productId, l.variantId);
+  const editOverriddenCount = editPre ? editPre.lines.filter(editIsOverridden).length : 0;
+  const editReasonMissing = editOverriddenCount > 0 && editReason.trim().length < 3;
+
+  const setEditLinePrice = (l: EditLine, pesosText: string) => {
+    const key = `${l.productId}|${l.variantId ?? ""}`;
+    if (pesosText.trim() === "") { setEditPrices((prev) => { const next = { ...prev }; delete next[key]; return next; }); return; }
+    const minor = Math.round(parseFloat(pesosText) * 100);
+    if (!Number.isFinite(minor)) return;
+    setEditPrices((prev) => ({ ...prev, [key]: minor < 0 ? 0 : minor }));
   };
 
   const setPreLineQty = (productId: string, qty: number) => {
@@ -255,14 +290,23 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
 
   const savePreEdit = async () => {
     if (!editPre) return;
+    if (editReasonMissing) { setError("A short reason is required when a price differs from the catalog price."); return; }
     setError(null);
     try {
-      const res = await fetch(`${API_URL}/admin/orders/${editPre.id}/items`, {
+      const res = await fetch(`${API_URL}/admin/pos/preorders/${editPre.id}/items`, {
         method: "PATCH", headers: { "Content-Type": "application/json", ...adminHeaders() },
-        body: JSON.stringify({ items: editPre.lines.map((l) => ({ productId: l.productId, quantity: l.quantity })) }),
+        body: JSON.stringify({
+          items: editPre.lines.map((l) => ({
+            productId: l.productId,
+            variantId: l.variantId ?? undefined,
+            quantity: l.quantity,
+            unitPriceMinorOverride: editIsOverridden(l) ? editLinePrice(l) : undefined,
+            priceOverrideReason: editIsOverridden(l) ? editReason.trim() || undefined : undefined,
+          })),
+        }),
       });
       const d = await res.json();
-      if (!res.ok) { setError(d?.message ?? "Edit failed"); return; }
+      if (!res.ok) { setError(d?.errors?.join(", ") ?? d?.message ?? "Edit failed"); return; }
       setEditPre(null);
       toast("Updated");
       await loadPreorders();
@@ -707,16 +751,44 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
                     <p className="text-muted small">No lines yet.</p>
                   ) : (
                     editPre.lines.map((l) => (
-                      <div key={l.productId} className="d-flex align-items-center gap-2 mb-1">
-                        <span className="flex-grow-1 small">{l.productName}</span>
+                      <div key={`${l.productId}|${l.variantId ?? ""}`} className="d-flex align-items-center gap-2 mb-1 flex-wrap">
+                        <span className="flex-grow-1 small">
+                          {l.productName}
+                          {l.variantName ? <span className="text-muted"> · {l.variantName}</span> : null}
+                        </span>
+                        {/* Price is editable even when the store hides prices (hiding is a display rule). */}
+                        <div className="input-group input-group-sm" style={{ width: 118 }}>
+                          <span className="input-group-text">₱</span>
+                          <input
+                            className={`form-control ${editIsOverridden(l) ? "border-warning bg-warning-subtle" : ""}`}
+                            type="number" inputMode="decimal" min="0" step="0.01"
+                            aria-label={`Price for ${l.productName}`}
+                            value={(editLinePrice(l) / 100).toString()}
+                            onChange={(e) => setEditLinePrice(l, e.target.value)}
+                          />
+                        </div>
                         <div className="input-group input-group-sm" style={{ width: 96 }}>
                           <button className="btn btn-outline-secondary" onClick={() => setPreLineQty(l.productId, l.quantity - 1)}>-</button>
-                          <input className="form-control text-center" type="number" min={1} value={l.quantity} onChange={(e) => { const v = parseInt(e.target.value, 10); if (v >= 1) setPreLineQty(l.productId, v); }} />
+                          <input className="form-control text-center" type="number" min={1} aria-label={`Quantity for ${l.productName}`} value={l.quantity} onChange={(e) => { const v = parseInt(e.target.value, 10); if (v >= 1) setPreLineQty(l.productId, v); }} />
                           <button className="btn btn-outline-secondary" onClick={() => setPreLineQty(l.productId, l.quantity + 1)}>+</button>
                         </div>
-                        <button className="btn btn-sm btn-outline-danger py-0" onClick={() => setPreLineQty(l.productId, 0)}><i className="bi bi-x"></i></button>
+                        {editIsOverridden(l) && <span className="badge text-bg-warning">edited</span>}
+                        <button className="btn btn-sm btn-outline-danger py-0" title="Remove line" onClick={() => setPreLineQty(l.productId, 0)}><i className="bi bi-x"></i></button>
                       </div>
                     ))
+                  )}
+                  {editOverriddenCount > 0 && (
+                    <div className="mt-2">
+                      <label className="form-label small mb-1" htmlFor="preEditPriceReason">
+                        Reason for the price change{editReasonMissing ? " *" : ""}
+                      </label>
+                      <input
+                        id="preEditPriceReason" className={`form-control form-control-sm ${editReasonMissing ? "is-invalid" : ""}`}
+                        maxLength={140} value={editReason} onChange={(e) => setEditReason(e.target.value)}
+                        placeholder={`e.g. price agreed with the customer (${editOverriddenCount} line(s) changed)`}
+                      />
+                      <div className="invalid-feedback">A short reason is required when a price differs from the catalog.</div>
+                    </div>
                   )}
                   <div className="d-flex gap-2 mt-2">
                     <select className="form-select form-select-sm flex-grow-1" value={editAddId} onChange={(e) => setEditAddId(e.target.value)}>
@@ -732,7 +804,7 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
                 </div>
                 <div className="modal-footer">
                   <button className="btn btn-outline-secondary" onClick={() => setEditPre(null)}>Cancel</button>
-                  <button className="btn btn-primary" onClick={savePreEdit}>Save changes</button>
+                  <button className="btn btn-primary" disabled={editReasonMissing} onClick={savePreEdit}>Save changes</button>
                 </div>
               </div>
             </div>

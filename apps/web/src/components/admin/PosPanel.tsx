@@ -23,7 +23,7 @@ interface PosProduct {
   variants?: PosVariant[]; // P2b
 }
 interface PosCustomer { id: string; name: string | null; email: string | null; phone: string | null; address?: string | null; loyaltyPoints?: number; }
-interface CartLine { product: PosProduct; quantity: number; variant: PosVariant | null; }
+interface CartLine { product: PosProduct; quantity: number; variant: PosVariant | null; priceOverrideMinor: number | null }
 interface HeldOrder { id: string; orderNumber: string; totalMinor: number; customerName: string; storeCustomerId: string | null; createdAt: string; items: { productId: string; productName: string; variantId?: string | null; quantity: number; unitPriceMinor: number }[]; }
 interface LastSale { orderId: string; orderNumber: string; totalMinor: number; changeMinor: number; paymentMethod: string }
 
@@ -164,6 +164,9 @@ export default function PosPanel({ onNavigate }: { onNavigate?: (tab: string) =>
   const [usePoints, setUsePoints] = useState(false);
   const [creditSig, setCreditSig] = useState<string | null>(null);
   const [creditSigError, setCreditSigError] = useState(false);
+  // Counter price override: one reason covers every line whose price was changed
+  // (mirrors the server rule — a deviating price is refused without a reason).
+  const [priceReason, setPriceReason] = useState("");
 
   const load = useCallback(async () => {
     try {
@@ -184,12 +187,43 @@ export default function PosPanel({ onNavigate }: { onNavigate?: (tab: string) =>
 
   useEffect(() => { load(); }, [load]);
 
-  const subtotal = cart.reduce((s, l) => s + (l.variant?.priceMinor ?? l.product.priceMinor) * l.quantity, 0);
+  // ── counter price override ───────────────────────────────────────────────────────
+  /** The price the catalog says (a variant line uses the variant's own price). */
+  const catalogPrice = (l: CartLine) => l.variant?.priceMinor ?? l.product.priceMinor;
+  /** The price the line will actually be sold at. */
+  const linePrice = (l: CartLine) => l.priceOverrideMinor ?? catalogPrice(l);
+  const isOverridden = (l: CartLine) => linePrice(l) !== catalogPrice(l);
+  const overriddenCount = cart.filter(isOverridden).length;
+  /** The server refuses a deviating price without a reason — mirror that here. */
+  const priceReasonMissing = overriddenCount > 0 && priceReason.trim().length < 3;
+
+  const setLinePrice = (productId: string, pesosText: string) => {
+    if (pesosText.trim() === "") { setCart((c) => c.map((l) => (l.product.id === productId ? { ...l, priceOverrideMinor: null } : l))); return; }
+    const minor = Math.round(parseFloat(pesosText) * 100);
+    if (!Number.isFinite(minor)) return;
+    setCart((c) => c.map((l) => (l.product.id === productId ? { ...l, priceOverrideMinor: minor < 0 ? 0 : minor } : l)));
+  };
+
+  const revertLinePrice = (productId: string) => {
+    setCart((c) => c.map((l) => (l.product.id === productId ? { ...l, priceOverrideMinor: null } : l)));
+  };
+
+  /** Sell/hold payload. A line only carries an override when it deviates, so an
+   *  untouched cart stays exactly as before (catalog price, no reason). */
+  const itemsPayload = () => cart.map((l) => ({
+    productId: l.product.id,
+    variantId: l.variant?.id ?? undefined,
+    quantity: l.quantity,
+    unitPriceMinorOverride: isOverridden(l) ? linePrice(l) : undefined,
+    priceOverrideReason: isOverridden(l) ? priceReason.trim() || undefined : undefined,
+  }));
+
+  const subtotal = cart.reduce((s, l) => s + linePrice(l) * l.quantity, 0);
   const tenderedMinor = Math.round(parseFloat(tendered || "0") * 100);
   const changeMinor = payment === "cash" ? tenderedMinor - subtotal : 0;
   const loyaltyCustomer = customers.find((c) => c.id === customerId);
   const loyaltyPoints = loyaltyCustomer?.loyaltyPoints ?? 0;
-  const canPay = cart.length > 0 && (payment === "cash" ? tenderedMinor >= subtotal : (!!customerId && !!creditSig));
+  const canPay = cart.length > 0 && !priceReasonMissing && (payment === "cash" ? tenderedMinor >= subtotal : (!!customerId && !!creditSig));
 
   const addProduct = (product: PosProduct) => {
     setError(null);
@@ -204,12 +238,13 @@ export default function PosPanel({ onNavigate }: { onNavigate?: (tab: string) =>
         if (found.quantity + 1 > limit) { setError(`Only ${limit} left for ${product.name}${variant ? ` (${variant.name})` : ""}`); return c; }
         return c.map((l) => (l.product.id === product.id ? { ...l, quantity: l.quantity + 1, variant: l.variant ?? variant } : l));
       }
-      return [...c, { product, quantity: 1, variant }];
+      return [...c, { product, quantity: 1, variant, priceOverrideMinor: null }];
     });
   };
 
   const setVariant = (productId: string, variantId: string) => {
-    setCart((c) => c.map((l) => (l.product.id === productId ? { ...l, variant: l.product.variants?.find((v) => v.id === variantId) ?? null, quantity: 1 } : l)));
+    // A different variant has a different catalog price, so any override is dropped.
+    setCart((c) => c.map((l) => (l.product.id === productId ? { ...l, variant: l.product.variants?.find((v) => v.id === variantId) ?? null, quantity: 1, priceOverrideMinor: null } : l)));
   };
 
   const setQty = (productId: string, qty: number) => {
@@ -241,7 +276,7 @@ export default function PosPanel({ onNavigate }: { onNavigate?: (tab: string) =>
       const customer = await ensureCustomer();
       const res = await fetch(`${API_URL}/admin/pos/hold`, {
         method: "POST", headers: { "Content-Type": "application/json", ...adminHeaders() },
-        body: JSON.stringify({ items: cart.map((l) => ({ productId: l.product.id, variantId: l.variant?.id ?? undefined, quantity: l.quantity })), customerId: customer ?? undefined }),
+        body: JSON.stringify({ items: itemsPayload(), customerId: customer ?? undefined }),
       });
       const data = await res.json();
       if (!res.ok) { setError(data?.errors?.join(", ") ?? data?.message ?? "Hold failed"); return; }
@@ -262,7 +297,12 @@ export default function PosPanel({ onNavigate }: { onNavigate?: (tab: string) =>
     const lines: CartLine[] = [];
     for (const it of h.items) {
       const prod = lineMap.get(it.productId);
-      if (prod) lines.push({ product: prod, quantity: it.quantity, variant: prod.variants?.find((v) => v.id === it.variantId) ?? null });
+      if (prod) {
+        // Carry the held price forward so resuming never silently re-prices a line.
+        const variant = prod.variants?.find((v) => v.id === it.variantId) ?? null;
+        const catalog = variant?.priceMinor ?? prod.priceMinor;
+        lines.push({ product: prod, quantity: it.quantity, variant, priceOverrideMinor: it.unitPriceMinor !== catalog ? it.unitPriceMinor : null });
+      }
     }
     setCart(lines);
     setCustomerId(h.storeCustomerId ?? "");
@@ -298,7 +338,7 @@ export default function PosPanel({ onNavigate }: { onNavigate?: (tab: string) =>
       const customer = await ensureCustomer();
       if (payment === "credit" && !customer) { setError("Add or select a customer for utang"); setBusy(false); return; }
       const payload = {
-        items: cart.map((l) => ({ productId: l.product.id, variantId: l.variant?.id ?? undefined, quantity: l.quantity })),
+        items: itemsPayload(),
         paymentMethod: payment,
         tenderedMinor: payment === "cash" ? tenderedMinor : undefined,
         customerId: customer ?? undefined,
@@ -324,7 +364,7 @@ export default function PosPanel({ onNavigate }: { onNavigate?: (tab: string) =>
   };
 
   const resetSale = () => {
-    setCart([]); setCustomerId(""); setNewName(""); setNewPhone("");
+    setCart([]); setCustomerId(""); setNewName(""); setNewPhone(""); setPriceReason("");
     setTendered(""); setStartAt(""); setDueAt(""); setWorkingHoldId(null);
     setUsePoints(false); setCreditSig(null); setCreditSigError(false);
     setDelivDone(false);
@@ -550,14 +590,32 @@ export default function PosPanel({ onNavigate }: { onNavigate?: (tab: string) =>
                               ))}
                             </select>
                           )}
-                          <div className="text-muted">{toPesos(l.variant?.priceMinor ?? l.product.priceMinor)} each</div>
+                          <div className="d-flex align-items-center gap-1 mt-1">
+                            <div className="input-group input-group-sm" style={{ maxWidth: 132 }}>
+                              <span className="input-group-text">₱</span>
+                              <input
+                                className={`form-control ${isOverridden(l) ? "border-warning bg-warning-subtle" : ""}`}
+                                type="number" inputMode="decimal" min="0" step="0.01"
+                                aria-label={`Price for ${l.product.name}`}
+                                value={((l.priceOverrideMinor ?? catalogPrice(l)) / 100).toString()}
+                                onChange={(e) => setLinePrice(l.product.id, e.target.value)}
+                              />
+                            </div>
+                            {isOverridden(l) && (
+                              <button type="button" className="btn btn-sm btn-outline-secondary" title="Restore the catalog price" onClick={() => revertLinePrice(l.product.id)}>
+                                <i className="bi bi-arrow-counterclockwise"></i>
+                              </button>
+                            )}
+                            {isOverridden(l) && <span className="badge text-bg-warning">edited</span>}
+                          </div>
+                          {isOverridden(l) && <div className="text-muted" style={{ fontSize: "0.72rem" }}>catalog {toPesos(catalogPrice(l))}</div>}
                         </div>
                         <div className="input-group input-group-sm" style={{ width: 104 }}>
                           <button className="btn btn-outline-secondary" onClick={() => setQty(l.product.id, l.quantity - 1)}>-</button>
                           <input className="form-control text-center" value={l.quantity} readOnly />
                           <button className="btn btn-outline-secondary" onClick={() => setQty(l.product.id, l.quantity + 1)}>+</button>
                         </div>
-                        <div className="fw-semibold small" style={{ width: 66, textAlign: "right" }}>{toPesos((l.variant?.priceMinor ?? l.product.priceMinor) * l.quantity)}</div>
+                        <div className="fw-semibold small" style={{ width: 66, textAlign: "right" }}>{toPesos(linePrice(l) * l.quantity)}</div>
                       </div>
                     ))}
                   </>
@@ -583,15 +641,30 @@ export default function PosPanel({ onNavigate }: { onNavigate?: (tab: string) =>
                 )}
                 {newName.trim() && !customerId && <small className="text-muted">Customer is saved automatically when you complete.</small>}
 
+                {overriddenCount > 0 && (
+                  <div className="mt-2">
+                    <label className="form-label small mb-1" htmlFor="posPriceReason">
+                      Reason for the price change{priceReasonMissing ? " *" : ""}
+                    </label>
+                    <input
+                      id="posPriceReason" className={`form-control form-control-sm ${priceReasonMissing ? "is-invalid" : ""}`}
+                      maxLength={140} value={priceReason} onChange={(e) => setPriceReason(e.target.value)}
+                      placeholder={`e.g. regular customer price (${overriddenCount} line(s) changed)`}
+                    />
+                    <div className="invalid-feedback">A short reason is required when a price differs from the catalog.</div>
+                    <div className="form-text">Recorded on the order and printed on the receipt.</div>
+                  </div>
+                )}
+
                 <div className="d-flex justify-content-between fw-bold fs-5 mt-2 mb-2">
                   <span>Total</span><span>{toPesos(subtotal)}</span>
                 </div>
                 <div className="d-flex flex-wrap gap-2">
                   <button className="btn btn-outline-secondary flex-fill" onClick={() => setStep("products")}>Back</button>
-                  <button className="btn btn-warning flex-fill" disabled={cart.length === 0 || busy} onClick={hold}>
+                  <button className="btn btn-warning flex-fill" disabled={cart.length === 0 || busy || priceReasonMissing} onClick={hold}>
                     <i className="bi bi-pause-circle me-1"></i>Hold order
                   </button>
-                  <button className="btn btn-primary flex-fill" disabled={cart.length === 0} onClick={() => { setError(null); setStep("payment"); }}>
+                  <button className="btn btn-primary flex-fill" disabled={cart.length === 0 || priceReasonMissing} onClick={() => { setError(null); setStep("payment"); }}>
                     Pay <i className="bi bi-arrow-right ms-1"></i>
                   </button>
                 </div>

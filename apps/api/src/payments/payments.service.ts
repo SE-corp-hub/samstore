@@ -277,7 +277,17 @@ export class PaymentsService {
       customerName: order.customerName,
       customerPhone: order.customerPhone,
       createdAt: order.createdAt,
-      items: order.items.map((i) => ({ productName: i.productName, sku: i.sku, unitPriceMinor: i.unitPriceMinor, quantity: i.quantity, lineTotalMinor: i.lineTotalMinor })),
+      items: order.items.map((i) => ({
+        productName: i.productName,
+        sku: i.sku,
+        unitPriceMinor: i.unitPriceMinor,
+        quantity: i.quantity,
+        lineTotalMinor: i.lineTotalMinor,
+        // Counter price override: the slip can show that staff changed this price.
+        priceOverridden: i.priceOverridden,
+        priceOverrideReason: i.priceOverrideReason,
+        catalogUnitPriceMinor: i.catalogUnitPriceMinor,
+      })),
       payments: order.payments.map((p) => ({
         id: p.id,
         method: p.method,

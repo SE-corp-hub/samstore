@@ -1,5 +1,19 @@
 # PINDIAN — Progress Log
 
+## Follow-up — Counter price override (POS review + pre-order edit)
+
+| Item | Detail |
+|---|---|
+| Problem | Prices were strictly server-authoritative with no way for counter staff to change one: the POS review showed a static "₱X each", and the pre-order Edit modal only sent quantity, so any typed price was silently discarded and re-priced from the catalog. |
+| Rules | `resolveLinePrice` (`apps/api/src/domain/price-override.ts`): no override → the catalog price wins; an override equal to the catalog price is not treated as an override; any real deviation must be a whole number from ₱0.00 to ₱1,000,000.00 with a 3–140 character reason. A variant line is measured against the VARIANT price, never the product price. |
+| Roles | The POS routes already gate on `TENANT_ROLES.ADMIN` (OWNER/MANAGER/STAFF) — exactly the agreed set, so no role change was needed; SALES_AGENT and DELIVERY cannot reach them. |
+| Audit | `OrderItem` gained `priceOverridden`, `priceOverrideReason`, `priceOverriddenById`, `priceOverriddenAt`, `catalogUnitPriceMinor` (additive migration `20260929100000_order_item_price_override`). A plain sale keeps every column null/false, the catalog price is never mutated, and the order snapshot plus the receipt payload carry the same facts so a printed slip can explain the price. |
+| Scope | POS review (Sell and Hold) and the pre-order Edit modal. One shared reason field covers every changed line, and the client blocks Pay/Hold/Save until it is filled — mirroring the server rule instead of relying on a 422. The Edit price input stays available when `hidePricePreOrder` is on, because hiding is a display rule for the customer-facing list. |
+| Defects fixed on the way | A pre-order/hold edit now preserves `variantId`/`variantName` (a variant line used to be silently flattened into its product) and re-freezes the VAT columns after a re-price instead of keeping the previous ones; the pre-order list returns variant and override data; `PATCH /admin/pos/preorders/:id/items` is scoped to `PRE_ORDER` drafts so it can never re-price a POS hold (and the hold route to `pos`). |
+| Tests | Override rules 9/9; POS + pre-order override integration 7/7 (cash sale audit, untouched sale unchanged, missing reason refused with nothing written, out-of-band prices refused, pre-order create + re-edit, source scoping, variant baseline + receipt markers). Regressions: POS service 21/21, payments 10/10, registers 7/7, split payment 10/10. |
+| Gate | Workspace typecheck and full lint passed (0 errors, 299 warnings — unchanged); secret scan 0 high-severity findings; web production build passed. |
+| Not included (agreed scope) | Price editing in the Hold/Build step or the held-strip item editor, per-line reasons, and the online-order reservation guard from the previous module (unchanged). |
+
 ## Follow-up — Online order stock reservation settlement
 
 | Item | Detail |
