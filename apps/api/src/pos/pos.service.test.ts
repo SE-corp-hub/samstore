@@ -258,6 +258,38 @@ test("finalize ok: COMPLETED + signature + CreditEntry; 2nd call → not_found",
   }
 });
 
+test("finalize with a credit limit the customer cannot absorb returns a conflict, not a 500", async () => {
+  // A pre-order charged to utang must fail CLEANLY when the customer's limit is too
+  // small. It used to throw inside the transaction, which surfaced as a 500
+  // "Internal server error" with no explanation of the actual reason.
+  const fx = await makeFixture();
+  try {
+    await prisma.storeCustomer.update({ where: { id: fx.storeCustomerId }, data: { creditLimitMinor: 5000 } });
+    const created = await svc.createPreOrder(fx.storeId, "actorX", {
+      customerId: fx.storeCustomerId,
+      items: [{ productId: fx.productId, quantity: 2 }], // ₱200 > the ₱50 limit
+    });
+    assert.equal(created.ok, true);
+    if (!created.ok) return;
+
+    const r = await svc.finalizePreorder(fx.storeId, "actorX", created.value.orderId, { signatureData: SIGNATURE });
+    assert.equal(r.ok, false, "finalize is refused instead of throwing");
+    if (r.ok) return;
+    assert.equal(r.error.type, "conflict");
+    assert.ok(JSON.stringify(r.error).toLowerCase().includes("credit"), "the message explains the credit limit");
+
+    // Nothing partial survived: still a draft, no signature, no debt, no balance change.
+    const row = await prisma.order.findUnique({ where: { id: created.value.orderId } });
+    assert.equal(row?.status, "ON_HOLD");
+    assert.equal(row?.signatureData, null);
+    assert.equal(await prisma.creditEntry.count({ where: { orderId: created.value.orderId } }), 0);
+    const sc = await prisma.storeCustomer.findUnique({ where: { id: fx.storeCustomerId } });
+    assert.equal(sc?.creditBalanceMinor, 0);
+  } finally {
+    await cleanupFixture(fx.storeId, fx.customerId);
+  }
+});
+
 test("finalize unknown / non-preorder id → not_found", async () => {
   const fx = await makeFixture();
   try {

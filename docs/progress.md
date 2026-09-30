@@ -1,5 +1,16 @@
 # PINDIAN — Progress Log
 
+## Follow-up — Pre-order finalize returns a real reason instead of a 500
+
+| Item | Detail |
+|---|---|
+| Symptom | Clicking **Finalize** on a pre-order showed only "Internal server error". |
+| Root cause | `PosService.finalizePreorder` threw a plain `Error` inside the finalize transaction when the credit check refused (limit too small, credit disabled, customer not approved). Nothing caught it, so NestJS answered 500 and the reason never reached the UI. Reproduced directly: `Error: Credit limit exceeded (limit ₱50.00)` at `pos.service.ts:559`. |
+| Fix | The transaction is wrapped and its failure is mapped to a typed `conflict` (409) carrying the real message, the same way `completeHold` already behaved. The transaction still rolls back, so the draft stays `ON_HOLD` with no signature, no credit entry and no balance change. |
+| Tests | `pos.service.test.ts` 22/22 — the new case asserts a 2-unit (₱200) pre-order against a ₱50 limit returns a conflict mentioning credit AND that nothing partial persisted. The happy-path finalize test is unchanged. |
+| Gate | Workspace typecheck and full lint passed (0 errors, 299 warnings — unchanged); secret scan 0 high-severity findings. |
+| Not a Supabase outage | The paused project `pindian-staging` (bpcjkaxnvgwqkbdrzohq) is a different project. `DATABASE_URL` points at `yeklfbggabxydnzfyorb` ("extraricestore's Project"), which is reachable — the same credentials serve every test run. |
+
 ## Follow-up — Pre-orders list shows item quantities
 
 | Item | Detail |

@@ -554,19 +554,29 @@ export class PosService {
     const startAt = input.startAt ?? pre?.startAt;
     const dueAt = input.dueAt ?? pre?.dueAt;
     let creditEntryId = "";
-    await prisma.$transaction(async (tx) => {
-      const cr = await this.credit.sellOnCredit(tx as never, storeId, order.storeCustomerId!, id, finalTotal, actorId, { startAt, dueAt });
-      if (!cr.ok) throw new Error("message" in cr.error ? cr.error.message : "Credit declined");
-      await tx.order.update({
-        where: { id },
-        data: { status: "COMPLETED", paymentStatus: "PENDING", signatureData, signatureAt },
-      });
-      const entry = await tx.creditEntry.findFirst({ where: { orderId: id }, orderBy: { createdAt: "desc" } });
-      creditEntryId = entry?.id ?? "";
-      await tx.orderStatusHistory.create({
-        data: { orderId: id, storeId, fromStatus: "ON_HOLD", toStatus: "COMPLETED", actorType: "pos_finalize", actorId },
-      });
-    }, { timeout: 30_000 });
+    try {
+      await prisma.$transaction(async (tx) => {
+        const cr = await this.credit.sellOnCredit(tx as never, storeId, order.storeCustomerId!, id, finalTotal, actorId, { startAt, dueAt });
+        // Mapped below into a clean conflict — an uncaught throw here surfaced as a
+        // 500 "Internal server error" that told staff nothing about the real reason.
+        if (!cr.ok) throw new Error("message" in cr.error ? cr.error.message : "Credit declined");
+        await tx.order.update({
+          where: { id },
+          data: { status: "COMPLETED", paymentStatus: "PENDING", signatureData, signatureAt },
+        });
+        const entry = await tx.creditEntry.findFirst({ where: { orderId: id }, orderBy: { createdAt: "desc" } });
+        creditEntryId = entry?.id ?? "";
+        await tx.orderStatusHistory.create({
+          data: { orderId: id, storeId, fromStatus: "ON_HOLD", toStatus: "COMPLETED", actorType: "pos_finalize", actorId },
+        });
+      }, { timeout: 30_000 });
+    } catch (e) {
+      // The transaction rolled back, so the draft is untouched: report the reason the
+      // way every other counter command does (409 + a message the UI can show).
+      const message = e instanceof Error ? e.message : "Could not finalize the pre-order";
+      await cacheBust(cacheKey("orders", storeId));
+      return { ok: false, error: { type: "conflict", message } };
+    }
     await cacheBust(cacheKey("orders", storeId));
     return {
       ok: true,
