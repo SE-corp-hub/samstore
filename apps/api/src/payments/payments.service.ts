@@ -8,6 +8,7 @@
 import { prisma } from "../persistence/prisma-repositories.js";
 import { randomId } from "../persistence/repositories.js";
 import { restoreStock } from "../domain/movements.js";
+import { settleOrderReservations } from "../domain/stock-settlement.js";
 import { RegisterService } from "../registers/register.service.js";
 import { LoyaltyService } from "../loyalty/loyalty.service.js";
 import { getGateway } from "./gateway.js";
@@ -323,8 +324,14 @@ export class PaymentsService {
     if (order.status === "CANCELLED") return { ok: false, error: { type: "conflict", message: "Order is already cancelled" } };
 
     await prisma.$transaction(async (tx) => {
-      // Restore stock (per line) + ledger
-      await restoreStock(tx, storeId, order.items.map((it) => ({ productId: it.productId ?? "", quantity: it.quantity })), { type: "VOID_RESTORE", orderId, createdBy: actorId });
+      // Stock is source-aware: an ONLINE order still holds a checkout reservation,
+      // so a void releases it (the units never left the shelf and on-hand must not
+      // grow). A POS/pre-order sale already consumed on-hand at sale time, so it is
+      // restored instead. `no-reservation` is the signal for the POS branch.
+      const settlement = await settleOrderReservations(tx, { id: orderId, storeId }, "RELEASED");
+      if (settlement.outcome === "no-reservation") {
+        await restoreStock(tx, storeId, order.items.map((it) => ({ productId: it.productId ?? "", quantity: it.quantity })), { type: "VOID_RESTORE", orderId, createdBy: actorId });
+      }
       await tx.order.update({ where: { id: orderId }, data: { status: "CANCELLED", paymentStatus: "CANCELLED_REFUND" } });
       await tx.payment.create({
         data: { orderId, storeId, method: "cash", amountMinor: 0, note: `VOID: ${reason?.trim() ?? "same-day void"}`.slice(0, 200), type: "void", createdBy: actorId, registerSessionId: await this.registers.attachOpenSession(storeId) },
@@ -371,6 +378,9 @@ export class PaymentsService {
         data: { orderId, storeId, method: "cash", amountMinor: -refundAmount, note: `REFUND: ${reason?.trim() ?? "customer refund"}`.slice(0, 200), type: "refund", createdBy: actorId, registerSessionId },
       });
       await tx.order.update({ where: { id: orderId }, data: { status: "CANCELLED", paymentStatus: "REFUNDED" } });
+      // An online order that is refunded before dispatch gives its reservation
+      // back. Already-delivered orders were consumed, so this is a no-op there.
+      await settleOrderReservations(tx, { id: orderId, storeId }, "RELEASED");
       await tx.orderStatusHistory.create({
         data: { orderId, storeId, fromStatus: order.status, toStatus: "CANCELLED", reason: reason?.trim() ?? null, actorType: "pos_refund", actorId },
       });

@@ -15,7 +15,7 @@ export interface MovementInput {
   variantId?: string | null;
   warehouseId?: string | null;
   delta: number;
-  type: string; // RESERVE | RELEASE | CONSUME | ADJUST | RECEIPT | TRANSFER_IN | TRANSFER_OUT | VOID_RESTORE
+  type: string; // RESERVE | RELEASE_RESERVATION | CONSUME | ADJUST | RECEIPT | TRANSFER_IN | TRANSFER_OUT | VOID_RESTORE | CONVERSION_IN | CONVERSION_OUT
   orderId?: string | null;
   conversionId?: string | null;
   createdBy?: string | null;

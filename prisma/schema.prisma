@@ -54,6 +54,16 @@ enum OrderStatus {
   FAILED_DELIVERY
 }
 
+/// How an ONLINE order's checkout reservation was settled. Null while the
+/// reservation is still held (in flight), then exactly one terminal value:
+/// CONSUMED = fulfilled (on-hand + reserved both fell), RELEASED = cancelled
+/// (reserved only fell; the units stayed on the shelf). POS/pre-order sales
+/// consume on-hand at sale time and never carry a reservation, so they stay null.
+enum OrderStockDisposition {
+  CONSUMED
+  RELEASED
+}
+
 enum PaymentStatus {
   PENDING // COD: awaiting collection at delivery
   RECEIVED // P4: gateway notification or bank-transfer proof received (awaiting review)
@@ -1171,6 +1181,9 @@ model Order {
   storeId              String
   store                Store                @relation(fields: [storeId], references: [id])
   status               OrderStatus          @default(RECEIVED)
+  /// Guarded claim marker for the reservation lifecycle (single source of truth
+  /// for "this order's reservation was already settled") — see OrderStockDisposition.
+  stockDisposition     OrderStockDisposition?
   source               String               @default("online") // online | pos
   deliveryType         String               @default("delivery") // delivery | pickup (UI U5)
   fulfillmentType      OrderFulfillmentType @default(DELIVERY) // M3: explicit; backfilled from address

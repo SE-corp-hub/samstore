@@ -3,6 +3,7 @@
 import { prisma } from "../persistence/prisma-repositories.js";
 import { cacheBust, cacheKey } from "../persistence/ttl-cache.js";
 import { deductStock, restoreStock } from "../domain/movements.js";
+import { hasActiveReservation, settleForStatus } from "../domain/stock-settlement.js";
 import { assertTransition, paymentEffectFor, type OrderState } from "../domain/order-state.js";
 import { computeOrderTotals } from "../domain/pricing.js";
 import { taxColumnsFor } from "../domain/tax-store.js";
@@ -64,6 +65,9 @@ export class OrderAdminService {
           actorId: actor?.id ?? null,
         },
       });
+      // Fulfilment consumes the checkout reservation; cancellation releases it.
+      // Same transaction as the status change — never a half-applied outcome.
+      await settleForStatus(tx, { id: orderId, storeId }, toStatus);
     });
 
     // Loyalty: award points when the order is delivered (and linked to a customer).
@@ -124,6 +128,19 @@ export class OrderAdminService {
     if (!order) return { ok: false, error: { type: "not_found", message: "Order not found" } };
     if (!OrderAdminService.EDITABLE.includes(order.status)) {
       return { ok: false, error: { type: "conflict", message: `Cannot edit an order in ${order.status}` } };
+    }
+    // An online order still holds the stock it reserved at checkout. The delta
+    // edit below moves the ON-HAND balance (correct for a POS hold that consumed
+    // stock at sale time, wrong for a live reservation), so refuse instead of
+    // corrupting availability. Reservation-aware editing is a follow-up.
+    if (await prisma.$transaction((tx) => hasActiveReservation(tx, storeId, orderId))) {
+      return {
+        ok: false,
+        error: {
+          type: "conflict",
+          message: "Cannot edit the items of an online order whose stock is still reserved — cancel the order or adjust stock in Inventory.",
+        },
+      };
     }
 
     // Fresh products + availability
@@ -230,6 +247,8 @@ export class OrderAdminService {
       await tx.orderStatusHistory.create({
         data: { orderId, storeId, fromStatus: order.status, toStatus: "COMPLETED", reason: "move-to-completed (pickup)", actorType: "admin", actorId: null },
       });
+      // Handed over at the counter: the checkout reservation is now consumed.
+      await settleForStatus(tx, { id: orderId, storeId }, "COMPLETED");
     });
     await cacheBust(cacheKey("orders", storeId));
     return { ok: true, value: { id: orderId, status: "COMPLETED" } };

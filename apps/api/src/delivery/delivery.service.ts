@@ -2,6 +2,7 @@
 // (no per-order assignment). Marks DELIVERED / FAILED_DELIVERY (+ reason). Tenant-scoped.
 
 import { prisma } from "../persistence/prisma-repositories.js";
+import { settleForStatus } from "../domain/stock-settlement.js";
 import { LoyaltyService } from "../loyalty/loyalty.service.js";
 import type { ApiError } from "@sam-store/contracts";
 
@@ -73,6 +74,9 @@ export class DeliveryService {
       await tx.orderStatusHistory.create({
         data: { orderId, storeId, fromStatus: "OUT_FOR_DELIVERY", toStatus, reason: reason?.trim() ?? null, actorType: "delivery" },
       });
+      // Handed to the customer: consume the checkout reservation in the same
+      // transaction. A FAILED_DELIVERY keeps the reservation so a retry can go out.
+      await settleForStatus(tx, { id: orderId, storeId }, toStatus);
     });
     // Award loyalty points when a delivery is completed (same rule as admin transition).
     if (toStatus === "DELIVERED") {
@@ -126,6 +130,8 @@ export class DeliveryService {
       await tx.orderStatusHistory.create({
         data: { orderId, storeId, fromStatus: "OUT_FOR_DELIVERY", toStatus: "CANCELLED", reason: reason?.trim() ?? null, actorType: "delivery" },
       });
+      // Never dispatched: the reserved units go back on the shelf.
+      await settleForStatus(tx, { id: orderId, storeId }, "CANCELLED");
     });
     return { ok: true, value: { id: orderId, status: "CANCELLED" } };
   }

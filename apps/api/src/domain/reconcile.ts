@@ -11,6 +11,7 @@
 //   StockLevel.quantityOnHand             == impliedInitial + sum(StockMovement.delta)
 
 import { prisma } from "../persistence/prisma-repositories.js";
+import { RESERVED_ONLY_MOVEMENT_TYPES } from "./stock-settlement.js";
 
 export type DriftKind = "voucher" | "loyalty" | "credit" | "stock";
 
@@ -152,9 +153,11 @@ export async function reconcileStock(opts: ReconcileOptions = {}): Promise<Drift
   const rows: DriftRow[] = [];
   for (const level of levels) {
     const movements = await prisma.stockMovement.findMany({
-      // RESERVE movements move `quantityReserved`, NOT the on-hand balance — including
-      // them would report a phantom drift of exactly the reserved quantity.
-      where: { storeId: level.storeId, productId: level.productId, warehouseId: level.warehouseId ?? null, type: { not: "RESERVE" } },
+      // RESERVE / RELEASE_RESERVATION move `quantityReserved`, NOT the on-hand
+      // balance — including them would report a phantom drift of exactly the
+      // reserved quantity. Variant legs belong to ProductVariant's own counters,
+      // so they are not part of a StockLevel's on-hand identity either.
+      where: { storeId: level.storeId, productId: level.productId, warehouseId: level.warehouseId ?? null, variantId: null, type: { notIn: [...RESERVED_ONLY_MOVEMENT_TYPES] } },
       orderBy: { createdAt: "asc" },
     });
     if (movements.length === 0) continue; // no on-hand history — predates the ledger

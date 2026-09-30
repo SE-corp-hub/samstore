@@ -1,5 +1,20 @@
 # PINDIAN — Progress Log
 
+## Follow-up — Online order stock reservation settlement
+
+| Item | Detail |
+|---|---|
+| Problem | Online checkout only raised `quantityReserved`; nothing ever consumed or released it. Delivered orders kept phantom reservations, cancelled orders stranded stock, and a void/refund inflated on-hand instead of giving the reservation back. |
+| Settlement | `settleOrderReservations` (`apps/api/src/domain/stock-settlement.ts`) replays the order's RESERVE ledger legs, aggregated per stock row. Fulfilment (`DELIVERED`, pickup `COMPLETED`) decrements on-hand **and** reserved with `CONSUME` movements; cancellation (`CANCELLED`) decrements reserved only with `RELEASE_RESERVATION` movements. Both run inside the same transaction as the status change. |
+| Idempotency | `Order.stockDisposition` (enum `CONSUMED`/`RELEASED`, additive nullable column) is claimed with a guarded conditional `UPDATE ... WHERE "stockDisposition" IS NULL`. The first caller wins; every retry, double click, or concurrent courier/admin settles nothing. A failed settlement rolls the claim back and stays retryable. |
+| Source-aware | POS and pre-order sales consume on-hand at sale time and carry no reservation, so settlement reports `no-reservation` and writes nothing; POS voids still restore stock. Voids and refunds now release an online reservation rather than adding phantom on-hand. |
+| Guards | Tenant-scoped leg reads (another store's order has no visible legs), per-order `CONSUME`/`RELEASE_RESERVATION` ledger rows with `balanceAfter`, dispatch/`FAILED_DELIVERY`/retry deliberately leave the reservation in place, and an item edit on an order with a live reservation is refused with a conflict (the old delta path moved on-hand, which corrupts availability). |
+| Reconciliation | `reconcileStock` now excludes both reserved-only movement types from the on-hand identity and ignores variant legs (which belong to `ProductVariant` counters), so settlement cannot be reported as on-hand drift. |
+| Migration | Additive `20260929090000_order_stock_disposition` (new `OrderStockDisposition` enum + nullable column), applied. |
+| Tests | Reservation settlement 11/11 (fulfilment, cancellation, idempotency, POS no-op, variant counters, multi-warehouse legs, tenant isolation, void, item-edit guard, post-settlement reconciliation). Regression: movements 4/4, reconcile 3/3, stock guard 4/4, atomic checkout 4/4, delivery service 6/6, payments 10/10, POS 21/21, checkout 16/16. |
+| Gate | Workspace typecheck and full lint passed (0 errors, 299 warnings — unchanged); secret scan 0 high-severity findings. Web production build unaffected (API-only change). |
+| Pre-existing (verified not caused by this change) | `persistence/integrity.test.ts` fulfilment-invariant test fails on 6 stale 2026-09-21 Phase-4A E2E orders with an empty address; `pos/pos-variant.test.ts` fails on an orphan `01P2PV-000001` order left by an aborted run (order numbers derive from a 6-char slug prefix, so they collide globally); `reconcile.ts` reports the same 6 drifts with and without this change (baseline captured by stashing). |
+
 ## Follow-up — Inventory stock conversion
 
 | Item | Detail |
