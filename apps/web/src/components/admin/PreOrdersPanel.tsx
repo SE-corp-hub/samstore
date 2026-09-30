@@ -439,6 +439,29 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
 
   const itemCount = (p: Preorder) => p.items.reduce((s, i) => s + i.quantity, 0);
 
+  /**
+   * Items WITH their quantity ("3 × Iced Kape") instead of a bare count, so staff can
+   * see what a pre-order actually holds without opening it. Long lists stay readable:
+   * the first `max` lines are shown and the rest collapse behind "+N more" (full list
+   * in the tooltip).
+   */
+  const itemLines = (p: Preorder, max = 3) => (
+    <>
+      {p.items.slice(0, max).map((it) => (
+        <div key={`${it.productId}|${it.variantId ?? ""}`} className="small text-nowrap">
+          <span className="fw-semibold">{it.quantity} ×</span> {it.productName}
+          {it.variantName ? <span className="text-muted"> · {it.variantName}</span> : null}
+        </div>
+      ))}
+      {p.items.length > max && (
+        <div className="small text-muted" title={p.items.map((i) => `${i.quantity} × ${i.productName}`).join("\n")}>
+          +{p.items.length - max} more
+        </div>
+      )}
+      {p.items.length === 0 && <span className="small text-muted">no items</span>}
+    </>
+  );
+
   /** Aggregate pre-order items: how many units of each product are on hold (draft) vs sold (finalized) in the current range. */
   const holdSoldRows = () => {
     const map: Record<string, { productName: string; holdQty: number; soldQty: number }> = {};
@@ -487,6 +510,7 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
         <div className="small text-muted mb-1">
           {itemCount(p)} item(s) · due {p.dueAt ? fmtDate(p.dueAt) : "—"}
         </div>
+        <div className="mb-1">{itemLines(p, 2)}</div>
         <div className="d-flex flex-wrap gap-1 align-items-center">
           {rowActions(p, finalizeOnly)}
         </div>
@@ -498,7 +522,7 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
     <table className="table table-sm align-middle mb-1 d-none d-md-table">
       <thead>
         <tr>
-          <th>Order</th><th>Customer</th><th className="text-end">Items</th><th className="text-end">Total</th><th>Due</th><th>Status</th><th className="text-end">Actions</th>
+          <th>Order</th><th>Customer</th><th>Items</th><th className="text-end">Total</th><th>Due</th><th>Status</th><th className="text-end">Actions</th>
         </tr>
       </thead>
       <tbody>
@@ -508,7 +532,7 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
             <tr key={p.id} className={pastDue ? "table-danger" : ""}>
               <td className={pastDue ? "text-danger fw-semibold" : "fw-semibold"}>{p.orderNumber}</td>
               <td className="small">{p.customerName || "—"}</td>
-              <td className="text-end">{itemCount(p)}</td>
+              <td>{itemLines(p)}</td>
               <td className="text-end">{maybePrice(p.totalMinor)}</td>
               <td className="small">{p.dueAt ? fmtDate(p.dueAt) : "—"}</td>
               <td><span className={`badge ${PRE_STATUS_BADGE[p.status] ?? "text-bg-secondary"}`}>{p.status}</span></td>

@@ -1,5 +1,15 @@
 # PINDIAN — Progress Log
 
+## Follow-up — Pre-orders list shows item quantities
+
+| Item | Detail |
+|---|---|
+| Problem | The Pre-Orders table listed only a bare item count in the Items column (`Order \| Customer \| Items`), so staff had to open a draft to learn what it actually held. The mobile card showed "N item(s)". |
+| Change | The Items cell now lists each line as `2 × Kape Barako` (quantity bound to the product, variant name appended when present), left-aligned; the first three lines show and the rest collapse behind "+N more" with the full list in the tooltip. Mobile cards show the same list (two lines). The column header no longer right-aligns. |
+| No API change | The list endpoint already returned line quantities; only the panel's rendering changed. |
+| Tests | New E2E `12-preorder-items-quantity.spec.ts` creates a pre-order for a uniquely named product through the API, then asserts the rendered row reads `2 × <product name>` and that the list endpoint carries the quantity. The spec scopes its locator by ORDER NUMBER, because the panel also renders an aggregate hold/sold table that repeats product names without one. It cleans up its order, product, stock rows and quick customer. |
+| Gate | Workspace typecheck and full lint passed (0 errors, 299 warnings — unchanged); secret scan 0 high-severity findings; web production build passed; E2E spec 12 passed. |
+
 ## Follow-up — Counter price override (POS review + pre-order edit)
 
 | Item | Detail |
