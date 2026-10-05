@@ -4,6 +4,10 @@ import { APIRequestContext, Page, expect } from "@playwright/test";
 export const API = "http://localhost:4100";
 export const ADMIN_EMAIL = "admin@samstore.test";
 export const ADMIN_PASSWORD = "admin-pass-123"; // seeded demo credential (prisma/seed.ts)
+// Platform operator — holds PLATFORM_ADMIN but NO store membership, so every
+// store-scoped endpoint 403s until they explicitly target a store (tenant-context.ts).
+export const PLATFORM_EMAIL = "platform@samstore.test";
+export const PLATFORM_PASSWORD = "platform-pass-123";
 
 /** Browser admin login — the current form uses a single "Phone or email" identifier field. */
 export async function loginAs(page: Page, identifier: string, password: string) {

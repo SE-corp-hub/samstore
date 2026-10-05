@@ -1,5 +1,18 @@
 # PINDIAN — Progress Log
 
+## Fix — the PLATFORM_ADMIN role can finally see data
+
+| Item | Detail |
+|---|---|
+| Symptom | A platform operator logged in and got "Failed to load overview", with every store-scoped widget empty. |
+| Root cause | The API was right and the web app was wrong. Probed live as `platform@samstore.test`: `/admin/stores` → **200 with 262 stores**, and with `X-Store-Id: <any store>` the widgets returned **200 with real data** (`analytics/status`: 61 RECEIVED / ₱8,904; `analytics/daily`; `inventory?status=low`: Kape Barako; `settings`). With no store header all four returned **403 "No active store membership"** — which is deliberate, per `auth/tenant-context.ts:7-8` ("PLATFORM_ADMIN is a global bypass that still requires an explicit store target (header) or an ACTIVE membership"). The seeded platform admin holds **0 memberships** (`/admin/stores/mine` → `stores: 0`), and `AdminDashboard.tsx` built the store switcher from `/admin/stores/mine` only — so the switcher was empty, `X-Store-Id` was never sent, and the four store-scoped tabs granted to `PLATFORM_ADMIN` could never resolve a tenant. |
+| Fix | The dashboard now also loads the platform-wide store list for a `PLATFORM_ADMIN` (labelled `(platform)`), the switcher renders for that role, and no store is auto-selected — the operator picks the tenant to inspect. `OverviewPanel` distinguishes "every widget refused for want of a store" (all three 403) from a genuine load failure and now says *"Select a store from the switcher above to view its dashboard."* |
+| Tests | New `apps/api/e2e/14-platform-admin-store-switcher.spec.ts`: the platform admin sees the actionable prompt (not "Failed to load overview"), finds Sam's Store in the switcher, sees that store's widgets load, and switching to another tenant re-scopes them. Also `02-admin-login` and `13-expired-session-redirect`: 3 passed. |
+| Gate | Workspace typecheck clean; lint back to its **299-warning baseline** (0 errors) after removing the `any` and non-null assertions this change introduced; secret scan 0 high-severity findings; web production build compiled successfully; web 200 after restart. |
+| Follow-up found | The platform store list holds **262 stores**, overwhelmingly leftover E2E fixtures — it pollutes the operator's store picker. Cleanup approved by the operator and done in the next entry. |
+
+## Housekeeping — test stores removed from the platform list
+
 ## Fix — a dead admin session no longer shows "Failed to load overview"
 
 | Item | Detail |

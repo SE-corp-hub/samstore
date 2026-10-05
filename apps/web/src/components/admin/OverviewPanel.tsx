@@ -43,21 +43,27 @@ export default function OverviewPanel({ onNavigate, storeSlug, storeName }: Over
       fetch(`${API_URL}/admin/inventory?status=low`, { headers: adminHeaders() }).catch(() => null),
     ]);
     let failed = 0;
+    let forbidden = 0;
     let unauthorized = false;
     if (sRes?.ok) setStatus((await sRes.json()).rows ?? []);
-    else failed++;
+    else { failed++; if (sRes?.status === 403) forbidden++; }
     if (dRes?.ok) setDaily((await dRes.json()).days ?? []);
-    else failed++;
+    else { failed++; if (dRes?.status === 403) forbidden++; }
     if (iRes?.ok) {
       const items = ((await iRes.json()).items ?? []);
       setLowStockCount(items.length);
       setLowItems(items.slice(0, 5).map((x: any) => ({ name: x.name ?? x.productName ?? "Item", availableQuantity: x.availableQuantity ?? 0 })));
-    } else failed++;
+    } else { failed++; if (iRes?.status === 403) forbidden++; }
     // A dead session explains every widget failing at once — send the operator to
     // login instead of reporting a generic load failure they cannot act on.
     unauthorized = [sRes, dRes, iRes].some((r) => handleUnauthorized(r));
     if (unauthorized) return;
-    if (failed === 3) {
+    if (failed === 3 && forbidden === 3) {
+      // Every widget was refused for want of a store: a platform operator who hasn't
+      // picked a tenant yet. Say what to do instead of blaming a failed load.
+      setError("Select a store from the switcher above to view its dashboard.");
+      setPartial(false);
+    } else if (failed === 3) {
       setError("Failed to load overview");
       setPartial(false);
     } else if (failed > 0) {

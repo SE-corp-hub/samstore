@@ -92,6 +92,29 @@ export default function AdminDashboard() {
         }
       })
       .catch(() => { /* non-fatal */ });
+
+    // A platform operator holds NO store membership, so /admin/stores/mine is empty,
+    // the switcher had nothing to show and no X-Store-Id was ever sent — every
+    // store-scoped call then answered 403 "No active store membership" and the
+    // overview looked permanently broken. Offer the platform-wide store list instead
+    // and let the operator target a store explicitly (see auth/tenant-context.ts:52).
+    if (getAdminRole() === "PLATFORM_ADMIN") {
+      fetch(`${API_URL}/admin/stores`, { headers: { Authorization: `Bearer ${token}` } })
+        .then((res) => {
+          if (handleUnauthorized(res)) return null;
+          return res.ok ? res.json() : null;
+        })
+        .then((data) => {
+          const listed = (data?.stores ?? []) as Array<{ id: string; name: string; slug: string }>;
+          const platform: MyStore[] = listed.map((s) => ({ ...s, role: "platform" }));
+          if (platform.length === 0) return;
+          setStores(platform);
+          // Deliberately NOT auto-selecting: the operator picks which tenant to view.
+          const kept = getAdminStoreId();
+          setActiveStore(platform.some((s) => s.id === kept) ? kept : null);
+        })
+        .catch(() => { /* non-fatal */ });
+    }
   }, [router]);
 
   const switchStore = (storeId: string) => {
@@ -214,7 +237,7 @@ case "erp": return <ErpPanel />;
               {role === "DELIVERY" ? "Courier" : "Dashboard"}
             </span>
             <div className="ms-auto d-flex align-items-center gap-2">
-              {stores.length > 1 && (
+              {(stores.length > 1 || (role === "PLATFORM_ADMIN" && stores.length > 0)) && (
                 <select
                   className="form-select form-select-sm"
                   style={{ width: 190 }}
