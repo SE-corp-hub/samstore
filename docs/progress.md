@@ -1,5 +1,18 @@
 # PINDIAN — Progress Log
 
+## Security — the public data API is closed on the `public` schema
+
+| Item | Detail |
+|---|---|
+| Reported | Supabase Shield, 27 Sep 2026: `rls_disabled_in_public` and `sensitive_columns_exposed` on project `yeklfbggabxydnzfyorb` — the project `DATABASE_URL` actually points at. |
+| Verified | Every one of the **70 tables in `public` had RLS disabled**, and the `anon` role held **SELECT/INSERT/UPDATE/DELETE on all 70** — including `User.passwordHash`, `PlatformUser`, `Customer`, `Payment`, `Order.signatureData`, `OrderClaimToken.token`, `PublicStoreLink.token`. Anyone with the public project URL and anon key could read or wipe the database through PostgREST. |
+| Fix | Migration `20261005090000_lock_down_public_schema`: enables RLS on every `public` table (idempotent loop), revokes all privileges on `public` tables and sequences from `anon` and `authenticated`, and revokes their default privileges so tables added by later migrations are locked down too. |
+| Why the app is unaffected | The API reaches Postgres as `postgres`, which is the owner of all 70 tables and carries `BYPASSRLS`; `service_role` also bypasses RLS. The codebase contains no Supabase client, PostgREST call or anon key (`.env` holds only `DATABASE_URL`, `PORT`, `REDIS_URL`, `CLAIM_SIGNING_SECRET`, `SESSION_SECRET`, `BCRYPT_ROUNDS`), so nothing in the product depends on the Data API. |
+| Tests | New `apps/api/src/persistence/row-level-security.test.ts` — 3/3: no `public` table without RLS, no `anon`/`authenticated` privileges, and both application roles bypass RLS. First test also covers any table a future migration adds. Regressions: `pos.service.test.ts` 22/22, `auth/tenant-context.test.ts` 8/8, and both dev servers healthy (200) against the locked-down database. |
+| Gate | Workspace typecheck and full lint passed (0 errors, 299 warnings — unchanged); secret scan 0 high-severity findings. |
+| Revert | `ALTER TABLE … DISABLE ROW LEVEL SECURITY` per table plus `GRANT ALL ON ALL TABLES IN SCHEMA public TO anon, authenticated` — deliberately left closed. |
+| Follow-up | The Supabase pooler intermittently refuses or delays new connections (11s observed, sometimes `P1001`), which produces pool-timeout failures. Raising Prisma's `poolTimeout` from the 10s default is the recommended fix; not done in this module. |
+
 ## Follow-up — Pre-order finalize returns a real reason instead of a 500
 
 | Item | Detail |
