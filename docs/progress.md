@@ -1,5 +1,25 @@
 # PINDIAN — Progress Log
 
+## Fix — a dead admin session no longer shows "Failed to load overview"
+
+| Item | Detail |
+|---|---|
+| Symptom | The dashboard reported "Failed to load overview" and the operator was stuck there. |
+| Root cause | Two facts, proved against the running API: all three overview widgets (`/admin/analytics/status`, `/admin/analytics/daily`, `/admin/inventory?status=low`) answered **401**, while the same three answered **200** with a freshly issued token. `AdminDashboard.tsx` only redirected when the token was **missing** — a token that is present but expired or foreign sailed through, `/admin/me` and `/admin/stores/mine` 401'd silently, and every panel then reported a generic load failure. No component anywhere handled a 401. |
+| Fix | `handleUnauthorized()` in `apps/web/src/lib/admin.ts` clears the dead token and store id and returns the operator to `/admin/login`, returning `true` so callers stop. Wired into the dashboard shell (`/admin/me`, `/admin/stores/mine`) and into the three overview widget fetches, so the first rejection ends the request instead of reporting a failure the operator cannot act on. |
+| Tests | New `apps/api/e2e/13-expired-session-redirect.spec.ts` — a syntactically valid token signed by nobody now lands on `/admin/login` with the dead credentials cleared, and a real login afterwards shows no load failure. It fails on the old code (page stays on `/admin/dashboard`). Also ran `02-admin-login` and `12-preorder-items-quantity`: 3 passed. |
+| Gate | Workspace typecheck clean; full lint 0 errors, 299 warnings (unchanged); secret scan 0 high-severity findings; web production build compiled successfully. Both servers verified 200 after the restart. |
+| Flake noted | `12-preorder-items-quantity` failed once inside a 3.3m combined run and passed both alone and on a repeat combined run (1.4m) — pooler latency, not this change. |
+| Operator action | A real session was still needed: the seeded demo owner is `admin@samstore.test` / `admin-pass-123`. |
+
+## Open P0 found while fixing this — the JWT signing secret is a repo constant
+
+| Item | Detail |
+|---|---|
+| Finding | `.env` has no `JWT_SECRET`. `app.module.ts` then falls back to the hard-coded `dev-jwt-secret-change-me-0123456789` at four injection sites (lines 124, 149, 156, 201), so **every admin, customer and platform token is signed with a constant that is public in this repository** — anyone could forge an OWNER token. `main.ts` only rejects a weak or placeholder secret when `NODE_ENV=production`, so a non-production run accepts it silently. |
+| Second finding | `REDIS_URL` is set but effectively blank, so `redis.ts` uses its in-process `Map` fallback: rate limits and TTL caches are per-process and are wiped by an API restart. |
+| Status | **Not changed.** Writing a signing secret is a credential change and needs operator approval; the value must never enter the repo, a commit, a log or a prompt. Recommended: generate a 64-character random secret into `.env` (gitignored), restart the API — which invalidates all existing sessions — and set a real `REDIS_URL`. |
+
 ## Follow-up — the managed pooler's latency no longer fails requests or tests
 
 | Item | Detail |

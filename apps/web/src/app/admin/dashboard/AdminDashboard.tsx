@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   getAdminToken, getAdminStoreId, setAdminStoreId, getAdminRole,
-  NAV_GROUPS, allowedTabs, defaultTabFor, isOwnerRole,
+  NAV_GROUPS, allowedTabs, defaultTabFor, isOwnerRole, handleUnauthorized,
 } from "../../../lib/admin";
 import { API_URL } from "../../../config";
 import OverviewPanel from "../../../components/admin/OverviewPanel";
@@ -59,13 +59,19 @@ export default function AdminDashboard() {
     setAuthed(true);
     setActiveStore(getAdminStoreId());
     fetch(`${API_URL}/admin/me`, { headers: { Authorization: `Bearer ${token}` } })
-      .then((res) => (res.ok ? res.json() : null))
+      .then((res) => {
+        if (handleUnauthorized(res)) return null;
+        return res.ok ? res.json() : null;
+      })
       .then((d) => d && setEmail(d.email ?? ""))
       .catch(() => {});
     fetch(`${API_URL}/admin/stores/mine`, {
       headers: { Authorization: `Bearer ${token}` },
     })
-      .then((r) => r.json())
+      .then((r) => {
+        if (handleUnauthorized(r)) return null;
+        return r.json();
+      })
       .then((data) => {
         if (data?.stores?.length) {
           setStores(data.stores);

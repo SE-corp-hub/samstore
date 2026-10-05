@@ -19,6 +19,25 @@ export function adminHeaders(): Record<string, string> {
   return headers;
 }
 
+/**
+ * Handles a 401 from any admin API call: drops the dead session and returns the
+ * operator to the login screen. A token can be present but expired or signed by
+ * someone else — without this the dashboard renders and every widget reports a
+ * generic failure ("Failed to load overview") with no way back to login.
+ * Returns true when the session was rejected, so callers can stop.
+ */
+export function handleUnauthorized(res: { status: number } | null | undefined): boolean {
+  if (!res || res.status !== 401) return false;
+  try {
+    sessionStorage.removeItem("samstore.admin.token");
+    sessionStorage.removeItem("samstore.admin.storeId");
+  } catch { /* ignore */ }
+  if (typeof window !== "undefined" && !window.location.pathname.startsWith("/admin/login")) {
+    window.location.assign("/admin/login");
+  }
+  return true;
+}
+
 export interface AdminOrder {
   id: string;
   orderNumber: string;
