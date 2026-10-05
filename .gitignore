@@ -29,3 +29,6 @@ coverage/
 # Playwright E2E artifacts
 apps/api/test-results/
 apps/api/playwright-report/
+# …and the same artifacts when Playwright is invoked from the repo root
+test-results/
+playwright-report/
