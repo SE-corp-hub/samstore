@@ -28,10 +28,17 @@ import { InsufficientStockError } from "../domain/movements.js";
 // connection_limit: the Supabase session pooler caps at 15 clients; capping the
 // Prisma client (default 4) keeps a long sequential test suite from exhausting the
 // pool with parallel lookups (root cause of the documented EMAXCONNSESSION flakes).
+// connect_timeout: the pooler intermittently refuses or delays a fresh connection
+// (measured 11s, occasionally P1001 "can't reach database server"), which is well
+// past Prisma's 10s default and surfaces as a 500 on a request that would have
+// succeeded. 20s turns those into successful connections.
+// pool_timeout: how long a query waits for a free connection before failing.
+// Prisma's default is 10s, which this pooler regularly exceeds while Supabase's own
+// components (Supavisor, PostgREST, pg_cron, pg_net, postgres_exporter) hold most of
+// the 15-session cap — producing spurious "Timed out fetching a new connection".
+// Both are engine URL parameters (seconds), not client options, in Prisma 6.
 const DATABASE_URL = process.env.DATABASE_URL ?? "";
-const pooledUrl = DATABASE_URL.includes("?")
-  ? `${DATABASE_URL}&connection_limit=4`
-  : `${DATABASE_URL}?connection_limit=4`;
+const pooledUrl = `${DATABASE_URL}${DATABASE_URL.includes("?") ? "&" : "?"}connection_limit=4&connect_timeout=20&pool_timeout=30`;
 
 export const prisma = new PrismaClient({
   transactionOptions: { timeout: 30_000, maxWait: 15_000 },

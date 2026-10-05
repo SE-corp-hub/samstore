@@ -1,5 +1,33 @@
 # PINDIAN — Progress Log
 
+## Follow-up — the managed pooler's latency no longer fails requests or tests
+
+| Item | Detail |
+|---|---|
+| Symptom | Intermittent `P1001 can't reach database server`, `Timed out fetching a new connection from the connection pool` (10s default), and two dev servers dying mid-session. Users saw these as 500s. |
+| Measured | The pooler needs ~11s to hand out a connection and sometimes refuses outright. `pg_stat_activity` shows why the headroom is thin: the session pooler caps at 15 and Supabase's own components already hold ~6 of them (Supavisor ×4, PostgREST, pg_cron, pg_net, postgres_exporter), alongside one leaked idle session. Prisma 6 exposes neither `poolTimeout` nor a retry as a client option here, so both budgets are engine URL parameters. |
+| Fix | `prisma-repositories.ts` now appends `connect_timeout=20&pool_timeout=30` alongside the existing `connection_limit=4`, so a slow or refused handshake becomes a slow success instead of a 500, and a query waits for a free connection instead of failing at 10s. |
+| Verified | `row-level-security.test.ts` 3/3, `pos.service.test.ts` 22/22, `auth/tenant-context.test.ts` 8/8, `pos-price-override.test.ts` 7/7 — run back-to-back, all green, where the tenant suite previously failed then needed a 120s pause to pass. API restarted on the new settings: `/health/ready` 200, web `/admin/dashboard` 200. |
+| Gate | Workspace typecheck clean; full lint 0 errors, 299 warnings (unchanged); secret scan 0 high-severity findings. |
+| Not fixed here | Leaked sessions are not reaped automatically — a crashed process can strand a session for hours. Closing clients on shutdown, and asking Supabase to raise the session cap, remain open. |
+
+## Follow-up — exposure checked beyond the `public` schema
+
+| Item | Detail |
+|---|---|
+| `public` | 70 of 70 tables with RLS enabled, 0 without — the lockdown holds. |
+| `storage` | 8 of 8 tables already have RLS, and `storage.buckets` is empty, so no object is reachable. The `anon`/`authenticated` grants there are Supabase Storage's own design; its policies, not the grants, are the gate. Left untouched. |
+| `auth`, `vault` | 11 tables without RLS each, but these are Supabase-managed and not served by the Data API, which exposes the `public` schema only. Changing them risks breaking platform auth and secrets; left untouched deliberately. |
+| `realtime` | 2 tables without RLS, but Realtime authorises in its own server, not via RLS, and the app uses no realtime features. Left untouched. |
+
+## Follow-up — the paused-project email, settled with evidence
+
+| Item | Detail |
+|---|---|
+| Verdict | Not our database. `pg_postmaster_start_time()` shows `yeklfbggabxydnzfyorb` has served **34 days 00:31** continuously — a paused project restarts Postgres, and this one never did. The paused project is `pindian-staging` (bpcjkaxnvgwqkbdrzohq). |
+| Operator-only action | Unpausing `pindian-staging` happens in the Supabase dashboard; it cannot be done from this repo, and nothing here depends on it. |
+| Standing risk | A free-tier project auto-pauses after 7 days idle. Preventing that on `yeklfbggabxydnzfyorb` is a billing decision (upgrade to Pro), outside the codebase. |
+
 ## Security — the public data API is closed on the `public` schema
 
 | Item | Detail |
