@@ -1089,7 +1089,7 @@ export class AdminController {
 
   /** GET /admin/analytics/daily?days=14 — revenue + orders per day. */
   @Get("analytics/daily")
-  async analyticsDaily(@Req() req: Request & { user?: AuthPrincipal }, @Headers("x-store-id") headerStoreId?: string, @Headers("days") days?: string) {
+  async analyticsDaily(@Req() req: Request & { user?: AuthPrincipal }, @Headers("x-store-id") headerStoreId?: string, @Query("days") days?: string) {
     const user = req.user;
     requireUser(user);
     const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
