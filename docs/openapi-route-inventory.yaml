@@ -858,6 +858,15 @@ paths:
         '401': { description: Unauthorized }
         '404': { description: Not found }
       security: [{ bearerAuth: [] }]
+  /admin/pos/preorders/{id}/items:
+    patch:
+      summary: Controller route (apps/api/src/pos\pos.controller.ts)
+      responses:
+        '200': { description: Successful response }
+        '400': { description: Validation error }
+        '401': { description: Unauthorized }
+        '404': { description: Not found }
+      security: [{ bearerAuth: [] }]
   /admin/pos/preorders:
     get:
       summary: Controller route (apps/api/src/pos\pos.controller.ts)
@@ -1290,6 +1299,15 @@ paths:
         '401': { description: Unauthorized }
         '404': { description: Not found }
       security: [{ bearerAuth: [] }]
+  /admin/stock/conversions:
+    post:
+      summary: Controller route (apps/api/src/inventory\inventory.controller.ts)
+      responses:
+        '200': { description: Successful response }
+        '400': { description: Validation error }
+        '401': { description: Unauthorized }
+        '404': { description: Not found }
+      security: [{ bearerAuth: [] }]
   /admin/stock/movements:
     get:
       summary: Controller route (apps/api/src/inventory\inventory.controller.ts)
@@ -1512,6 +1530,15 @@ paths:
         '401': { description: Unauthorized }
         '404': { description: Not found }
       security: [{ bearerAuth: [] }]
+    post:
+      summary: Controller route (apps/api/src/admin\admin.controller.ts)
+      responses:
+        '200': { description: Successful response }
+        '400': { description: Validation error }
+        '401': { description: Unauthorized }
+        '404': { description: Not found }
+      security: [{ bearerAuth: [] }]
+  /admin/users:
     post:
       summary: Controller route (apps/api/src/admin\admin.controller.ts)
       responses:

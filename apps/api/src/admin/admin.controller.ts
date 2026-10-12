@@ -4,6 +4,7 @@ import {
   Delete,
   Get,
   Headers,
+  HttpCode,
   HttpException,
   HttpStatus,
   Inject,
@@ -338,6 +339,27 @@ export class AdminController {
       throw new HttpException({ type: "forbidden", message: "Platform admin only" }, HttpStatus.FORBIDDEN);
     }
     const result = await this.storesAdmin.create(body);
+    if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
+    return result.value;
+  }
+
+  /** POST /admin/users — create a user and optionally bind them to a store (platform admin only). */
+  @Post("users")
+  @HttpCode(HttpStatus.CREATED)
+  async createPlatformUser(
+    @Req() req: Request & { user?: AuthPrincipal },
+    @Body() body: { name?: string | null; email: string; phone?: string | null; storeId?: string | null; role: string },
+  ) {
+    const user = req.user;
+    requireUser(user);
+    this.requirePlatformAdmin(user);
+    const result = await this.auth.createPlatformUser({
+      name: body?.name ?? null,
+      email: body?.email ?? "",
+      phone: body?.phone ?? null,
+      storeId: body?.storeId ?? null,
+      role: body?.role ?? "",
+    });
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
     return result.value;
   }

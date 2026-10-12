@@ -321,6 +321,89 @@ export class AuthService {
   }
 
   /**
+   * Platform admin user creation — mints a user (with a one-time temp password and
+   * must-change flag) and optionally binds them to a store. An email that already
+   * has an account is bound to the store instead: no password or flag change.
+   * Without a store there is nothing to bind, so a duplicate email conflicts.
+   */
+  async createPlatformUser(input: {
+    name?: string | null;
+    email: string;
+    phone?: string | null;
+    storeId?: string | null;
+    role: string;
+  }): Promise<AuthResult<{ userId: string; email: string; role: string; tempPassword?: string }>> {
+    const email = (input.email ?? "").trim().toLowerCase();
+    if (!EMAIL_RE.test(email)) {
+      return { ok: false, error: { type: "validation", errors: ["A valid email is required"] } };
+    }
+    if (!(MANAGEABLE_STORE_ROLES as readonly string[]).includes(input.role)) {
+      return {
+        ok: false,
+        error: { type: "validation", errors: ["Role must be OWNER, MANAGER, STAFF, SALES_AGENT, or DELIVERY"] },
+      };
+    }
+    const phone = toE164(input.phone) || null;
+    const storeId = input.storeId ?? null;
+    if (storeId) {
+      const store = await prisma.store.findUnique({ where: { id: storeId }, select: { id: true } });
+      if (!store) return { ok: false, error: { type: "not_found", message: "Store not found" } };
+    }
+
+    const existing = await this.repo.findByEmail(email);
+    if (existing && !storeId) {
+      return { ok: false, error: { type: "conflict", message: "Email already registered" } };
+    }
+    if (phone) {
+      const byPhone = await this.repo.findByIdentifier(phone);
+      if (byPhone && byPhone.id !== existing?.id) {
+        return { ok: false, error: { type: "conflict", message: "This mobile number is already registered" } };
+      }
+    }
+
+    let userId: string;
+    let tempPassword: string | undefined;
+    if (existing) {
+      userId = existing.id;
+    } else {
+      tempPassword = randomBytes(9).toString("base64url");
+      const user = await prisma.user.create({
+        data: {
+          email,
+          phone,
+          passwordHash: await hashPassword(tempPassword),
+          name: input.name?.trim() || null,
+          role: input.role === "OWNER" ? "STORE_OWNER" : input.role,
+          mustChangePassword: true,
+        },
+        select: { id: true },
+      });
+      userId = user.id;
+    }
+
+    if (storeId) {
+      await prisma.userStore.upsert({
+        where: { userId_storeId: { userId, storeId } },
+        update: { role: input.role as StoreRole, status: "ACTIVE" },
+        create: { userId, storeId, role: input.role as StoreRole, status: "ACTIVE" },
+      });
+    }
+
+    await prisma.auditLog.create({
+      data: {
+        storeId: storeId ?? null,
+        actorType: "platform_admin",
+        action: "platform.user.create",
+        entityType: "User",
+        entityId: userId,
+        after: { role: input.role },
+      },
+    });
+
+    return { ok: true, value: { userId, email, role: input.role, ...(tempPassword ? { tempPassword } : {}) } };
+  }
+
+  /**
    * v6 A3 — per-user access within a store. A DEACTIVATED membership drops out of
    * tenant resolution immediately (resolveStoreId only counts ACTIVE memberships),
    * locking the user out of that store while leaving other stores usable.
