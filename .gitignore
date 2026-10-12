@@ -32,3 +32,9 @@ apps/api/playwright-report/
 # …and the same artifacts when Playwright is invoked from the repo root
 test-results/
 playwright-report/
+
+# Archify output: generated diagrams and their receipts, not source
+.archify/
+
+# A nested third-party clone someone dropped under vids/ — not part of this codebase
+vids/
