@@ -1,5 +1,30 @@
 # PINDIAN — Progress Log
 
+## Insurance — daily database keep-alive so Supabase cannot auto-pause the project
+
+| Item | Detail |
+|---|---|
+| Risk | Supabase pauses a **Free Plan** project after 7 days with too little *database* activity. The operator's other project (`pindian-staging`) was paused on exactly this rule, so `yeklfbggabxydnzfyorb` is exposed to the same fate — it has survived only because it is actively developed. Free tier also keeps **no backups**, so a restore past the window means the data is simply gone. |
+| Rule that shapes the fix | Supabase's pause scanner measures **Postgres**, not HTTP: "a few user requests to the database each day" clears the threshold, and paid projects cannot be paused at all. Pinging `/auth/v1/health` or any non-DB endpoint is a documented false comfort — it generates no database activity. |
+| Fix | `scripts/keepalive.ts` runs one real query (`SELECT 1` plus a `count(*)` read of `Store`) on a single pooled connection. `.github/workflows/supabase-keepalive.yml` runs it daily at 07:17 UTC, reusing the `DATABASE_URL` secret CI already uses — no new secret. |
+| Honesty guards | The job is skipped (never faked green) when `DATABASE_URL` is unset, it runs on an off-peak minute because scheduled Actions runs can be delayed, and the script exits non-zero on failure so a broken ping shows red. |
+| Verified | `npx tsx scripts/keepalive.ts` → `KEEPALIVE ok in 6182ms — ping=1 stores=1` (real query, 6.2s of it is pooler latency). Workflow YAML parsed: 1 job, cron `17 7 * * *`, 5 steps. Typecheck clean; lint at its 299-warning baseline; secret scan 0 high-severity findings. |
+| Limitations, stated plainly | This is **insurance, not a fix** — the only guaranteed answer is upgrading the project to Pro. It also depends on the repo running scheduled Actions (GitHub disables scheduled workflows after long periods of repository inactivity) and on the secret staying configured. A local alternative needs no remote at all: Windows Task Scheduler running `npx tsx scripts/keepalive.ts` daily, which works whenever this machine is on. |
+
+## Housekeeping — 261 test stores swept, demo store proven intact
+
+| Item | Detail |
+|---|---|
+| Why | The platform store list a `PLATFORM_ADMIN` browses held **262 stores** — every non-demo store had a machine-generated name/slug (fixture tenants left by aborted runs). Approved by the operator. |
+| Tool | New `scripts/cleanup-test-stores.ts` (dry-run by default, `--apply` to delete). It discovers the store-owned tables and their foreign keys from the **live catalog** instead of a hand-written list, which the older `cleanup-test-fixtures.ts` does — that hand-list predates `AuditLog`, `Cart`, `DeliveryZone`, `StockConversion`, `MessengerPage`, `Campaign`, `RolePermission` and others, and its `TEST_STORE_SLUG` regex matched a fraction of the fixtures. `sam-store` is pinned in `KEEP_SLUGS` and can never be deleted. |
+| FK reality found | The graph contains a genuine cycle: `Product.stockLevelId` → `StockLevel` while `StockLevel` → `Product`, so no delete order exists. `Product.stockLevelId` is nullable, so the sweeper nulls it on the doomed rows first (reported in its output) and then deletes in topological order. Both faults in my first attempt (an inverted "ready" test that deleted parents before children, then a splice that left dead code) were caught by the script aborting loudly rather than half-deleting. |
+| Result | **261 test stores and 984 dependent rows deleted**, plus **331 orphan rows** (`AuditLog` 321, `Cart` 10) left by the older hand-listed sweeper. Final orphan check: *clean — no row points at a deleted store.* |
+| Demo store | Verified untouched: `sam-store` keeps **191 orders, 66 customers, 8 products, 10 stock levels, 25 credit entries, 4 vouchers, 1 register** — identical counts to the pre-cleanup inventory. `GET /admin/stores` as a platform admin now returns exactly `sam-store`. |
+| Side effect | `persistence/integrity.test.ts` now passes **5/5** (it had been failing on stale Phase-4A E2E orders — those lived in fixture stores, so they went with the sweep). `scripts/reconcile.ts` improved from **6 drifts to 2**. |
+| Remaining drift | Both are the known duplicate-`StockLevel` defect: `KAPE-001` at `sam-store` has two rows (`onHand=-71`, `onHand=17`) where the ledger implies 25. Real data, so correcting it is a separate decision; the durable fix is a unique `(storeId, productId, warehouseId)` constraint plus merging the rows. |
+| Gate | Workspace typecheck clean; lint at its 299-warning baseline (0 errors); secret scan 0 high-severity findings. API restarted and `/health/ready` 200. |
+| Not done | The 6 stale orders and the orphan order `01P2PV-000001` that broke `pos-variant.test.ts` earlier were **not** touched — the operator has not approved deleting rows inside the live demo store. |
+
 ## Fix — the PLATFORM_ADMIN role can finally see data
 
 | Item | Detail |

@@ -1,0 +1,40 @@
+name: Supabase keep-alive
+
+# Supabase pauses a Free Plan project after 7 days with too little *database*
+# activity. This runs one real SQL query a day to clear that threshold, reusing the
+# DATABASE_URL secret the CI gate already uses.
+#
+# Two things this deliberately does NOT do:
+#  - It does not ping /auth/v1/health or any HTTP-only endpoint: the pause scanner
+#    measures Postgres, so those do not count (a well-known false sense of safety).
+#  - It does not report success when unconfigured — with no DATABASE_URL secret the
+#    job is skipped, never faked green.
+#
+# Note: upgrading the project to Pro removes the risk entirely; paid projects cannot
+# be paused for inactivity. This is only the free-tier insurance policy.
+
+on:
+  schedule:
+    # Daily at 07:17 UTC — off the top of the hour, where scheduled Actions runs
+    # queue up. GitHub may delay or skip scheduled runs, so daily (not every N days)
+    # keeps a wide margin against the 7-day threshold.
+    - cron: "17 7 * * *"
+  workflow_dispatch:
+
+jobs:
+  keepalive:
+    name: one real query against the managed database
+    runs-on: ubuntu-latest
+    if: ${{ secrets.DATABASE_URL != '' }}
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate
+      - name: Generate database activity
+        run: npx tsx scripts/keepalive.ts
