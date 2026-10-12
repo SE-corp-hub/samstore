@@ -7,6 +7,7 @@ import { prisma } from "../persistence/prisma-repositories.js";
 import { AuthService } from "../auth/auth.service.js";
 import { PrismaAuthRepository } from "../auth/auth.repository.js";
 import { hashPassword, verifyPassword } from "../auth/auth.domain.js";
+import { TeamService } from "./team.service.js";
 
 const CONFIG = { jwtSecret: "test-secret-0123456789", jwtExpiresIn: "1h" };
 const svc = new AuthService(new PrismaAuthRepository(), CONFIG);
@@ -120,4 +121,17 @@ test("createPlatformUser conflicts on a duplicate email with no store to bind", 
   const second = await svc.createPlatformUser({ email: email("dup"), role: "STAFF" });
   assert.equal(second.ok, false);
   if (!second.ok) assert.equal(second.error.type, "conflict");
+});
+
+test("invite creates a new user who must change their password on first login", async () => {
+  const store = await makeStore();
+  const team = new TeamService();
+
+  const r = await team.invite(store.id, email("invite-new"), "Invited Person", "STAFF");
+  assert.equal(r.ok, true);
+  if (!r.ok) return;
+  userIds.push(r.value.userId);
+
+  const row = await prisma.user.findUnique({ where: { id: r.value.userId } });
+  assert.equal(row?.mustChangePassword, true, "newly invited user must change password");
 });

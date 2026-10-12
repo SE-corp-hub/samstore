@@ -27,7 +27,7 @@ export class TeamService {
    * Invite a user to a store with a store role.
    * - If the email already has a User account → link membership.
    * - Else create the user (role + a temporary password) so they can log in.
-   * The invited person should change their password on first login (out of scope for this pass).
+   * New accounts are flagged to change their password on first login.
    */
   async invite(storeId: string, email: string, name: string | null, role: string): Promise<TeamResult<{ userId: string; role: string; tempPassword?: string }>> {
     const cleanEmail = email?.trim().toLowerCase() ?? "";
@@ -52,6 +52,7 @@ export class TeamService {
           name: name?.trim() || null,
           passwordHash: await bcrypt.hash(tempPassword, 12),
           role,
+          mustChangePassword: true,
         },
       });
     }
