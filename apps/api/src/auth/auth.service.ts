@@ -53,6 +53,7 @@ export class AuthService {
     email?: string;
     phone?: string;
     password: string;
+    passwordConfirm?: string;
     name?: string;
   }): Promise<AuthResult<{ token: string; user: AuthUserSummary }>> {
     const email = (input.email ?? "").trim().toLowerCase();
@@ -74,6 +75,11 @@ export class AuthService {
     }
     if (input.password?.length < 8) {
       return { ok: false, error: { type: "validation", errors: ["Password must be at least 8 characters"] } };
+    }
+    // A mistyped password cannot be recovered by the owner, so the confirmation is
+    // verified here as well as in the form — same rule change-password already uses.
+    if (input.password !== (input.passwordConfirm ?? input.password)) {
+      return { ok: false, error: { type: "validation", errors: ["Passwords do not match"] } };
     }
     // Module 1 (invite/admin-created owner only): public registration NEVER binds a
     // store or accepts a client-supplied role. Any storeId/role sent by a caller is

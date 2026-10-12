@@ -39,11 +39,11 @@ export class AuthController {
    */
   @Post("register")
   async register(
-    @Body() body: { email?: string; phone?: string; password: string; name?: string },
+    @Body() body: { email?: string; phone?: string; password: string; passwordConfirm: string; name?: string },
   ) {
     // Module 2 fix: shape-validate the untrusted body (unknown keys rejected — a
     // client-supplied storeId/role is a 422, not a silently ignored extra field).
-    const dto = assertDto<{ email?: string; phone?: string; password: string; name?: string }>(body, REGISTER_DTO);
+    const dto = assertDto<{ email?: string; phone?: string; password: string; passwordConfirm: string; name?: string }>(body, REGISTER_DTO);
     const r = await this.auth.register(dto);
     if (!r.ok) throw new HttpException(r.error, statusFor(r.error));
     return r.value;

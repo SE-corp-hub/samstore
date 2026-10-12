@@ -9,6 +9,7 @@ export default function AdminRegister() {
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [passwordConfirm, setPasswordConfirm] = useState("");
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -17,11 +18,23 @@ export default function AdminRegister() {
     e.preventDefault();
     setLoading(true);
     setError(null);
+    // Catch the typo before the round-trip — the API re-checks, this is just faster.
+    if (password !== passwordConfirm) {
+      setError("Passwords do not match.");
+      setLoading(false);
+      return;
+    }
     try {
       const res = await fetch(`${API_URL}/auth/register`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone: phone.trim() || undefined, email: email.trim() || undefined, password, name }),
+        body: JSON.stringify({
+          phone: phone.trim() || undefined,
+          email: email.trim() || undefined,
+          password,
+          passwordConfirm,
+          name,
+        }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -67,10 +80,40 @@ export default function AdminRegister() {
               <label className="form-label small">Email</label>
               <input className="form-control" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="owner@store.com" />
             </div>
-            <div className="mb-3">
-              <label className="form-label small">Password (min 8)</label>
-              <input className="form-control" type="password" required minLength={8} value={password} onChange={(e) => setPassword(e.target.value)} />
-            </div>
+<div className="mb-3">
+                <label className="form-label small">Password (min 8)</label>
+                <input
+                  className="form-control"
+                  type="password"
+                  required
+                  minLength={8}
+                  autoComplete="new-password"
+                  value={password}
+                  onChange={(e) => {
+                    setPassword(e.target.value);
+                    setError(null); // a stale mismatch banner is worse than none
+                  }}
+                />
+              </div>
+              <div className="mb-3">
+                <label className="form-label small">Re-enter password</label>
+                <input
+                  className="form-control"
+                  type="password"
+                  required
+                  minLength={8}
+                  autoComplete="new-password"
+                  value={passwordConfirm}
+                  onChange={(e) => {
+                    setPasswordConfirm(e.target.value);
+                    setError(null);
+                  }}
+                  placeholder="Type the same password again"
+                />
+                {passwordConfirm && password !== passwordConfirm && (
+                  <div className="form-text small text-danger">Passwords do not match.</div>
+                )}
+              </div>
             <button className="btn btn-primary w-100" type="submit" disabled={loading}>
               {loading ? "Creating account…" : "Create account"}
             </button>

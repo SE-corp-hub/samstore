@@ -290,6 +290,9 @@ export const REGISTER_DTO: ObjectRule = {
     email: { kind: "string", required: false, min: 3, max: 254 },
     phone: { kind: "string", required: false, min: 5, max: 20, trim: true },
     password: { kind: "string", required: true, min: 8, max: 200, trim: false },
+    // Confirmed by the client so a mistyped password is caught before hashing;
+    // required, because a silently ignored confirmation is worse than none.
+    passwordConfirm: { kind: "string", required: true, min: 8, max: 200, trim: false },
     name: { kind: "string", max: 120 },
   },
 };

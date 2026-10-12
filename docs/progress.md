@@ -1,5 +1,18 @@
 # PINDIAN — Progress Log
 
+## Fix — registration asks for the password twice
+
+| Item | Detail |
+|---|---|
+| Request | On `/admin/register`, add a re-enter field so a mistyped password is caught before the account is created. A password a store owner mistypes is otherwise unrecoverable. |
+| Client | `AdminRegister.tsx` gains a "Re-enter password" field with an inline "Passwords do not match" hint that appears as soon as the two diverge and clears when they match. Submission is blocked before the round-trip. |
+| Server | `passwordConfirm` is now **required** by `REGISTER_DTO` and compared in `AuthService.register`, mirroring the rule `change-password` already enforced (`auth.service.ts:232`) rather than inventing a second convention. Only the register page calls this endpoint, so requiring it breaks no caller. |
+| Tests | `auth.service.test.ts` 14/14 — a mismatched confirmation is a `validation` error naming the mismatch, a matching one succeeds. New `apps/api/e2e/15-register-password-confirm.spec.ts` proves the form blocks submission, stays on the page, and clears the warning once corrected. |
+| Bug the test caught | The error banner was **stale**: after a blocked submit, typing the corrected password left "Passwords do not match" on screen. The field now clears the error as the user edits. |
+| Gate | Typecheck clean; lint at its 299-warning baseline (0 errors); secret scan 0 high-severity findings; web production build compiled; `/admin/register` 200 after restart. |
+| Note on `02-admin-login` | That E2E failed twice on this run and is **not** caused by this change: `/admin/orders` measured 12.8s, then 1.6s, then 2.8s/0.9s/1.2s/0.9s across identical calls. The endpoint is a single flat `findMany(take: 200)` with no N+1; the variance is the Supabase pooler stalling a connection, against a 60s test budget covering login + dashboard + orders. |
+| Accessibility gap noted | Neither the login nor the register form associates its `<label>` with its input (no `htmlFor`/`id`), so `getByLabel` cannot find them and screen readers get no accessible name. Left alone here — it is a separate, mechanical fix across both forms. |
+
 ## Insurance — daily database keep-alive so Supabase cannot auto-pause the project
 
 | Item | Detail |

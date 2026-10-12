@@ -60,6 +60,31 @@ test("register rejects invalid email and short password", async () => {
   assert.equal((await svc.register({ email: "a@b.com", password: "short" })).ok, false);
 });
 
+test("register rejects a mismatched password confirmation and accepts a matching one", async () => {
+  // A mistyped password is unrecoverable for the owner — the confirmation must be
+  // checked server-side, mirroring what change-password already enforces.
+  const { svc } = makeService();
+  const mismatch = await svc.register({
+    email: "typo@store.com",
+    password: "password123",
+    passwordConfirm: "password124",
+  });
+  assert.equal(mismatch.ok, false);
+  if (mismatch.ok) return;
+  assert.equal(mismatch.error.type, "validation");
+  assert.ok(
+    JSON.stringify(mismatch.error).toLowerCase().includes("match"),
+    "the error must say the two entries do not match",
+  );
+
+  const match = await svc.register({
+    email: "typed@store.com",
+    password: "password123",
+    passwordConfirm: "password123",
+  });
+  assert.equal(match.ok, true);
+});
+
 test("register rejects duplicate email", async () => {
   const { svc } = makeService();
   await svc.register({ email: "dup@store.com", password: "password123" });
