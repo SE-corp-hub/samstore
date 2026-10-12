@@ -1,5 +1,19 @@
 # PINDIAN — Progress Log
 
+## Security — tokens are signed with a real secret, and the algorithm is pinned
+
+| Item | Detail |
+|---|---|
+| Finding | `.env` had no `JWT_SECRET`, so `app.module.ts` fell back to the constant `dev-jwt-secret-change-me-0123456789` **committed in this repository** at four injection sites. Anyone with the source could mint an OWNER or PLATFORM_ADMIN token. |
+| Compounding finding | `verifyToken` passed no `algorithms` list, so verification accepted whatever algorithm the token claimed. Demonstrated directly: a token signed **HS512** carrying `role: PLATFORM_ADMIN` was **accepted** by the old code and is now rejected with `invalid algorithm`. The two findings together were a complete account-takeover path. |
+| Fix | A 64-character random `JWT_SECRET` now lives in `.env` (gitignored, never printed, never committed). `auth.domain.ts` signs with `algorithm: "HS256"` and verifies with `algorithms: ["HS256"]`, exported as `JWT_ALGORITHM` so a future move to RS256 is deliberate. |
+| Fix — no more silent fallback | `main.ts` now warns loudly in development when `JWT_SECRET` (or `CLAIM_SIGNING_SECRET`) is missing, instead of printing a neutral "development mode" line. That silence is exactly what let this hide. |
+| Tests | `auth.service.test.ts` **18/18**, including four new cases: the header is always HS256; a different-algorithm token is rejected even with the correct secret; an unsigned `alg: none` token is rejected; a token signed with another secret is rejected. |
+| Verified live | API restarted with its stdout captured: the startup log shows no secret warning, so the value was read. `POST /auth/login` → **201** with a token; that token → `/admin/me` **200**; a token forged with the old in-repo placeholder → `/admin/me` **401**. |
+| Gate | Typecheck clean; lint 0 errors, **301 warnings (was 299)** — both new warnings are the startup `console.warn` calls in `main.ts`, which already logs at boot; disclosure rather than a silent baseline move. Secret scan 0 high-severity findings. |
+| Operator impact | Existing browser sessions were signed with the old secret and are now invalid — logging in again is required. Rotation is the same procedure: replace `JWT_SECRET` in `.env` and restart. |
+| Left open, stated plainly | The placeholder constant still exists in `app.module.ts` as a development fallback, now guarded by a loud warning rather than removed; centralising it remains worthwhile. `SESSION_SECRET` and `BCRYPT_ROUNDS` in `.env` are still dead config (rounds are hard-coded to 12). |
+
 ## Fix — registration asks for the password twice
 
 | Item | Detail |

@@ -33,7 +33,15 @@ if (NODE_ENV === "production") {
   if (claimSecret.length < 32 || claimSecret.includes("dev-")) fail("CLAIM_SIGNING_SECRET must be a strong secret (>= 32 chars, no dev placeholder) in production");
   if (!process.env.DATABASE_URL) fail("DATABASE_URL is required in production");
 } else {
-  console.log("[sam-store] DEVELOPMENT MODE — using dev fallback secrets");
+  if (!process.env.JWT_SECRET) {
+    console.warn(
+      "[sam-store] WARNING: JWT_SECRET is not set. Every token is being signed with the placeholder committed in this repository, so anyone with the source can forge an OWNER token. Put JWT_SECRET in .env before this leaves your machine.",
+    );
+  }
+  if (!process.env.CLAIM_SIGNING_SECRET) {
+    console.warn("[sam-store] WARNING: CLAIM_SIGNING_SECRET is not set — claim links use a dev placeholder.");
+  }
+  console.log("[sam-store] DEVELOPMENT MODE");
 }
 
 async function bootstrap() {

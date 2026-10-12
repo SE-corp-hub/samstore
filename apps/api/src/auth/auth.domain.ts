@@ -11,6 +11,14 @@ export interface AuthConfig {
 
 const BCRYPT_ROUNDS = 12;
 
+/**
+ * Pinned signing algorithm. Without this, `jwt.verify` accepts any algorithm the
+ * key length permits, which is the classic algorithm-confusion footgun. One entry
+ * now, so a future migration to RS256 is a deliberate edit rather than a silent
+ * acceptance of whatever a token claims.
+ */
+const JWT_ALGORITHM = "HS256" as const;
+
 export async function hashPassword(plain: string): Promise<string> {
   return bcrypt.hash(plain, BCRYPT_ROUNDS);
 }
@@ -29,7 +37,10 @@ export interface TokenPayload {
 }
 
 export function signToken(payload: TokenPayload, config: AuthConfig): string {
-  return jwt.sign(payload, config.jwtSecret, { expiresIn: config.jwtExpiresIn } as jwt.SignOptions);
+  return jwt.sign(payload, config.jwtSecret, {
+    expiresIn: config.jwtExpiresIn,
+    algorithm: JWT_ALGORITHM,
+  } as jwt.SignOptions);
 }
 
 export interface VerifiedToken {
@@ -51,9 +62,11 @@ export class InvalidTokenError extends Error {
 
 export function verifyToken(token: string, config: AuthConfig): VerifiedToken {
   try {
-    const decoded = jwt.verify(token, config.jwtSecret) as VerifiedToken;
+    const decoded = jwt.verify(token, config.jwtSecret, { algorithms: [JWT_ALGORITHM] }) as VerifiedToken;
     return decoded;
   } catch {
     throw new InvalidTokenError();
   }
 }
+
+export { JWT_ALGORITHM };

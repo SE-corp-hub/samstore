@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { AuthService } from "./auth.service.js";
 import type { AuthUserRecord, AuthRepository } from "./auth.repository.js";
-import { hashPassword } from "./auth.domain.js";
+import { hashPassword, signToken, verifyToken, InvalidTokenError, JWT_ALGORITHM } from "./auth.domain.js";
+import jwt from "jsonwebtoken";
 
 class InMemoryAuthRepo implements AuthRepository {
   users = new Map<string, AuthUserRecord>();
@@ -149,6 +150,30 @@ test("jwt signing and verification round-trips claims", async () => {
   const decoded = verifyToken(token, CONFIG);
   assert.equal(decoded.sub, "u1");
   assert.equal(decoded.storeId, "s1");
+});
+
+test("tokens are signed with HS256 only", () => {
+  const token = signToken({ sub: "u1", role: "STAFF", email: "a@b.com" }, CONFIG);
+  const header = JSON.parse(Buffer.from(token.split(".")[0] ?? "", "base64url").toString("utf8"));
+  assert.equal(header.alg, JWT_ALGORITHM);
+  assert.equal(header.alg, "HS256");
+});
+
+test("verification rejects a token signed with a different algorithm, even with the right secret", () => {
+  // Classic algorithm confusion: RS256/HS512 tokens forged with a known secret.
+  const forged = jwt.sign({ sub: "u1", role: "PLATFORM_ADMIN", email: "a@b.com" }, CONFIG.jwtSecret, { algorithm: "HS512" });
+  assert.throws(() => verifyToken(forged, CONFIG), InvalidTokenError);
+});
+
+test("verification rejects an unsigned (alg none) token", () => {
+  const b64 = (o: unknown) => Buffer.from(JSON.stringify(o)).toString("base64url");
+  const unsigned = `${b64({ alg: "none", typ: "JWT" })}.${b64({ sub: "u1", role: "PLATFORM_ADMIN", email: "a@b.com" })}.`;
+  assert.throws(() => verifyToken(unsigned, CONFIG), InvalidTokenError);
+});
+
+test("verification rejects a token signed with a different secret", () => {
+  const foreign = jwt.sign({ sub: "u1", role: "STAFF", email: "a@b.com" }, "some-other-secret-0123456789", { algorithm: "HS256" });
+  assert.throws(() => verifyToken(foreign, CONFIG), InvalidTokenError);
 });
 
 // ─────────────────────────────── A1: phone-first identity ───────────────────────────────
