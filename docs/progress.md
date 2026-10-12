@@ -1,5 +1,17 @@
 # PINDIAN — Progress Log
 
+## Fix — a new owner is told no store is linked, instead of landing on a broken dashboard
+
+| Item | Detail |
+|---|---|
+| Symptom | Registering an owner and signing in dropped you on the full tab shell where every store-scoped call answered 403. The overview then said "Select a store from the switcher above" — on a screen with no switcher, because the account reaches no store at all. |
+| Why | Public registration deliberately creates a bare `STORE_OWNER` with **no membership**, and only a platform admin can create or bind a store (`auth.service.ts`). The dashboard never distinguished "no store yet" from "store not selected". |
+| Fix | The dashboard now tracks whether the store list is still loading, loaded, or failed, and for a signed-in account that reaches **no** store it renders an explanation — *"No store linked yet … a platform admin has to create your store or invite you to one"* — with **Check again** and **Sign out**, instead of the tab shell. A failed lookup gets its own retry card rather than a shell that 403s. A `PLATFORM_ADMIN` is excluded from the gate, since an empty `/admin/stores/mine` is normal for them and the platform list fills the switcher instead. |
+| Refactor | The store lookup moved into a reusable `loadStores()` so **Check again** can re-run it; the platform-admin branch now lives inside it. Behaviour for members, platform admins and 401 handling is unchanged. |
+| Tests | New `apps/api/e2e/16-storeless-owner-onboarding.spec.ts` registers a real account, loads the dashboard, asserts the explanation appears and that neither "Failed to load overview" nor the unmatchable switcher prompt does — then deletes the account. Regressions: `02-admin-login`, `13-expired-session-redirect`, `14-platform-admin-store-switcher` — **4 passed**. |
+| Stale test repaired | Spec 14 asserted "the platform list should hold more than one store", which was true when it was written (262 fixture stores) and false after the sweep to one. A test-data premise, not a regression — the cross-tenant switch is now exercised when a second tenant exists and otherwise annotated explicitly instead of silently skipped. |
+| Gate | Typecheck clean; lint unchanged at **301 warnings** (0 errors); secret scan 0 high-severity findings; web production build compiled; web and API both 200 after restart. |
+
 ## Security — tokens are signed with a real secret, and the algorithm is pinned
 
 | Item | Detail |

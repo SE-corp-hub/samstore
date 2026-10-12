@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   getAdminToken, getAdminStoreId, setAdminStoreId, getAdminRole,
@@ -41,7 +41,66 @@ export default function AdminDashboard() {
   const [email, setEmail] = useState("");
   const [tab, setTab] = useState("overview");
   const [mobileNav, setMobileNav] = useState(false);
+  // Whether we know which stores this account can reach. Without this the shell
+  // renders while the answer is still "none", and every tab answers 403.
+  const [storesStatus, setStoresStatus] = useState<"loading" | "ready" | "error">("loading");
   const userNavigated = useRef(false);
+
+  const loadStores = useCallback(async () => {
+    const token = getAdminToken();
+    if (!token) return;
+    setStoresStatus("loading");
+    try {
+      const res = await fetch(`${API_URL}/admin/stores/mine`, { headers: { Authorization: `Bearer ${token}` } });
+      if (handleUnauthorized(res)) return;
+      if (!res.ok) {
+        setStoresStatus("error");
+        return;
+      }
+      const data = await res.json();
+      const mine: MyStore[] = (data?.stores ?? []) as MyStore[];
+      if (mine.length > 0) {
+        setStores(mine);
+        const firstId = mine[0]?.id;
+        if (!getAdminStoreId() && firstId) setAdminStoreId(firstId);
+        setActiveStore(getAdminStoreId());
+        // M7 vocab fix: nav role comes from the ACTIVE store's membership role
+        // (OWNER/…) — the JWT global role can lag it (e.g. an owner whose global
+        // role is still STORE_OWNER or a stale STAFF after promotion).
+        const member = mine.find((s) => s.id === getAdminStoreId());
+        if (member?.role) {
+          if (member.role === "DELIVERY") {
+            router.replace("/admin/delivery");
+            return;
+          }
+          setRole(isOwnerRole(member.role) ? "OWNER" : member.role);
+          if (!userNavigated.current) setTab(defaultTabFor(isOwnerRole(member.role) ? "OWNER" : member.role));
+        }
+        setStoresStatus("ready");
+        return;
+      }
+
+      // No membership at all. A platform operator is meant to reach every tenant,
+      // so offer the platform-wide list and let them target a store explicitly
+      // (see auth/tenant-context.ts:52). Anyone else genuinely has no store yet.
+      if (getAdminRole() === "PLATFORM_ADMIN") {
+        const all = await fetch(`${API_URL}/admin/stores`, { headers: { Authorization: `Bearer ${token}` } });
+        if (handleUnauthorized(all)) return;
+        const body = all.ok ? await all.json() : null;
+        const listed = (body?.stores ?? []) as Array<{ id: string; name: string; slug: string }>;
+        const platform: MyStore[] = listed.map((s) => ({ ...s, role: "platform" }));
+        if (platform.length > 0) {
+          setStores(platform);
+          // Deliberately NOT auto-selecting: the operator picks which tenant to view.
+          const kept = getAdminStoreId();
+          setActiveStore(platform.some((s) => s.id === kept) ? kept : null);
+        }
+      }
+      setStoresStatus("ready");
+    } catch {
+      setStoresStatus("error");
+    }
+  }, [router]);
 
   useEffect(() => {
     const token = getAdminToken();
@@ -65,57 +124,8 @@ export default function AdminDashboard() {
       })
       .then((d) => d && setEmail(d.email ?? ""))
       .catch(() => {});
-    fetch(`${API_URL}/admin/stores/mine`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then((r) => {
-        if (handleUnauthorized(r)) return null;
-        return r.json();
-      })
-      .then((data) => {
-        if (data?.stores?.length) {
-          setStores(data.stores);
-          if (!getAdminStoreId()) setAdminStoreId(data.stores[0].id);
-          setActiveStore(getAdminStoreId());
-          // M7 vocab fix: nav role comes from the ACTIVE store's membership role
-          // (OWNER/…) — the JWT global role can lag it (e.g. an owner whose global
-          // role is still STORE_OWNER or a stale STAFF after promotion).
-          const member = data.stores.find((s: MyStore) => s.id === getAdminStoreId());
-           if (member?.role) {
-             if (member.role === "DELIVERY") {
-               router.replace("/admin/delivery");
-               return;
-             }
-             setRole(isOwnerRole(member.role) ? "OWNER" : member.role);
-            if (!userNavigated.current) setTab(defaultTabFor(isOwnerRole(member.role) ? "OWNER" : member.role));
-          }
-        }
-      })
-      .catch(() => { /* non-fatal */ });
-
-    // A platform operator holds NO store membership, so /admin/stores/mine is empty,
-    // the switcher had nothing to show and no X-Store-Id was ever sent — every
-    // store-scoped call then answered 403 "No active store membership" and the
-    // overview looked permanently broken. Offer the platform-wide store list instead
-    // and let the operator target a store explicitly (see auth/tenant-context.ts:52).
-    if (getAdminRole() === "PLATFORM_ADMIN") {
-      fetch(`${API_URL}/admin/stores`, { headers: { Authorization: `Bearer ${token}` } })
-        .then((res) => {
-          if (handleUnauthorized(res)) return null;
-          return res.ok ? res.json() : null;
-        })
-        .then((data) => {
-          const listed = (data?.stores ?? []) as Array<{ id: string; name: string; slug: string }>;
-          const platform: MyStore[] = listed.map((s) => ({ ...s, role: "platform" }));
-          if (platform.length === 0) return;
-          setStores(platform);
-          // Deliberately NOT auto-selecting: the operator picks which tenant to view.
-          const kept = getAdminStoreId();
-          setActiveStore(platform.some((s) => s.id === kept) ? kept : null);
-        })
-        .catch(() => { /* non-fatal */ });
-    }
-  }, [router]);
+    void loadStores();
+  }, [router, loadStores]);
 
   const switchStore = (storeId: string) => {
     setAdminStoreId(storeId);
@@ -130,6 +140,50 @@ export default function AdminDashboard() {
   };
 
   if (!authed) return null;
+
+  // A signed-in account that reaches no store gets an explanation, not a tab shell
+  // where every panel answers 403. A platform admin is excluded: an empty
+  // /admin/stores/mine is normal for them and the platform list fills in above.
+  if (storesStatus === "ready" && stores.length === 0 && role !== "PLATFORM_ADMIN") {
+    return (
+      <div className="container d-flex align-items-center justify-content-center" style={{ minHeight: "100vh" }}>
+        <div className="card shadow-sm p-4 text-center" style={{ width: "100%", maxWidth: 460 }}>
+          <i className="bi bi-shop-window fs-1 text-secondary"></i>
+          <h4 className="mt-3 mb-2">No store linked yet</h4>
+          <p className="text-muted small mb-3">
+            Your account is ready, but it is not connected to a store, so there is nothing to
+            show yet. A platform admin has to create your store or invite you to one — then
+            check again.
+          </p>
+          {email && <p className="small mb-3">Signed in as <strong>{email}</strong></p>}
+          <button
+            className="btn btn-primary w-100"
+            onClick={() => { void loadStores(); }}
+          >
+            Check again
+          </button>
+          <button className="btn btn-link btn-sm w-100 mt-2" onClick={logout}>Sign out</button>
+        </div>
+      </div>
+    );
+  }
+
+  if (storesStatus === "error") {
+    return (
+      <div className="container d-flex align-items-center justify-content-center" style={{ minHeight: "100vh" }}>
+        <div className="card shadow-sm p-4 text-center" style={{ width: "100%", maxWidth: 460 }}>
+          <i className="bi bi-exclamation-triangle fs-1 text-warning"></i>
+          <h4 className="mt-3 mb-2">Could not load your stores</h4>
+          <p className="text-muted small mb-3">
+            The server could not be reached. Your session is still valid — try again.
+          </p>
+          <button className="btn btn-primary w-100" onClick={() => { void loadStores(); }}>Retry</button>
+          <button className="btn btn-link btn-sm w-100 mt-2" onClick={logout}>Sign out</button>
+        </div>
+      </div>
+    );
+  }
+
   const active = stores.find((s) => s.id === activeStore);
   const allowed = allowedTabs(role);
   const visibleGroups = NAV_GROUPS
