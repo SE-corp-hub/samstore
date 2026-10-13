@@ -81,6 +81,8 @@ each endpoint's own work.
 
 | Code-split the 22 admin panels (`next/dynamic`, `ssr:false`); keep the landing panel eager | `/admin/dashboard` route chunk **95.4 kB → 7.7 kB**; First Load JS **198 kB → 111 kB** (−44%); login untouched at 105 kB | **kept** | Deterministic build metric. jsbarcode/qrcode now ride inside the two panels that use them. E2E 10/10 across the panel-driven specs (pre-orders tab, user access, onboarding, login). |
 
+| Idle backoff + enqueue wake for the outbox drain (was a fixed 5 s poll forever) | idle DB polls in 60 s: **12 → 2** (measured over a quiet 60 s window, cumulative `OutboxEvent` calls 74,175 → delta 12 then 2); new test proves an enqueue still drains within seconds with a 60 s backoff configured | **kept** | ~17k idle queries/day/process removed from a pooler with 4 slots, while real events now drain *immediately* instead of waiting up to 5 s. `outbox.service.test.ts` 4/4. |
+
 ### Wall-clock probe results (noisy — see caveat)
 
 `node scripts/perf-probe.mjs`, median of 3, before → after (typical run):

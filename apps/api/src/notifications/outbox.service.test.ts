@@ -31,6 +31,36 @@ after(async () => {
   await prisma.$disconnect();
 });
 
+test("an enqueue wakes an idle worker instead of waiting out the backoff", async () => {
+  // The loop backs off to 30 s when the outbox is empty. If the wake hook regressed, the
+  // event would sit PENDING for the whole backoff — so start it with a 60 s base interval
+  // and assert the drain still happens within a couple of seconds.
+  const store = await makeStore();
+  const worker = new OutboxWorker();
+  worker.start(60_000, 60_000);
+  try {
+    await enqueueOutboxEvent({
+      storeId: store.id,
+      aggregateType: "order",
+      aggregateId: "ord-wake",
+      eventType: "order.received",
+      payload: { orderNumber: "SAMSTO-WAKE", text: "wake check" },
+    });
+
+    const deadline = Date.now() + 8_000;
+    let status = "PENDING";
+    while (Date.now() < deadline && status !== "PROCESSED") {
+      await new Promise((r) => setTimeout(r, 250));
+      const row = await prisma.outboxEvent.findFirst({ where: { storeId: store.id }, select: { status: true, id: true } });
+      status = row?.status ?? "PENDING";
+      if (row) eventIds.push(row.id);
+    }
+    assert.equal(status, "PROCESSED", "the enqueue itself triggered a drain");
+  } finally {
+    worker.stop();
+  }
+});
+
 test("worker drains an order.received event → PROCESSED + NotificationLog row", async () => {
   const store = await makeStore();
   await enqueueOutboxEvent({

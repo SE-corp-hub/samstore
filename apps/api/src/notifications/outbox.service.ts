@@ -15,9 +15,17 @@ export interface OutboxEventInput {
   payload: Record<string, unknown>;
 }
 
+/** Registered by a running worker; lets an enqueue drain immediately instead of waiting a tick. */
+let wake: (() => void) | null = null;
+export function wakeOutbox(): void {
+  wake?.();
+}
+
 /** Enqueue a side-effect event (fire-and-forget; failures are swallowed by the caller). */
 export async function enqueueOutboxEvent(input: OutboxEventInput): Promise<void> {
   await prisma.outboxEvent.create({ data: { ...input, payload: input.payload as object } });
+  // Drain now: with the idle backoff below, waiting for the next tick could mean 30 s.
+  wakeOutbox();
 }
 
 const MAX_ATTEMPTS = 5;
@@ -25,6 +33,10 @@ const BACKOFF_BASE_MS = 5_000;
 
 export class OutboxWorker {
   private timer: NodeJS.Timeout | null = null;
+  private running = false;
+  private idleStreak = 0;
+  private baseMs = 5_000;
+  private maxIdleMs = 30_000;
 
   /** Process one batch of due PENDING events. Returns how many were processed. */
   async poll(batchSize = 20): Promise<number> {
@@ -116,21 +128,51 @@ export class OutboxWorker {
     }
   }
 
-  start(intervalMs = 5_000): void {
-    if (this.timer) return;
-    // eslint-disable-next-line @typescript-eslint/no-misused-promises
-    this.timer = setInterval(() => {
-      void this.poll().catch(() => {
-        /* transient db errors: try again next tick */
-      });
-    }, intervalMs);
+  /**
+   * Self-scheduling drain loop. An empty outbox is the normal state, so after two empty
+   * ticks the delay backs off to `maxIdleMs` — measured, the old fixed 5 s interval ran
+   * 12 idle queries a minute (~17k/day per process) against a pooler with 4 slots.
+   * `enqueueOutboxEvent` wakes the loop, so a real event drains immediately rather than
+   * waiting out the backoff.
+   */
+  start(intervalMs = 5_000, maxIdleMs = 30_000): void {
+    if (this.running) return;
+    this.running = true;
+    this.baseMs = intervalMs;
+    this.maxIdleMs = maxIdleMs;
+    wake = () => {
+      this.idleStreak = 0;
+      this.schedule(0);
+    };
+    this.schedule(intervalMs);
+  }
+
+  private schedule(delayMs: number): void {
+    if (!this.running) return;
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = setTimeout(() => {
+      void this.tick();
+    }, delayMs);
     this.timer.unref?.();
   }
 
+  private async tick(): Promise<void> {
+    let processed = 0;
+    try {
+      processed = await this.poll();
+    } catch {
+      /* transient db errors: try again next tick */
+    }
+    this.idleStreak = processed > 0 ? 0 : this.idleStreak + 1;
+    this.schedule(this.idleStreak >= 2 ? this.maxIdleMs : this.baseMs);
+  }
+
   stop(): void {
+    this.running = false;
     if (this.timer) {
-      clearInterval(this.timer);
+      clearTimeout(this.timer);
       this.timer = null;
     }
+    wake = null;
   }
 }
