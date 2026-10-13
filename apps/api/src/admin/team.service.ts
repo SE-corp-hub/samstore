@@ -7,6 +7,7 @@ import bcrypt from "bcryptjs";
 import { prisma } from "../persistence/prisma-repositories.js";
 import { StoreRole } from "@prisma/client";
 import type { ApiError } from "@sam-store/contracts";
+import { bustMemberships } from "../auth/membership-cache.js";
 
 export type TeamResult<T> = { ok: true; value: T } | { ok: false; error: ApiError };
 
@@ -67,6 +68,7 @@ export class TeamService {
     // Also align the user's global role so JWT claims match the store role.
     await prisma.user.update({ where: { id: user.id }, data: { role } });
 
+    await bustMemberships();
     return { ok: true, value: { userId: user.id, role: membership.role, ...(tempPassword ? { tempPassword } : {}) } };
   }
 
@@ -84,6 +86,7 @@ export class TeamService {
       data: { role: role as StoreRole },
     });
     await prisma.user.update({ where: { id: userId }, data: { role } });
+    await bustMemberships();
     return { ok: true, value: { userId, role: updated.role } };
   }
 
@@ -93,6 +96,7 @@ export class TeamService {
     if (!membership) return { ok: false, error: { type: "not_found", message: "Member not part of this store" } };
     if (membership.role === "OWNER") return { ok: false, error: { type: "conflict", message: "Cannot deactivate the owner" } };
     await prisma.userStore.update({ where: { userId_storeId: { userId, storeId } }, data: { status: "DEACTIVATED" } });
+    await bustMemberships();
     return { ok: true, value: { userId } };
   }
 }

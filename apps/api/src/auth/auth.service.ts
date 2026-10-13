@@ -9,6 +9,7 @@ import {
   type AuthRepository,
 } from "./auth.repository.js";
 import { prisma } from "../persistence/prisma-repositories.js";
+import { bustMemberships } from "./membership-cache.js";
 
 export type AuthResult<T> = { ok: true; value: T } | { ok: false; error: ApiError };
 
@@ -317,6 +318,7 @@ export class AuthService {
       where: { id: input.userId },
       data: { role: input.role === "OWNER" ? "STORE_OWNER" : input.role },
     });
+    await bustMemberships();
     return { ok: true, value: { userId: input.userId, role: updated.role } };
   }
 
@@ -413,7 +415,8 @@ export class AuthService {
         return { userId, tempPassword };
       });
 
-      return { ok: true, value: { userId, email, role: input.role, ...(tempPassword ? { tempPassword } : {}) } };
+      await bustMemberships();
+    return { ok: true, value: { userId, email, role: input.role, ...(tempPassword ? { tempPassword } : {}) } };
     } catch (e) {
       // Race on the unique constraint → same normalized email/phone created twice.
       if ((e as { code?: string }).code === "P2002") {
@@ -451,6 +454,7 @@ export class AuthService {
       where: { userId_storeId: { userId: input.userId, storeId: input.storeId } },
       data: { status: input.status },
     });
+    await bustMemberships();
     return { ok: true, value: { userId: input.userId, storeId: input.storeId, status: updated.status } };
   }
 

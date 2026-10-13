@@ -6,6 +6,7 @@ import { prisma } from "../persistence/prisma-repositories.js";
 import { StoreRole, StoreStatus } from "@prisma/client";
 import type { ApiError } from "@sam-store/contracts";
 import { toE164 } from "../domain/phone.js";
+import { bustMemberships } from "../auth/membership-cache.js";
 
 export type AdminResult<T> = { ok: true; value: T } | { ok: false; error: ApiError };
 
@@ -126,6 +127,8 @@ export class StoreAdminService {
     await prisma.storeStatusHistory.create({
       data: { storeId, fromStatus, toStatus: to, reason: reason ?? null, changedBy: actorId ?? null },
     });
+    // Suspending/reinstating changes every member's effective access — drop the cache.
+    await bustMemberships();
     return {
       ok: true,
       value: {

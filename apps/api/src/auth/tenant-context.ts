@@ -12,6 +12,7 @@ import { prisma } from "../persistence/prisma-repositories.js";
 import type { AuthPrincipal } from "./auth.guard.js";
 import { TENANT_ROLES, KEY_BY_SET } from "./capability-sets.js";
 import { effectiveRoleSets } from "./role-permissions.js";
+import { getMemberships } from "./membership-cache.js";
 
 export type TenantContext = { storeId: string; role: string };
 
@@ -59,23 +60,16 @@ export async function resolveTenant(
       if (first) ctx = { storeId: first.storeId, role: "PLATFORM_ADMIN" };
     }
   } else {
+    // Same cached rows the guard just read (membership-cache.ts) — no second round-trip.
+    const memberships = await getMemberships(user.sub);
     if (headerStoreId) {
-      const m = await prisma.userStore.findUnique({
-        where: { userId_storeId: { userId: user.sub, storeId: headerStoreId } },
-      });
-      if (!m || m.status !== "ACTIVE") forbidden("Not a member of that store");
+      const m = memberships.find((x) => x.storeId === headerStoreId);
+      if (!m) forbidden("Not a member of that store");
       ctx = { storeId: headerStoreId, role: m!.role };
     } else {
-      if (user.storeId) {
-        const m = await prisma.userStore.findUnique({
-          where: { userId_storeId: { userId: user.sub, storeId: user.storeId } },
-        });
-        if (m && m.status === "ACTIVE") ctx = { storeId: m.storeId, role: m.role };
-      }
-      if (!ctx) {
-        const first = await prisma.userStore.findFirst({ where: { userId: user.sub, status: "ACTIVE" } });
-        if (first) ctx = { storeId: first.storeId, role: first.role };
-      }
+      const claimed = user.storeId ? memberships.find((x) => x.storeId === user.storeId) : undefined;
+      const chosen = claimed ?? memberships[0];
+      if (chosen) ctx = { storeId: chosen.storeId, role: chosen.role };
     }
   }
 

@@ -66,8 +66,35 @@ each endpoint's own work.
    4 slots (`connection_limit=4`).
 5. **Pooler/region round-trip floor (~350 ms/query)** — infra; caps what any code fix can achieve.
 
+## Operator decisions (2026-10-13)
+
+1. Client-side cache: **always-fresh** — no client TTL cache; each view re-fetches.
+2. Server membership cache staleness: **accepted** (short TTL).
+3. Infra: **apply pgbouncer mode** to the Prisma URL.
+4. Scope: **include the public storefront and checkout**.
+
 ## Attempt ledger
 
 | Idea | Baseline → Result | Verdict | Why |
 |---|---|---|---|
-| (baseline recorded, no optimizations attempted yet) | — | — | — |
+| One shared, 10 s-cached membership lookup replacing the guard + resolveTenant pair | deterministic: `/admin/orders` 3 statements with **0** membership lookups (was 1 per request alongside the guard's own); `/admin/settings` shows 1 on a cache miss; wall-clock settings 805 ms → 11 ms on repeat calls | **kept** | Removes ~1–2 DB round-trips (~300 ms each) from every authenticated request. Verified with `scripts/perf-queries.mjs` (statement counts, not wall-clock — the pooler swings 2–3× run to run). Suites `tenant-context` 8/8 and `store-access` 11/11 still green. |
+
+### Wall-clock probe results (noisy — see caveat)
+
+`node scripts/perf-probe.mjs`, median of 3, before → after (typical run):
+
+| Endpoint | before | after |
+|---|---|---|
+| `/health/ready` (raw query floor) | 304 ms | 272 ms |
+| `/admin/settings` | 805 ms | 11 ms ¹ |
+| `/admin/orders` | 1164 ms | 828 ms |
+| `/admin/orders/counts` | 1025 ms | 16 ms ¹ |
+| `/admin/analytics/status` | 1128 ms | 286 ms |
+| `/admin/inventory?status=low` | 893 ms | 12 ms ¹ |
+| `/admin/credit/utang` | 1668 ms | 547 ms |
+| `/admin/maintenance/stats` | 2769 ms | 568 ms |
+| `/admin/pos/preorders` | 2367 ms | 4269–5761 ms ² |
+
+¹ In-process TTL cache hits (these endpoints already had a 5 s TTL); the run-to-run total varied 7.7–16.5 s, so treat sub-20 ms rows as cache, not as a measured speed-up of the endpoint itself.
+² **Not attributable to this change** — pre-orders has no TTL cache and its runs swung 3.0–6.7 s across all measurements including the baseline. Tracked as an open item (find its query cost, then cache or index).
+Caveat: the pooler's run-to-run variance (2–3×) exceeds the effect being measured for uncached endpoints, so the statement-count probe is the metric that decides keep/revert.

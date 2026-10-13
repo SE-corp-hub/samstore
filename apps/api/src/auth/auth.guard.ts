@@ -10,7 +10,7 @@ import {
 } from "@nestjs/common";
 import { Request } from "express";
 import { verifyToken, InvalidTokenError } from "./auth.domain.js";
-import { prisma } from "../persistence/prisma-repositories.js";
+import { getMemberships } from "./membership-cache.js";
 
 export interface AuthPrincipal {
   sub: string;
@@ -47,11 +47,10 @@ export class JwtAuthGuard implements CanActivate {
     // ALL belong to restricted stores (SUSPENDED/ARCHIVED/CLOSED), refuse the request.
     // Storeless users (no memberships) are never blocked here.
     if (verified.role !== "PLATFORM_ADMIN") {
-      const memberships = await prisma.userStore.findMany({
-        where: { userId: verified.sub, status: "ACTIVE" },
-        select: { store: { select: { status: true } } },
-      });
-      if (memberships.length > 0 && memberships.every((m) => m.store.status !== "ACTIVE")) {
+      // Shared 10 s cache with resolveTenant, which needs the same rows — one query per
+      // request instead of two. See membership-cache.ts for the staleness contract.
+      const memberships = await getMemberships(verified.sub);
+      if (memberships.length > 0 && memberships.every((m) => m.storeStatus !== "ACTIVE")) {
         throw new UnauthorizedException("Store suspended");
       }
     }
