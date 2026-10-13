@@ -2,9 +2,10 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { API_URL } from "../../config";
-import { adminHeaders } from "../../lib/admin";
+import { adminHeaders, getAdminStoreId } from "../../lib/admin";
 import { toast } from "../../lib/toast";
 import DeliveryZonesCard from "./DeliveryZonesCard";
+import NoStoreScope from "./NoStoreScope";
 
 interface StoreSettings {
   id: string;
@@ -50,6 +51,7 @@ interface StoreSettings {
 type Section = "general" | "pos" | "receipt" | "orders" | "taxes" | "invoices";
 
 export default function SettingsPanel() {
+  const storeId = getAdminStoreId();
   const [data, setData] = useState<StoreSettings | null>(null);
   const [section, setSection] = useState<Section>("general");
   const [loading, setLoading] = useState(true);
@@ -142,7 +144,9 @@ export default function SettingsPanel() {
     }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { if (storeId) load(); }, [load, storeId]);
+
+  if (!storeId) return <NoStoreScope />;
 
   const saveSection = async (fields: Record<string, unknown>) => {
     setSaving(true);

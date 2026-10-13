@@ -2,11 +2,13 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { API_URL } from "../../config";
-import { adminHeaders } from "../../lib/admin";
+import { adminHeaders, getAdminStoreId } from "../../lib/admin";
+import NoStoreScope from "./NoStoreScope";
 
 // Maintenance panel — cart sweeps, DB stats.
 
 export default function MaintenancePanel() {
+  const storeId = getAdminStoreId();
   const [stats, setStats] = useState<{ openCarts: number; expiredCarts: number; orders: number } | null>(null);
   const [sweeping, setSweeping] = useState(false);
   const [result, setResult] = useState<string | null>(null);
@@ -23,7 +25,9 @@ export default function MaintenancePanel() {
     }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { if (storeId) load(); }, [load, storeId]);
+
+  if (!storeId) return <NoStoreScope />;
 
   const sweep = async () => {
     setSweeping(true);

@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { API_URL } from "../../config";
-import { adminHeaders, getAdminRole, roleCan } from "../../lib/admin";
+import { adminHeaders, getAdminRole, getAdminStoreId, roleCan } from "../../lib/admin";
+import NoStoreScope from "./NoStoreScope";
 
 interface ProfitData {
   revenueMinor: number; refundsMinor: number; netRevenueMinor: number;
@@ -25,6 +26,7 @@ type ReportTab = "profit" | "sales" | "stock-low" | "sold-stock" | "income-loss"
 const toPesos = (m: number) => `₱${(m / 100).toFixed(2)}`;
 
 export default function ReportsPanel() {
+  const storeId = getAdminStoreId();
   const [days, setDays] = useState(30);
   const [activeTab, setActiveTab] = useState<ReportTab>("profit");
   const [profit, setProfit] = useState<ProfitData | null>(null);
@@ -79,9 +81,18 @@ export default function ReportsPanel() {
     } finally { setLoading(false); }
   }, [days, activeTab, canProfit]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { if (storeId) load(); }, [load, storeId]);
 
-  const exportProfit = () => window.open(`${API_URL}/admin/reports/profit.csv?days=${days}`, "_blank");
+  if (!storeId) return <NoStoreScope />;
+
+  // B7: the CSV route reads from/to (reports.controller.ts:83-85), not days — send the
+  // same window the on-screen report uses, computed client-side as ISO dates.
+  const exportProfit = () => {
+    const to = new Date();
+    const from = new Date(to.getTime() - days * 86_400_000);
+    const q = new URLSearchParams({ from: from.toISOString(), to: to.toISOString() });
+    window.open(`${API_URL}/admin/reports/profit.csv?${q.toString()}`, "_blank");
+  };
   const print = () => window.print();
 
   const reportTabs: { id: ReportTab; label: string }[] = [

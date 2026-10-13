@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { API_URL } from "../../config";
-import { adminHeaders } from "../../lib/admin";
+import { adminHeaders, getAdminStoreId } from "../../lib/admin";
 import BarChart from "./BarChart";
+import NoStoreScope from "./NoStoreScope";
 
 interface Summary {
   totalOrders: number;
@@ -14,6 +15,7 @@ interface Summary {
 }
 
 export default function AnalyticsPanel() {
+  const storeId = getAdminStoreId();
   const [summary, setSummary] = useState<Summary | null>(null);
   const [statusRows, setStatusRows] = useState<{ status: string; count: number }[]>([]);
   const [daily, setDaily] = useState<{ date: string; count: number; revenueMinor: number }[]>([]);
@@ -40,7 +42,9 @@ export default function AnalyticsPanel() {
     }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { if (storeId) load(); }, [load, storeId]);
+
+  if (!storeId) return <NoStoreScope />;
 
   const pesos = (m: number) => `₱${(m / 100).toFixed(2)}`;
 

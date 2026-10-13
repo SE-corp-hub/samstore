@@ -19,3 +19,14 @@ test("the platform User Access store picker lists Sam's Store", async ({ page })
     "Sam's Store is listed in the picker (it used to list nothing)",
   ).toHaveCount(1);
 });
+
+test("a storeless platform admin is prompted to select a store on Analytics", async ({ page }) => {
+  await loginAs(page, PLATFORM_EMAIL, PLATFORM_PASSWORD);
+  await page.getByRole("button", { name: "Analytics" }).first().click();
+
+  await expect(
+    page.getByText("Select a store"),
+    "the store-scoped Analytics panel prompts for a store instead of a generic failure",
+  ).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText(/Failed to load analytics/i)).toHaveCount(0);
+});
