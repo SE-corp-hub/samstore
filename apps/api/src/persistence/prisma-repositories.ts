@@ -37,6 +37,9 @@ import { InsufficientStockError } from "../domain/movements.js";
 // components (Supavisor, PostgREST, pg_cron, pg_net, postgres_exporter) hold most of
 // the 15-session cap — producing spurious "Timed out fetching a new connection".
 // Both are engine URL parameters (seconds), not client options, in Prisma 6.
+// NOTE: pgbouncer=true was tried here (operator decision 2026-10-13) and REVERTED — see
+// PERF.md. This URL is the *session*-mode pooler (port 5432), where prepared statements are
+// supported; disabling them cost 6-16x on every endpoint.
 const DATABASE_URL = process.env.DATABASE_URL ?? "";
 const pooledUrl = `${DATABASE_URL}${DATABASE_URL.includes("?") ? "&" : "?"}connection_limit=4&connect_timeout=20&pool_timeout=30`;
 

@@ -73,6 +73,13 @@ each endpoint's own work.
 3. Infra: **apply pgbouncer mode** to the Prisma URL.
 4. Scope: **include the public storefront and checkout**.
 
+## Open items (next, in measured-impact order)
+
+1. `/admin/pos/preorders` (2.4–5.8 s) and `/admin/maintenance/stats` (2.8–5.5 s) — no caching, budget of round-trips dominated by the pooler floor; needs an index/`EXPLAIN` look and a deliberate cache decision (they are not money-mutating reads).
+2. Storefront server component fetches `/public/stores/:slug?token=` with `cache: "no-store"` on every view; the store payload is a candidate for a short server-side cache. Not yet measured (needs the public link token).
+3. `REDIS_URL` is blank → every cache above is per-process and dies on restart. A real Redis removes that and shares the caches across instances.
+4. The ~300 ms/query floor is the environment: Supabase session pooler in `ap-southeast-2` (Sydney) from the PH. Moving region, or the Pro plan with a nearer pooler, is the single largest remaining lever and is an operator/billing decision.
+
 ## Attempt ledger
 
 | Idea | Baseline → Result | Verdict | Why |
@@ -84,6 +91,7 @@ each endpoint's own work.
 | Idle backoff + enqueue wake for the outbox drain (was a fixed 5 s poll forever) | idle DB polls in 60 s: **12 → 2** (measured over a quiet 60 s window, cumulative `OutboxEvent` calls 74,175 → delta 12 then 2); new test proves an enqueue still drains within seconds with a 60 s backoff configured | **kept** | ~17k idle queries/day/process removed from a pooler with 4 slots, while real events now drain *immediately* instead of waiting up to 5 s. `outbox.service.test.ts` 4/4. |
 
 | Cache PH address reference data + collapse each parent/child list into one relation-filtered query + `Promise.all` the four checkout lookups | regions **748–1840 ms → 1–10 ms**; provinces/cities 0–1 ms warm (first cities call 532 ms = one query, was two); `resolve()` 4 sequential round-trips → 1 | **kept** | This is the checkout address cascade the operator flagged: ~2–5 s of dropdown latency removed. Seeded reference data, 10 min TTL. `address.service.test.ts` 2/2. |
+| `?pgbouncer=true` on the Prisma URL (operator-approved) | warm 5-run totals **2.7 s (before) → 16.3 s and 44.9 s (after)**, with `/health/ready` at 1.3–1.8 s (was 0.27 s) | **REVERTED** | This URL is the *session*-mode pooler (port 5432), where prepared statements work fine; disabling them cost 6–16×. Reverting restored 2.5 s / 8.0 s. Do not re-try on this connection string; it would only help on the transaction-mode pooler (port 6543). |
 
 ### Wall-clock probe results (noisy — see caveat)
 
