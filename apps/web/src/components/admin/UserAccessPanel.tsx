@@ -9,7 +9,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { API_URL } from "../../config";
-import { adminHeaders, getAdminRole, roleCan } from "../../lib/admin";
+import { adminHeaders, getAdminRole, handleUnauthorized, roleCan } from "../../lib/admin";
 import { toast } from "../../lib/toast";
 
 interface Member {
@@ -24,7 +24,8 @@ interface Member {
 interface StoreRow2 { id: string; name: string; slug: string }
 
 const INVITABLE = ["MANAGER", "STAFF", "SALES_AGENT", "DELIVERY"];
-const ALL_ROLES = ["OWNER", "MANAGER", "STAFF", "SALES_AGENT", "DELIVERY", "PLATFORM_ADMIN"];
+// Roles a platform admin can assign to any store user (POST /admin/users + role change).
+const ALL_MANAGEABLE = ["OWNER", "MANAGER", "STAFF", "SALES_AGENT", "DELIVERY"];
 
 const apiError = (d: unknown, fb: string) =>
   (d && typeof d === "object" && (d as any).message) || (Array.isArray((d as any)?.errors) ? (d as any).errors.join(", ") : fb);
@@ -32,6 +33,8 @@ const apiError = (d: unknown, fb: string) =>
 export default function UserAccessPanel() {
   const role = getAdminRole();
   const isPlatform = role === "PLATFORM_ADMIN";
+  const PANEL_ADD_ROLES = isPlatform ? ALL_MANAGEABLE : INVITABLE;
+  const PANEL_CHANGE_ROLES = PANEL_ADD_ROLES;
 
   const [stores, setStores] = useState<StoreRow2[]>([]);
   const [storeId, setStoreId] = useState("");
@@ -98,13 +101,14 @@ export default function UserAccessPanel() {
 
   const loadStores = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}/admin/stores/mine`, { headers: adminHeaders() });
+      const res = await fetch(isPlatform ? `${API_URL}/admin/stores` : `${API_URL}/admin/stores/mine`, { headers: adminHeaders() });
+      if (handleUnauthorized(res) || !res.ok) return;
       const d = await res.json();
       const list = (d.stores ?? []).map((s: any) => ({ id: s.id, name: s.name, slug: s.slug }));
       setStores(list);
-      if (!storeId && list.length > 0) setStoreId(list[0].id);
+      if (list.length > 0) setStoreId((prev) => prev || list[0].id);
     } catch { /* non-fatal */ }
-  }, []);
+  }, [isPlatform]);
 
   useEffect(() => { void loadStores(); }, [loadStores]);
 
@@ -132,10 +136,10 @@ export default function UserAccessPanel() {
     setAddSaving(true); setError(null); setLastTemp(null);
     try {
       const url = isPlatform
-        ? `${API_URL}/admin/stores/${storeId}/users`
+        ? `${API_URL}/admin/users`
         : `${API_URL}/admin/team/invite`;
       const body = isPlatform
-        ? { email: addEmail.trim(), name: addName.trim() || undefined, role: addRole }
+        ? { name: addName.trim() || undefined, email: addEmail.trim(), role: addRole, storeId }
         : { email: addEmail.trim(), name: addName.trim() || undefined, role: addRole };
       const res = await fetch(url, {
         method: "POST", headers: { "Content-Type": "application/json", ...adminHeaders() },
@@ -213,14 +217,6 @@ export default function UserAccessPanel() {
     }
   };
 
-  const canEdit = (m: Member) => {
-    if (m.role === "PLATFORM_ADMIN") return false;
-    if (!isPlatform) return m.role !== "OWNER";
-    return m.role !== "OWNER" || m.userId !== sessionStorage.getItem("samstore.admin.token")?.split(".")[0]; // self guard (loose)
-  };
-
-  const roleOptions = (m: Member) => isPlatform ? ALL_ROLES.filter((r) => r !== "PLATFORM_ADMIN" || false) : INVITABLE;
-
   const roleSelect = (m: Member) => (
     <select
       className="form-select form-select-sm"
@@ -229,7 +225,7 @@ export default function UserAccessPanel() {
       disabled={m.role === "OWNER" && !isPlatform || m.role === "PLATFORM_ADMIN"}
       onChange={(e) => changeRole(m, e.target.value)}
     >
-      {(isPlatform ? ALL_ROLES : INVITABLE).map((r) => <option key={r} value={r}>{r}</option>)}
+      {PANEL_CHANGE_ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
     </select>
   );
 
@@ -334,9 +330,11 @@ export default function UserAccessPanel() {
                 </td>
                 <td className="text-end">
                   <div className="d-flex flex-wrap gap-1 justify-content-end">
-                    <button className="btn btn-sm btn-outline-secondary" title="Reset password" onClick={() => { setResetTarget(m); setResetResult(null); }}>
-                      <i className="bi bi-key me-1"></i>Reset
-                    </button>
+                    {(!isPlatform || m.role === "OWNER") && (
+                      <button className="btn btn-sm btn-outline-secondary" title="Reset password" onClick={() => { setResetTarget(m); setResetResult(null); }}>
+                        <i className="bi bi-key me-1"></i>Reset
+                      </button>
+                    )}
                     {m.role !== "OWNER" && m.role !== "PLATFORM_ADMIN" && (m.status ?? "ACTIVE") === "ACTIVE" && (
                       <button className="btn btn-sm btn-outline-danger" title="Deactivate" onClick={() => { setConfirmTarget(m); setConfirmAction("deactivate"); }}>
                         <i className="bi bi-person-x me-1"></i>Delete
@@ -372,7 +370,7 @@ export default function UserAccessPanel() {
                   <input className="form-control" value={addName} onChange={(e) => setAddName(e.target.value)} placeholder="optional" />
                   <label className="form-label small mt-2">Role</label>
                   <select className="form-select" value={addRole} onChange={(e) => setAddRole(e.target.value)}>
-                    {(isPlatform ? ALL_ROLES : INVITABLE).map((r) => <option key={r} value={r}>{r}</option>)}
+                    {PANEL_ADD_ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
                   </select>
                 </div>
                 <div className="modal-footer">
