@@ -359,6 +359,7 @@ export class AdminController {
       phone: body?.phone ?? null,
       storeId: body?.storeId ?? null,
       role: body?.role ?? "",
+      actorId: user.sub,
     });
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
     return result.value;

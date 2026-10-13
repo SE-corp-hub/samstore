@@ -10,7 +10,16 @@
 | Tests | `17-platform-user-management` **7/7**: picker lists Sam's Store; storeless Analytics prompt; platform add-user (role list without `PLATFORM_ADMIN`, temp password shown once, new member listed, Reset absent on the STAFF row / present on the OWNER row, STAFF role-change list without `PLATFORM_ADMIN`); `analytics/daily?days=7` returns ≤ 7 entries (API, with `X-Store-Id`); STAFF sidebar shows POS but no Stores/User Access; last-owner demotion refused by the API (409 "Cannot demote the last active owner") and surfaced in the UI; owner's Team surface lists only MANAGER/STAFF/SALES_AGENT/DELIVERY to add and no `PLATFORM_ADMIN` to assign. Regressions `02-admin-login`, `14-platform-admin-store-switcher`, `16-storeless-owner-onboarding` **3/3**. |
 | Gate | Typecheck clean; lint 0 errors, **297 warnings** (baseline 301 — not raised; count drifted down on pre-existing warnings in untouched files); secret scan **0 high-severity** findings; web production build compiled (dev server stopped for the build, then restarted); web `/admin/dashboard` and API `/health` **200** after restart. |
 | Operator notes | Temporary passwords are **shown once** (add-user and reset), never logged, and the account must change its password on first login. Platform admins can now **create users** (`POST /admin/users`, platform-only, 403 for everyone else) and manage any store's users through the User Access store picker. The invite flow now **forces a first-login password change** for every newly invited account. |
-| Follow-up (deferred, ruling 2026-10-13) | The owner's Team panel still offers an **OWNER option in its role-change select**, though the API rejects selecting it with 422 (`team.service.ts:75-77`) — pre-existing legacy TeamPanel behaviour, deliberately left out of this plan. Owners are not given a User Access tab (`TABS_BY_ROLE`); the unified panel's owner-mode lists (exactly the four staff roles) are covered by Task 4's review. |
+| Follow-up (deferred, ruling 2026-10-13) | The owner's Team panel's role-change select used to offer an **OWNER option** the API rejects with 422 (`team.service.ts:75-77`) — **closed 2026-10-13**: the option is removed from `TeamPanel.tsx`; the role-change list is now exactly `MANAGER/STAFF/SALES_AGENT/DELIVERY`. Owners are not given a User Access tab (`TABS_BY_ROLE`); the unified panel's owner-mode lists (exactly the four staff roles) are covered by Task 4's review. |
+
+## Final review fixes — platform admin surface (2026-10-13)
+
+| Item | Detail |
+|---|---|
+| OWNER option | The owner's TeamPanel role-change select no longer offers OWNER (the API rejects it with 422). User-visible: the select now lists exactly the four staff roles on every row. |
+| Audit actor | `platform.user.create` audit rows now record `actorId` (the acting platform admin, from `user.sub`), matching every other admin audit write. |
+| Bind role alignment | Binding an existing account to a store now aligns the global `User.role` with the membership role (`OWNER → STORE_OWNER`, otherwise the role itself), so the bound user's JWT-driven UI matches their membership. |
+| Atomicity | `createPlatformUser` writes (user + membership + audit) are now one `prisma.$transaction`; a `P2002` unique-constraint race on email/phone returns the same `conflict` shape as `register` instead of a 500. |
 
 ## Fix — a new owner is told no store is linked, instead of landing on a broken dashboard
 

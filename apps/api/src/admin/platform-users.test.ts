@@ -13,6 +13,7 @@ const CONFIG = { jwtSecret: "test-secret-0123456789", jwtExpiresIn: "1h" };
 const svc = new AuthService(new PrismaAuthRepository(), CONFIG);
 
 const run = `PAU${Date.now()}${Math.floor(Math.random() * 1000)}`;
+const ACTOR_ID = `actor-${run}`;
 const storeIds: string[] = [];
 const userIds: string[] = [];
 
@@ -41,7 +42,7 @@ after(async () => {
 test("createPlatformUser creates a user with a temp password and an ACTIVE membership", async () => {
   const store = await makeStore();
 
-  const owner = await svc.createPlatformUser({ name: "New Owner", email: email("owner"), role: "OWNER", storeId: store.id });
+  const owner = await svc.createPlatformUser({ name: "New Owner", email: email("owner"), role: "OWNER", storeId: store.id, actorId: ACTOR_ID });
   assert.equal(owner.ok, true);
   if (!owner.ok) return;
   userIds.push(owner.value.userId);
@@ -61,7 +62,13 @@ test("createPlatformUser creates a user with a temp password and an ACTIVE membe
   assert.equal(ownerMembership?.role, "OWNER");
   assert.equal(ownerMembership?.status, "ACTIVE");
 
-  const staff = await svc.createPlatformUser({ email: email("staff"), role: "STAFF", storeId: store.id });
+  const audit = await prisma.auditLog.findFirst({
+    where: { entityId: owner.value.userId, action: "platform.user.create" },
+  });
+  assert.equal(audit?.actorType, "platform_admin");
+  assert.equal(audit?.actorId, ACTOR_ID, "audit row records the acting platform admin");
+
+  const staff = await svc.createPlatformUser({ email: email("staff"), role: "STAFF", storeId: store.id, actorId: ACTOR_ID });
   assert.equal(staff.ok, true);
   if (!staff.ok) return;
   userIds.push(staff.value.userId);
@@ -76,7 +83,7 @@ test("createPlatformUser creates a user with a temp password and an ACTIVE membe
 });
 
 test("createPlatformUser rejects PLATFORM_ADMIN as a store role", async () => {
-  const r = await svc.createPlatformUser({ email: email("badrole"), role: "PLATFORM_ADMIN" });
+  const r = await svc.createPlatformUser({ email: email("badrole"), role: "PLATFORM_ADMIN", actorId: ACTOR_ID });
   assert.equal(r.ok, false);
   if (!r.ok) assert.equal(r.error.type, "validation");
 });
@@ -88,7 +95,7 @@ test("createPlatformUser binds an existing email without touching its password",
   });
   userIds.push(existing.id);
 
-  const r = await svc.createPlatformUser({ name: "Ignored", email: email("existing"), role: "MANAGER", storeId: store.id });
+  const r = await svc.createPlatformUser({ name: "Ignored", email: email("existing"), role: "MANAGER", storeId: store.id, actorId: ACTOR_ID });
   assert.equal(r.ok, true);
   if (!r.ok) return;
   assert.equal(r.value.userId, existing.id);
@@ -98,6 +105,7 @@ test("createPlatformUser binds an existing email without touching its password",
   const row = await prisma.user.findUnique({ where: { id: existing.id } });
   assert.equal(row?.passwordHash, existing.passwordHash, "password hash unchanged");
   assert.equal(row?.mustChangePassword, false, "must-change flag untouched");
+  assert.equal(row?.role, "MANAGER", "bound user's global role aligns with the membership role");
 
   const membership = await prisma.userStore.findUnique({
     where: { userId_storeId: { userId: existing.id, storeId: store.id } },
@@ -107,18 +115,18 @@ test("createPlatformUser binds an existing email without touching its password",
 });
 
 test("createPlatformUser rejects a nonexistent store", async () => {
-  const r = await svc.createPlatformUser({ email: email("nostore"), role: "STAFF", storeId: "does-not-exist-000" });
+  const r = await svc.createPlatformUser({ email: email("nostore"), role: "STAFF", storeId: "does-not-exist-000", actorId: ACTOR_ID });
   assert.equal(r.ok, false);
   if (!r.ok) assert.equal(r.error.type, "not_found");
 });
 
 test("createPlatformUser conflicts on a duplicate email with no store to bind", async () => {
-  const first = await svc.createPlatformUser({ email: email("dup"), role: "STAFF" });
+  const first = await svc.createPlatformUser({ email: email("dup"), role: "STAFF", actorId: ACTOR_ID });
   assert.equal(first.ok, true);
   if (!first.ok) return;
   userIds.push(first.value.userId);
 
-  const second = await svc.createPlatformUser({ email: email("dup"), role: "STAFF" });
+  const second = await svc.createPlatformUser({ email: email("dup"), role: "STAFF", actorId: ACTOR_ID });
   assert.equal(second.ok, false);
   if (!second.ok) assert.equal(second.error.type, "conflict");
 });

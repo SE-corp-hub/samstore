@@ -139,7 +139,6 @@ export default function TeamPanel() {
                     disabled={m.role === "OWNER"}
                     onChange={(e) => changeRole(m.userId, e.target.value)}
                   >
-                    <option value="OWNER">OWNER</option>
                     {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
                   </select>
                 </td>

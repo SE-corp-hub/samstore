@@ -184,16 +184,14 @@ test("an owner's team surface lists only staff roles to add and no PLATFORM_ADMI
   await expect(inviteSelect.locator("option", { hasText: "OWNER" })).toHaveCount(0);
   await expect(inviteSelect.locator("option", { hasText: "PLATFORM_ADMIN" })).toHaveCount(0);
 
-  // Role-change list on a non-owner row: the 4 staff roles plus OWNER — but never
-  // PLATFORM_ADMIN. The OWNER option is pre-existing legacy TeamPanel behaviour
-  // whose selection the API rejects (422, team.service.ts:75-77); deferred as a
-  // follow-up outside this plan.
+  // Role-change list on a non-owner row: exactly the 4 staff roles — never OWNER
+  // (the API rejects it, team.service.ts:75-77) and never PLATFORM_ADMIN.
   const row = page.locator("tr", { hasText: "staff@samstore.test" });
   await expect(row).toBeVisible({ timeout: 20_000 });
   const changeSelect = row.locator("select");
   for (const role of ["MANAGER", "STAFF", "SALES_AGENT", "DELIVERY"]) {
     await expect(changeSelect.locator(`option[value="${role}"]`)).toHaveCount(1);
   }
-  await expect(changeSelect.locator("option", { hasText: "OWNER" })).toHaveCount(1);
+  await expect(changeSelect.locator("option", { hasText: "OWNER" })).toHaveCount(0);
   await expect(changeSelect.locator("option", { hasText: "PLATFORM_ADMIN" })).toHaveCount(0);
 });

@@ -332,6 +332,7 @@ export class AuthService {
     phone?: string | null;
     storeId?: string | null;
     role: string;
+    actorId: string;
   }): Promise<AuthResult<{ userId: string; email: string; role: string; tempPassword?: string }>> {
     const email = (input.email ?? "").trim().toLowerCase();
     if (!EMAIL_RE.test(email)) {
@@ -361,46 +362,65 @@ export class AuthService {
       }
     }
 
-    let userId: string;
-    let tempPassword: string | undefined;
-    if (existing) {
-      userId = existing.id;
-    } else {
-      tempPassword = randomBytes(9).toString("base64url");
-      const user = await prisma.user.create({
-        data: {
-          email,
-          phone,
-          passwordHash: await hashPassword(tempPassword),
-          name: input.name?.trim() || null,
-          role: input.role === "OWNER" ? "STORE_OWNER" : input.role,
-          mustChangePassword: true,
-        },
-        select: { id: true },
+    try {
+      const { userId, tempPassword } = await prisma.$transaction(async (tx) => {
+        let userId: string;
+        let tempPassword: string | undefined;
+        if (existing) {
+          userId = existing.id;
+          // Align the bound user's global role claim with the membership role
+          // (same convention as changeRole).
+          await tx.user.update({
+            where: { id: existing.id },
+            data: { role: input.role === "OWNER" ? "STORE_OWNER" : input.role },
+          });
+        } else {
+          tempPassword = randomBytes(9).toString("base64url");
+          const user = await tx.user.create({
+            data: {
+              email,
+              phone,
+              passwordHash: await hashPassword(tempPassword),
+              name: input.name?.trim() || null,
+              role: input.role === "OWNER" ? "STORE_OWNER" : input.role,
+              mustChangePassword: true,
+            },
+            select: { id: true },
+          });
+          userId = user.id;
+        }
+
+        if (storeId) {
+          await tx.userStore.upsert({
+            where: { userId_storeId: { userId, storeId } },
+            update: { role: input.role as StoreRole, status: "ACTIVE" },
+            create: { userId, storeId, role: input.role as StoreRole, status: "ACTIVE" },
+          });
+        }
+
+        await tx.auditLog.create({
+          data: {
+            storeId: storeId ?? null,
+            actorType: "platform_admin",
+            actorId: input.actorId,
+            action: "platform.user.create",
+            entityType: "User",
+            entityId: userId,
+            after: { role: input.role },
+          },
+        });
+
+        return { userId, tempPassword };
       });
-      userId = user.id;
+
+      return { ok: true, value: { userId, email, role: input.role, ...(tempPassword ? { tempPassword } : {}) } };
+    } catch (e) {
+      // Race on the unique constraint → same normalized email/phone created twice.
+      if ((e as { code?: string }).code === "P2002") {
+        return { ok: false, error: { type: "conflict", message: "Email or mobile number already registered" } };
+      }
+      throw e;
     }
-
-    if (storeId) {
-      await prisma.userStore.upsert({
-        where: { userId_storeId: { userId, storeId } },
-        update: { role: input.role as StoreRole, status: "ACTIVE" },
-        create: { userId, storeId, role: input.role as StoreRole, status: "ACTIVE" },
-      });
-    }
-
-    await prisma.auditLog.create({
-      data: {
-        storeId: storeId ?? null,
-        actorType: "platform_admin",
-        action: "platform.user.create",
-        entityType: "User",
-        entityId: userId,
-        after: { role: input.role },
-      },
-    });
-
-    return { ok: true, value: { userId, email, role: input.role, ...(tempPassword ? { tempPassword } : {}) } };
   }
 
   /**
