@@ -1,5 +1,17 @@
 # PINDIAN — Progress Log
 
+## UI/UX — admin console theme, foundation loop (warm light on the brand)
+
+| Item | Detail |
+|---|---|
+| Request | Analyze the whole project and improve design/UI-UX on the admin console only (operator-confirmed: storefront and auth pages untouched; warm-light direction on the existing brand; foundation first, then batches). |
+| Design system | Persisted source of truth: `design-system/sam-s-store-admin/MASTER.md` (operator-approved direction, tokens, component specs, anti-patterns, pre-delivery checklist). The tool's initial dark-glassmorphism recommendation was rejected as off-brand and off-stack (Bootstrap 5.3 mandate). |
+| Foundation (this loop) | `globals.css` gains admin tokens (`--sam-sidebar #2b2118`, `--sam-border #e9e2d8`, `--sam-text #33261d`, `--sam-radius`, `--sam-shadow`, `--bs-focus-ring-color` terracotta) plus an `admin-shell`-scoped theme: dark coffee-brown sidebar with terracotta active pill, topbar surface, card/modal radius+border, dense table chrome (uppercase muted thead, tabular-nums), single 150ms transition, `:focus-visible` outline, `prefers-reduced-motion` collapse. Storefront/auth pages untouched (scoped). |
+| Shell | `AdminDashboard.tsx`: `admin-shell` wrapper, `admin-sidebar` aside, nav pills with terracotta active state (replaces Bootstrap default blue `bg-primary`), topbar `admin-topbar`, group labels, `bi-shop` brand row. |
+| High-traffic screens | Headers already followed the `<h1 className="h4">` + Bootstrap-Icons pattern (Orders, POS, Pre-Orders) — normalized by CSS. Removed the decorative emoji from Overview ("Good day! 👋" → "Good day!"). |
+| Verified | typecheck clean; lint 0 errors / 297 warnings (unchanged); secret scan 0 high; web production build compiled; E2E regression **12 passed** across the six shell-dependent specs (login, expired-session, platform switcher, register confirm, storeless onboarding, platform user management). |
+| Next loops | Batched panel passes: (a) POS + Pre-Orders + Orders interaction polish, (b) money/sell panels, (c) platform surfaces (Stores, User Access, Maintenance). Each loop re-runs the gates and a relevant E2E slice. |
+
 ## Platform admin — user management end to end (audit B1–B9)
 
 | Item | Detail |

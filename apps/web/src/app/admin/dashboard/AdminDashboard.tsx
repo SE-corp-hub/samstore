@@ -221,21 +221,21 @@ case "erp": return <ErpPanel />;
   const sidebar = (
     <div className="d-flex flex-column h-100">
       <div className="p-3 border-bottom">
-        <div className="fw-bold h6 mb-0">
-          <i className="bi bi-shop me-2 text-primary"></i>
+        <div className="fw-bold h6 mb-0 d-flex align-items-center gap-2">
+          <i className="bi bi-shop fs-6"></i>
           {active?.name ?? "Store Admin"}
         </div>
-        {active && <small className="text-muted">{active.slug}</small>}
+        {active && <small>{active.slug}</small>}
       </div>
       <nav className="flex-grow-1 overflow-auto py-2">
         {visibleGroups.map((g) => (
           <div key={g.group} className="mb-2">
-            <div className="px-3 small text-uppercase text-muted fw-semibold">{g.label}</div>
+            <div className="nav-group-label px-3 small text-uppercase fw-semibold">{g.label}</div>
             <ul className="nav flex-column">
               {g.items.map((item) => (
                 <li className="nav-item" key={item.id}>
                   <button
-                    className={`nav-link w-100 text-start d-flex align-items-center gap-2 ${tab === item.id ? "active bg-primary text-white" : "text-body"}`}
+                    className={`nav-link w-100 text-start d-flex align-items-center gap-2 ${tab === item.id ? "active" : ""}`}
                     onClick={() => { userNavigated.current = true; setTab(item.id); setMobileNav(false); }}
                   >
                     <i className={`bi ${item.icon}`}></i>
@@ -249,7 +249,7 @@ case "erp": return <ErpPanel />;
       </nav>
       <div className="p-3 border-top">
         <div className="small fw-semibold">{email || "Admin"}</div>
-        <div className="small text-muted mb-2">{role} · {active?.name}</div>
+        <div className="small mb-2">{role} · {active?.name}</div>
         <button className="btn btn-outline-danger btn-sm w-100" onClick={logout}>
           <i className="bi bi-box-arrow-right me-1"></i>Log out
         </button>
@@ -258,9 +258,9 @@ case "erp": return <ErpPanel />;
   );
 
   return (
-    <div key={activeStore ?? "none"} className="d-flex min-vh-100">
+    <div key={activeStore ?? "none"} className="admin-shell d-flex min-vh-100">
       {/* Desktop sidebar */}
-      <aside className="d-none d-md-flex flex-column border-end bg-white" style={{ width: 240, position: "sticky", top: 0, height: "100vh" }}>
+      <aside className="admin-sidebar d-none d-md-flex flex-column" style={{ width: 240, position: "sticky", top: 0, height: "100vh" }}>
         {sidebar}
       </aside>
 
@@ -281,7 +281,7 @@ case "erp": return <ErpPanel />;
       {/* Main */}
       <div className="flex-grow-1 d-flex flex-column" style={{ minWidth: 0 }}>
         {/* Topbar */}
-        <nav className="navbar navbar-expand bg-white border-bottom py-2">
+        <nav className="admin-topbar navbar navbar-expand py-2">
           <div className="container-fluid">
             <button className="btn btn-outline-secondary btn-sm d-md-none me-2" onClick={() => setMobileNav(true)}>
               <i className="bi bi-list"></i>

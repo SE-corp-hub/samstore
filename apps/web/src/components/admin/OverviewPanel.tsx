@@ -124,7 +124,7 @@ export default function OverviewPanel({ onNavigate, storeSlug, storeName }: Over
     <div>
       <div className="d-flex justify-content-between align-items-center flex-wrap mb-3">
         <div>
-          <h1 className="h4 mb-0">Good day! 👋</h1>
+          <h1 className="h4 mb-0">Good day!</h1>
           {storeName && <small className="text-muted">Here&apos;s how {storeName} is doing today.</small>}
         </div>
         <div className="d-flex gap-2 align-items-center">
