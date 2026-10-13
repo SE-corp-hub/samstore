@@ -6,29 +6,45 @@ import {
   getAdminToken, getAdminStoreId, setAdminStoreId, getAdminRole,
   NAV_GROUPS, allowedTabs, defaultTabFor, isOwnerRole, handleUnauthorized,
 } from "../../../lib/admin";
+import dynamic from "next/dynamic";
 import { API_URL } from "../../../config";
+// The landing panel stays eager (it is the first paint); every other panel loads when
+// its tab opens. Shipping all 22 at once cost ~95 kB of route JS for one visible screen,
+// and dragged jsbarcode/qrcode (used by two panels) into the initial payload.
 import OverviewPanel from "../../../components/admin/OverviewPanel";
-import OrdersPanel from "../../../components/admin/OrdersPanel";
-import ProductsPanel from "../../../components/admin/ProductsPanel";
-import SettingsPanel from "../../../components/admin/SettingsPanel";
-import VouchersPanel from "../../../components/admin/VouchersPanel";
-import StoresPanel from "../../../components/admin/StoresPanel";
-import CustomersPanel from "../../../components/admin/CustomersPanel";
-import CrmPanel from "../../../components/admin/CrmPanel";
-import ErpPanel from "../../../components/admin/ErpPanel";
-import AnalyticsPanel from "../../../components/admin/AnalyticsPanel";
-import MaintenancePanel from "../../../components/admin/MaintenancePanel";
-import TeamPanel from "../../../components/admin/TeamPanel";
-import WarehousesPanel from "../../../components/admin/WarehousesPanel";
-import UserAccessPanel from "../../../components/admin/UserAccessPanel";
-import PosPanel from "../../../components/admin/PosPanel";
-import PreOrdersPanel from "../../../components/admin/PreOrdersPanel";
-import UtangPanel from "../../../components/admin/UtangPanel";
-import ExpensesPanel from "../../../components/admin/ExpensesPanel";
-import PurchasesPanel from "../../../components/admin/PurchasesPanel";
-import InventoryPanel from "../../../components/admin/InventoryPanel";
-import StoreLinkPanel from "../../../components/admin/StoreLinkPanel";
-import ReportsPanel from "../../../components/admin/ReportsPanel";
+
+const panelLoading = () => (
+  <div className="d-flex justify-content-center py-5" role="status">
+    <div className="spinner-border text-primary"></div>
+    <span className="ms-2 text-muted">Loading…</span>
+  </div>
+);
+const panel = (loader: () => Promise<{ default: React.ComponentType<PanelProps> }>) =>
+  dynamic(loader, { ssr: false, loading: panelLoading });
+
+interface PanelProps { onNavigate?: (tab: string) => void }
+
+const OrdersPanel = panel(() => import("../../../components/admin/OrdersPanel"));
+const ProductsPanel = panel(() => import("../../../components/admin/ProductsPanel"));
+const SettingsPanel = panel(() => import("../../../components/admin/SettingsPanel"));
+const VouchersPanel = panel(() => import("../../../components/admin/VouchersPanel"));
+const StoresPanel = panel(() => import("../../../components/admin/StoresPanel"));
+const CustomersPanel = panel(() => import("../../../components/admin/CustomersPanel"));
+const CrmPanel = panel(() => import("../../../components/admin/CrmPanel"));
+const ErpPanel = panel(() => import("../../../components/admin/ErpPanel"));
+const AnalyticsPanel = panel(() => import("../../../components/admin/AnalyticsPanel"));
+const MaintenancePanel = panel(() => import("../../../components/admin/MaintenancePanel"));
+const TeamPanel = panel(() => import("../../../components/admin/TeamPanel"));
+const WarehousesPanel = panel(() => import("../../../components/admin/WarehousesPanel"));
+const UserAccessPanel = panel(() => import("../../../components/admin/UserAccessPanel"));
+const PosPanel = panel(() => import("../../../components/admin/PosPanel"));
+const PreOrdersPanel = panel(() => import("../../../components/admin/PreOrdersPanel"));
+const UtangPanel = panel(() => import("../../../components/admin/UtangPanel"));
+const ExpensesPanel = panel(() => import("../../../components/admin/ExpensesPanel"));
+const PurchasesPanel = panel(() => import("../../../components/admin/PurchasesPanel"));
+const InventoryPanel = panel(() => import("../../../components/admin/InventoryPanel"));
+const StoreLinkPanel = panel(() => import("../../../components/admin/StoreLinkPanel"));
+const ReportsPanel = panel(() => import("../../../components/admin/ReportsPanel"));
 
 interface MyStore { id: string; name: string; slug: string; role: string; }
 

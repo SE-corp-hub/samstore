@@ -79,6 +79,8 @@ each endpoint's own work.
 |---|---|---|---|
 | One shared, 10 s-cached membership lookup replacing the guard + resolveTenant pair | deterministic: `/admin/orders` 3 statements with **0** membership lookups (was 1 per request alongside the guard's own); `/admin/settings` shows 1 on a cache miss; wall-clock settings 805 ms → 11 ms on repeat calls | **kept** | Removes ~1–2 DB round-trips (~300 ms each) from every authenticated request. Verified with `scripts/perf-queries.mjs` (statement counts, not wall-clock — the pooler swings 2–3× run to run). Suites `tenant-context` 8/8 and `store-access` 11/11 still green. |
 
+| Code-split the 22 admin panels (`next/dynamic`, `ssr:false`); keep the landing panel eager | `/admin/dashboard` route chunk **95.4 kB → 7.7 kB**; First Load JS **198 kB → 111 kB** (−44%); login untouched at 105 kB | **kept** | Deterministic build metric. jsbarcode/qrcode now ride inside the two panels that use them. E2E 10/10 across the panel-driven specs (pre-orders tab, user access, onboarding, login). |
+
 ### Wall-clock probe results (noisy — see caveat)
 
 `node scripts/perf-probe.mjs`, median of 3, before → after (typical run):
