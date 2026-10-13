@@ -5,7 +5,24 @@
 // Codes are PSGC-style; the seed ships a curated subset (full dataset PENDING).
 
 import { prisma } from "../persistence/prisma-repositories.js";
+import { cacheGet, cacheKey, cacheSet } from "../persistence/ttl-cache.js";
 import type { PhBarangayDTO, PhCityDTO, PhProvinceDTO, PhRegionDTO } from "@sam-store/contracts";
+
+// PH reference data is seeded and effectively immutable, but checkout's address cascade
+// read it fresh on every dropdown change and every submit — each read paying the pooler's
+// ~300 ms round-trip. Cache it (10 min) and collapse each parent+children pair into one
+// query via a relation filter.
+const ADDRESS_CACHE_TTL_MS = 10 * 60_000;
+const ADDRESS_PREFIX = "ph-address";
+
+async function cached<T>(key: string, load: () => Promise<T>): Promise<T> {
+  const k = cacheKey(ADDRESS_PREFIX, key);
+  const hit = await cacheGet<T>(k);
+  if (hit) return hit;
+  const value = await load();
+  await cacheSet(k, value, ADDRESS_CACHE_TTL_MS);
+  return value;
+}
 
 /** DI token — the CheckoutService consumes this as its AddressGateway. */
 export const ADDRESS_GATEWAY = Symbol("ADDRESS_GATEWAY");
@@ -16,49 +33,43 @@ export type AddressResolution =
 
 export class AddressService {
   async listRegions(): Promise<PhRegionDTO[]> {
-    return prisma.phRegion.findMany({
-      orderBy: { sortOrder: "asc" },
-      select: { code: true, name: true },
-    });
+    return cached("regions", () =>
+      prisma.phRegion.findMany({
+        orderBy: { sortOrder: "asc" },
+        select: { code: true, name: true },
+      }),
+    );
   }
 
+  /** One query: filter through the relation instead of resolving the parent id first. */
   async listProvinces(regionCode: string): Promise<PhProvinceDTO[]> {
-    const region = await prisma.phRegion.findUnique({
-      where: { code: regionCode },
-      select: { id: true },
-    });
-    if (!region) return [];
-    return prisma.phProvince.findMany({
-      where: { regionId: region.id },
-      orderBy: { name: "asc" },
-      select: { code: true, name: true },
-    });
+    return cached(`provinces:${regionCode}`, () =>
+      prisma.phProvince.findMany({
+        where: { region: { code: regionCode } },
+        orderBy: { name: "asc" },
+        select: { code: true, name: true },
+      }),
+    );
   }
 
   async listCities(provinceCode: string): Promise<PhCityDTO[]> {
-    const province = await prisma.phProvince.findUnique({
-      where: { code: provinceCode },
-      select: { id: true },
-    });
-    if (!province) return [];
-    return prisma.phCity.findMany({
-      where: { provinceId: province.id },
-      orderBy: { name: "asc" },
-      select: { code: true, name: true, type: true },
-    });
+    return cached(`cities:${provinceCode}`, () =>
+      prisma.phCity.findMany({
+        where: { province: { code: provinceCode } },
+        orderBy: { name: "asc" },
+        select: { code: true, name: true, type: true },
+      }),
+    );
   }
 
   async listBarangays(cityCode: string): Promise<PhBarangayDTO[]> {
-    const city = await prisma.phCity.findUnique({
-      where: { code: cityCode },
-      select: { id: true },
-    });
-    if (!city) return [];
-    return prisma.phBarangay.findMany({
-      where: { cityId: city.id },
-      orderBy: { name: "asc" },
-      select: { code: true, name: true },
-    });
+    return cached(`barangays:${cityCode}`, () =>
+      prisma.phBarangay.findMany({
+        where: { city: { code: cityCode } },
+        orderBy: { name: "asc" },
+        select: { code: true, name: true },
+      }),
+    );
   }
 
   /** Validate a full selection and return the frozen name snapshot for the order.
@@ -69,10 +80,14 @@ export class AddressService {
     cityCode: string,
     barangayCode: string,
   ): Promise<AddressResolution> {
-    const region = await prisma.phRegion.findUnique({ where: { code: regionCode } });
-    const province = await prisma.phProvince.findUnique({ where: { code: provinceCode } });
-    const city = await prisma.phCity.findUnique({ where: { code: cityCode } });
-    const barangay = await prisma.phBarangay.findUnique({ where: { code: barangayCode } });
+    // Independent lookups: four sequential round-trips became one (validation against
+    // each other happens below, so order does not matter).
+    const [region, province, city, barangay] = await Promise.all([
+      prisma.phRegion.findUnique({ where: { code: regionCode } }),
+      prisma.phProvince.findUnique({ where: { code: provinceCode } }),
+      prisma.phCity.findUnique({ where: { code: cityCode } }),
+      prisma.phBarangay.findUnique({ where: { code: barangayCode } }),
+    ]);
 
     if (!region || !province || !city || !barangay) {
       return { ok: false, message: "Address selection is invalid — please re-check your location" };

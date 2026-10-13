@@ -83,6 +83,8 @@ each endpoint's own work.
 
 | Idle backoff + enqueue wake for the outbox drain (was a fixed 5 s poll forever) | idle DB polls in 60 s: **12 → 2** (measured over a quiet 60 s window, cumulative `OutboxEvent` calls 74,175 → delta 12 then 2); new test proves an enqueue still drains within seconds with a 60 s backoff configured | **kept** | ~17k idle queries/day/process removed from a pooler with 4 slots, while real events now drain *immediately* instead of waiting up to 5 s. `outbox.service.test.ts` 4/4. |
 
+| Cache PH address reference data + collapse each parent/child list into one relation-filtered query + `Promise.all` the four checkout lookups | regions **748–1840 ms → 1–10 ms**; provinces/cities 0–1 ms warm (first cities call 532 ms = one query, was two); `resolve()` 4 sequential round-trips → 1 | **kept** | This is the checkout address cascade the operator flagged: ~2–5 s of dropdown latency removed. Seeded reference data, 10 min TTL. `address.service.test.ts` 2/2. |
+
 ### Wall-clock probe results (noisy — see caveat)
 
 `node scripts/perf-probe.mjs`, median of 3, before → after (typical run):
