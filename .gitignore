@@ -38,3 +38,7 @@ playwright-report/
 
 # A nested third-party clone someone dropped under vids/ — not part of this codebase
 vids/
+
+# Database backups made by `npm run db:backup` — contain customer data, never commit
+backups/
+*.dump

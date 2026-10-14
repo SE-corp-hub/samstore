@@ -1,5 +1,16 @@
 # PINDIAN — Progress Log
 
+## M0 — Prepare the Rice Ops release (2026-10-14)
+
+| Item | Detail |
+|---|---|
+| Plan | `SAM STORE — Rice Operations Upgrade Plan` (Claude doc), module M0 of 13. Operator decision: build module by module, stop after each for CONTINUE (AGENTS.md unchanged). |
+| Finding | Local `main` (83 commits, root `c62c011` "Phase 0: foundation transfer into extraricestore", head `d7a893a`) and GitHub `extraricestore/samstore` `main` (`30a2131`, the older sam-store line) have **unrelated histories**. Replacing GitHub `main` would be a force-push, which AGENTS.md reserves for explicit operator approval — so local `main` is pushed to a **new** branch `pindian-main` instead, and GitHub `main` is left untouched. |
+| Secret scan of the full history | All 83 commits re-built from `.git` and scanned (postgres/redis URLs with passwords, OpenRouter/OpenAI-style keys, JWTs, `JWT_SECRET=` values, GitHub tokens, AWS keys, `.env`/key files). Only hits: the placeholders in `.env.example` (`USER:PASSWORD@HOST`, `replace-with-32-plus-random-chars`). `git fsck --full` clean. Largest blob 0.78 MB (`.archify` HTML). |
+| Backup | New `scripts/backup-db.mjs` + `npm run db:backup`: reads `DATABASE_URL` from `.env` without printing it, switches a Supabase transaction-pooler URL (6543) to session mode (5432) for `pg_dump`, writes `backups/samstore-YYYYMMDD-HHMM.dump` (custom format), then verifies it with `pg_restore --list` (fails unless table data is present). `backups/` and `*.dump` are gitignored. Tested end-to-end against a throwaway Postgres 16: `BACKUP OK … 4 archive entries · 2 tables with data`, exit 0; missing tools → exit 3 with install steps; unreachable DB → exit 4 with the URL masked. |
+| Branch | `release/rice-ops` is cut from `pindian-main` after the backup is verified. |
+| Not done here (needs the operator) | The push itself (this session's GitHub access is read-only, 403 on push) and running the backup (needs the real `DATABASE_URL`, which stays on the operator's machine). |
+
 ## UI/UX — admin console theme, foundation loop (warm light on the brand)
 
 | Item | Detail |

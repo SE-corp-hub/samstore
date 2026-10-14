@@ -23,6 +23,7 @@
     "db:deploy": "prisma migrate deploy",
     "db:seed": "tsx prisma/seed.ts",
     "db:seed:addresses": "tsx prisma/seed-ph-addresses.ts",
+    "db:backup": "node scripts/backup-db.mjs",
     "test:e2e": "playwright test --config apps/api/playwright.config.ts",
     "lint": "eslint apps/api/src apps/web/src && npm run typecheck && npm run check:secrets",
     "check:secrets": "node scripts/check-secrets.mjs",
