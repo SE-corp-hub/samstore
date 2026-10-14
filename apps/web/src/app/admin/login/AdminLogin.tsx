@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { API_URL } from "../../../config";
 
@@ -16,6 +16,52 @@ export default function AdminLogin() {
   const [newPasswordConfirm, setNewPasswordConfirm] = useState("");
   const [changeError, setChangeError] = useState<string | null>(null);
   const [changing, setChanging] = useState(false);
+  // Rice Ops M2: PIN login — mobile number + 4 digits on a big on-screen pad.
+  const [pinMode, setPinMode] = useState(false);
+  const [pinPhone, setPinPhone] = useState("");
+  const [pin, setPin] = useState("");
+
+  useEffect(() => {
+    try {
+      if (new URLSearchParams(window.location.search).get("pin") === "1") setPinMode(true);
+      const last = localStorage.getItem("samstore.pin.phone");
+      if (last) setPinPhone(last);
+    } catch { /* storage may be blocked: start empty */ }
+  }, []);
+
+  const pinLogin = async (digits: string) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`${API_URL}/auth/pin-login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone: pinPhone, pin: digits }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        setError(data?.message ?? "Hindi naka-login");
+        setPin("");
+        return;
+      }
+      try { localStorage.setItem("samstore.pin.phone", pinPhone); } catch { /* convenience only */ }
+      sessionStorage.setItem("samstore.admin.token", data.token);
+      sessionStorage.setItem("samstore.admin.email", data.user?.name ?? data.user?.phone ?? pinPhone);
+      goAfterAuth(data.token);
+    } catch {
+      setError("Walang internet. Subukan ulit.");
+      setPin("");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const pressDigit = (d: string) => {
+    if (loading) return;
+    const next = (pin + d).slice(0, 4);
+    setPin(next);
+    if (next.length === 4) void pinLogin(next);
+  };
 
   const decodeRole = (token: string): string => {
     try {
@@ -156,6 +202,46 @@ export default function AdminLogin() {
               ← Back to sign in
             </button>
           </div>
+        ) : pinMode ? (
+          <div className="card shadow-sm p-4" style={{ width: "100%", maxWidth: 420, fontSize: 18 }}>
+            <div className="text-center mb-3">
+              <i className="bi bi-person-badge fs-1 text-success"></i>
+              <h1 className="h4 mt-2 mb-0">Mag-login gamit ang PIN</h1>
+            </div>
+            {error && <div className="alert alert-danger py-2" role="alert">{error}</div>}
+            <label className="form-label" htmlFor="pin-phone">Mobile number</label>
+            <input
+              id="pin-phone" className="form-control form-control-lg mb-3" inputMode="tel" autoComplete="tel"
+              value={pinPhone} onChange={(e) => setPinPhone(e.target.value)} placeholder="0917 123 4567"
+            />
+            <div className="text-center mb-2" aria-live="polite" aria-label={`${pin.length} sa 4 na numero`}>
+              {[0, 1, 2, 3].map((i) => (
+                <span key={i} className={`d-inline-block rounded-circle mx-2 ${i < pin.length ? "bg-dark" : "border border-2 border-dark"}`} style={{ width: 18, height: 18 }} />
+              ))}
+            </div>
+            <div className="row g-2" style={{ fontVariantNumeric: "tabular-nums" }}>
+              {["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((d) => (
+                <div className="col-4" key={d}>
+                  <button type="button" className="btn btn-outline-dark w-100 py-3 fs-3" disabled={loading || !pinPhone.trim()} onClick={() => pressDigit(d)}>{d}</button>
+                </div>
+              ))}
+              <div className="col-4">
+                <button type="button" className="btn btn-outline-secondary w-100 py-3" disabled={loading || pin.length === 0} onClick={() => setPin(pin.slice(0, -1))} aria-label="Burahin ang huling numero">
+                  <i className="bi bi-backspace fs-4"></i>
+                </button>
+              </div>
+              <div className="col-4">
+                <button type="button" className="btn btn-outline-dark w-100 py-3 fs-3" disabled={loading || !pinPhone.trim()} onClick={() => pressDigit("0")}>0</button>
+              </div>
+              <div className="col-4">
+                <button type="button" className="btn btn-outline-secondary w-100 py-3" disabled={loading} onClick={() => setPin("")}>Burahin</button>
+              </div>
+            </div>
+            {loading && <p className="text-center text-muted mt-3 mb-0">Sandali…</p>}
+            <button className="btn btn-link w-100 mt-3" type="button" onClick={() => { setPinMode(false); setError(null); setPin(""); }}>
+              Gamitin ang password
+            </button>
+          </div>
         ) : (
           <div className="card shadow-sm p-4" style={{ width: "100%", maxWidth: 420 }}>
             <div className="text-center mb-4">
@@ -215,6 +301,9 @@ export default function AdminLogin() {
                 {loading ? "Signing in…" : "Sign in"}
               </button>
             </form>
+            <button className="btn btn-outline-success w-100 mt-2" type="button" onClick={() => { setPinMode(true); setError(null); }}>
+              <i className="bi bi-123 me-1"></i>Staff: mag-login gamit ang PIN
+            </button>
             <hr className="my-4" />
             <p className="text-muted small mb-0 text-center">
               Don&apos;t have an account?{" "}

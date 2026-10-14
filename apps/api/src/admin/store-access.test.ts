@@ -209,6 +209,7 @@ after(async () => {
     // worker drains it into a NotificationLog row — clear both before the store.
     await prisma.outboxEvent.deleteMany({ where: { storeId: { in: createdStoreIds } } });
     await prisma.notificationLog.deleteMany({ where: { storeId: { in: createdStoreIds } } });
+    await prisma.warehouse.deleteMany({ where: { storeId: { in: createdStoreIds } } }); // Rice Ops M1: stores start with a location
     await prisma.store.deleteMany({ where: { id: { in: createdStoreIds } } });
   }
   await prisma.$disconnect();

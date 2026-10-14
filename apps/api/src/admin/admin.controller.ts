@@ -11,6 +11,7 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   Query,
   Req,
   Res,
@@ -31,6 +32,8 @@ import { StoreAdminService } from "./store-admin.service.js";
 import { AnalyticsService } from "./analytics.service.js";
 import { TeamService } from "./team.service.js";
 import { WarehouseService } from "./warehouse.service.js";
+import { loadActor } from "../people/people.service.js";
+import { signaturesFrom } from "../people/signature-input.js";
 import { LoyaltyService } from "../loyalty/loyalty.service.js";
 import { CartRecoveryService } from "../cart/recovery.service.js";
 import { PrivacyRetentionService } from "../privacy/retention.service.js";
@@ -1043,7 +1046,7 @@ export class AdminController {
     const user = req.user;
     requireUser(user);
     const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.VIEW);
-    const result = await this.ordersAdmin.replaceOrderItems(storeId, id, body?.items ?? []);
+    const result = await this.ordersAdmin.replaceOrderItems(storeId, id, body?.items ?? [], user.sub);
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
     return { ...result.value, storeId };
   }
@@ -1154,33 +1157,98 @@ export class AdminController {
     return { warehouses: await this.warehouses.list(storeId), storeId };
   }
 
-  /** POST /admin/warehouses — create a warehouse (first = default). */
+  /** POST /admin/warehouses — create a location (first = default). Rice Ops M1: type/code/address. */
   @Post("warehouses")
   async createWarehouse(
     @Req() req: Request & { user?: AuthPrincipal },
-    @Body() body: { name: string },
+    @Body() body: { name: string; type?: string; code?: string | null; address?: string | null },
     @Headers("x-store-id") headerStoreId?: string,
   ) {
     const user = req.user;
     requireUser(user);
-    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
-    const result = await this.warehouses.create(storeId, body.name);
+    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.OWNER_MANAGER);
+    const result = await this.warehouses.create(storeId, {
+      name: body?.name,
+      type: body?.type,
+      code: body?.code,
+      address: body?.address,
+    });
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
     return result.value;
   }
 
-  /** POST /admin/warehouses/:id/stock — set a product's stock at a warehouse. */
+  /** PATCH /admin/warehouses/:id — Rice Ops M1: rename, code, address, type, active, default. */
+  @Patch("warehouses/:id")
+  async updateWarehouse(
+    @Req() req: Request & { user?: AuthPrincipal },
+    @Param("id") id: string,
+    @Body() body: { name?: string; type?: string; code?: string | null; address?: string | null; isActive?: boolean; isDefault?: boolean },
+    @Headers("x-store-id") headerStoreId?: string,
+  ) {
+    const user = req.user;
+    requireUser(user);
+    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.OWNER_MANAGER);
+    const result = await this.warehouses.update(storeId, id, {
+      name: body?.name,
+      type: body?.type,
+      code: body?.code,
+      address: body?.address,
+      isActive: typeof body?.isActive === "boolean" ? body.isActive : undefined,
+      isDefault: typeof body?.isDefault === "boolean" ? body.isDefault : undefined,
+    });
+    if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
+    return result.value;
+  }
+
+  /**
+   * POST /admin/warehouses/:id/stock — set a product's COUNTED stock at a location.
+   * Rice Ops M1: owner/manager only, a reason is required, and the change is an
+   * actor-attributed ADJUST in the ledger (no silent overwrite).
+   */
   @Post("warehouses/:id/stock")
   async setWarehouseStock(
     @Req() req: Request & { user?: AuthPrincipal },
     @Param("id") id: string,
-    @Body() body: { productId: string; quantityOnHand: number },
+    @Body() body: { productId: string; quantityOnHand: number; reason: string },
+    @Headers("x-store-id") headerStoreId?: string,
+  ) {
+    const user = req.user;
+    requireUser(user);
+    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.OWNER_MANAGER);
+    const result = await this.warehouses.setStock(storeId, id, body?.productId, body?.quantityOnHand, user.sub, body?.reason);
+    if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
+    return result.value;
+  }
+
+  /** GET /admin/warehouses/:id/prices — Rice Ops M1: main vs this location's selling prices. */
+  @Get("warehouses/:id/prices")
+  async listLocationPrices(
+    @Req() req: Request & { user?: AuthPrincipal },
+    @Param("id") id: string,
     @Headers("x-store-id") headerStoreId?: string,
   ) {
     const user = req.user;
     requireUser(user);
     const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
-    const result = await this.warehouses.setStock(storeId, id, body.productId, body.quantityOnHand);
+    const result = await this.warehouses.listPrices(storeId, id);
+    if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
+    return { prices: result.value, storeId };
+  }
+
+  /** PUT /admin/warehouses/:id/prices/:productId — set (or null to clear) a location's own price. */
+  @Put("warehouses/:id/prices/:productId")
+  async setLocationPrice(
+    @Req() req: Request & { user?: AuthPrincipal },
+    @Param("id") id: string,
+    @Param("productId") productId: string,
+    @Body() body: { priceMinor: number | null },
+    @Headers("x-store-id") headerStoreId?: string,
+  ) {
+    const user = req.user;
+    requireUser(user);
+    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.OWNER_MANAGER);
+    const priceMinor = body?.priceMinor === null ? null : Number(body?.priceMinor);
+    const result = await this.warehouses.setPrice(storeId, id, productId, priceMinor, user.sub);
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
     return result.value;
   }
@@ -1220,12 +1288,31 @@ export class AdminController {
   async completeTransfer(
     @Req() req: Request & { user?: AuthPrincipal },
     @Param("id") id: string,
+    @Body() body: { signatures?: unknown },
     @Headers("x-store-id") headerStoreId?: string,
   ) {
     const user = req.user;
     requireUser(user);
-    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.MANAGE);
-    const result = await this.warehouses.completeTransfer(storeId, id);
+    const { storeId, role } = await resolveTenant(user, headerStoreId, TENANT_ROLES.MANAGE);
+    // Rice Ops M2: the receiver signs; signatures travel in the same request.
+    const actor = await loadActor(storeId, user.sub, role);
+    const result = await this.warehouses.completeTransfer(storeId, id, actor, signaturesFrom(body?.signatures));
+    if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
+    return result.value;
+  }
+
+  /** PATCH /admin/transfers/:id/cancel — Rice Ops M1: cancel before any stock moved. */
+  @Patch("transfers/:id/cancel")
+  async cancelTransfer(
+    @Req() req: Request & { user?: AuthPrincipal },
+    @Param("id") id: string,
+    @Body() body: { reason?: string },
+    @Headers("x-store-id") headerStoreId?: string,
+  ) {
+    const user = req.user;
+    requireUser(user);
+    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.OWNER_MANAGER);
+    const result = await this.warehouses.cancelTransfer(storeId, id, user.sub, body?.reason);
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
     return result.value;
   }
@@ -1254,13 +1341,20 @@ export class AdminController {
   @Post("team/invite")
   async inviteMember(
     @Req() req: Request & { user?: AuthPrincipal },
-    @Body() body: { email: string; name?: string; role: string },
+    @Body() body: { email?: string; phone?: string; name?: string; role: string; homeLocationId?: string | null },
     @Headers("x-store-id") headerStoreId?: string,
   ) {
     const user = req.user;
     requireUser(user);
     const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.MANAGE);
-    const result = await this.team.invite(storeId, body.email, body.name ?? null, body.role);
+    const result = await this.team.invite(
+      storeId,
+      typeof body?.email === "string" ? body.email : "",
+      body?.name ?? null,
+      body?.role,
+      typeof body?.phone === "string" ? body.phone : null,
+      typeof body?.homeLocationId === "string" ? body.homeLocationId : undefined,
+    );
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
     return result.value;
   }

@@ -50,6 +50,24 @@ paths:
         '401': { description: Unauthorized }
         '404': { description: Not found }
       security: [{ bearerAuth: [] }]
+  /admin/approvals/{id}/decide:
+    post:
+      summary: Controller route (apps/api/src/people\people.controller.ts)
+      responses:
+        '200': { description: Successful response }
+        '400': { description: Validation error }
+        '401': { description: Unauthorized }
+        '404': { description: Not found }
+      security: [{ bearerAuth: [] }]
+  /admin/approvals:
+    get:
+      summary: Controller route (apps/api/src/people\people.controller.ts)
+      responses:
+        '200': { description: Successful response }
+        '400': { description: Validation error }
+        '401': { description: Unauthorized }
+        '404': { description: Not found }
+      security: [{ bearerAuth: [] }]
   /admin/auth/change-password:
     post:
       summary: Controller route (apps/api/src/admin\admin.controller.ts)
@@ -439,6 +457,41 @@ paths:
         '401': { description: Unauthorized }
         '404': { description: Not found }
       security: [{ bearerAuth: [] }]
+  /admin/drafts/{id}/close:
+    post:
+      summary: Controller route (apps/api/src/people\people.controller.ts)
+      responses:
+        '200': { description: Successful response }
+        '400': { description: Validation error }
+        '401': { description: Unauthorized }
+        '404': { description: Not found }
+      security: [{ bearerAuth: [] }]
+  /admin/drafts/{id}:
+    patch:
+      summary: Controller route (apps/api/src/people\people.controller.ts)
+      responses:
+        '200': { description: Successful response }
+        '400': { description: Validation error }
+        '401': { description: Unauthorized }
+        '404': { description: Not found }
+      security: [{ bearerAuth: [] }]
+  /admin/drafts:
+    get:
+      summary: Controller route (apps/api/src/people\people.controller.ts)
+      responses:
+        '200': { description: Successful response }
+        '400': { description: Validation error }
+        '401': { description: Unauthorized }
+        '404': { description: Not found }
+      security: [{ bearerAuth: [] }]
+    post:
+      summary: Controller route (apps/api/src/people\people.controller.ts)
+      responses:
+        '200': { description: Successful response }
+        '400': { description: Validation error }
+        '401': { description: Unauthorized }
+        '404': { description: Not found }
+      security: [{ bearerAuth: [] }]
   /admin/erp/accounts:
     get:
       summary: Controller route (apps/api/src/erp\erp-admin.controller.ts)
@@ -528,6 +581,32 @@ paths:
         '401': { description: Unauthorized }
         '404': { description: Not found }
       security: [{ bearerAuth: [] }]
+  /admin/kargadors/{id}:
+    patch:
+      summary: Controller route (apps/api/src/people\people.controller.ts)
+      responses:
+        '200': { description: Successful response }
+        '400': { description: Validation error }
+        '401': { description: Unauthorized }
+        '404': { description: Not found }
+      security: [{ bearerAuth: [] }]
+  /admin/kargadors:
+    get:
+      summary: Controller route (apps/api/src/people\people.controller.ts)
+      responses:
+        '200': { description: Successful response }
+        '400': { description: Validation error }
+        '401': { description: Unauthorized }
+        '404': { description: Not found }
+      security: [{ bearerAuth: [] }]
+    post:
+      summary: Controller route (apps/api/src/people\people.controller.ts)
+      responses:
+        '200': { description: Successful response }
+        '400': { description: Validation error }
+        '401': { description: Unauthorized }
+        '404': { description: Not found }
+      security: [{ bearerAuth: [] }]
   /admin/loyalty/expire:
     post:
       summary: Controller route (apps/api/src/admin\admin.controller.ts)
@@ -549,6 +628,24 @@ paths:
   /admin/maintenance/sweep-expired-carts:
     post:
       summary: Controller route (apps/api/src/admin\admin.controller.ts)
+      responses:
+        '200': { description: Successful response }
+        '400': { description: Validation error }
+        '401': { description: Unauthorized }
+        '404': { description: Not found }
+      security: [{ bearerAuth: [] }]
+  /admin/me/pin:
+    post:
+      summary: Controller route (apps/api/src/people\people.controller.ts)
+      responses:
+        '200': { description: Successful response }
+        '400': { description: Validation error }
+        '401': { description: Unauthorized }
+        '404': { description: Not found }
+      security: [{ bearerAuth: [] }]
+  /admin/me/rice:
+    get:
+      summary: Controller route (apps/api/src/people\people.controller.ts)
       responses:
         '200': { description: Successful response }
         '400': { description: Validation error }
@@ -789,6 +886,24 @@ paths:
   /admin/payments/review-queue:
     get:
       summary: Controller route (apps/api/src/payments\payments.controller.ts)
+      responses:
+        '200': { description: Successful response }
+        '400': { description: Validation error }
+        '401': { description: Unauthorized }
+        '404': { description: Not found }
+      security: [{ bearerAuth: [] }]
+  /admin/people/{userId}:
+    patch:
+      summary: Controller route (apps/api/src/people\people.controller.ts)
+      responses:
+        '200': { description: Successful response }
+        '400': { description: Validation error }
+        '401': { description: Unauthorized }
+        '404': { description: Not found }
+      security: [{ bearerAuth: [] }]
+  /admin/people:
+    get:
+      summary: Controller route (apps/api/src/people\people.controller.ts)
       responses:
         '200': { description: Successful response }
         '400': { description: Validation error }
@@ -1281,6 +1396,23 @@ paths:
         '401': { description: Unauthorized }
         '404': { description: Not found }
       security: [{ bearerAuth: [] }]
+  /admin/signatures:
+    get:
+      summary: Controller route (apps/api/src/people\people.controller.ts)
+      responses:
+        '200': { description: Successful response }
+        '400': { description: Validation error }
+        '401': { description: Unauthorized }
+        '404': { description: Not found }
+      security: [{ bearerAuth: [] }]
+    post:
+      summary: Controller route (apps/api/src/people\people.controller.ts)
+      responses:
+        '200': { description: Successful response }
+        '400': { description: Validation error }
+        '401': { description: Unauthorized }
+        '404': { description: Not found }
+      security: [{ bearerAuth: [] }]
   /admin/stock/adjustments:
     get:
       summary: Controller route (apps/api/src/inventory\inventory.controller.ts)
@@ -1512,6 +1644,15 @@ paths:
         '401': { description: Unauthorized }
         '404': { description: Not found }
       security: [{ bearerAuth: [] }]
+  /admin/transfers/{id}/cancel:
+    patch:
+      summary: Controller route (apps/api/src/admin\admin.controller.ts)
+      responses:
+        '200': { description: Successful response }
+        '400': { description: Validation error }
+        '401': { description: Unauthorized }
+        '404': { description: Not found }
+      security: [{ bearerAuth: [] }]
   /admin/transfers/{id}/complete:
     patch:
       summary: Controller route (apps/api/src/admin\admin.controller.ts)
@@ -1573,8 +1714,35 @@ paths:
         '401': { description: Unauthorized }
         '404': { description: Not found }
       security: [{ bearerAuth: [] }]
+  /admin/warehouses/{id}/prices/{productId}:
+    put:
+      summary: Controller route (apps/api/src/admin\admin.controller.ts)
+      responses:
+        '200': { description: Successful response }
+        '400': { description: Validation error }
+        '401': { description: Unauthorized }
+        '404': { description: Not found }
+      security: [{ bearerAuth: [] }]
+  /admin/warehouses/{id}/prices:
+    get:
+      summary: Controller route (apps/api/src/admin\admin.controller.ts)
+      responses:
+        '200': { description: Successful response }
+        '400': { description: Validation error }
+        '401': { description: Unauthorized }
+        '404': { description: Not found }
+      security: [{ bearerAuth: [] }]
   /admin/warehouses/{id}/stock:
     post:
+      summary: Controller route (apps/api/src/admin\admin.controller.ts)
+      responses:
+        '200': { description: Successful response }
+        '400': { description: Validation error }
+        '401': { description: Unauthorized }
+        '404': { description: Not found }
+      security: [{ bearerAuth: [] }]
+  /admin/warehouses/{id}:
+    patch:
       summary: Controller route (apps/api/src/admin\admin.controller.ts)
       responses:
         '200': { description: Successful response }
@@ -1678,6 +1846,14 @@ paths:
         '401': { description: Unauthorized }
         '404': { description: Not found }
   /auth/login:
+    post:
+      summary: Controller route (apps/api/src/auth\auth.controller.ts)
+      responses:
+        '200': { description: Successful response }
+        '400': { description: Validation error }
+        '401': { description: Unauthorized }
+        '404': { description: Not found }
+  /auth/pin-login:
     post:
       summary: Controller route (apps/api/src/auth\auth.controller.ts)
       responses:

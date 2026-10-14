@@ -13,6 +13,7 @@ after(async () => {
     await prisma.userStore.deleteMany({ where: { storeId } });
     await prisma.publicStoreLink.deleteMany({ where: { storeId } });
     await prisma.storeSettings.deleteMany({ where: { storeId } });
+    await prisma.warehouse.deleteMany({ where: { storeId } });
     await prisma.store.deleteMany({ where: { id: storeId } });
   }
   if (userIds.length) await prisma.user.deleteMany({ where: { id: { in: userIds } } });
@@ -33,6 +34,9 @@ test("Platform Admin store creation creates a new owner login with one-time cred
   assert.ok(result.value.tempPassword, "new owner receives a one-time password");
   assert.equal(membership.user.mustChangePassword, true);
   assert.ok(await prisma.publicStoreLink.findUnique({ where: { storeId: result.value.id } }));
+  // Rice Ops M1: the store starts with its first (default) stock location.
+  const locations = await prisma.warehouse.findMany({ where: { storeId: result.value.id } });
+  assert.deepEqual(locations.map((l) => [l.code, l.type, l.isDefault]), [["S1", "STORE", true]]);
 });
 
 test("existing owner email is linked without generating a second user", async () => {

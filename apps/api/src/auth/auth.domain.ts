@@ -34,6 +34,8 @@ export interface TokenPayload {
   phone?: string;
   // for store-scoped roles: the store the user belongs to
   storeId?: string;
+  /** Rice Ops M2: User.tokenVersion at signing; a bump signs the user out everywhere. */
+  tv?: number;
 }
 
 export function signToken(payload: TokenPayload, config: AuthConfig): string {
@@ -49,6 +51,7 @@ export interface VerifiedToken {
   email: string;
   phone?: string;
   storeId?: string;
+  tv?: number;
   iat: number;
   exp: number;
 }

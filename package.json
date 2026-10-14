@@ -34,6 +34,8 @@
     "prepare:phase12": "tsx scripts/prepare-phase12-fixtures.ts",
     "test:cov": "node scripts/run-tests.mjs --coverage",
     "reconcile": "tsx scripts/reconcile.ts",
+    "setup:locations": "tsx scripts/setup-locations.ts",
+    "db:doctor": "tsx scripts/db-doctor.ts",
     "fixtures:cleanup": "tsx scripts/cleanup-test-fixtures.ts"
   },
   "devDependencies": {

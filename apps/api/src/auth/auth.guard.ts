@@ -11,6 +11,7 @@ import {
 import { Request } from "express";
 import { verifyToken, InvalidTokenError } from "./auth.domain.js";
 import { getMemberships } from "./membership-cache.js";
+import { getTokenVersion, tokenVersionCurrent } from "./token-version.js";
 
 export interface AuthPrincipal {
   sub: string;
@@ -36,6 +37,11 @@ export class JwtAuthGuard implements CanActivate {
       if (e instanceof InvalidTokenError) throw new UnauthorizedException(e.message);
       throw e;
     }
+    // Rice Ops M2: a PIN reset (or removal) bumps tokenVersion → older tokens stop working.
+    if (!tokenVersionCurrent(verified.tv, await getTokenVersion(verified.sub))) {
+      throw new UnauthorizedException("Session ended. Please log in again.");
+    }
+
     (req as unknown as { user: AuthPrincipal }).user = {
       sub: verified.sub,
       role: verified.role,

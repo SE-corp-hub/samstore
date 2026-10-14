@@ -8,8 +8,8 @@
 // readable archive with `pg_restore --list` and reports what it contains.
 // Exit code 0 = backup written AND verified; anything else = no usable backup.
 
-import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -54,12 +54,69 @@ export function dumpableUrl(raw) {
     }
   }
   if (!u.searchParams.has("sslmode")) u.searchParams.set("sslmode", "require");
-  return { url: u.toString(), notes };
+  // Fail in seconds instead of hanging when the host is unreachable (e.g. an IPv6-only host on IPv4).
+  if (!u.searchParams.has("connect_timeout")) u.searchParams.set("connect_timeout", "20");
+  return { url: u.toString(), notes, where: `${u.hostname}:${u.port || "5432"}` };
 }
 
+/**
+ * Find a PostgreSQL client tool: on PATH first, then (Windows) the installer's
+ * default folders, newest version first — so a fresh install works without
+ * editing PATH or opening a new terminal.
+ */
 function tool(name) {
-  const r = spawnSync(name, ["--version"], { encoding: "utf8", shell: false });
-  return r.status === 0 ? r.stdout.trim() : null;
+  const candidates = [name];
+  if (process.platform === "win32") {
+    for (const base of [process.env.ProgramFiles, process.env["ProgramFiles(x86)"]].filter(Boolean)) {
+      const pg = join(base, "PostgreSQL");
+      if (!existsSync(pg)) continue;
+      const versions = readdirSync(pg).filter((v) => /^\d+$/.test(v)).sort((a, b) => Number(b) - Number(a));
+      for (const v of versions) candidates.push(join(pg, v, "bin", `${name}.exe`));
+    }
+  }
+  for (const c of candidates) {
+    if (c !== name && !existsSync(c)) continue;
+    const r = spawnSync(c, ["--version"], { encoding: "utf8", shell: false });
+    if (r.status === 0) return { path: c, version: r.stdout.trim() };
+  }
+  return null;
+}
+
+/**
+ * Run a tool and show its progress (stderr) live, every line passed through
+ * redact() so the connection string can never be printed. Returns the exit code
+ * and the last lines for diagnosis.
+ */
+function runStreaming(cmd, args, url) {
+  return new Promise((resolveRun) => {
+    const child = spawn(cmd, args, { shell: false, stdio: ["ignore", "ignore", "pipe"] });
+    let buf = "";
+    const tail = [];
+    let tables = 0;
+    const emit = (line) => {
+      if (!line.trim()) return;
+      const safe = redact(line, url);
+      tail.push(safe);
+      if (tail.length > 20) tail.shift();
+      // Print errors in full; for routine progress, only table-data lines (one per table).
+      if (/error|fatal|failed|could not|timeout/i.test(safe)) console.error(`  ${safe}`);
+      else if (/dumping contents of table/i.test(safe)) console.log(`${tables === 0 ? "\n" : ""}  [${++tables}] ${safe.replace(/^pg_dump:\s*/, "")}`);
+      else if (/reading|last built-in|saving|identifying/i.test(safe) && tables === 0) process.stdout.write(".");
+    };
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk) => {
+      buf += chunk;
+      const lines = buf.split(/\r?\n/);
+      buf = lines.pop() ?? "";
+      lines.forEach(emit);
+    });
+    child.on("error", (e) => resolveRun({ status: 1, tail: String(e.message) }));
+    child.on("close", (code) => {
+      emit(buf);
+      process.stdout.write("\n");
+      resolveRun({ status: code ?? 1, tail: tail.join("\n") });
+    });
+  });
 }
 
 function stamp(d = new Date()) {
@@ -67,7 +124,7 @@ function stamp(d = new Date()) {
   return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}`;
 }
 
-function main() {
+async function main() {
   loadDotEnv();
   const raw = process.env.DATABASE_URL;
   if (!raw) {
@@ -82,9 +139,10 @@ function main() {
       [
         "BACKUP FAILED: pg_dump / pg_restore are not installed on this computer.",
         "Install the PostgreSQL command-line tools (version 17 or newer), then run this again:",
-        "  winget install --id PostgreSQL.PostgreSQL.17 -e",
-        "  (or the EDB installer from postgresql.org — tick only \"Command Line Tools\")",
-        "Then open a NEW terminal so the tools are on PATH.",
+        "  Windows: https://www.enterprisedb.com/downloads/postgres-postgresql-downloads",
+        "           → PostgreSQL 17, Windows x86-64 → in the installer tick ONLY \"Command Line Tools\".",
+        "           (or, where available: winget install --id PostgreSQL.PostgreSQL.17 -e)",
+        "  This script finds C:\\Program Files\\PostgreSQL\\<version>\\bin by itself.",
       ].join("\n"),
     );
     return 3;
@@ -103,22 +161,30 @@ function main() {
   mkdirSync(dir, { recursive: true });
   const file = join(dir, `samstore-${stamp()}.dump`);
 
-  console.log(`${pgDump} → ${file}`);
-  const dump = spawnSync(
-    "pg_dump",
-    ["--format=custom", "--no-owner", "--no-privileges", "--file", file, "--dbname", target.url],
-    { encoding: "utf8", shell: false },
+  console.log(`${pgDump.version} → ${file}`);
+  console.log(`connecting to ${target.where} (password hidden) — progress is shown below; a few minutes is normal.`);
+  const started = Date.now();
+  const dump = await runStreaming(
+    pgDump.path,
+    ["--format=custom", "--no-owner", "--no-privileges", "--verbose", "--lock-wait-timeout=120s", "--file", file, "--dbname", target.url],
+    target.url,
   );
   if (dump.status !== 0) {
-    const msg = redact(dump.stderr || dump.stdout, target.url);
-    console.error(`BACKUP FAILED: pg_dump exited with ${dump.status}.\n${msg}`);
+    const msg = dump.tail;
+    console.error(`BACKUP FAILED: pg_dump exited with ${dump.status} after ${Math.round((Date.now() - started) / 1000)} s.`);
     if (/server version/i.test(msg)) {
       console.error("Your pg_dump is older than the database server. Install a newer PostgreSQL client (see above).");
     }
+    if (/timeout expired|could not connect|Network is unreachable|could not translate host/i.test(msg)) {
+      console.error(`Could not reach ${target.where}. If this is Supabase's direct host (db.<ref>.supabase.co), it is IPv6-only:`);
+      console.error("use the Session pooler connection string from Supabase → Connect (host …pooler.supabase.com, port 5432).");
+    }
+    if (/lock/i.test(msg)) console.error("Another session is holding a table lock. Stop the dev server and try again.");
     return 4;
   }
+  console.log(`pg_dump finished in ${Math.round((Date.now() - started) / 1000)} s.`);
 
-  const list = spawnSync("pg_restore", ["--list", file], { encoding: "utf8", shell: false });
+  const list = spawnSync(pgRestore.path, ["--list", file], { encoding: "utf8", shell: false });
   if (list.status !== 0) {
     console.error(`BACKUP FAILED: the file was written but pg_restore cannot read it.\n${redact(list.stderr, target.url)}`);
     return 5;
@@ -137,5 +203,8 @@ function main() {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === resolve(here)) {
-  process.exit(main());
+  main().then((code) => process.exit(code), (e) => {
+    console.error(`BACKUP FAILED: ${redact(e?.message ?? e)}`);
+    process.exit(1);
+  });
 }

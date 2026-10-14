@@ -45,6 +45,9 @@ const PurchasesPanel = panel(() => import("../../../components/admin/PurchasesPa
 const InventoryPanel = panel(() => import("../../../components/admin/InventoryPanel"));
 const StoreLinkPanel = panel(() => import("../../../components/admin/StoreLinkPanel"));
 const ReportsPanel = panel(() => import("../../../components/admin/ReportsPanel"));
+const ApprovalsPanel = panel(() => import("../../../components/admin/ApprovalsPanel"));
+const DraftsPanel = panel(() => import("../../../components/admin/DraftsPanel"));
+const KargadorsPanel = panel(() => import("../../../components/admin/KargadorsPanel"));
 
 interface MyStore { id: string; name: string; slug: string; role: string; }
 
@@ -155,6 +158,13 @@ export default function AdminDashboard() {
     router.push("/admin/login");
   };
 
+  // Rice Ops M2: hand the phone to the next person — they log in with their own PIN.
+  const switchUser = () => {
+    sessionStorage.removeItem("samstore.admin.token");
+    sessionStorage.removeItem("samstore.admin.storeId");
+    router.push("/admin/login?pin=1");
+  };
+
   if (!authed) return null;
 
   // A signed-in account that reaches no store gets an explanation, not a tab shell
@@ -229,6 +239,9 @@ case "erp": return <ErpPanel />;
       case "maintenance": return <MaintenancePanel />;
       case "useraccess": return <UserAccessPanel />;
       case "warehouses": return <WarehousesPanel />;
+      case "approvals": return <ApprovalsPanel />;
+      case "drafts": return <DraftsPanel />;
+      case "kargadors": return <KargadorsPanel />;
       case "stores": return <StoresPanel />;
       default: return <OrdersPanel />;
     }
@@ -266,6 +279,9 @@ case "erp": return <ErpPanel />;
       <div className="p-3 border-top">
         <div className="small fw-semibold">{email || "Admin"}</div>
         <div className="small mb-2">{role} · {active?.name}</div>
+        <button className="btn btn-outline-secondary btn-sm w-100 mb-2" onClick={switchUser}>
+          <i className="bi bi-arrow-left-right me-1"></i>Palit user (PIN)
+        </button>
         <button className="btn btn-outline-danger btn-sm w-100" onClick={logout}>
           <i className="bi bi-box-arrow-right me-1"></i>Log out
         </button>

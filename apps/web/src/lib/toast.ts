@@ -15,7 +15,22 @@ export function toast(message: string, tone: "success" | "danger" = "success") {
   const el = document.createElement("div");
   el.className = "toast align-items-center text-bg-" + (tone === "success" ? "success" : "danger") + " border-0 show";
   el.setAttribute("role", "alert");
-  el.innerHTML = `<div class="d-flex"><div class="toast-body"><i class="bi ${tone === "success" ? "bi-check-circle" : "bi-exclamation-triangle"} me-1"></i>${message}</div><button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button></div>`;
+  // Built with DOM nodes + textContent: the message often contains names people
+  // typed (stores, products, customers), so it must never be parsed as HTML.
+  const row = document.createElement("div");
+  row.className = "d-flex";
+  const body = document.createElement("div");
+  body.className = "toast-body";
+  const icon = document.createElement("i");
+  icon.className = `bi ${tone === "success" ? "bi-check-circle" : "bi-exclamation-triangle"} me-1`;
+  icon.setAttribute("aria-hidden", "true");
+  body.append(icon, document.createTextNode(String(message)));
+  const close = document.createElement("button");
+  close.type = "button";
+  close.className = "btn-close btn-close-white me-2 m-auto";
+  close.setAttribute("aria-label", "Close");
+  row.append(body, close);
+  el.appendChild(row);
   container.appendChild(el);
   const dismiss = () => { el.classList.remove("show"); setTimeout(() => el.remove(), 300); };
   el.querySelector("button")?.addEventListener("click", dismiss);

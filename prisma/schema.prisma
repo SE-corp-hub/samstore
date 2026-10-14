@@ -127,6 +127,11 @@ model User {
   name               String?
   role               String    @default("STORE_OWNER") // STORE_OWNER | PLATFORM_ADMIN | MANAGER | STAFF | SALES_AGENT
   mustChangePassword Boolean   @default(false) // v6: set by admin password reset — forces a password change on next login
+  // Rice Ops M2: 4-digit PIN for quick login on staff phones (bcrypt hash, never the PIN).
+  pinHash            String?
+  pinFailedCount     Int       @default(0) // wrong PINs since the last success; 5 → locked
+  pinLockedUntil     DateTime? // PIN login refused until this time (15 min lock)
+  tokenVersion       Int       @default(0) // bump to sign the user out everywhere (PIN reset, removal)
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
@@ -146,6 +151,9 @@ model UserStore {
   role      StoreRole
   status    MembershipStatus @default(ACTIVE)
   createdAt DateTime         @default(now())
+  // Rice Ops M2: the location this person works at. Empty = every location.
+  homeLocationId String?
+  homeLocation   Warehouse? @relation("MemberHomeLocation", fields: [homeLocationId], references: [id], onDelete: SetNull)
 
   @@unique([userId, storeId])
 }
@@ -213,6 +221,11 @@ model Store {
   paymentMethods         PaymentMethod[] // N2: per-store tender methods
   notifications          NotificationLog[]
   warehouses             Warehouse[]
+  locationPrices         LocationPrice[]
+  kargadors              Kargador[]
+  signatures             Signature[]
+  approvalRequests       ApprovalRequest[]
+  flowDrafts             FlowDraft[]
   stockTransfers         StockTransfer[]
   payments               Payment[]
   creditEntries          CreditEntry[]
@@ -353,6 +366,7 @@ model Product {
   relationsTo    ProductRelation[] @relation("ProductRelationTarget")
   stockLevel     StockLevel?       @relation(fields: [stockLevelId], references: [id]) // legacy single-level (no warehouse); kept for backward compat
   stockLevels    StockLevel[]      @relation("ProductStockLevels")
+  locationPrices LocationPrice[]
   cartItems      CartItem[]
   orderItems     OrderItem[]
   purchaseItems  PurchaseItem[]
@@ -743,21 +757,58 @@ model JournalEntryLine {
 
 // ─────────────────────────────── Warehouses / inventory ───────────────────────────────
 
+// Rice Ops M1: a Warehouse row is a stock LOCATION of the business — a store
+// counter (STORE) or the bulk warehouse (WAREHOUSE). The UI calls it "Location".
 model Warehouse {
-  id        String   @id @default(cuid())
+  id        String       @id @default(cuid())
   storeId   String
-  store     Store    @relation(fields: [storeId], references: [id])
+  store     Store        @relation(fields: [storeId], references: [id])
   name      String
-  isDefault Boolean  @default(false)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  isDefault Boolean      @default(false)
+  type      LocationType @default(STORE) // M1: STORE counter or bulk WAREHOUSE
+  code      String? // M1: short code shown everywhere (S1, S2, S3, WH)
+  address   String? // M1: where the kargador goes
+  isActive  Boolean      @default(true) // M1: inactive locations keep history but take no new stock
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
 
   stockLevels    StockLevel[]
   stockMovements StockMovement[]
   transfersFrom  StockTransfer[] @relation("TransferFrom")
   transfersTo    StockTransfer[] @relation("TransferTo")
+  prices         LocationPrice[]
+  members        UserStore[]       @relation("MemberHomeLocation")
+  kargadors      Kargador[]
+  signatures     Signature[]
+  approvals      ApprovalRequest[]
+  drafts         FlowDraft[]
 
   @@unique([storeId, name])
+  @@unique([storeId, code])
+}
+
+enum LocationType {
+  STORE
+  WAREHOUSE
+}
+
+// M1: a location's own selling price for a product. No row = the product's main
+// price. Cost is NOT here: one cost per product, the same at every location.
+model LocationPrice {
+  id          String    @id @default(cuid())
+  storeId     String
+  store       Store     @relation(fields: [storeId], references: [id])
+  productId   String
+  product     Product   @relation(fields: [storeId, productId], references: [storeId, id], onDelete: Cascade)
+  warehouseId String
+  warehouse   Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  priceMinor  Int // integer centavos; per sack/pack, or per KILO for sold-by-weight items
+  updatedBy   String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([storeId, productId, warehouseId])
+  @@index([storeId, warehouseId])
 }
 
 enum TransferStatus {
@@ -806,6 +857,11 @@ model StockLevel {
   products         Product[]
 
   @@unique([storeId, id]) // M3: composite target for tenant-consistent children
+  // Rice Ops M1: one row per product per location. Existing rows were merged and
+  // given a location by the M1 migration; new code always sets warehouseId.
+  // (Still nullable in the type only because older test fixtures create
+  // location-less rows; Postgres treats NULLs as distinct in this key.)
+  @@unique([storeId, productId, warehouseId])
   @@index([storeId, productId])
 }
 
@@ -1496,9 +1552,12 @@ model StockMovement {
   note         String?
   createdBy    String?
   balanceAfter Int? // stock-level balance after applying this movement (reconcilable)
+  documentType String? // Rice Ops M1: the document behind this move (TRANSFER, SALE, RESACK, COUNT, …)
+  documentId   String? // Rice Ops M1: that document's id, so every number traces back
   createdAt    DateTime         @default(now())
 
   @@unique([storeId, id]) // composite target for future child refs
+  @@index([storeId, documentType, documentId])
   @@index([storeId, conversionId])
   @@index([storeId, productId, createdAt])
   @@index([storeId, type, createdAt])
@@ -1612,4 +1671,116 @@ model PhBarangay {
 
   @@index([cityId])
   @@map("PhBarangay")
+}
+
+// ─────────────────────────── Rice Ops M2: people, signatures, approvals ───────────────────────────
+
+// A kargador carries and repacks rice. Not a login account: they sign on staff phones.
+model Kargador {
+  id             String     @id @default(cuid())
+  storeId        String
+  store          Store      @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  name           String
+  phone          String?
+  photoUrl       String?
+  homeLocationId String?
+  homeLocation   Warehouse? @relation(fields: [homeLocationId], references: [id], onDelete: SetNull)
+  isActive       Boolean    @default(true)
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  signatures Signature[]
+
+  @@unique([storeId, name])
+  @@index([storeId, isActive])
+}
+
+enum SignerKind {
+  STAFF
+  KARGADOR
+  CUSTOMER
+  SLIP_PHOTO
+}
+
+// Insert-only (a DB trigger refuses UPDATE). One row per person signing one step of one document.
+model Signature {
+  id           String     @id @default(cuid())
+  storeId      String
+  store        Store      @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  documentType String // TRANSFER, RELEASE, RESACK, COUNT, WRITE_OFF, ORDER, CLOSE…
+  documentId   String
+  step         String // RELEASE, RECEIVE, FINISH, SUBMIT…
+  signerKind   SignerKind
+  signerUserId String? // STAFF: the logged-in person who signed
+  kargadorId   String?
+  kargador     Kargador?  @relation(fields: [kargadorId], references: [id], onDelete: NoAction)
+  signerName   String // name as shown at signing time (kept even if the person is renamed)
+  imagePng     String // data:image/png;base64,…
+  imageSha256  String
+  locationId   String?
+  location     Warehouse? @relation(fields: [locationId], references: [id], onDelete: NoAction) // a location with signatures cannot be deleted (deactivate it)
+  capturedById String // whose phone/session captured it
+  createdAt    DateTime   @default(now())
+
+  @@index([storeId, documentType, documentId])
+  @@index([storeId, kargadorId, createdAt])
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  DECLINED
+  CANCELLED
+}
+
+// "Para sa iyo" — one owner inbox for anything that needs a yes/no.
+model ApprovalRequest {
+  id            String         @id @default(cuid())
+  storeId       String
+  store         Store          @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  kind          String // LOSS_OVER_TOLERANCE, UTANG_OVER_LIMIT, MANUAL_ITEM, WRITE_OFF, VOID, TRANSFER
+  documentType  String
+  documentId    String
+  locationId    String?
+  location      Warehouse?     @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  summary       String // one Taglish sentence, shown as-is
+  detail        Json?
+  approverRoles String[]       @default(["OWNER"]) // who may decide
+  status        ApprovalStatus @default(PENDING)
+  requestedById String
+  decidedById   String?
+  decidedAt     DateTime?
+  decisionNote  String?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  @@index([storeId, status, createdAt])
+  @@index([storeId, documentType, documentId])
+}
+
+enum DraftStatus {
+  OPEN
+  DONE
+  CANCELLED
+}
+
+// "Tapusin" — a flow saved at every step so another phone can finish it.
+model FlowDraft {
+  id          String      @id @default(cuid())
+  storeId     String
+  store       Store       @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  flow        String // RELEASE, RECEIVE, RESACK, COUNT, SALE…
+  locationId  String?
+  location    Warehouse?  @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  docNumber   String?
+  step        Int         @default(1)
+  data        Json
+  status      DraftStatus @default(OPEN)
+  version     Int         @default(1)
+  createdById String
+  updatedById String
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  @@index([storeId, status, locationId])
 }

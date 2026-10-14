@@ -115,7 +115,7 @@ export class OrderAdminService {
   private static EDITABLE = ["RECEIVED", "CONFIRMED", "ON_HOLD", "PREPARING", "READY"];
 
   /** W1: replace an order's items with stock-delta (restore removed, deduct added). */
-  async replaceOrderItems(storeId: string, orderId: string, items: { productId: string; quantity: number }[]): Promise<AdminResult<{ id: string; status: string; totalMinor: number }>> {
+  async replaceOrderItems(storeId: string, orderId: string, items: { productId: string; quantity: number }[], actorId: string | null = null): Promise<AdminResult<{ id: string; status: string; totalMinor: number }>> {
     if (!Array.isArray(items) || items.length === 0) {
       return { ok: false, error: { type: "validation", errors: ["At least one item with positive quantity is required"] } };
     }
@@ -175,10 +175,18 @@ export class OrderAdminService {
     });
 
     await prisma.$transaction(async (tx) => {
-      // Stock-delta: restore old, deduct new (net effect = difference) + ledger
-      await restoreStock(tx, storeId, oldItems.map((oi) => ({ productId: oi.productId ?? "", quantity: oi.quantity })), { type: "RELEASE", orderId, createdBy: "admin" });
+      // Stock-delta: restore old, deduct new (net effect = difference) + ledger.
+      // Rice Ops M1: the old lines go back to the location they came from, the new
+      // lines are taken from that same location, and the ledger names the editor.
+      const firstTake = await tx.stockMovement.findFirst({
+        where: { storeId, orderId, delta: { lt: 0 }, variantId: null, warehouseId: { not: null } },
+        orderBy: { createdAt: "asc" },
+        select: { warehouseId: true },
+      });
+      const actor = actorId ?? "admin";
+      await restoreStock(tx, storeId, oldItems.map((oi) => ({ productId: oi.productId ?? "", quantity: oi.quantity })), { type: "RELEASE", orderId, createdBy: actor, documentType: "ORDER_EDIT", documentId: orderId });
       for (const nl of newLines) {
-        await deductStock(tx, storeId, [{ productId: nl.productId, quantity: nl.quantity }], { type: "CONSUME", orderId, createdBy: "admin" });
+        await deductStock(tx, storeId, [{ productId: nl.productId, quantity: nl.quantity }], { type: "CONSUME", orderId, createdBy: actor, warehouseId: firstTake?.warehouseId ?? null, documentType: "ORDER_EDIT", documentId: orderId });
       }
       await tx.orderItem.deleteMany({ where: { orderId } });
       await tx.orderItem.createMany({

@@ -10,6 +10,10 @@ import {
 } from "./auth.repository.js";
 import { prisma } from "../persistence/prisma-repositories.js";
 import { bustMemberships } from "./membership-cache.js";
+import { PIN_LOCK_MINUTES, PIN_MAX_FAILS, pinLockSecondsLeft } from "../domain/people.js";
+
+/** bcrypt of a random never-used PIN; compared against when the number has no PIN, to keep timing flat. */
+const DUMMY_PIN_HASH = "$2b$10$CwTycUXWue0Thq9StjUM0uJ8.8DqQ6E9QeE3n9gVnK6S2r1a4VJ7e";
 
 export type AuthResult<T> = { ok: true; value: T } | { ok: false; error: ApiError };
 
@@ -172,6 +176,7 @@ export class AuthService {
         email: user.email ?? "",
         phone: user.phone ?? undefined,
         storeId: user.memberships[0]?.storeId,
+        tv: user.tokenVersion ?? 0,
       },
       this.config,
     );
@@ -179,6 +184,64 @@ export class AuthService {
       ok: true,
       value: { token, user: { id: user.id, email: user.email, phone: user.phone, name: user.name } },
     };
+  }
+
+  /**
+   * Rice Ops M2 — quick login on a staff phone: mobile number + 4-digit PIN.
+   * Each try is counted BEFORE the PIN is checked, in one guarded UPDATE, so even a
+   * burst of parallel guesses gets at most 5 tries; the 5th wrong one locks PIN login
+   * for 15 minutes (the password login still works, and the owner can unlock).
+   */
+  async pinLogin(input: { phone?: string; pin?: string }): Promise<AuthResult<{ token: string; user: AuthUserSummary }>> {
+    const generic = { ok: false as const, error: { type: "unauthorized" as const, message: "Mali ang numero o PIN" } };
+    const phone = toE164(input.phone);
+    const pin = typeof input.pin === "string" ? input.pin : "";
+    const user = phone
+      ? await prisma.user.findUnique({
+          where: { phone },
+          select: { id: true, email: true, phone: true, name: true, role: true, pinHash: true, tokenVersion: true },
+        })
+      : null;
+    if (!user?.pinHash || !/^\d{4}$/.test(pin)) {
+      await verifyPassword(pin || "0000", DUMMY_PIN_HASH); // same time whether or not the number exists
+      return generic;
+    }
+    const reserved = await prisma.$queryRaw<{ pinFailedCount: number }[]>`
+      UPDATE "User"
+         SET "pinFailedCount" = CASE WHEN "pinFailedCount" + 1 >= ${PIN_MAX_FAILS}::int THEN 0 ELSE "pinFailedCount" + 1 END,
+             "pinLockedUntil" = CASE WHEN "pinFailedCount" + 1 >= ${PIN_MAX_FAILS}
+                                     THEN now() + make_interval(mins => ${PIN_LOCK_MINUTES}::int) ELSE "pinLockedUntil" END
+       WHERE id = ${user.id} AND ("pinLockedUntil" IS NULL OR "pinLockedUntil" <= now())
+   RETURNING "pinFailedCount"`;
+    if (reserved.length === 0) {
+      const locked = await prisma.user.findUnique({ where: { id: user.id }, select: { pinLockedUntil: true } });
+      const mins = Math.max(1, Math.ceil(pinLockSecondsLeft(locked?.pinLockedUntil, new Date()) / 60));
+      return { ok: false, error: { type: "rate_limited", message: `Naka-lock ang PIN. Subukan ulit sa loob ng ${mins} minuto, o magpa-unlock sa may-ari.` } };
+    }
+    if (!(await verifyPassword(pin, user.pinHash))) {
+      const used = reserved[0]!.pinFailedCount;
+      if (used === 0) {
+        return { ok: false, error: { type: "rate_limited", message: `Naka-lock ang PIN nang ${PIN_LOCK_MINUTES} minuto (${PIN_MAX_FAILS} maling subok).` } };
+      }
+      return { ok: false, error: { type: "unauthorized", message: `Mali ang numero o PIN. ${PIN_MAX_FAILS - used} subok na lang.` } };
+    }
+    await prisma.user.update({ where: { id: user.id }, data: { pinFailedCount: 0, pinLockedUntil: null } });
+
+    // PIN login is for store people: an ACTIVE membership in an ACTIVE store is required.
+    const memberships = await prisma.userStore.findMany({
+      where: { userId: user.id, status: "ACTIVE" },
+      orderBy: { createdAt: "asc" },
+      select: { storeId: true, store: { select: { status: true } } },
+    });
+    const usable = memberships.find((m) => m.store.status === "ACTIVE");
+    if (!usable && user.role !== "PLATFORM_ADMIN") {
+      return { ok: false, error: { type: "forbidden", message: "Walang aktibong tindahan ang account na ito" } };
+    }
+    const token = signToken(
+      { sub: user.id, role: user.role, email: user.email ?? "", phone: user.phone ?? undefined, storeId: usable?.storeId, tv: user.tokenVersion },
+      this.config,
+    );
+    return { ok: true, value: { token, user: { id: user.id, email: user.email, phone: user.phone, name: user.name } } };
   }
 
   // ─────────────────────────────── v6 user management ───────────────────────────────
@@ -255,6 +318,7 @@ export class AuthService {
         email: user.email ?? "",
         phone: user.phone ?? undefined,
         storeId: user.memberships[0]?.storeId,
+        tv: user.tokenVersion ?? 0,
       },
       this.config,
     );

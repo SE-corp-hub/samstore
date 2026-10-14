@@ -1,34 +1,57 @@
 "use client";
 
+// Team & roles. Rice Ops M2: staff can be added by mobile number (no email needed),
+// each person gets a home location (where they may release, receive, count and sign)
+// and a 4-digit PIN for quick login on their own phone.
+
 import { useCallback, useEffect, useState } from "react";
 import { API_URL } from "../../config";
-import { adminHeaders } from "../../lib/admin";
+import { adminHeaders, getAdminRole, roleCan } from "../../lib/admin";
 
 interface Member {
   userId: string;
-  email: string;
+  email: string | null;
+  phone?: string | null;
   name: string | null;
   role: string;
-  joinedAt: string;
+  joinedAt?: string;
+  homeLocationId?: string | null;
+  hasPin?: boolean;
+  pinLocked?: boolean;
 }
 
+interface Location { id: string; name: string; code: string | null; isActive: boolean }
+
 const ROLES = ["MANAGER", "STAFF", "SALES_AGENT", "DELIVERY"];
+const errText = (d: { errors?: string[]; message?: string } | null, fallback: string) => d?.errors?.join(", ") ?? d?.message ?? fallback;
 
 export default function TeamPanel() {
   const [members, setMembers] = useState<Member[]>([]);
+  const [locations, setLocations] = useState<Location[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [form, setForm] = useState({ email: "", name: "", role: "STAFF" });
+  const [notice, setNotice] = useState<string | null>(null);
+  const [form, setForm] = useState({ phone: "", email: "", name: "", role: "STAFF", homeLocationId: "" });
   const [inviting, setInviting] = useState(false);
   const [tempPassword, setTempPassword] = useState<string | null>(null);
+  const [pinFor, setPinFor] = useState<string | null>(null);
+  const [pinValue, setPinValue] = useState("");
+  const canManage = roleCan(getAdminRole(), "manageTeam");
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_URL}/admin/team`, { headers: adminHeaders() });
-      if (!res.ok) throw new Error("Failed to load team");
-      const data = await res.json();
-      setMembers(data.members);
+      const [teamRes, peopleRes, locRes] = await Promise.all([
+        fetch(`${API_URL}/admin/team`, { headers: adminHeaders() }),
+        fetch(`${API_URL}/admin/people`, { headers: adminHeaders() }),
+        fetch(`${API_URL}/admin/warehouses`, { headers: adminHeaders() }),
+      ]);
+      if (!teamRes.ok) throw new Error("Failed to load team");
+      const team = (await teamRes.json()).members as Member[];
+      const people = peopleRes.ok ? ((await peopleRes.json()).members as Member[]) : [];
+      const byId = new Map(people.map((p) => [p.userId, p]));
+      setMembers(team.map((m) => ({ ...m, ...(byId.get(m.userId) ?? {}) })));
+      if (locRes.ok) setLocations(((await locRes.json()).warehouses as Location[]).filter((l) => l.isActive));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Load failed");
     } finally {
@@ -38,29 +61,70 @@ export default function TeamPanel() {
 
   useEffect(() => { load(); }, [load]);
 
+  const locLabel = (id: string | null | undefined) => {
+    if (!id) return "Lahat ng lokasyon";
+    const l = locations.find((x) => x.id === id);
+    return l ? `${l.code ? `${l.code} · ` : ""}${l.name}` : "—";
+  };
+
   const invite = async (e: React.FormEvent) => {
     e.preventDefault();
     setInviting(true);
     setError(null);
+    setNotice(null);
     setTempPassword(null);
     try {
       const res = await fetch(`${API_URL}/admin/team/invite`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...adminHeaders() },
-        body: JSON.stringify(form),
+        body: JSON.stringify({
+          phone: form.phone.trim() || undefined,
+          email: form.email.trim() || undefined,
+          name: form.name.trim() || undefined,
+          role: form.role,
+          homeLocationId: form.homeLocationId || null,
+        }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => null);
       if (!res.ok) {
-        setError(data?.errors?.join(", ") ?? data?.message ?? "Invite failed");
+        setError(errText(data, "Invite failed"));
         return;
       }
-      if (data.tempPassword) setTempPassword(data.tempPassword);
-      setForm({ email: "", name: "", role: "STAFF" });
+      if (data?.tempPassword) setTempPassword(data.tempPassword);
+      setForm({ phone: "", email: "", name: "", role: "STAFF", homeLocationId: "" });
+      setNotice("Naidagdag na. Mag-set ng PIN para makapag-login sila sa sariling phone.");
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Invite failed");
     } finally {
       setInviting(false);
+    }
+  };
+
+  const patchPerson = async (userId: string, body: Record<string, unknown>, done: string) => {
+    setError(null);
+    setNotice(null);
+    const res = await fetch(`${API_URL}/admin/people/${userId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", ...adminHeaders() },
+      body: JSON.stringify(body),
+    });
+    const d = await res.json().catch(() => null);
+    if (!res.ok) {
+      setError(errText(d, "Hindi na-save"));
+      return false;
+    }
+    setNotice(done);
+    await load();
+    return true;
+  };
+
+  const savePin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!pinFor) return;
+    if (await patchPerson(pinFor, { pin: pinValue }, "Na-set ang PIN. Na-sign out siya sa lahat ng phone; mag-login ulit gamit ang bagong PIN.")) {
+      setPinFor(null);
+      setPinValue("");
     }
   };
 
@@ -74,7 +138,7 @@ export default function TeamPanel() {
   };
 
   const deactivate = async (userId: string) => {
-    if (!confirm("Remove this member from the store?")) return;
+    if (!confirm("Alisin ang taong ito sa tindahan? Mala-logout siya sa lahat ng phone.")) return;
     await fetch(`${API_URL}/admin/team/${userId}`, { method: "DELETE", headers: adminHeaders() });
     await load();
   };
@@ -82,7 +146,8 @@ export default function TeamPanel() {
   return (
     <div>
       <h1 className="h4 mb-3">Team &amp; Roles</h1>
-      {error && <div className="alert alert-danger py-2 small">{error}</div>}
+      {error && <div className="alert alert-danger py-2 small" role="alert">{error}</div>}
+      {notice && <div className="alert alert-success py-2 small" role="status">{notice}</div>}
       {tempPassword && (
         <div className="alert alert-warning py-2 small">
           <strong>New member created.</strong> Temporary password (share securely, change on first login):{" "}
@@ -90,92 +155,153 @@ export default function TeamPanel() {
         </div>
       )}
 
-      <form onSubmit={invite} className="card mb-4">
-        <div className="card-body">
-          <h6 className="card-title">Invite to store</h6>
-          <div className="row g-2">
-            <div className="col-md-3">
-              <input className="form-control form-control-sm" type="email" placeholder="Email" required value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+      {canManage && (
+        <form onSubmit={invite} className="card mb-4">
+          <div className="card-body">
+            <h2 className="h6 card-title">Magdagdag ng tao</h2>
+            <div className="row g-2">
+              <div className="col-md-3">
+                <label className="form-label small mb-1" htmlFor="tm-phone">Mobile number</label>
+                <input id="tm-phone" className="form-control" inputMode="tel" placeholder="0917 123 4567" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+              </div>
+              <div className="col-md-3">
+                <label className="form-label small mb-1" htmlFor="tm-email">Email (optional)</label>
+                <input id="tm-email" className="form-control" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+              </div>
+              <div className="col-md-2">
+                <label className="form-label small mb-1" htmlFor="tm-name">Pangalan</label>
+                <input id="tm-name" className="form-control" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+              </div>
+              <div className="col-md-2">
+                <label className="form-label small mb-1" htmlFor="tm-role">Role</label>
+                <select id="tm-role" className="form-select" value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>
+                  {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
+                </select>
+              </div>
+              <div className="col-md-2">
+                <label className="form-label small mb-1" htmlFor="tm-home">Lokasyon</label>
+                <select id="tm-home" className="form-select" value={form.homeLocationId} onChange={(e) => setForm({ ...form, homeLocationId: e.target.value })}>
+                  <option value="">Lahat</option>
+                  {locations.map((l) => <option key={l.id} value={l.id}>{locLabel(l.id)}</option>)}
+                </select>
+              </div>
             </div>
-            <div className="col-md-2">
-              <input className="form-control form-control-sm" placeholder="Name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-            </div>
-            <div className="col-md-2">
-              <select className="form-select form-select-sm" value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>
-                {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
-              </select>
-            </div>
-            <div className="col-md-2">
-              <button className="btn btn-primary btn-sm w-100" type="submit" disabled={inviting}>{inviting ? "…" : "Invite"}</button>
-            </div>
+            <button className="btn btn-success mt-3" type="submit" disabled={inviting || (!form.phone.trim() && !form.email.trim())}>
+              {inviting ? "Idinadagdag…" : "Idagdag"}
+            </button>
+            <p className="text-muted small mt-2 mb-0">
+              <strong>MANAGER</strong> runs the store · <strong>STAFF</strong> sells, releases and receives at their location · <strong>SALES_AGENT</strong> takes orders · <strong>DELIVERY</strong> courier app only.
+              Owners and managers work at every location.
+            </p>
           </div>
-          <p className="text-muted small mt-2 mb-0">
-            Roles: <strong>MANAGER</strong> runs the store · <strong>STAFF</strong> fulfils orders · <strong>SALES_AGENT</strong> views orders and updates delivery status · <strong>DELIVERY</strong> courier (delivery app only).
-          </p>
-        </div>
-      </form>
+        </form>
+      )}
+
+      {pinFor && (
+        <form onSubmit={savePin} className="card mb-4 border-success">
+          <div className="card-body">
+            <h2 className="h6">PIN para kay {members.find((m) => m.userId === pinFor)?.name ?? "staff"}</h2>
+            <label className="form-label small" htmlFor="tm-pin">4 na numero (huwag 1111 o 1234)</label>
+            <div className="d-flex gap-2" style={{ maxWidth: 320 }}>
+              <input
+                id="tm-pin" className="form-control form-control-lg text-center" inputMode="numeric" autoComplete="off"
+                maxLength={4} pattern="\d{4}" value={pinValue} onChange={(e) => setPinValue(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                style={{ letterSpacing: "0.5em", fontVariantNumeric: "tabular-nums" }}
+              />
+              <button className="btn btn-success" type="submit" disabled={pinValue.length !== 4}>I-save</button>
+              <button className="btn btn-outline-secondary" type="button" onClick={() => { setPinFor(null); setPinValue(""); }}>Bumalik</button>
+            </div>
+            <div className="form-text">Sabihin ang PIN nang personal. Mapapalitan nila ito sa sarili nilang phone.</div>
+          </div>
+        </form>
+      )}
 
       {loading ? <p className="text-muted">Loading…</p> : (
-        <table className="table table-hover align-middle">
-          <thead>
-            <tr>
-              <th>Member</th>
-              <th>Email</th>
-              <th>Role</th>
-              <th>Joined</th>
-              <th className="text-end">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {members.map((m) => (
-              <tr key={m.userId}>
-                <td className="fw-semibold">{m.name ?? "—"}</td>
-                <td>{m.email}</td>
-                <td>
-                  <select
-                    className="form-select form-select-sm"
-                    style={{ width: 140 }}
-                    value={m.role}
-                    disabled={m.role === "OWNER"}
-                    onChange={(e) => changeRole(m.userId, e.target.value)}
-                  >
-                    {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
-                  </select>
-                </td>
-                <td className="small text-muted">{new Date(m.joinedAt).toLocaleDateString()}</td>
-                <td className="text-end">
-                  <div className="d-flex flex-wrap gap-1 justify-content-end">
-                    {m.role !== "OWNER" && (
-                      <>
-                        <button
-                          className="btn btn-sm btn-outline-secondary"
-                          title="Reset password"
-                          onClick={async () => {
-                            const res = await fetch(`${API_URL}/admin/team/${m.userId}/reset-password`, {
-                              method: "POST", headers: { "Content-Type": "application/json", ...adminHeaders() },
-                              body: JSON.stringify({}),
-                            });
-                            const d = await res.json().catch(() => null);
-                            if (res.ok && typeof d?.tempPassword === "string") {
-                              setTempPassword(d.tempPassword);
-                            } else {
-                              setError(d?.message ?? "Reset failed");
-                            }
-                          }}
-                        >
-                          <i className="bi bi-key me-1"></i>Reset password
-                        </button>
-                        <button className="btn btn-sm btn-outline-danger" onClick={() => deactivate(m.userId)}>
-                          <i className="bi bi-person-x"></i>
-                        </button>
-                      </>
-                    )}
-                  </div>
-                </td>
+        <div className="table-responsive">
+          <table className="table table-hover align-middle">
+            <thead>
+              <tr>
+                <th>Tao</th>
+                <th>Mobile / email</th>
+                <th>Role</th>
+                <th>Lokasyon</th>
+                <th>PIN</th>
+                <th className="text-end">Actions</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {members.map((m) => (
+                <tr key={m.userId}>
+                  <td className="fw-semibold">{m.name ?? "—"}</td>
+                  <td className="small">{m.phone ?? ""}{m.phone && m.email ? <br /> : null}{m.email ?? ""}</td>
+                  <td>
+                    <select
+                      className="form-select form-select-sm" style={{ width: 140 }} aria-label={`Role of ${m.name ?? m.userId}`}
+                      value={m.role} disabled={!canManage || m.role === "OWNER"}
+                      onChange={(e) => changeRole(m.userId, e.target.value)}
+                    >
+                      {(m.role === "OWNER" ? ["OWNER"] : ROLES).map((r) => <option key={r} value={r}>{r}</option>)}
+                    </select>
+                  </td>
+                  <td>
+                    {canManage && m.role !== "OWNER" && m.role !== "MANAGER" ? (
+                      <select
+                        className="form-select form-select-sm" style={{ width: 170 }} aria-label={`Home location of ${m.name ?? m.userId}`}
+                        value={m.homeLocationId ?? ""}
+                        onChange={(e) => patchPerson(m.userId, { homeLocationId: e.target.value || null }, "Na-save ang lokasyon.")}
+                      >
+                        <option value="">Lahat ng lokasyon</option>
+                        {locations.map((l) => <option key={l.id} value={l.id}>{locLabel(l.id)}</option>)}
+                      </select>
+                    ) : (
+                      <span className="small">{m.role === "OWNER" || m.role === "MANAGER" ? "Lahat ng lokasyon" : locLabel(m.homeLocationId)}</span>
+                    )}
+                  </td>
+                  <td>
+                    {m.pinLocked ? <span className="badge text-bg-danger">Naka-lock</span>
+                      : m.hasPin ? <span className="badge text-bg-success">May PIN</span>
+                      : <span className="badge text-bg-secondary">Wala pa</span>}
+                  </td>
+                  <td className="text-end">
+                    {canManage && (
+                      <div className="d-flex flex-wrap gap-1 justify-content-end">
+                        <button className="btn btn-sm btn-outline-success" onClick={() => { setPinFor(m.userId); setPinValue(""); }}>
+                          <i className="bi bi-123 me-1"></i>{m.hasPin ? "Palitan ang PIN" : "Mag-set ng PIN"}
+                        </button>
+                        {m.pinLocked && (
+                          <button className="btn btn-sm btn-outline-warning" onClick={() => patchPerson(m.userId, { unlock: true }, "Na-unlock ang PIN.")}>
+                            <i className="bi bi-unlock me-1"></i>Unlock
+                          </button>
+                        )}
+                        {m.role !== "OWNER" && (
+                          <>
+                            <button
+                              className="btn btn-sm btn-outline-secondary"
+                              onClick={async () => {
+                                const res = await fetch(`${API_URL}/admin/team/${m.userId}/reset-password`, {
+                                  method: "POST", headers: { "Content-Type": "application/json", ...adminHeaders() },
+                                  body: JSON.stringify({}),
+                                });
+                                const d = await res.json().catch(() => null);
+                                if (res.ok && typeof d?.tempPassword === "string") setTempPassword(d.tempPassword);
+                                else setError(d?.message ?? "Reset failed");
+                              }}
+                            >
+                              <i className="bi bi-key me-1"></i>Reset password
+                            </button>
+                            <button className="btn btn-sm btn-outline-danger" onClick={() => deactivate(m.userId)} aria-label={`Remove ${m.name ?? "member"}`}>
+                              <i className="bi bi-person-x"></i>
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );

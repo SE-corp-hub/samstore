@@ -59,6 +59,17 @@ export class AuthController {
     return r.value;
   }
 
+  /** POST /auth/pin-login — Rice Ops M2: mobile number + 4-digit PIN (5 wrong → locked 15 min). */
+  @Post("pin-login")
+  async pinLogin(@Body() body: { phone?: unknown; pin?: unknown }) {
+    const r = await this.auth.pinLogin({
+      phone: typeof body?.phone === "string" ? body.phone : undefined,
+      pin: typeof body?.pin === "string" ? body.pin : undefined,
+    });
+    if (!r.ok) throw new HttpException(r.error, statusFor(r.error));
+    return r.value;
+  }
+
   /** POST /auth/change-password — PUBLIC: the must-change user has no token yet,
    *  so they prove their current (temp) password to set a new one + receive a fresh JWT. */
   @Post("change-password")

@@ -8,6 +8,8 @@ import { prisma } from "../persistence/prisma-repositories.js";
 import { StoreRole } from "@prisma/client";
 import type { ApiError } from "@sam-store/contracts";
 import { bustMemberships } from "../auth/membership-cache.js";
+import { bustTokenVersion } from "../auth/token-version.js";
+import { toE164 } from "../domain/phone.js";
 
 export type TeamResult<T> = { ok: true; value: T } | { ok: false; error: ApiError };
 
@@ -30,26 +32,47 @@ export class TeamService {
    * - Else create the user (role + a temporary password) so they can log in.
    * New accounts are flagged to change their password on first login.
    */
-  async invite(storeId: string, email: string, name: string | null, role: string): Promise<TeamResult<{ userId: string; role: string; tempPassword?: string }>> {
+  async invite(
+    storeId: string,
+    email: string,
+    name: string | null,
+    role: string,
+    phone?: string | null,
+    homeLocationId?: string | null,
+  ): Promise<TeamResult<{ userId: string; role: string; tempPassword?: string }>> {
+    // Rice Ops M2: staff often have no email — a PH mobile number is enough.
     const cleanEmail = email?.trim().toLowerCase() ?? "";
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+    const cleanPhone = phone ? toE164(phone) : null;
+    if (phone && !cleanPhone) {
+      return { ok: false, error: { type: "validation", errors: ["A valid Philippine mobile number is required"] } };
+    }
+    if (cleanEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
       return { ok: false, error: { type: "validation", errors: ["A valid email is required"] } };
+    }
+    if (!cleanEmail && !cleanPhone) {
+      return { ok: false, error: { type: "validation", errors: ["A mobile number or an email is required"] } };
     }
     if (!(INVITABLE_STORE_ROLES as readonly string[]).includes(role)) {
       return { ok: false, error: { type: "validation", errors: ["Role must be MANAGER, STAFF, SALES_AGENT, or DELIVERY"] } };
     }
     const store = await prisma.store.findUnique({ where: { id: storeId } });
     if (!store) return { ok: false, error: { type: "not_found", message: "Store not found" } };
+    if (homeLocationId) {
+      const loc = await prisma.warehouse.findFirst({ where: { id: homeLocationId, storeId, isActive: true }, select: { id: true } });
+      if (!loc) return { ok: false, error: { type: "validation", errors: ["Unknown location"] } };
+    }
 
-    // Existing user?
-    let user = await prisma.user.findUnique({ where: { email: cleanEmail } });
+    // Existing user? (by phone first, then email)
+    let user = cleanPhone ? await prisma.user.findUnique({ where: { phone: cleanPhone } }) : null;
+    if (!user && cleanEmail) user = await prisma.user.findUnique({ where: { email: cleanEmail } });
     let tempPassword: string | undefined;
     if (!user) {
       // Create a user account with a one-time temp password (owner communicates it out-of-band).
       tempPassword = randomBytes(9).toString("base64url");
       user = await prisma.user.create({
         data: {
-          email: cleanEmail,
+          email: cleanEmail || null,
+          phone: cleanPhone,
           name: name?.trim() || null,
           passwordHash: await bcrypt.hash(tempPassword, 12),
           role,
@@ -61,8 +84,8 @@ export class TeamService {
     // Upsert the membership (re-activate if it was deactivated).
     const membership = await prisma.userStore.upsert({
       where: { userId_storeId: { userId: user.id, storeId } },
-      update: { role: role as StoreRole, status: "ACTIVE" },
-      create: { userId: user.id, storeId, role: role as StoreRole, status: "ACTIVE" },
+      update: { role: role as StoreRole, status: "ACTIVE", ...(homeLocationId !== undefined ? { homeLocationId: homeLocationId || null } : {}) },
+      create: { userId: user.id, storeId, role: role as StoreRole, status: "ACTIVE", homeLocationId: homeLocationId || null },
     });
 
     // Also align the user's global role so JWT claims match the store role.
@@ -96,6 +119,9 @@ export class TeamService {
     if (!membership) return { ok: false, error: { type: "not_found", message: "Member not part of this store" } };
     if (membership.role === "OWNER") return { ok: false, error: { type: "conflict", message: "Cannot deactivate the owner" } };
     await prisma.userStore.update({ where: { userId_storeId: { userId, storeId } }, data: { status: "DEACTIVATED" } });
+    // Rice Ops M2: removing someone signs them out on every phone at once.
+    await prisma.user.update({ where: { id: userId }, data: { tokenVersion: { increment: 1 } } });
+    await bustTokenVersion(userId);
     await bustMemberships();
     return { ok: true, value: { userId } };
   }

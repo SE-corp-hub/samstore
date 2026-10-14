@@ -5,6 +5,7 @@
 // helpers so the ledger can never silently diverge from the balances.
 
 import type { Prisma } from "@prisma/client";
+import { allocateRestore, pickDeductionLevel, type LevelView } from "./stock-location.js";
 
 export type MovementTx = Prisma.TransactionClient;
 
@@ -21,6 +22,10 @@ export interface MovementInput {
   createdBy?: string | null;
   note?: string | null;
   balanceAfter?: number | null;
+  /** Rice Ops M1: the document behind the move (TRANSFER, SALE, ORDER_EDIT, VOID, ADJUST, …). */
+  documentType?: string | null;
+  /** Rice Ops M1: that document's id — every ledger row traces back to it. */
+  documentId?: string | null;
 }
 
 /** Append a movement to the ledger (inside an existing transaction). */
@@ -38,8 +43,55 @@ export async function recordMovement(tx: MovementTx, m: MovementInput): Promise<
       createdBy: m.createdBy ?? null,
       note: m.note ?? null,
       balanceAfter: m.balanceAfter ?? null,
+      documentType: m.documentType ?? (m.orderId ? "ORDER" : null),
+      documentId: m.documentId ?? m.orderId ?? null,
     },
   });
+}
+
+/** Movement types that move `quantityReserved` only (mirrors stock-settlement.ts). */
+const RESERVED_ONLY_TYPES = ["RESERVE", "RELEASE_RESERVATION"];
+
+/** The store's default location id (null for a store that predates locations). */
+export async function defaultLocationId(tx: MovementTx, storeId: string): Promise<string | null> {
+  const def = await tx.warehouse.findFirst({ where: { storeId, isDefault: true }, select: { id: true } });
+  return def?.id ?? null;
+}
+
+/**
+ * Rice Ops M1: the store's default location, creating one when the store has
+ * none — so no new stock row is ever written without a location. A store with
+ * locations but no default promotes its oldest.
+ */
+export async function ensureDefaultLocation(tx: MovementTx, storeId: string): Promise<string> {
+  const def = await defaultLocationId(tx, storeId);
+  if (def) return def;
+  const oldest = await tx.warehouse.findFirst({ where: { storeId }, orderBy: { createdAt: "asc" }, select: { id: true } });
+  if (oldest) {
+    await tx.warehouse.update({ where: { id: oldest.id }, data: { isDefault: true } });
+    return oldest.id;
+  }
+  const created = await tx.warehouse.upsert({
+    where: { storeId_name: { storeId, name: "Main" } },
+    create: { storeId, name: "Main", isDefault: true },
+    update: { isDefault: true },
+    select: { id: true },
+  });
+  return created.id;
+}
+
+/**
+ * Guarded decrement against AVAILABLE stock (on hand − reserved), in ONE statement:
+ * a concurrent sale or reservation can never push the row below what is promised.
+ * Returns the new on-hand balance, or null when the guard missed.
+ */
+async function takeAvailable(tx: MovementTx, levelId: string, take: number): Promise<number | null> {
+  const rows = await tx.$queryRaw<{ quantityOnHand: number }[]>`
+    UPDATE "StockLevel"
+    SET "quantityOnHand" = "quantityOnHand" - ${take}::int, "updatedAt" = now()
+    WHERE id = ${levelId} AND "quantityOnHand" - "quantityReserved" >= ${take}::int
+    RETURNING "quantityOnHand"`;
+  return rows[0]?.quantityOnHand ?? null;
 }
 
 /**
@@ -51,6 +103,8 @@ export class InsufficientStockError extends Error {
   constructor(
     public readonly productId: string,
     public readonly shortfall: number,
+    /** Rice Ops M1: available units at OTHER locations — so the screen can offer "kunin sa …". */
+    public readonly elsewhere = 0,
   ) {
     super(`insufficient stock for product ${productId} (short by ${shortfall})`);
     this.name = "InsufficientStockError";
@@ -58,18 +112,25 @@ export class InsufficientStockError extends Error {
 }
 
 /**
- * Decrement multiple stock levels for lines (prefers default-warehouse rows),
- * recording a movement per touched level. Returns the levels actually changed.
+ * Decrement stock for sale/edit lines, recording one ledger row per line.
  * Used by POS sells/holds/preorders and admin item edits.
  *
- * CONDITIONAL WRITES ONLY: every decrement is a single guarded UPDATE
- * (`... WHERE id = ? AND "quantityOnHand" >= take`). If the guard misses, the
- * level changed under us — we re-read it and try the next level. A shortfall is
- * an explicit InsufficientStockError, so a balance can never go negative.
- * Products with NO stock-level rows are untracked and keep the legacy no-op.
+ * Rice Ops M1 rules (see stock-location.ts):
+ *   * ONE location per line — `opts.warehouseId`, else the store's default
+ *     location (legacy: the location-less row). Never spread over other stores.
+ *   * Guarded against AVAILABLE (on hand − reserved) in a single statement, so a
+ *     concurrent sale or a reservation can never be oversold.
+ *   * A shortfall is an explicit InsufficientStockError carrying what is
+ *     available elsewhere. Products with NO stock rows are untracked (legacy no-op).
  */
-export async function deductStock(tx: MovementTx, storeId: string, lines: { productId: string; variantId?: string | null; quantity: number }[], opts?: { type?: string; orderId?: string | null; createdBy?: string | null }): Promise<void> {
+export async function deductStock(
+  tx: MovementTx,
+  storeId: string,
+  lines: { productId: string; variantId?: string | null; quantity: number }[],
+  opts?: { type?: string; orderId?: string | null; createdBy?: string | null; warehouseId?: string | null; documentType?: string | null; documentId?: string | null },
+): Promise<void> {
   const type = opts?.type ?? "CONSUME";
+  let defaultId: string | null | undefined;
   for (const l of lines) {
     if (l.quantity <= 0) continue;
     // P2b: VARIANT lines decrement the variant's own counter (guarded the same way).
@@ -92,46 +153,41 @@ export async function deductStock(tx: MovementTx, storeId: string, lines: { prod
         orderId: opts?.orderId,
         createdBy: opts?.createdBy,
         balanceAfter: fresh?.quantityOnHand ?? null,
+        documentType: opts?.documentType,
+        documentId: opts?.documentId,
       });
       continue;
     }
-    // Fetch ALL levels (not just in-stock ones): the difference between "this
-    // product is untracked" (no rows) and "tracked but empty" decides whether a
-    // shortfall is an error or a legacy no-op.
-    const allLevels = await tx.stockLevel.findMany({ where: { storeId, productId: l.productId } });
-    if (allLevels.length === 0) continue; // untracked product — no stock accounting
-    const levels = allLevels.filter((x) => x.quantityOnHand > 0);
-    levels.sort((a, b) => (a.warehouseId ? 0 : 1) - (b.warehouseId ? 0 : 1));
-    let remaining = l.quantity;
-    for (const lvl of levels) {
-      if (remaining <= 0) break;
-      const take = Math.min(lvl.quantityOnHand, remaining);
-      if (take > 0) {
-        // Guarded single-statement decrement — no read-then-write race.
-        const changed = await tx.stockLevel.updateMany({
-          where: { id: lvl.id, quantityOnHand: { gte: take } },
-          data: { quantityOnHand: { decrement: take } },
-        });
-        if (changed.count === 0) continue; // lost the race — re-read happens on the next level
-        const fresh = await tx.stockLevel.findUnique({ where: { id: lvl.id }, select: { quantityOnHand: true } });
-        await recordMovement(tx, {
-          storeId,
-          productId: l.productId,
-          warehouseId: lvl.warehouseId,
-          delta: -take,
-          type,
-          orderId: opts?.orderId,
-          createdBy: opts?.createdBy,
-          balanceAfter: fresh?.quantityOnHand ?? null,
-        });
-        remaining -= take;
-      }
+    const levels: LevelView[] = await tx.stockLevel.findMany({
+      where: { storeId, productId: l.productId },
+      select: { id: true, warehouseId: true, quantityOnHand: true, quantityReserved: true },
+    });
+    if (defaultId === undefined) defaultId = await defaultLocationId(tx, storeId);
+    const pick = pickDeductionLevel(levels, l.quantity, { warehouseId: opts?.warehouseId ?? null, defaultWarehouseId: defaultId });
+    if (!pick.ok) {
+      if (pick.reason === "untracked") continue; // untracked product — no stock accounting
+      const available = pick.reason === "short" ? pick.available : 0;
+      throw new InsufficientStockError(l.productId, l.quantity - available, pick.elsewhere);
     }
-    // Levels existed but could not cover the request → the caller must handle a
-    // real shortfall instead of silently shipping stock we do not have.
-    if (remaining > 0) {
-      throw new InsufficientStockError(l.productId, remaining);
+    const balanceAfter = await takeAvailable(tx, pick.level.id, l.quantity);
+    if (balanceAfter === null) {
+      // The row changed between the read and the guarded write (a concurrent sale).
+      const fresh = await tx.stockLevel.findUnique({ where: { id: pick.level.id }, select: { quantityOnHand: true, quantityReserved: true } });
+      const available = Math.max(0, (fresh?.quantityOnHand ?? 0) - (fresh?.quantityReserved ?? 0));
+      throw new InsufficientStockError(l.productId, l.quantity - available);
     }
+    await recordMovement(tx, {
+      storeId,
+      productId: l.productId,
+      warehouseId: pick.level.warehouseId,
+      delta: -l.quantity,
+      type,
+      orderId: opts?.orderId,
+      createdBy: opts?.createdBy,
+      balanceAfter,
+      documentType: opts?.documentType,
+      documentId: opts?.documentId,
+    });
   }
 }
 
@@ -158,6 +214,9 @@ export async function adjustStock(
     actorId: string;
     /** Allow the balance to go negative (manager stock-take only). */
     allowNegative?: boolean;
+    /** Rice Ops M1: the document behind the adjustment (e.g. COUNT + its id). */
+    documentType?: string | null;
+    documentId?: string | null;
   },
 ): Promise<{ levelId: string; balanceAfter: number; delta: number }> {
   const { storeId, productId, actorId, reason } = input;
@@ -177,11 +236,15 @@ export async function adjustStock(
     : await tx.stockLevel.findFirst({
         where: { storeId, productId, warehouse: { isDefault: true } },
       });
-  if (!level) level = await tx.stockLevel.findFirst({ where: { storeId, productId } });
+  // Legacy: a location-less row, only when no location was asked for.
+  if (!level && !input.warehouseId) level = await tx.stockLevel.findFirst({ where: { storeId, productId, warehouseId: null } });
   if (!level) {
-    const fallbackWarehouse = await tx.warehouse.findFirst({ where: { storeId, isDefault: true }, select: { id: true } });
+    // Rice Ops M1: a new row goes to the asked location, else the default location.
+    // (A store that predates locations keeps the legacy location-less row until the
+    // M1 migration / setup-locations script gives it one.)
+    const warehouseId = input.warehouseId ?? (await defaultLocationId(tx, storeId));
     level = await tx.stockLevel.create({
-      data: { storeId, productId, warehouseId: input.warehouseId ?? fallbackWarehouse?.id ?? null, quantityOnHand: 0, quantityReserved: 0 },
+      data: { storeId, productId, warehouseId, quantityOnHand: 0, quantityReserved: 0 },
     });
   }
 
@@ -218,17 +281,30 @@ export async function adjustStock(
     createdBy: actorId,
     note: reason,
     balanceAfter,
+    documentType: input.documentType ?? "ADJUST",
+    documentId: input.documentId ?? null,
   });
   return { levelId: level.id, balanceAfter, delta: balanceAfter - level.quantityOnHand };
 }
 
 /**
- * Restore stock for lines (void/cancel/edit-revert), recording a movement.
- * Uses the FIRST level for the product (legacy compatibility).
+ * Restore stock for lines (void/cancel/edit-revert), recording ledger rows.
+ *
+ * Rice Ops M1: stock goes back to the location it was TAKEN from, read from the
+ * order's own ledger rows (allocateRestore). Without an order (or beyond what the
+ * ledger shows) it goes to `opts.warehouseId`, else the default location. A
+ * product with no stock row at all stays untracked (legacy no-op).
  */
-export async function restoreStock(tx: MovementTx, storeId: string, lines: { productId: string; variantId?: string | null; quantity: number }[], opts?: { type?: string; orderId?: string | null; createdBy?: string | null }): Promise<void> {
+export async function restoreStock(
+  tx: MovementTx,
+  storeId: string,
+  lines: { productId: string; variantId?: string | null; quantity: number }[],
+  opts?: { type?: string; orderId?: string | null; createdBy?: string | null; warehouseId?: string | null; documentType?: string | null; documentId?: string | null },
+): Promise<void> {
   const type = opts?.type ?? "RELEASE";
+  let fallbackId: string | null | undefined;
   for (const l of lines) {
+    if (l.quantity <= 0) continue;
     // P2b: variant lines restore the variant's counter.
     if (l.variantId) {
       const updated = await tx.productVariant.update({
@@ -244,25 +320,96 @@ export async function restoreStock(tx: MovementTx, storeId: string, lines: { pro
         orderId: opts?.orderId,
         createdBy: opts?.createdBy,
         balanceAfter: updated.quantityOnHand,
+        documentType: opts?.documentType,
+        documentId: opts?.documentId,
       });
       continue;
     }
-    const level = await tx.stockLevel.findFirst({ where: { storeId, productId: l.productId } });
-    if (level) {
+    const levels = await tx.stockLevel.findMany({ where: { storeId, productId: l.productId }, select: { id: true, warehouseId: true } });
+    if (levels.length === 0) continue; // untracked product
+    if (fallbackId === undefined) fallbackId = opts?.warehouseId ?? (await defaultLocationId(tx, storeId));
+    const taken = opts?.orderId
+      ? await tx.stockMovement.findMany({
+          where: { storeId, orderId: opts.orderId, productId: l.productId, variantId: null, type: { notIn: RESERVED_ONLY_TYPES } },
+          orderBy: { createdAt: "asc" },
+          select: { productId: true, warehouseId: true, delta: true },
+        })
+      : [];
+    for (const part of allocateRestore(taken, l.productId, l.quantity, fallbackId)) {
+      let level = levels.find((x) => (x.warehouseId ?? null) === part.warehouseId) ?? null;
+      if (!level && part.warehouseId) {
+        // The stock came from a location that no longer has a row for it: recreate the row there.
+        level = await tx.stockLevel.upsert({
+          where: { storeId_productId_warehouseId: { storeId, productId: l.productId, warehouseId: part.warehouseId } },
+          create: { storeId, productId: l.productId, warehouseId: part.warehouseId, quantityOnHand: 0, quantityReserved: 0 },
+          update: {},
+          select: { id: true, warehouseId: true },
+        });
+        levels.push(level);
+      }
+      if (!level) level = levels[0] ?? null; // legacy store without locations
+      if (!level) continue;
       const updated = await tx.stockLevel.update({
         where: { id: level.id },
-        data: { quantityOnHand: { increment: l.quantity } },
+        data: { quantityOnHand: { increment: part.quantity } },
       });
       await recordMovement(tx, {
         storeId,
         productId: l.productId,
         warehouseId: level.warehouseId,
-        delta: l.quantity,
+        delta: part.quantity,
         type,
         orderId: opts?.orderId,
         createdBy: opts?.createdBy,
         balanceAfter: updated.quantityOnHand,
+        documentType: opts?.documentType,
+        documentId: opts?.documentId,
       });
     }
   }
+}
+
+/**
+ * Rice Ops M1 — move stock between two locations in ONE transaction: the only
+ * writer for transfers (and, from M3, releases). The source is decremented
+ * against AVAILABLE stock with a single guarded statement — a transfer can never
+ * create rice the source does not have, nor push the source below what is
+ * reserved. The destination row is upserted on its (store, product, location)
+ * key. Both ledger rows carry the actor and the document.
+ */
+export async function transferStock(
+  tx: MovementTx,
+  input: {
+    storeId: string;
+    productId: string;
+    fromWarehouseId: string;
+    toWarehouseId: string;
+    quantity: number;
+    actorId: string | null;
+    documentType: string;
+    documentId: string;
+    note?: string | null;
+  },
+): Promise<{ fromBalance: number; toBalance: number }> {
+  const { storeId, productId, fromWarehouseId, toWarehouseId, quantity } = input;
+  if (!Number.isInteger(quantity) || quantity <= 0) throw new Error("transfer quantity must be a positive whole number");
+  if (fromWarehouseId === toWarehouseId) throw new Error("transfer source and destination must differ");
+
+  const source = await tx.stockLevel.findFirst({ where: { storeId, productId, warehouseId: fromWarehouseId }, select: { id: true } });
+  if (!source) throw new InsufficientStockError(productId, quantity);
+  const fromBalance = await takeAvailable(tx, source.id, quantity);
+  if (fromBalance === null) {
+    const fresh = await tx.stockLevel.findUnique({ where: { id: source.id }, select: { quantityOnHand: true, quantityReserved: true } });
+    throw new InsufficientStockError(productId, quantity - Math.max(0, (fresh?.quantityOnHand ?? 0) - (fresh?.quantityReserved ?? 0)));
+  }
+  const dest = await tx.stockLevel.upsert({
+    where: { storeId_productId_warehouseId: { storeId, productId, warehouseId: toWarehouseId } },
+    create: { storeId, productId, warehouseId: toWarehouseId, quantityOnHand: quantity, quantityReserved: 0 },
+    update: { quantityOnHand: { increment: quantity } },
+    select: { quantityOnHand: true },
+  });
+  const common = { storeId, productId, orderId: null, createdBy: input.actorId, note: input.note ?? null, documentType: input.documentType, documentId: input.documentId };
+  await recordMovement(tx, { ...common, warehouseId: fromWarehouseId, delta: -quantity, type: "TRANSFER_OUT", balanceAfter: fromBalance });
+  await recordMovement(tx, { ...common, warehouseId: toWarehouseId, delta: quantity, type: "TRANSFER_IN", balanceAfter: dest.quantityOnHand });
+  return { fromBalance, toBalance: dest.quantityOnHand };
 }

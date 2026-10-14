@@ -88,6 +88,9 @@ export class StoreAdminService {
         status: "ACTIVE",
         settings: { create: {} },
         publicLink: { create: { slug, token } },
+        // Rice Ops M1: every new store starts with its first stock location, so no
+        // stock row is ever created without one. More are added in Locations.
+        warehouses: { create: { name: "Store 1", code: "S1", type: "STORE", isDefault: true } },
          userStores: {
            create: { userId: owner.id, role: (input.ownerRole ?? "OWNER") as StoreRole },
          },

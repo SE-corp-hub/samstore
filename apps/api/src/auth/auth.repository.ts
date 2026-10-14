@@ -16,6 +16,8 @@ export interface AuthUserRecord {
   memberships: { storeId: string; role: string }[];
   /** v6: set by an admin password reset — forces a password change on next login. */
   mustChangePassword?: boolean;
+  /** Rice Ops M2: copied into the JWT as `tv`. */
+  tokenVersion?: number;
 }
 
 export interface MembershipLookup {
@@ -74,6 +76,7 @@ export class PrismaAuthRepository implements AuthRepository {
       role: u.role ?? "STORE_OWNER",
       memberships: u.memberships.map((m) => ({ storeId: m.storeId, role: m.role })),
       mustChangePassword: u.mustChangePassword ?? false,
+      tokenVersion: u.tokenVersion ?? 0,
     };
   }
 

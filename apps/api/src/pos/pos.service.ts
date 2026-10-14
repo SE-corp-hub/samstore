@@ -8,6 +8,7 @@
 import { prisma } from "../persistence/prisma-repositories.js";
 import { cacheBust, cacheKey } from "../persistence/ttl-cache.js";
 import { deductStock, restoreStock as restoreStockLedger } from "../domain/movements.js";
+import { pickDeductionLevel } from "../domain/stock-location.js";
 import { RegisterService } from "../registers/register.service.js";
 import { PrismaOrderSequenceRepository } from "../persistence/prisma-repositories.js";
 import { computeOrderTotals } from "../domain/pricing.js";
@@ -73,6 +74,9 @@ export class PosService {
       ? await prisma.productVariant.findMany({ where: { storeId, id: { in: variantIds }, isActive: true } })
       : [];
     const variantMap = new Map(variants.map((v) => [v.id, v]));
+    // Rice Ops M1: a counter sale takes stock from THIS store's location (the
+    // default), never silently from another store — the same rule deductStock uses.
+    const defaultLocation = await prisma.warehouse.findFirst({ where: { storeId, isDefault: true }, select: { id: true } });
 
     for (const it of items) {
       const p = products.find((x) => x.id === it.productId)!;
@@ -86,9 +90,17 @@ export class PosService {
           return { ok: false, error: { type: "conflict", message: `Only ${available} in stock for ${p.name} (${v.name})` } };
         }
       } else {
-        const available = p.stockLevels.reduce((s, l) => s + (l.quantityOnHand - l.quantityReserved), 0);
-        if (available < it.quantity) {
-          return { ok: false, error: { type: "conflict", message: `Only ${available} in stock for ${p.name}` } };
+        const pick = pickDeductionLevel(p.stockLevels, it.quantity, { defaultWarehouseId: defaultLocation?.id ?? null });
+        if (!pick.ok) {
+          const available = pick.reason === "short" ? pick.available : 0;
+          const elsewhere = pick.reason === "untracked" ? 0 : pick.elsewhere;
+          return {
+            ok: false,
+            error: {
+              type: "conflict",
+              message: `Only ${available} in stock for ${p.name}${elsewhere > 0 ? ` here (${elsewhere} at other locations)` : ""}`,
+            },
+          };
         }
       }
     }
