@@ -470,7 +470,7 @@ export async function unreserveForTrip(tx: MovementTx, leg: TripLeg, qty: number
  * Ilabas: drop the trip's hold and take `releaseQty` off the shelf in ONE statement.
  * The released units must be covered by the hold plus what else is available.
  */
-export async function releaseForTrip(tx: MovementTx, leg: TripLeg, heldQty: number, releaseQty: number, type: "RELEASE_OUT" | "RESACK_OUT" = "RELEASE_OUT"): Promise<number> {
+export async function releaseForTrip(tx: MovementTx, leg: TripLeg, heldQty: number, releaseQty: number, type: "RELEASE_OUT" | "RESACK_OUT" | "CONSUME" | "WRITE_OFF" = "RELEASE_OUT"): Promise<number> {
   if (!Number.isInteger(releaseQty) || releaseQty <= 0) throw new Error("release quantity must be a positive whole number");
   const level = await levelFor(tx, leg);
   if (!level) throw new InsufficientStockError(leg.productId, releaseQty);
@@ -496,7 +496,7 @@ export async function releaseForTrip(tx: MovementTx, leg: TripLeg, heldQty: numb
 }
 
 /** Tanggapin / Tanggapin pabalik / Ibinalik: add counted stock at a location (row created if new). */
-export async function addForTrip(tx: MovementTx, leg: TripLeg, qty: number, type: "RECEIVE_IN" | "RETURN_IN" | "RESACK_IN" | "RESACK_RETURN"): Promise<number> {
+export async function addForTrip(tx: MovementTx, leg: TripLeg, qty: number, type: "RECEIVE_IN" | "RETURN_IN" | "RESACK_IN" | "RESACK_RETURN" | "STOCK_IN" | "MERGE_IN" | "COUNT_ADJUST_IN"): Promise<number> {
   if (!Number.isInteger(qty) || qty < 0) throw new Error("quantity must be a whole number ≥ 0");
   if (qty === 0) return 0;
   const row = await tx.stockLevel.upsert({
@@ -507,4 +507,36 @@ export async function addForTrip(tx: MovementTx, leg: TripLeg, qty: number, type
   });
   await recordMovement(tx, { ...leg, orderId: null, createdBy: leg.actorId, delta: qty, type, balanceAfter: row.quantityOnHand });
   return row.quantityOnHand;
+}
+
+/**
+ * Rice Ops M8: post a count's difference (COUNT_ADJUST) in ONE guarded statement. A kulang
+ * can never take the shelf below what is held for orders/trips; a sobra creates the row
+ * when the location had none. Returns the new on-hand balance (0 when nothing was posted).
+ */
+export async function adjustForCount(tx: MovementTx, leg: TripLeg, delta: number): Promise<number> {
+  if (!Number.isInteger(delta)) throw new Error("count adjustment must be a whole number");
+  if (delta === 0) return 0; // Tama — nothing to post
+  if (delta > 0) {
+    const row = await tx.stockLevel.upsert({
+      where: { storeId_productId_warehouseId: { storeId: leg.storeId, productId: leg.productId, warehouseId: leg.warehouseId } },
+      create: { storeId: leg.storeId, productId: leg.productId, warehouseId: leg.warehouseId, quantityOnHand: delta, quantityReserved: 0 },
+      update: { quantityOnHand: { increment: delta } },
+      select: { quantityOnHand: true },
+    });
+    await recordMovement(tx, { ...leg, orderId: null, createdBy: leg.actorId, delta, type: "COUNT_ADJUST", balanceAfter: row.quantityOnHand });
+    return row.quantityOnHand;
+  }
+  const level = await levelFor(tx, leg);
+  if (!level) throw new InsufficientStockError(leg.productId, -delta);
+  const rows = await tx.$queryRaw<{ quantityOnHand: number }[]>`
+    UPDATE "StockLevel" SET "quantityOnHand" = "quantityOnHand" + ${delta}::int, "updatedAt" = now()
+     WHERE id = ${level.id} AND "quantityOnHand" + ${delta}::int >= "quantityReserved"
+    RETURNING "quantityOnHand"`;
+  if (!rows[0]) {
+    const fresh = await tx.stockLevel.findUnique({ where: { id: level.id }, select: { quantityOnHand: true, quantityReserved: true } });
+    throw new InsufficientStockError(leg.productId, Math.max(0, (fresh?.quantityReserved ?? 0) - ((fresh?.quantityOnHand ?? 0) + delta)));
+  }
+  await recordMovement(tx, { ...leg, orderId: null, createdBy: leg.actorId, delta, type: "COUNT_ADJUST", balanceAfter: rows[0].quantityOnHand });
+  return rows[0].quantityOnHand;
 }

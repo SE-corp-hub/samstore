@@ -21,6 +21,7 @@ import {
   captureSignatures, locationRefusal, nextDocNumber, requestApproval, requireSignatures, signatureErrorResult,
   type Actor, type SignatureInput,
 } from "../people/people.service.js";
+import { txOptions } from "../persistence/tx-options.js";
 
 export type FlowResult<T> = { ok: true; value: T } | { ok: false; error: ApiError };
 type Tx = Prisma.TransactionClient;
@@ -40,8 +41,11 @@ const tripInclude = {
   toWarehouse: { select: { id: true, name: true, code: true, type: true } },
   product: { select: { id: true, name: true, sku: true } },
   kargador: { select: { id: true, name: true } },
-  order: { select: { id: true, orderNumber: true, customerName: true } },
+  order: { select: { id: true, orderNumber: true, customerName: true, source: true, status: true } },
 } satisfies Prisma.StockTransferInclude;
+
+/** Rice Ops M7: an agent order is paid AFTER delivery — undelivered rice is simply not charged (no refund to settle). */
+const unpaidAgentOrder = (t: { order: { source: string; status: string } | null }) => !!t.order && t.order.source === "AGENT" && t.order.status !== "COMPLETED";
 
 type Trip = Prisma.StockTransferGetPayload<{ include: typeof tripInclude }>;
 
@@ -178,7 +182,7 @@ export class TransferFlowService {
         await tx.auditLog.create({
           data: { storeId, actorType: "USER", actorId: actor.userId, action: "transfer.release", entityType: "StockTransfer", entityId: id, after: { released, requested: t.quantity, kargadorId: kargador.id } },
         });
-      }, { timeout: 30_000 });
+      }, txOptions());
       return { id, status: "IN_TRANSIT", releasedQty: released };
     }, t.product.name, placeName(t.fromWarehouse));
   }
@@ -223,7 +227,7 @@ export class TransferFlowService {
         await tx.auditLog.create({
           data: { storeId, actorType: "USER", actorId: actor.userId, action: "transfer.receive", entityType: "StockTransfer", entityId: id, after: { released, received, short } },
         });
-      }, { timeout: 30_000 });
+      }, txOptions());
       return { id, status: "COMPLETED", receivedQty: received, shortQty: short, approvalId };
     }, t.product.name, placeName(t.fromWarehouse));
   }
@@ -257,7 +261,7 @@ export class TransferFlowService {
         });
         await captureSignatures(tx, storeId, actor, { documentType: "RELEASE", documentId: id, step: "DELIVERED", locationId: t.toWarehouseId }, input.signatures);
         await requireSignatures(tx, storeId, { documentType: "RELEASE", documentId: id, step: "DELIVERED" }, { kargador: true, customer: customerSigned });
-        if (pendingReturn > 0) {
+        if (pendingReturn > 0 && !unpaidAgentOrder(t)) {
           // The money side of a refused/partial delivery is the owner's call (refund or utang reversal).
           approvalId = (await requestApproval(tx, {
             storeId, kind: "REFUND", documentType: "RELEASE", documentId: id, locationId: t.toWarehouseId,
@@ -269,7 +273,7 @@ export class TransferFlowService {
         await tx.auditLog.create({
           data: { storeId, actorType: "USER", actorId: actor.userId, action: "release.delivered", entityType: "StockTransfer", entityId: id, after: { released, delivered, pendingReturn, note: note || null } },
         });
-      }, { timeout: 30_000 });
+      }, txOptions());
       return { id, status: nextStatus, deliveredQty: delivered, pendingReturn, approvalId };
     }, t.product.name, placeName(t.fromWarehouse));
   }
@@ -311,7 +315,7 @@ export class TransferFlowService {
         await tx.auditLog.create({
           data: { storeId, actorType: "USER", actorId: actor.userId, action: "release.returned", entityType: "StockTransfer", entityId: id, after: { pending, returned, short } },
         });
-      }, { timeout: 30_000 });
+      }, txOptions());
       return { id, status: "COMPLETED", returnedQty: returned, shortQty: short, approvalId };
     }, t.product.name, placeName(t.fromWarehouse));
   }
@@ -329,7 +333,7 @@ export class TransferFlowService {
           storeId, productId: t.productId, warehouseId: t.fromWarehouseId, actorId: actor.userId,
           documentType: t.kind === "ORDER_RELEASE" ? "RELEASE" : "TRANSFER", documentId: id, note: `cancel: ${why}`,
         }, t.reservedQty);
-        if (t.kind === "ORDER_RELEASE") {
+        if (t.kind === "ORDER_RELEASE" && !unpaidAgentOrder(t)) {
           await requestApproval(tx, {
             storeId, kind: "REFUND", documentType: "RELEASE", documentId: id, locationId: t.toWarehouseId,
             summary: `${t.docNumber ?? "Benta"}${t.order ? ` (order ${t.order.orderNumber})` : ""} kinansela bago mailabas: ${t.quantity} × ${t.product.name} — ${why}. Ibalik ang bayad o bawasan ang utang.`,

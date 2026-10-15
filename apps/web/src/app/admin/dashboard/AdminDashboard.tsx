@@ -8,6 +8,11 @@ import {
 } from "../../../lib/admin";
 import dynamic from "next/dynamic";
 import { API_URL } from "../../../config";
+import { useLang, LANG_WORDS } from "../../../lib/lang";
+import QueueBadge from "../../../components/admin/QueueBadge";
+
+/** Rice Ops M10: the store screens get the large, high-contrast look (globals.css .rice-ui). */
+const RICE_TABS = new Set(["benta", "utangrice", "agentorders", "agent", "approvals", "trips", "resack", "pasok", "bilangin", "ulat", "drafts", "kargadors"]);
 // The landing panel stays eager (it is the first paint); every other panel loads when
 // its tab opens. Shipping all 22 at once cost ~95 kB of route JS for one visible screen,
 // and dragged jsbarcode/qrcode (used by two panels) into the initial payload.
@@ -22,7 +27,7 @@ const panelLoading = () => (
 const panel = (loader: () => Promise<{ default: React.ComponentType<PanelProps> }>) =>
   dynamic(loader, { ssr: false, loading: panelLoading });
 
-interface PanelProps { onNavigate?: (tab: string) => void }
+interface PanelProps { onNavigate?: (tab: string) => void; role?: string }
 
 const OrdersPanel = panel(() => import("../../../components/admin/OrdersPanel"));
 const ProductsPanel = panel(() => import("../../../components/admin/ProductsPanel"));
@@ -50,10 +55,19 @@ const DraftsPanel = panel(() => import("../../../components/admin/DraftsPanel"))
 const KargadorsPanel = panel(() => import("../../../components/admin/KargadorsPanel"));
 const TripsPanel = panel(() => import("../../../components/admin/TripsPanel"));
 const ResackPanel = panel(() => import("../../../components/admin/ResackPanel"));
+const BentaPanel = panel(() => import("../../../components/admin/BentaPanel"));
+const PasokPanel = panel(() => import("../../../components/admin/PasokPanel"));
+const UtangRicePanel = panel(() => import("../../../components/admin/UtangRicePanel"));
+const AgentPanel = panel(() => import("../../../components/admin/AgentPanel"));
+const AgentOrdersPanel = panel(() => import("../../../components/admin/AgentOrdersPanel"));
+const BilanginPanel = panel(() => import("../../../components/admin/BilanginPanel"));
+const UlatPanel = panel(() => import("../../../components/admin/UlatPanel"));
 
 interface MyStore { id: string; name: string; slug: string; role: string; }
 
 export default function AdminDashboard() {
+  const { t, toggle: toggleLang } = useLang();
+  const navLabel = (id: string, label: string) => (LANG_WORDS[`nav.${id}`] ? t(`nav.${id}`) : label);
   const router = useRouter();
   const [authed, setAuthed] = useState(false);
   const [stores, setStores] = useState<MyStore[]>([]);
@@ -246,6 +260,13 @@ case "erp": return <ErpPanel />;
       case "kargadors": return <KargadorsPanel />;
       case "trips": return <TripsPanel />;
       case "resack": return <ResackPanel />;
+      case "benta": return <BentaPanel />;
+      case "pasok": return <PasokPanel role={role} />;
+      case "utangrice": return <UtangRicePanel role={role} />;
+      case "agent": return <AgentPanel />;
+      case "agentorders": return <AgentOrdersPanel />;
+      case "bilangin": return <BilanginPanel role={role} />;
+      case "ulat": return <UlatPanel role={role} />;
       case "stores": return <StoresPanel />;
       default: return <OrdersPanel />;
     }
@@ -272,7 +293,7 @@ case "erp": return <ErpPanel />;
                     onClick={() => { userNavigated.current = true; setTab(item.id); setMobileNav(false); }}
                   >
                     <i className={`bi ${item.icon}`}></i>
-                    <span>{item.label}</span>
+                    <span>{navLabel(item.id, item.label)}</span>
                   </button>
                 </li>
               ))}
@@ -339,6 +360,8 @@ case "erp": return <ErpPanel />;
                   ))}
                 </select>
               )}
+              <QueueBadge />
+              <button type="button" className="btn btn-sm btn-outline-dark" onClick={toggleLang} title="Taglish / English">{t("lang.switch")}</button>
               <span className="badge text-bg-primary text-uppercase">{role}</span>
               {active && (
                 <a className="btn btn-sm btn-outline-primary" href={`/${active.slug}`} target="_blank" rel="noreferrer" title="Open storefront">
@@ -353,7 +376,7 @@ case "erp": return <ErpPanel />;
         </nav>
 
         <main className="container-fluid py-4 flex-grow-1" style={{ background: "#faf7f2" }}>
-          {renderTab()}
+          {RICE_TABS.has(tab) ? <div className="rice-ui p-2 rounded">{renderTab()}</div> : renderTab()}
         </main>
       </div>
     </div>

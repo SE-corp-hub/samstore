@@ -4,13 +4,14 @@
 // No live Meta calls are ever made here.
 
 import { prisma } from "../persistence/prisma-repositories.js";
+import { claimSecret } from "../security/secrets.js";
 import { verifyClaimToken, InvalidClaimTokenError } from "../domain/claim-token.js";
 import { MessengerService, SuppressedMessengerProvider, type MessengerProvider } from "./messenger.adapter.js";
 import { journeyTurn, startJourney, type JourneyContext, type JourneyOrderLookup, type JourneyState } from "./journey.js";
 import { type ReplyTemplate } from "./templates.js";
 import type { ApiError } from "@sam-store/contracts";
 
-const CLAIM_SECRET = process.env.CLAIM_SIGNING_SECRET ?? "dev-only-in-memory-secret-0123456789";
+const CLAIM_SECRET = claimSecret(); // M11: no committed fallback
 
 export type JourneyDispatchResult = { ok: true; value: { sent: number; templates: ReplyTemplate[] } } | { ok: false; error: ApiError };
 

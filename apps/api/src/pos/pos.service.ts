@@ -15,12 +15,15 @@ import { PrismaOrderSequenceRepository } from "../persistence/prisma-repositorie
 import { computeOrderTotals } from "../domain/pricing.js";
 import { resolveLinePrice } from "../domain/price-override.js";
 import { taxColumnsFor } from "../domain/tax-store.js";
+import { saleKey, SellingError } from "../domain/selling.js";
+import { Prisma } from "@prisma/client";
 import { formatOrderNumber } from "../domain/order-number.js";
 import { randomId } from "../persistence/repositories.js";
 import { CreditService } from "../credit/credit.service.js";
 import { LoyaltyService } from "../loyalty/loyalty.service.js";
 import { ensureMethods, prepareTenders, writeTenders } from "../payments/tenders.js";
 import type { ApiError, PosSellRequest, PosSellResponse, PosHoldRequest, PosHoldItemsRequest, PosHoldCompleteRequest, PosSellItem, PosTender, PreOrderCreateRequest, PreOrderFinalizeRequest, PreOrderFinalizeResponse } from "@sam-store/contracts";
+import { txOptions } from "../persistence/tx-options.js";
 
 export type PosResult<T> = { ok: true; value: T } | { ok: false; error: ApiError };
 
@@ -223,6 +226,8 @@ export class PosService {
     signatureData?: string | null; signatureAt?: Date | null;
     preorder?: { startAt: string; dueAt: string | null } | null;
     registerSessionId?: string | null; // N1: cash drawer shift this counter sale belongs to
+    idempotencyKey?: string | null; // Rice Ops M5: the caller's real key (hashed); default pos_<id>
+    sellingLocationId?: string | null; // Rice Ops M5
   }) {
     const discountMinor = data.discountMinor ?? 0;
     const finalTotal = data.totalMinor ?? Math.max(0, data.totals.totalMinor - discountMinor);
@@ -256,11 +261,13 @@ export class PosService {
           ...(data.signatureData ? { signature: { capturedAt: signatureAt!.toISOString() } } : {}),
         },
         paymentMethod: data.paymentMethod, paymentStatus: data.paymentStatus,
-        idempotencyKey: `pos_${data.id}`, cartToken: "", customerName: data.customerName, customerPhone: "",
+        idempotencyKey: data.idempotencyKey ?? `pos_${data.id}`, cartToken: "", customerName: data.customerName, customerPhone: "",
         deliveryAddressLine1: "", storeCustomerId: data.storeCustomerId,
         fulfillmentType: "PICKUP", // M3: POS orders are counter/pickup at creation (delivery conversion flips it)
         signatureData: data.signatureData ?? null, signatureAt,
         registerSessionId: data.registerSessionId ?? null, // N1
+        sellingLocationId: data.sellingLocationId ?? null,
+        occurredAt: new Date(),
       },
     });
     const overriddenAt = new Date();
@@ -335,7 +342,46 @@ export class PosService {
     });
   }
 
+  /** Rice Ops M5: the sale already made with this key (a double-tap or a retry), as the same response. */
+  private async replaySale(storeId: string, key: string): Promise<PosSellResponse | null> {
+    const o = await prisma.order.findFirst({
+      where: { storeId, idempotencyKey: key },
+      include: { payments: { select: { changeMinor: true } }, stockTransfers: { select: { id: true, docNumber: true } } },
+    });
+    if (!o) return null;
+    const releases = o.stockTransfers.map((t) => ({ id: t.id, docNumber: t.docNumber ?? "" }));
+    return {
+      orderId: o.id, orderNumber: o.orderNumber, status: "COMPLETED", totalMinor: o.totalMinor, currencyCode: o.currencyCode,
+      paymentMethod: (o.paymentMethod === "credit" ? "credit" : "cash"), changeMinor: o.payments.reduce((s, p) => s + (p.changeMinor ?? 0), 0),
+      ...(releases.length ? { releases } : {}),
+    };
+  }
+
   async sell(storeId: string, actorId: string, input: PosSellRequest): Promise<PosResult<PosSellResponse>> {
+    // Rice Ops M5: a real idempotency key — the same key never makes a second sale.
+    let key: string | null = null;
+    if (input.idempotencyKey !== undefined) {
+      try {
+        key = saleKey(storeId, input.idempotencyKey);
+      } catch (e) {
+        return { ok: false, error: { type: "validation", errors: [e instanceof SellingError ? e.message : "invalid idempotencyKey"] } };
+      }
+      const earlier = await this.replaySale(storeId, key);
+      if (earlier) return { ok: true, value: earlier };
+    }
+    try {
+      return await this.sellOnce(storeId, actorId, input, key);
+    } catch (e) {
+      // Two taps raced past the check: the unique key let exactly one commit — return it.
+      if (key && e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002" && JSON.stringify(e.meta?.target ?? "").includes("idempotencyKey")) {
+        const won = await this.replaySale(storeId, key);
+        if (won) return { ok: true, value: won };
+      }
+      throw e;
+    }
+  }
+
+  private async sellOnce(storeId: string, actorId: string, input: PosSellRequest, key: string | null): Promise<PosResult<PosSellResponse>> {
     if (!this.validateItems(input.items)) {
       return { ok: false, error: { type: "validation", errors: ["At least one item with positive quantity is required"] } };
     }
@@ -410,6 +456,7 @@ export class PosService {
 
     let changeMinor = 0;
     const releases: { id: string; docNumber: string }[] = [];
+    const defaultLocationId = sellingLocation?.id ?? (await prisma.warehouse.findFirst({ where: { storeId, isDefault: true }, select: { id: true } }))?.id ?? null;
     await prisma.$transaction(async (tx) => {
       await this.makeOrder(tx, storeId, actorId, {
         id, orderNumber, status: "COMPLETED", paymentMethod: input.paymentMethod,
@@ -418,6 +465,8 @@ export class PosService {
         discountMinor, totalMinor: finalTotal,
         signatureData: kinds.hasCredit ? input.signatureData : null,
         registerSessionId,
+        idempotencyKey: key,
+        sellingLocationId: defaultLocationId,
       });
       if (plan.hasCash) changeMinor = plan.changeMinor;
       await writeTenders(tx, {
@@ -436,7 +485,7 @@ export class PosService {
           customerName: displayName, actorId,
         }));
       }
-    }, { timeout: 30_000 });
+    }, txOptions());
 
     // v4: record the redemption only after the order exists (checkout pattern).
     if (loyaltyRedeemed > 0 && loyaltyCustomerId && custId) {
@@ -478,7 +527,7 @@ export class PosService {
         currencyCode: store.currencyCode, totals, storeCustomerId: custId, customerName: displayName, lines,
       });
       await this.decrementStock(tx, storeId, lines, { orderId: id, createdBy: actorId });
-    }, { timeout: 30_000 });
+    }, txOptions());
     return { ok: true, value: { orderId: id, orderNumber, totalMinor: totals.totalMinor } };
   }
 
@@ -513,7 +562,7 @@ export class PosService {
       await tx.orderStatusHistory.create({
         data: { orderId, storeId, fromStatus: "COMPLETED", toStatus: "OUT_FOR_DELIVERY", reason: "POS sale marked for delivery", actorType: "pos", actorId },
       });
-    }, { timeout: 30_000 });
+    }, txOptions());
     await cacheBust(cacheKey("orders", storeId));
     return { ok: true, value: { id: orderId, status: "OUT_FOR_DELIVERY", orderNumber: order.orderNumber } };
   }
@@ -559,7 +608,7 @@ export class PosService {
         preorder: { startAt: input.startAt ?? new Date().toISOString(), dueAt: input.dueAt ?? null },
       });
       await this.decrementStock(tx, storeId, lines, { orderId: id, createdBy: actorId });
-    }, { timeout: 30_000 });
+    }, txOptions());
     await cacheBust(cacheKey("products", storeId));
     await cacheBust(cacheKey("orders", storeId));
     return { ok: true, value: { orderId: id, orderNumber, status: "ON_HOLD", totalMinor: totals.totalMinor, currencyCode: store.currencyCode } };
@@ -623,7 +672,7 @@ export class PosService {
         await tx.orderStatusHistory.create({
           data: { orderId: id, storeId, fromStatus: "ON_HOLD", toStatus: "COMPLETED", actorType: "pos_finalize", actorId },
         });
-      }, { timeout: 30_000 });
+      }, txOptions());
     } catch (e) {
       // The transaction rolled back, so the draft is untouched: report the reason the
       // way every other counter command does (409 + a message the UI can show).
@@ -696,7 +745,7 @@ export class PosService {
       });
       await tx.order.update({ where: { id: holdId }, data: { subtotalMinor: totals.subtotalMinor, totalMinor: totals.totalMinor, snapshot: { lines, source: hold.source.toLowerCase(), paymentMethod: hold.paymentMethod } as object, ...taxCols } });
       await tx.orderStatusHistory.create({ data: { orderId: holdId, storeId, fromStatus: "ON_HOLD", toStatus: "ON_HOLD", reason: "items edited", actorType: "pos", actorId: actorId } });
-    }, { timeout: 30_000 });
+    }, txOptions());
     return { ok: true, value: { id: holdId, totalMinor: totals.totalMinor, lines } };
   }
 
@@ -814,7 +863,7 @@ export class PosService {
         },
       });
       await tx.orderStatusHistory.create({ data: { orderId: holdId, storeId, fromStatus: hold.status, toStatus: finalStatus, reason: input.sendForDelivery === true && isDelivery ? "paid at counter → send for delivery" : null, actorType: "pos", actorId: actorId } });
-    }, { timeout: 30_000 });
+    }, txOptions());
 
     // v4: record loyalty redemption after the order exists (checkout pattern).
         if (loyaltyRedeemed > 0 && loyaltyCustomerId && custId) {
@@ -845,7 +894,7 @@ export class PosService {
       await tx.orderStatusHistory.create({
         data: { orderId: holdId, storeId, fromStatus: "ON_HOLD", toStatus: "CANCELLED", reason: reason?.trim() ?? null, actorType: "pos_void", actorId: actorId },
       });
-    }, { timeout: 30_000 });
+    }, txOptions());
     await cacheBust(cacheKey("products", storeId));
     await cacheBust(cacheKey("orders", storeId));
     return { ok: true, value: { id: holdId, status: "CANCELLED" } };

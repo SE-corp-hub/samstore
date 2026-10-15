@@ -82,3 +82,16 @@ test("M2 drafts: stale after 2 hours", () => {
   assert.equal(isDraftStale(new Date("2026-10-14T10:30:00Z"), now), false);
   assert.equal(isDraftStale(new Date("2026-10-14T09:59:00Z"), now), true);
 });
+
+test("M5: a slip photo may be a JPEG up to 400 KB; signatures stay PNG-only", async () => {
+  const { checkPhotoImage, MAX_PHOTO_BYTES } = await import("./people.js");
+  const jpeg = Buffer.alloc(2_000, 7);
+  jpeg[0] = 0xff; jpeg[1] = 0xd8; jpeg[2] = 0xff;
+  assert.equal(checkPhotoImage(`data:image/jpeg;base64,${jpeg.toString("base64")}`).ok, true);
+  assert.equal(checkPhotoImage(TINY_PNG).ok, true, "a PNG photo is fine too");
+  assert.equal(checkPhotoImage(`data:image/jpeg;base64,${Buffer.alloc(2_000, 7).toString("base64")}`).ok, false, "not JPEG bytes");
+  const big = Buffer.alloc(MAX_PHOTO_BYTES + 1, 7);
+  big[0] = 0xff; big[1] = 0xd8; big[2] = 0xff;
+  assert.equal(checkPhotoImage(`data:image/jpeg;base64,${big.toString("base64")}`).ok, false);
+  assert.equal(checkSignatureImage(`data:image/jpeg;base64,${jpeg.toString("base64")}`).ok, false, "a signature is still PNG only");
+});

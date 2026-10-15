@@ -256,7 +256,7 @@ export class AdminController {
           throw new HttpException({ type: "forbidden", message: "Use your own password change to update your credentials" }, HttpStatus.FORBIDDEN);
         }
       }
-      const result = await this.auth.resetPassword({ userId, storeId, resetBy: user.sub, newPassword: body.newPassword });
+      const result = await this.auth.resetPassword({ userId, storeId, resetBy: user.sub, newPassword: body.newPassword, byPlatformAdmin: user.role === "PLATFORM_ADMIN" });
       if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
       return result.value;
     }
@@ -1401,7 +1401,7 @@ export class AdminController {
         throw new HttpException({ type: "forbidden", message: "Platform admin can only reset a store owner's password. The owner resets their own team." }, HttpStatus.FORBIDDEN);
       }
     }
-    const result = await this.auth.resetPassword({ userId, storeId, resetBy: user.sub, newPassword: body.newPassword });
+    const result = await this.auth.resetPassword({ userId, storeId, resetBy: user.sub, newPassword: body.newPassword, byPlatformAdmin: user.role === "PLATFORM_ADMIN" });
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
     return result.value;
   }

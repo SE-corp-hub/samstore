@@ -3,6 +3,7 @@
 // (handoff: "I'll ask our staff"). Live-data-only, honest.
 
 import { prisma } from "../persistence/prisma-repositories.js";
+import { claimSecret } from "../security/secrets.js";
 import { verifyClaimToken, InvalidClaimTokenError } from "../domain/claim-token.js";
 import {
   classify,
@@ -15,7 +16,7 @@ import {
 } from "./engine.js";
 import type { ApiError } from "@sam-store/contracts";
 
-const CLAIM_SECRET = process.env.CLAIM_SIGNING_SECRET ?? "dev-only-in-memory-secret-0123456789";
+const CLAIM_SECRET = claimSecret(); // M11: no committed fallback
 
 export type ChatbotResult<T> = { ok: true; value: T } | { ok: false; error: ApiError };
 

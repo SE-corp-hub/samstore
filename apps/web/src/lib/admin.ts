@@ -123,9 +123,16 @@ export const NAV_GROUPS: NavGroup[] = [
     group: "rice",
     label: "Bigas",
     items: [
+      { id: "benta", label: "Benta", icon: "bi-basket" },
+      { id: "utangrice", label: "Utang", icon: "bi-journal-richtext" },
+      { id: "agentorders", label: "Order ng agent", icon: "bi-person-lines-fill" },
+      { id: "agent", label: "Bagong order (agent)", icon: "bi-phone" },
       { id: "approvals", label: "Para sa iyo", icon: "bi-inbox" },
       { id: "trips", label: "Lipat at Ilabas", icon: "bi-truck" },
       { id: "resack", label: "Resack", icon: "bi-arrow-repeat" },
+      { id: "pasok", label: "Pasok at Susuriin", icon: "bi-box-arrow-in-down" },
+      { id: "bilangin", label: "Bilangin", icon: "bi-clipboard-check" },
+      { id: "ulat", label: "Ulat at Pagsasara", icon: "bi-bar-chart-line" },
       { id: "drafts", label: "Tapusin", icon: "bi-hourglass-split" },
       { id: "kargadors", label: "Kargadors", icon: "bi-person-walking" },
     ],
@@ -173,13 +180,13 @@ export const NAV_GROUPS: NavGroup[] = [
 export const TABS_BY_ROLE: Record<string, string[]> = {
   // M7: OWNER is the tenant (store membership) role; STORE_OWNER is the legacy global
   // role — both are store owners and must see the same surface.
-  STORE_OWNER: ["overview", "pos", "preorders", "orders", "utang", "products", "inventory", "expenses", "purchases", "team", "customers", "vouchers", "crm", "erp", "analytics", "reports", "settings", "storelink", "warehouses", "approvals", "trips", "resack", "drafts", "kargadors"],
-  OWNER: ["overview", "pos", "preorders", "orders", "utang", "products", "inventory", "expenses", "purchases", "team", "customers", "vouchers", "crm", "erp", "analytics", "reports", "settings", "storelink", "warehouses", "approvals", "trips", "resack", "drafts", "kargadors"],
+  STORE_OWNER: ["overview", "pos", "preorders", "orders", "utang", "products", "inventory", "expenses", "purchases", "team", "customers", "vouchers", "crm", "erp", "analytics", "reports", "settings", "storelink", "warehouses", "approvals", "trips", "resack", "drafts", "kargadors", "benta", "pasok", "utangrice", "agentorders", "bilangin", "ulat"],
+  OWNER: ["overview", "pos", "preorders", "orders", "utang", "products", "inventory", "expenses", "purchases", "team", "customers", "vouchers", "crm", "erp", "analytics", "reports", "settings", "storelink", "warehouses", "approvals", "trips", "resack", "drafts", "kargadors", "benta", "pasok", "utangrice", "agentorders", "bilangin", "ulat"],
   // Platform operators manage tenants/access and monitor the platform; daily POS/catalog tabs belong to store roles.
   PLATFORM_ADMIN: ["overview", "stores", "useraccess", "maintenance", "analytics", "reports", "settings"],
-  MANAGER: ["overview", "pos", "preorders", "orders", "utang", "products", "inventory", "expenses", "purchases", "team", "customers", "vouchers", "crm", "erp", "analytics", "reports", "settings", "warehouses", "approvals", "trips", "resack", "drafts", "kargadors"],
-  STAFF: ["overview", "pos", "preorders", "orders", "products", "inventory", "customers", "trips", "resack", "drafts", "kargadors"],
-  SALES_AGENT: ["overview", "orders", "customers", "crm", "reports"],
+  MANAGER: ["overview", "pos", "preorders", "orders", "utang", "products", "inventory", "expenses", "purchases", "team", "customers", "vouchers", "crm", "erp", "analytics", "reports", "settings", "warehouses", "approvals", "trips", "resack", "drafts", "kargadors", "benta", "pasok", "utangrice", "agentorders", "bilangin", "ulat"],
+  STAFF: ["overview", "pos", "preorders", "orders", "products", "inventory", "customers", "trips", "resack", "drafts", "kargadors", "benta", "pasok", "utangrice", "agentorders", "bilangin", "ulat"],
+  SALES_AGENT: ["agent", "overview", "orders", "customers", "crm", "reports"],
   DELIVERY: [],
 };
 
@@ -203,6 +210,7 @@ export function roleCan(role: string, action: "manageTeam" | "manageLink" | "voi
 export function defaultTabFor(role: string): string {
   const tabs = TABS_BY_ROLE[role] ?? [];
   if (tabs.length === 0) return "orders";
+  if (role === "SALES_AGENT") return "agent"; // Rice Ops M7: the agent's three-button screen
   if (tabs.includes("overview")) return "overview";
   return tabs[0] ?? "orders";
 }

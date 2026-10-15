@@ -3,7 +3,8 @@
 // resolveTenant; the store role it returns is the actor's role; location checks live
 // in the service (staff act only at their home location).
 
-import { Body, Controller, Get, Headers, HttpException, HttpStatus, Param, Post, Query, Req, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Headers, HttpException, HttpStatus, Param, Post, Query, Req, UseGuards, UseInterceptors } from "@nestjs/common";
+import { IdempotencyInterceptor } from "../security/idempotency.interceptor.js";
 import type { ApiError } from "@sam-store/contracts";
 import { JwtAuthGuard, type AuthPrincipal } from "../auth/auth.guard.js";
 import { requireUser, resolveTenant, TENANT_ROLES } from "../auth/tenant-context.js";
@@ -33,6 +34,7 @@ const VIEWS: TripView[] = ["ilabas", "tanggapin", "naihatid", "pabalik", "all"];
 
 @Controller("admin")
 @UseGuards(JwtAuthGuard)
+@UseInterceptors(IdempotencyInterceptor)
 export class TransferFlowController {
   private readonly flow = new TransferFlowService();
 

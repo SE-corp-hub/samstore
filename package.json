@@ -38,6 +38,7 @@
     "db:doctor": "tsx scripts/db-doctor.ts",
     "stock:trace": "tsx scripts/stock-trace.ts",
     "ledger:rebase": "tsx scripts/ledger-rebase.ts",
+    "rice:import": "tsx scripts/rice-import.ts",
     "verify": "node scripts/verify.mjs",
     "fixtures:cleanup": "tsx scripts/cleanup-test-fixtures.ts"
   },

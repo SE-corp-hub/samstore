@@ -1,7 +1,8 @@
 // Rice Ops M4 — Resack routes for the store phones. Tenant-scoped via resolveTenant;
 // location checks and signatures live in the service.
 
-import { Body, Controller, Get, Headers, HttpException, HttpStatus, Param, Post, Query, Req, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Headers, HttpException, HttpStatus, Param, Post, Query, Req, UseGuards, UseInterceptors } from "@nestjs/common";
+import { IdempotencyInterceptor } from "../security/idempotency.interceptor.js";
 import type { ApiError } from "@sam-store/contracts";
 import { JwtAuthGuard, type AuthPrincipal } from "../auth/auth.guard.js";
 import { requireUser, resolveTenant, TENANT_ROLES } from "../auth/tenant-context.js";
@@ -40,6 +41,7 @@ function outputsFrom(v: unknown): OutputInput[] {
 
 @Controller("admin")
 @UseGuards(JwtAuthGuard)
+@UseInterceptors(IdempotencyInterceptor)
 export class ResackController {
   private readonly resacks = new ResackService();
 

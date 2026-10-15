@@ -12,6 +12,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { API_URL } from "../../config";
 import { adminHeaders } from "../../lib/admin";
 import { toast } from "../../lib/toast";
+import { sendStep } from "../../lib/offlineQueue";
 import SignCapture, { type KargadorOption, type SignatureOut } from "./SignCapture";
 
 interface Product { id: string; name: string; stockBaseUnit: string | null; stockBaseQuantity: number | null; stockConversionFamily: string | null; isActive?: boolean }
@@ -118,10 +119,11 @@ export default function ResackPanel() {
     else if (mode === "start") { path = "/admin/resacks/start"; body = { locationId, inputProductId: inputId, inputQty: inQty, kargadorId: k, signatures }; }
     else if (mode === "open") { path = "/admin/resacks/open-sack"; body = { locationId, sackProductId: inputId, sacks: inQty, looseProductId: outs[0]?.productId, looseGrams: outUnits[0], kargadorId: k, signatures }; }
     else body = { locationId, inputProductId: inputId, inputQty: inQty, outputs, kargadorId: k, signatures };
-    const res = await fetch(`${API_URL}${path}`, { method: "POST", headers: { "Content-Type": "application/json", ...adminHeaders() }, body: JSON.stringify(body) });
-    const data = (await res.json().catch(() => null)) as ApiBody | null;
+    const r = await sendStep(path, body, `Resack ${inProduct?.name ?? ""}`.trim());
     setBusy(false);
-    if (!res.ok) { setSigning(false); setError(errText(data, "Hindi natuloy")); return; }
+    if (r.status === "queued") { toast("Walang signal — naka-save sa phone, ipapadala pagbalik ng signal"); reset(); return; }
+    const data = r.data as ApiBody | null;
+    if (!r.ok) { setSigning(false); setError(errText(data, "Hindi natuloy")); return; }
     toast(mode === "start" ? `Nasimulan: ${String(data?.docNumber ?? "")}` : data?.needsApproval ? "Tapos — lampas 1% ang kulang, ipinaalam sa may-ari" : "Tapos ang resack");
     reset();
     await loadJobs();

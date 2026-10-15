@@ -1,4 +1,5 @@
 import { Module } from "@nestjs/common";
+import { claimSecret, jwtSecret } from "./security/secrets.js";
 import { CHECKOUT_SERVICE, CheckoutService } from "./checkout/checkout.service.js";
 import { CheckoutController } from "./checkout/checkout.controller.js";
 import { PublicStoreController } from "./public/public-store.controller.js";
@@ -12,6 +13,11 @@ import { AdminController } from "./admin/admin.controller.js";
 import { PeopleController } from "./people/people.controller.js";
 import { TransferFlowController } from "./transfers/transfer-flow.controller.js";
 import { ResackController } from "./resack/resack.controller.js";
+import { BentaController } from "./selling/benta.controller.js";
+import { UtangController } from "./utang/utang.controller.js";
+import { AgentOrderController } from "./agent/agent-order.controller.js";
+import { CountController } from "./counts/count.controller.js";
+import { RiceReportsController } from "./reports/rice-reports.controller.js";
 import { JwtAuthGuard } from "./auth/auth.guard.js";
 import type { AuthConfig } from "./auth/auth.domain.js";
 import { MessengerService, SuppressedMessengerProvider } from "./messenger/messenger.adapter.js";
@@ -65,10 +71,10 @@ import {
   PrismaOrderSequenceRepository,
 } from "./persistence/prisma-repositories.js";
 
-const CLAIM_SECRET = process.env.CLAIM_SIGNING_SECRET ?? "dev-only-in-memory-secret-0123456789";
+const CLAIM_SECRET = claimSecret(); // M11: no committed fallback (see security/secrets.ts)
 
 @Module({
-    controllers: [CheckoutController, PublicStoreController, CartController, AuthController, AdminController, PeopleController, TransferFlowController, ResackController, OrderLookupController, CustomerAuthController, PosController, PaymentsController, PaymentsWebhookController, DeliveryZonesAdminController, DeliveryBookingsAdminController, MessengerConnectionAdminController, ChatbotAdminController, ChatAgentAdminController, CrmAdminController, ErpAdminController, BirAdminController, SecurityIncidentAdminController, CreditController, ExpensesController, PurchasesController, InventoryController, ReportsController, DeliveryController, HealthController, RegisterController, RolePermissionsController, AddressController],
+    controllers: [CheckoutController, PublicStoreController, CartController, AuthController, AdminController, PeopleController, TransferFlowController, ResackController, BentaController, UtangController, AgentOrderController, CountController, RiceReportsController, OrderLookupController, CustomerAuthController, PosController, PaymentsController, PaymentsWebhookController, DeliveryZonesAdminController, DeliveryBookingsAdminController, MessengerConnectionAdminController, ChatbotAdminController, ChatAgentAdminController, CrmAdminController, ErpAdminController, BirAdminController, SecurityIncidentAdminController, CreditController, ExpensesController, PurchasesController, InventoryController, ReportsController, DeliveryController, HealthController, RegisterController, RolePermissionsController, AddressController],
   providers: [
     {
       provide: DELIVERY_SERVICE,
@@ -124,7 +130,7 @@ const CLAIM_SECRET = process.env.CLAIM_SIGNING_SECRET ?? "dev-only-in-memory-sec
       useFactory: () =>
         new CustomerAuthService(
           {
-            jwtSecret: process.env.JWT_SECRET ?? "dev-jwt-secret-change-me-0123456789",
+            jwtSecret: jwtSecret(),
             jwtExpiresIn: "30d",
           },
           new AddressService(),
@@ -149,14 +155,14 @@ const CLAIM_SECRET = process.env.CLAIM_SIGNING_SECRET ?? "dev-only-in-memory-sec
         new AuthService(
           new PrismaAuthRepository(),
           {
-            jwtSecret: process.env.JWT_SECRET ?? "dev-jwt-secret-change-me-0123456789",
+            jwtSecret: jwtSecret(),
             jwtExpiresIn: "7d",
           } as AuthConfig,
         ),
     },
     {
       provide: "AUTH_CONFIG",
-      useValue: { jwtSecret: process.env.JWT_SECRET ?? "dev-jwt-secret-change-me-0123456789" },
+      useValue: { jwtSecret: jwtSecret() },
     },
     JwtAuthGuard,
     PublicStoreService,
@@ -201,7 +207,7 @@ const CLAIM_SECRET = process.env.CLAIM_SIGNING_SECRET ?? "dev-only-in-memory-sec
             // Resolve a customer JWT to a customer id (role must be CUSTOMER).
             try {
               const decoded = verifyToken(customerToken, {
-                jwtSecret: process.env.JWT_SECRET ?? "dev-jwt-secret-change-me-0123456789",
+                jwtSecret: jwtSecret(),
                 jwtExpiresIn: "30d",
               });
               return decoded.role === "CUSTOMER" ? decoded.sub : null;

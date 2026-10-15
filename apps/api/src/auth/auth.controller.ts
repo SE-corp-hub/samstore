@@ -8,6 +8,7 @@ import {
 } from "@nestjs/common";
 import type { ApiError } from "@sam-store/contracts";
 import { AuthService, AUTH_SERVICE } from "./auth.service.js";
+import { assertOwnerSignupOpen } from "./signup-gate.js";
 import { assertDto, CHANGE_PASSWORD_DTO, LOGIN_DTO, REGISTER_DTO } from "../security/validate.js";
 
 function statusFor(error: ApiError): HttpStatus {
@@ -43,6 +44,9 @@ export class AuthController {
   ) {
     // Module 2 fix: shape-validate the untrusted body (unknown keys rejected — a
     // client-supplied storeId/role is a 422, not a silently ignored extra field).
+    // Rice Ops M11: public owner sign-up is closed — stores and owners are created by
+    // the platform admin, staff by their owner. Reopen only with ALLOW_OWNER_SIGNUP=true.
+    assertOwnerSignupOpen();
     const dto = assertDto<{ email?: string; phone?: string; password: string; passwordConfirm: string; name?: string }>(body, REGISTER_DTO);
     const r = await this.auth.register(dto);
     if (!r.ok) throw new HttpException(r.error, statusFor(r.error));

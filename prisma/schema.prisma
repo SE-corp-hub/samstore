@@ -131,6 +131,8 @@ model User {
   pinHash            String?
   pinFailedCount     Int       @default(0) // wrong PINs since the last success; 5 → locked
   pinLockedUntil     DateTime? // PIN login refused until this time (15 min lock)
+  loginFailedCount   Int       @default(0) // Rice Ops M11: wrong passwords since the last success; 5 → locked
+  loginLockedUntil   DateTime? // Rice Ops M11: password login refused until this time (15 min lock)
   tokenVersion       Int       @default(0) // bump to sign the user out everywhere (PIN reset, removal)
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
@@ -225,6 +227,11 @@ model Store {
   kargadors              Kargador[]
   stockReturns           StockReturn[]
   resackJobs             ResackJob[]
+  stockIns               StockIn[]
+  smsMessages            SmsMessage[]
+  stockCounts            StockCount[]
+  stockWriteOffs         StockWriteOff[]
+  dailyCloses            DailyClose[]
   signatures             Signature[]
   approvalRequests       ApprovalRequest[]
   flowDrafts             FlowDraft[]
@@ -259,6 +266,12 @@ model StoreSettings {
   deliveryFeeMinor          Int            @default(0)
   creditLimitMinor          Int            @default(0) // store-wide utang limit (0 = credit disabled)
   creditTermDays            Int            @default(30) // V1: default dueAt offset for credit purchases
+  // Rice Ops M6: utang texts and reminders (the owner can switch them off).
+  utangSmsEnabled           Boolean        @default(true)
+  utangMonthlyReminder      Boolean        @default(true)
+  utangOverdueReminder      Boolean        @default(true)
+  utangOverdueDays          Int            @default(30)
+  smsSenderName             String?
   receiptHeader             String? // P11: printed at top of receipts
   receiptFooter             String? // P11: printed at bottom
   showVatLabel              Boolean        @default(true) // P11: display-only VAT note (decision #2)
@@ -352,6 +365,9 @@ model Product {
   stockBaseQuantity     Int? // content represented by one product stock unit in stockBaseUnit
   stockConversionFamily String? // only products in the same family may be converted into one another
   variety               String? // Rice Ops M4: e.g. "Sinandomeng"; empty = taken from the name ("Sinandomeng 25 kg")
+  reviewStatus          ProductReviewStatus @default(ACTIVE) // Rice Ops M5: Bagong item stays FOR_REVIEW until the owner confirms or merges it
+  createdById           String? // Rice Ops M5: who added it (manual items)
+  mergedIntoId          String? // Rice Ops M5: the product a manual item was merged into
   priceMinor            Int // integer minor units; NEVER float
   taxExempt             Boolean   @default(false) // M4: VAT-exempt line (e.g. basic goods / zero-rated)
   costMinor             Int       @default(0) // latest purchase cost (P5) — feeds COGS/profit (P10)
@@ -378,6 +394,9 @@ model Product {
   stockReturns   StockReturn[]
   resacksIn      ResackJob[]
   resackOutputs  ResackOutput[]
+  stockInLines   StockInLine[]
+  countLines     StockCountLine[]
+  writeOffs      StockWriteOff[]
   stockLevelId   String?
 
   @@unique([storeId, sku])
@@ -790,6 +809,13 @@ model Warehouse {
   signatures     Signature[]
   approvals      ApprovalRequest[]
   drafts         FlowDraft[]
+  ordersSold     Order[]           @relation("OrderSellingLocation")
+  registers      Register[]
+  stockIns       StockIn[]
+  payments       Payment[]
+  stockCounts    StockCount[]
+  writeOffs      StockWriteOff[]
+  dailyCloses    DailyClose[]
 
   @@unique([storeId, name])
   @@unique([storeId, code])
@@ -1018,6 +1044,8 @@ model Payment {
   reviewedBy        String?
   registerSessionId String? // N1: cash drawer shift this tender belongs to (null = off-counter)
   registerSession   RegisterSession? @relation(fields: [registerSessionId], references: [id])
+  locationId        String? // Rice Ops M6: the location that took the money (Bayad sa utang at any store)
+  location          Warehouse?       @relation(fields: [locationId], references: [id], onDelete: SetNull)
 
   @@index([storeId, receivedAt])
   @@index([orderId])
@@ -1104,6 +1132,8 @@ model Register {
   store     Store             @relation(fields: [storeId], references: [id])
   name      String            @default("Main counter")
   status    RegisterStatus    @default(ACTIVE)
+  locationId String? // Rice Ops M5: each location keeps its own drawer
+  location   Warehouse?       @relation(fields: [locationId], references: [id], onDelete: SetNull)
   createdAt DateTime          @default(now())
   sessions  RegisterSession[]
 
@@ -1299,7 +1329,7 @@ model VoucherRedemption {
 
 model Order {
   id                   String               @id @default(cuid())
-  orderNumber          String               @unique // store-scoped human-readable, e.g. SAMSTO-000001
+  orderNumber          String               // store-scoped human-readable, e.g. SAMSTO-000001 (unique per store — M11)
   storeId              String
   store                Store                @relation(fields: [storeId], references: [id])
   status               OrderStatus          @default(RECEIVED)
@@ -1351,6 +1381,17 @@ model Order {
   statutoryId          String?
   statutoryName        String?
   acknowledgedAt       DateTime?
+  // Rice Ops M5: the location that sold it; a paper slip keeps its real time and number.
+  sellingLocationId    String?
+  sellingLocation      Warehouse?           @relation("OrderSellingLocation", fields: [sellingLocationId], references: [id], onDelete: Restrict)
+  occurredAt           DateTime? // when it really happened (paper slip); null = createdAt
+  paperSlipNo          String?
+  encodedLater         Boolean              @default(false)
+  // Rice Ops M7: agent orders — who took it, who approved it at the store (or why it was declined).
+  agentUserId          String?
+  approvedById         String?
+  approvedAt           DateTime?
+  declineReason        String?
   createdAt            DateTime             @default(now())
   updatedAt            DateTime             @updatedAt
 
@@ -1372,7 +1413,12 @@ model Order {
   deliveryBookings       DeliveryBooking[]
 
   @@unique([storeId, id]) // M3: composite target for tenant-consistent children
+  @@unique([storeId, paperSlipNo]) // Rice Ops M5: a paper slip is encoded once
+  @@unique([storeId, orderNumber]) // Rice Ops M11: two stores may pick the same prefix
   @@index([storeId, status, createdAt])
+  @@index([storeId, sellingLocationId, createdAt])
+  @@index([storeId, agentUserId, createdAt])
+  @@index([storeId, source, status])
 }
 
 model OrderItem {
@@ -1399,6 +1445,12 @@ model OrderItem {
   priceOverriddenById String? // actor id (mirrors OrderStatusHistory.actorId)
   priceOverriddenAt   DateTime?
   catalogUnitPriceMinor Int? // the catalog/variant price the override deviated from
+  // Rice Ops M5: loose rice. quantity = grams for a loose line; unitPriceMinor = per kilo.
+  soldBy             String? // PIECE | KILO | PESO (null = legacy line)
+  grams              Int?
+  enteredAmountMinor Int? // by peso: what the customer asked for (= the line total)
+  sourceLocationId   String? // served from another location (Kunin sa ibang tindahan)
+  unitCostMinor      Int? // Rice Ops M9: cost frozen with the sale (per piece, or per kilo for loose rice)
 }
 
 model OrderStatusHistory {
@@ -1466,6 +1518,7 @@ model StoreCustomer {
   orders             Order[]
   loyalty            LoyaltyEntry[]
   credit             CreditEntry[]
+  smsMessages        SmsMessage[]
   addresses          StoreCustomerAddress[]
   campaignRecipients CampaignRecipient[]
 
@@ -1487,6 +1540,7 @@ model CreditEntry {
   dueAt           DateTime? // V1: startAt + store creditTermDays (or manual)
   note            String?
   createdBy       String?
+  paymentId       String? // Rice Ops M6: the Payment row behind a Bayad sa utang
   createdAt       DateTime      @default(now())
 
   @@index([storeId, storeCustomerId, createdAt])
@@ -1629,6 +1683,7 @@ model StockMovement {
   @@index([storeId, conversionId])
   @@index([storeId, productId, createdAt])
   @@index([storeId, type, createdAt])
+  @@index([storeId, warehouseId, createdAt]) // Rice Ops M9: reports by location and time
 }
 
 // One atomic repack/transform operation (source decrement + output increment).
@@ -1795,6 +1850,7 @@ model Signature {
 
   @@index([storeId, documentType, documentId])
   @@index([storeId, kargadorId, createdAt])
+  @@index([storeId, createdAt])
 }
 
 enum ApprovalStatus {
@@ -1913,4 +1969,216 @@ model ResackOutput {
   valueMinor Int // the input cost carried into this output
 
   @@index([storeId, jobId])
+}
+
+// ─────────────── Rice Ops M5: selling ───────────────
+
+enum ProductReviewStatus {
+  ACTIVE
+  FOR_REVIEW // Bagong item: sells now, the owner reviews it later
+  MERGED // merged into another product (kept for history)
+}
+
+// Manual na pasok: stock in without a purchase order, signed by the receiver.
+model StockIn {
+  id           String        @id @default(cuid())
+  storeId      String
+  store        Store         @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  docNumber    String // IN-000001
+  locationId   String
+  location     Warehouse     @relation(fields: [locationId], references: [id], onDelete: Restrict)
+  supplierName String?
+  note         String?
+  createdById  String
+  createdAt    DateTime      @default(now())
+  lines        StockInLine[]
+
+  @@unique([storeId, docNumber])
+  @@index([storeId, locationId, createdAt])
+}
+
+model StockInLine {
+  id            String  @id @default(cuid())
+  storeId       String
+  stockInId     String
+  stockIn       StockIn @relation(fields: [stockInId], references: [id], onDelete: Cascade)
+  productId     String
+  product       Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+  quantity      Int // sacks, or grams for loose rice
+  unitCostMinor Int?
+
+  @@index([storeId, stockInId])
+}
+
+// ─────────────── Rice Ops M6: utang texts ───────────────
+
+enum SmsStatus {
+  QUEUED
+  SENT
+  FAILED // shows "Hindi naipadala" with Ipadala ulit
+  SKIPPED // no valid mobile number / texts switched off
+}
+
+// Every utang text: what was sent, to whom, and whether it went. A failed text never
+// blocks the sale or payment behind it.
+model SmsMessage {
+  id                String         @id @default(cuid())
+  storeId           String
+  store             Store          @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  storeCustomerId   String?
+  storeCustomer     StoreCustomer? @relation(fields: [storeCustomerId], references: [id], onDelete: SetNull)
+  phone             String? // E.164
+  template          String // utang_sale | utang_payment | utang_monthly | utang_overdue
+  text              String
+  status            SmsStatus      @default(QUEUED)
+  provider          String? // mock | semaphore
+  providerMessageId String?
+  attempts          Int            @default(0)
+  lastError         String?
+  documentType      String?
+  documentId        String?
+  periodKey         String? // reminders: one per customer per period
+  createdById       String?
+  createdAt         DateTime       @default(now())
+  sentAt            DateTime?
+
+  @@unique([storeId, storeCustomerId, template, periodKey])
+  @@index([storeId, createdAt])
+  @@index([storeId, storeCustomerId, createdAt])
+  @@index([storeId, status])
+}
+
+// ─────────────── Rice Ops M8: counts and write-offs ───────────────
+
+enum CountKind {
+  FULL // the owner's count of every item at a location
+  PARTIAL // the owner's count of chosen items
+  QUICK // the zero check: "May natira pa ba?" — posts at once
+  CLOSING // the top-5 quick count at closing — posts at once
+}
+
+enum CountStatus {
+  OPEN
+  SUBMITTED // waiting for the owner (FULL / PARTIAL)
+  APPROVED // adjustments posted (Bilang CNT-…)
+  CANCELLED
+}
+
+model StockCount {
+  id               String           @id @default(cuid())
+  storeId          String
+  store            Store            @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  docNumber        String // CNT-000045
+  locationId       String
+  location         Warehouse        @relation(fields: [locationId], references: [id], onDelete: Restrict)
+  kind             CountKind
+  status           CountStatus      @default(OPEN)
+  blind            Boolean          @default(true)
+  note             String?
+  startedById      String
+  startedAt        DateTime         @default(now())
+  submittedById    String?
+  submittedAt      DateTime?
+  decidedById      String?
+  decidedAt        DateTime?
+  approvalId       String?
+  kulangValueMinor Int              @default(0)
+  sobraValueMinor  Int              @default(0)
+  lines            StockCountLine[]
+
+  @@unique([storeId, docNumber])
+  @@index([storeId, locationId, status])
+  @@index([storeId, startedAt])
+}
+
+model StockCountLine {
+  id                 String     @id @default(cuid())
+  storeId            String
+  countId            String
+  count              StockCount @relation(fields: [countId], references: [id], onDelete: Cascade)
+  productId          String
+  product            Product    @relation(fields: [productId], references: [id], onDelete: Restrict)
+  expectedQty        Int? // the system's number when this line was counted (hidden on a blind count)
+  countedQty         Int?
+  countedAt          DateTime?
+  countedById        String?
+  varianceQty        Int?
+  varianceValueMinor Int?
+  postedQty          Int? // the COUNT_ADJUST posted
+
+  @@unique([countId, productId])
+  @@index([storeId, productId, countedAt])
+}
+
+enum WriteOffReason {
+  TAPON // spilled
+  BASA // wet
+  BUKBOK // weevils
+  SAMPLE
+  BIGAY // giveaway
+  IBA // other (reason required)
+}
+
+model StockWriteOff {
+  id          String         @id @default(cuid())
+  storeId     String
+  store       Store          @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  docNumber   String // WO-000001
+  locationId  String
+  location    Warehouse      @relation(fields: [locationId], references: [id], onDelete: Restrict)
+  productId   String
+  product     Product        @relation(fields: [productId], references: [id], onDelete: Restrict)
+  quantity    Int
+  reason      WriteOffReason
+  note        String?
+  valueMinor  Int
+  lossBp      Int
+  approvalId  String?
+  createdById String
+  createdAt   DateTime       @default(now())
+
+  @@unique([storeId, docNumber])
+  @@index([storeId, locationId, createdAt])
+}
+
+// ─────────────── Rice Ops M9: Pagsasara (closing) ───────────────
+
+// One per location per business day: the frozen totals the owner reads that evening,
+// cash expected vs counted, and the closing signature. The day's report locks to it.
+model DailyClose {
+  id                String    @id @default(cuid())
+  storeId           String
+  store             Store     @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  locationId        String
+  location          Warehouse @relation(fields: [locationId], references: [id], onDelete: Restrict)
+  businessDate      String // YYYY-MM-DD (Manila)
+  totals            Json
+  cashExpectedMinor Int
+  cashCountedMinor  Int
+  cashVarianceMinor Int
+  closingCountId    String?
+  note              String?
+  closedById        String
+  closedAt          DateTime  @default(now())
+
+  @@unique([storeId, locationId, businessDate])
+  @@index([storeId, businessDate])
+}
+
+// ─────────────── Rice Ops M10: weak signal ───────────────
+
+// The first answer to a signed step, by the phone's Idempotency-Key — a step queued
+// offline and sent twice (or sent after it already reached the server) happens once.
+model IdempotencyRecord {
+  id             String    @id @default(cuid())
+  keyHash        String    @unique // sha256(user + store + route + key); the raw key is never stored
+  userId         String
+  route          String
+  status         String    @default("IN_PROGRESS") // IN_PROGRESS | DONE
+  responseStatus Int?
+  responseBody   Json?
+  createdAt      DateTime  @default(now())
+  completedAt    DateTime?
+
+  @@index([createdAt])
 }

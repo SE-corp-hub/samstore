@@ -9,6 +9,7 @@
 
 import { useState } from "react";
 import SignaturePad from "./SignaturePad";
+import { useLang } from "../../lib/lang";
 
 export interface SignatureOut {
   signerKind: "STAFF" | "KARGADOR" | "CUSTOMER";
@@ -44,6 +45,7 @@ export default function SignCapture({
   onDone: (signatures: SignatureOut[]) => void;
   onCancel: () => void;
 }) {
+  const { t, lang } = useLang();
   const signers: Signer[] = ["STAFF", ...(needKargador ? (["KARGADOR"] as Signer[]) : []), ...(customer ? (["CUSTOMER"] as Signer[]) : [])];
   const [step, setStep] = useState(0); // 0 = read-back, then one screen per signer
   const [ink, setInk] = useState<string | null>(null);
@@ -78,11 +80,11 @@ export default function SignCapture({
   return (
     <div className="card border-success mb-3" role="dialog" aria-label="Pirmahan">
       <div className="card-body" style={{ fontSize: 18 }}>
-        <div className="small text-muted mb-2">Hakbang {step + 1} sa {total}</div>
+        <div className="small text-muted mb-2">{t("step.of", { n: step + 1, total })}</div>
         {step === 0 ? (
           <>
             <p className="fw-semibold mb-3" style={{ fontSize: 20 }}>{sentence}</p>
-            <p className="mb-3">Tama ba? Pipirma ang {signers.map((s) => (s === "STAFF" ? "staff" : s === "KARGADOR" ? "kargador" : "customer")).join(", ")} sa phone na ito.</p>
+            <p className="mb-3">{t("sign.readBack", { who: signers.map((s) => (s === "STAFF" ? "staff" : s === "KARGADOR" ? (lang === "en" ? "porter" : "kargador") : "customer")).join(", ") })}</p>
           </>
         ) : (
           <>
@@ -101,11 +103,11 @@ export default function SignCapture({
                 <input id="sc-customer" className="form-control form-control-lg" value={customerName} onChange={(e) => setCustomerName(e.target.value)} />
               </div>
             )}
-            <h2 className="h5">Pirma ni {who}</h2>
+            <h2 className="h5">{t("sign.of", { who })}</h2>
             <SignaturePad key={step} onSignature={setInk} />
             {current === "CUSTOMER" && customer?.optional && (
               <button type="button" className="btn btn-link px-0 mt-2" disabled={busy} onClick={() => advance(done)}>
-                Walang pirma ng customer (nasa papel)
+                {t("sign.noCustomer")}
               </button>
             )}
           </>
@@ -113,13 +115,13 @@ export default function SignCapture({
         <div className="d-flex justify-content-between mt-3">
           <button type="button" className="btn btn-outline-secondary btn-lg" disabled={busy}
             onClick={() => { if (step === 0) onCancel(); else { setStep(step - 1); setDone(done.slice(0, Math.max(0, step - 2))); setInk(null); } }}>
-            Bumalik
+            {t("btn.back")}
           </button>
           {step === 0 ? (
-            <button type="button" className="btn btn-success btn-lg" onClick={() => setStep(1)}>Oo, pipirma</button>
+            <button type="button" className="btn btn-success btn-lg" onClick={() => setStep(1)}>{t("btn.yesSign")}</button>
           ) : (
             <button type="button" className="btn btn-success btn-lg" disabled={!canFinish} onClick={next}>
-              {busy ? "Sandali…" : "Tapos"}
+              {busy ? t("btn.wait") : t("btn.done")}
             </button>
           )}
         </div>

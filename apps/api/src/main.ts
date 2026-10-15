@@ -15,6 +15,7 @@ import { NestFactory } from "@nestjs/core";
 import { AppModule } from "./app.module.js";
 import { rateLimitOk, clientKey } from "./security/rate-limit.js";
 import { InsufficientStockFilter } from "./security/domain-exception.filter.js";
+import { claimSecret, corsOriginCheck, corsOrigins, jwtSecret, missingSecrets, SecretConfigError } from "./security/secrets.js";
 import { logRequest, recordRequest, sanitizeRequestId } from "./security/observability.js";
 
 const PORT = Number(process.env.PORT ?? 4000);
@@ -25,21 +26,21 @@ function fail(msg: string): never {
   process.exit(1);
 }
 
-// ── Production config validation ─────────────────────────────────────────────
+// ── Config validation (Rice Ops M11: no committed secret fallbacks) ──────────
+let allowedOrigins: string[] = [];
+try {
+  jwtSecret();
+  claimSecret();
+  allowedOrigins = corsOrigins();
+} catch (e) {
+  if (e instanceof SecretConfigError) fail(e.message);
+  throw e;
+}
 if (NODE_ENV === "production") {
-  const jwtSecret = process.env.JWT_SECRET ?? "";
-  const claimSecret = process.env.CLAIM_SIGNING_SECRET ?? "";
-  if (jwtSecret.length < 32 || jwtSecret.includes("dev-")) fail("JWT_SECRET must be a strong secret (>= 32 chars, no dev placeholder) in production");
-  if (claimSecret.length < 32 || claimSecret.includes("dev-")) fail("CLAIM_SIGNING_SECRET must be a strong secret (>= 32 chars, no dev placeholder) in production");
   if (!process.env.DATABASE_URL) fail("DATABASE_URL is required in production");
 } else {
-  if (!process.env.JWT_SECRET) {
-    console.warn(
-      "[sam-store] WARNING: JWT_SECRET is not set. Every token is being signed with the placeholder committed in this repository, so anyone with the source can forge an OWNER token. Put JWT_SECRET in .env before this leaves your machine.",
-    );
-  }
-  if (!process.env.CLAIM_SIGNING_SECRET) {
-    console.warn("[sam-store] WARNING: CLAIM_SIGNING_SECRET is not set — claim links use a dev placeholder.");
+  for (const name of missingSecrets()) {
+    console.warn(`[sam-store] WARNING: ${name} is not set — using a random one for this run only (logins and claim links reset when the API restarts). Put ${name} in .env.`);
   }
   console.log("[sam-store] DEVELOPMENT MODE");
 }
@@ -56,7 +57,10 @@ async function bootstrap() {
     const { OutboxWorker } = await import("./notifications/outbox.service.js");
     const outbox = new OutboxWorker();
     outbox.start(5_000);
-    app.getHttpAdapter().getInstance().on?.("close", () => outbox.stop());
+    // Rice Ops M6: utang reminder texts, hourly (idempotent per customer per period).
+    const { startUtangReminders } = await import("./utang/reminders.js");
+    const stopReminders = startUtangReminders();
+    app.getHttpAdapter().getInstance().on?.("close", () => { outbox.stop(); stopReminders(); });
   }
 
   app.use(express.json({ limit: "5mb" }));
@@ -161,8 +165,9 @@ async function bootstrap() {
     next();
   });
 
+  // Rice Ops M11: only the web app's own address may call the API from a browser.
   app.enableCors({
-    origin: true,
+    origin: corsOriginCheck(allowedOrigins),
     credentials: false,
   });
   await app.listen(PORT);

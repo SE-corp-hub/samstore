@@ -13,6 +13,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { API_URL } from "../../config";
 import { adminHeaders } from "../../lib/admin";
 import { toast } from "../../lib/toast";
+import { sendStep } from "../../lib/offlineQueue";
 import SignCapture, { type KargadorOption, type SignatureOut } from "./SignCapture";
 
 type View = "ilabas" | "tanggapin" | "naihatid" | "pabalik" | "all";
@@ -44,9 +45,11 @@ const STATUS: Record<string, [string, string]> = {
 };
 const errText = (d: ApiBody | null, fallback: string) => d?.errors?.join(", ") ?? d?.message ?? fallback;
 
-async function post(path: string, body: unknown) {
-  const res = await fetch(`${API_URL}${path}`, { method: "POST", headers: { "Content-Type": "application/json", ...adminHeaders() }, body: JSON.stringify(body) });
-  return { ok: res.ok, data: (await res.json().catch(() => null)) as (ApiBody & Record<string, unknown>) | null };
+/** Rice Ops M10: a signed step goes through the phone's queue — with no signal it waits and is sent later (once). */
+async function post(path: string, body: unknown, label = "Hakbang") {
+  const r = await sendStep(path, body, label);
+  if (r.status === "queued") return { ok: true, queued: true, data: null as (ApiBody & Record<string, unknown>) | null };
+  return { ok: r.ok, queued: false, data: r.data as (ApiBody & Record<string, unknown>) | null };
 }
 
 type Step = { trip: Trip; action: "release" | "receive" | "deliver" | "return"; qty: string; note: string; kargadorId: string; signing: boolean };
@@ -126,9 +129,10 @@ export default function TripsPanel() {
     setError(null);
     const kargadorId = signatures.find((x) => x.signerKind === "KARGADOR")?.kargadorId ?? s.kargadorId;
     const body = { quantity: Number(s.qty), signatures, ...(s.action === "release" ? { kargadorId } : {}), ...(s.action === "deliver" ? { note: s.note } : {}) };
-    const { ok, data } = await post(`/admin/trips/${s.trip.id}/${s.action}`, body);
+    const { ok, data, queued } = await post(`/admin/trips/${s.trip.id}/${s.action}`, body, `${s.trip.docNumber ?? "Trip"} ${s.action}`);
     setBusy(false);
     setStep(null);
+    if (queued) { toast("Walang signal — naka-save sa phone, ipapadala pagbalik ng signal"); return; }
     if (!ok) { setError(errText(data, "Hindi natuloy")); return; }
     const short = Number((data as Record<string, unknown>)?.shortQty ?? 0);
     const pending = Number((data as Record<string, unknown>)?.pendingReturn ?? 0);

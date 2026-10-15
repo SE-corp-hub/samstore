@@ -10,6 +10,7 @@ import type { ApiError } from "@sam-store/contracts";
 import { bustMemberships } from "../auth/membership-cache.js";
 import { bustTokenVersion } from "../auth/token-version.js";
 import { toE164 } from "../domain/phone.js";
+import { accountBelongsToStore, alignGlobalRole } from "../auth/account-scope.js";
 
 export type TeamResult<T> = { ok: true; value: T } | { ok: false; error: ApiError };
 
@@ -88,8 +89,9 @@ export class TeamService {
       create: { userId: user.id, storeId, role: role as StoreRole, status: "ACTIVE", homeLocationId: homeLocationId || null },
     });
 
-    // Also align the user's global role so JWT claims match the store role.
-    await prisma.user.update({ where: { id: user.id }, data: { role } });
+    // Align the account-wide role only when this store is the account's only store
+    // (M11: inviting someone from another store must not rewrite their account).
+    await alignGlobalRole(prisma, user.id, storeId, role);
 
     await bustMemberships();
     return { ok: true, value: { userId: user.id, role: membership.role, ...(tempPassword ? { tempPassword } : {}) } };
@@ -108,7 +110,7 @@ export class TeamService {
       where: { userId_storeId: { userId, storeId } },
       data: { role: role as StoreRole },
     });
-    await prisma.user.update({ where: { id: userId }, data: { role } });
+    await alignGlobalRole(prisma, userId, storeId, role); // M11: single-store accounts only
     await bustMemberships();
     return { ok: true, value: { userId, role: updated.role } };
   }
@@ -119,9 +121,13 @@ export class TeamService {
     if (!membership) return { ok: false, error: { type: "not_found", message: "Member not part of this store" } };
     if (membership.role === "OWNER") return { ok: false, error: { type: "conflict", message: "Cannot deactivate the owner" } };
     await prisma.userStore.update({ where: { userId_storeId: { userId, storeId } }, data: { status: "DEACTIVATED" } });
-    // Rice Ops M2: removing someone signs them out on every phone at once.
-    await prisma.user.update({ where: { id: userId }, data: { tokenVersion: { increment: 1 } } });
-    await bustTokenVersion(userId);
+    // Rice Ops M2: removing someone signs them out on every phone at once — M11: unless
+    // another store still uses the account (this store's access is already gone with
+    // the membership; signing them out of the other store is not this store's call).
+    if (await accountBelongsToStore(prisma, userId, storeId)) {
+      await prisma.user.update({ where: { id: userId }, data: { tokenVersion: { increment: 1 } } });
+      await bustTokenVersion(userId);
+    }
     await bustMemberships();
     return { ok: true, value: { userId } };
   }

@@ -1,0 +1,311 @@
+// Rice Ops M5 — Benta (selling), against the real DB. Proves the M5 "done when" list:
+//   * a double-tap makes ONE sale (Benta and the old POS path);
+//   * a manual item (Bagong item) sells at once and appears for the owner's review;
+//   * an encoded paper slip keeps its real time.
+// Plus: by peso / by kilo arithmetic on the real ledger, location prices, utang needs a
+// customer and their signature, GCash needs a reference, "kulang" says where stock is,
+// Kunin sa ibang tindahan holds the other location's stock, Manual na pasok, merging a
+// manual item by weight, location rules and tenant isolation.
+import { test, after } from "node:test";
+import assert from "node:assert/strict";
+import { randomBytes } from "node:crypto";
+import bcrypt from "bcryptjs";
+import { prisma } from "../persistence/prisma-repositories.js";
+import { BentaService } from "./benta.service.js";
+import { PeopleService, type Actor, type SignatureInput } from "../people/people.service.js";
+import { PosService } from "../pos/pos.service.js";
+import { LoyaltyService } from "../loyalty/loyalty.service.js";
+
+const PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==";
+const jpegBytes = Buffer.alloc(800, 9);
+jpegBytes[0] = 0xff; jpegBytes[1] = 0xd8; jpegBytes[2] = 0xff;
+const JPEG = `data:image/jpeg;base64,${jpegBytes.toString("base64")}`;
+const run = `M5R${Date.now()}${Math.floor(Math.random() * 1000)}`;
+const storeIds: string[] = [];
+const userIds: string[] = [];
+const customerIds: string[] = [];
+let seq = 0;
+
+after(async () => {
+  if (storeIds.length) {
+    const where = { storeId: { in: storeIds } };
+    const orderIds = (await prisma.order.findMany({ where, select: { id: true } })).map((o) => o.id);
+    await prisma.auditLog.deleteMany({ where });
+    await prisma.signature.deleteMany({ where });
+    await prisma.approvalRequest.deleteMany({ where });
+    await prisma.smsMessage.deleteMany({ where });
+    await prisma.outboxEvent.deleteMany({ where });
+    await prisma.stockTransfer.deleteMany({ where });
+    await prisma.stockInLine.deleteMany({ where });
+    await prisma.stockIn.deleteMany({ where });
+    if (orderIds.length) {
+      await prisma.creditEntry.deleteMany({ where: { orderId: { in: orderIds } } });
+      await prisma.orderStatusHistory.deleteMany({ where: { orderId: { in: orderIds } } });
+      await prisma.orderItem.deleteMany({ where: { orderId: { in: orderIds } } });
+      await prisma.payment.deleteMany({ where: { orderId: { in: orderIds } } });
+    }
+    await prisma.creditEntry.deleteMany({ where });
+    await prisma.stockMovement.deleteMany({ where });
+    await prisma.order.deleteMany({ where });
+    await prisma.storeCustomer.deleteMany({ where });
+    await prisma.paymentMethod.deleteMany({ where });
+    await prisma.kargador.deleteMany({ where });
+    await prisma.storeCounter.deleteMany({ where });
+    await prisma.locationPrice.deleteMany({ where });
+    await prisma.stockLevel.deleteMany({ where });
+    await prisma.product.deleteMany({ where });
+    await prisma.userStore.deleteMany({ where });
+    await prisma.storeSettings.deleteMany({ where });
+    await prisma.warehouse.deleteMany({ where });
+    await prisma.store.deleteMany({ where: { id: { in: storeIds } } });
+  }
+  if (customerIds.length) await prisma.customer.deleteMany({ where: { id: { in: customerIds } } });
+  if (userIds.length) await prisma.user.deleteMany({ where: { id: { in: userIds } } });
+  await prisma.$disconnect();
+});
+
+const PIN = "2580";
+
+async function fixture() {
+  seq += 1;
+  const slug = `${randomBytes(6).toString("hex").replace(/[0-9]/g, (d) => "ghijklmnop"[Number(d)]!).slice(0, 6)}-${run}-${seq}`.toLowerCase();
+  const store = await prisma.store.create({ data: { slug, name: `M5 ${run}` } });
+  storeIds.push(store.id);
+  await prisma.storeSettings.create({ data: { storeId: store.id, requireOpenShift: false } });
+  const s1 = await prisma.warehouse.create({ data: { storeId: store.id, name: "Store 1", code: "S1", type: "STORE", isDefault: true } });
+  const s2 = await prisma.warehouse.create({ data: { storeId: store.id, name: "Store 2", code: "S2", type: "STORE" } });
+  const wh = await prisma.warehouse.create({ data: { storeId: store.id, name: "Warehouse", code: "WH", type: "WAREHOUSE" } });
+  const rice = (sku: string, name: string, grams: number, price: number, cost: number) =>
+    prisma.product.create({ data: { storeId: store.id, sku: `${run}-${seq}-${sku}`, name, priceMinor: price, costMinor: cost, stockBaseUnit: "g", stockBaseQuantity: grams, stockConversionFamily: "Bigas", soldByWeight: grams === 1 } });
+  const sin25 = await rice("SIN25", "Sinandomeng 25 kg", 25_000, 130_000, 110_000);
+  const loose = await rice("SINK", "Sinandomeng (per kilo)", 1, 5_200, 4_600);
+  await prisma.locationPrice.create({ data: { storeId: store.id, productId: loose.id, warehouseId: s2.id, priceMinor: 5_400 } });
+  const lvl = (productId: string, warehouseId: string, q: number) => prisma.stockLevel.create({ data: { storeId: store.id, productId, warehouseId, quantityOnHand: q } });
+  await lvl(sin25.id, s1.id, 10);
+  await lvl(sin25.id, s2.id, 5);
+  await lvl(sin25.id, wh.id, 0);
+  await lvl(loose.id, s1.id, 50_000);
+  await lvl(loose.id, s2.id, 10_000);
+  const cust = await prisma.customer.create({ data: { name: `Juan ${run}`, phone: null, email: null, passwordHash: null } });
+  customerIds.push(cust.id);
+  const sc = await prisma.storeCustomer.create({ data: { storeId: store.id, customerId: cust.id, creditApproved: true, creditLimitMinor: 500_000 } });
+  const pinHash = bcrypt.hashSync(PIN, 4);
+  const mk = async (name: string, role: "OWNER" | "STAFF", home: string | null): Promise<Actor> => {
+    const u = await prisma.user.create({ data: { email: `${run}-${seq}-${name.replace(/\s/g, "")}@m5.test`, passwordHash: "x", name, role: role === "OWNER" ? "STORE_OWNER" : "STAFF", pinHash } });
+    userIds.push(u.id);
+    await prisma.userStore.create({ data: { userId: u.id, storeId: store.id, role, homeLocationId: home } });
+    return { userId: u.id, role, homeLocationId: home };
+  };
+  return {
+    storeId: store.id, s1: s1.id, s2: s2.id, wh: wh.id, sin25, loose, customerId: sc.id,
+    staff1: await mk("Ate Lorna", "STAFF", s1.id), staff2: await mk("Kuya Ben", "STAFF", s2.id), owner: await mk("Aling Nena", "OWNER", null),
+  };
+}
+
+const staffSig: SignatureInput[] = [{ signerKind: "STAFF", imagePng: PNG }];
+const onHand = async (fx: { storeId: string }, productId: string, w: string) =>
+  (await prisma.stockLevel.findFirst({ where: { storeId: fx.storeId, productId, warehouseId: w } }))?.quantityOnHand ?? null;
+const msg = (r: unknown) => JSON.stringify((r as { error?: unknown }).error ?? r);
+const key = () => `tap-${randomBytes(8).toString("hex")}`;
+const svc = new BentaService();
+
+test("M5: a double-tap makes ONE sale — both taps get the same sale back", async () => {
+  const fx = await fixture();
+  const k = key();
+  const body = { idempotencyKey: k, locationId: fx.s1, lines: [{ productId: fx.sin25.id, quantity: 2 }], payment: { method: "cash", tenderedMinor: 300_000 } };
+  const [a, b] = await Promise.all([svc.sell(fx.storeId, fx.staff1, body), svc.sell(fx.storeId, fx.staff1, body)]);
+  assert.equal(a.ok && b.ok, true, `${msg(a)} ${msg(b)}`);
+  if (!a.ok || !b.ok) return;
+  assert.equal(a.value.orderId, b.value.orderId, "the same sale");
+  assert.equal([a.value.replayed, b.value.replayed].filter(Boolean).length, 1, "one made it, one replayed it");
+  assert.equal(a.value.changeMinor, 40_000);
+  assert.equal(await prisma.order.count({ where: { storeId: fx.storeId } }), 1);
+  assert.equal(await prisma.payment.count({ where: { storeId: fx.storeId } }), 1);
+  assert.equal(await onHand(fx, fx.sin25.id, fx.s1), 8, "2 sacks left Store 1 once");
+  // A third tap, later, still returns the same sale.
+  const c = await svc.sell(fx.storeId, fx.staff1, body);
+  assert.equal(c.ok && c.value.orderId === a.value.orderId && c.value.replayed, true);
+  const o = await prisma.order.findUniqueOrThrow({ where: { id: a.value.orderId } });
+  assert.equal(o.sellingLocationId, fx.s1);
+  assert.notEqual(o.idempotencyKey, k, "only a hash of the key is stored");
+});
+
+test("M5: the old POS path also makes one sale per key", async () => {
+  const fx = await fixture();
+  const pos = new PosService(new LoyaltyService());
+  const body = { idempotencyKey: key(), items: [{ productId: fx.sin25.id, quantity: 1 }], paymentMethod: "cash" as const, tenderedMinor: 130_000 };
+  const [a, b] = await Promise.all([pos.sell(fx.storeId, fx.staff1.userId, body), pos.sell(fx.storeId, fx.staff1.userId, body)]);
+  assert.equal(a.ok && b.ok, true, `${msg(a)} ${msg(b)}`);
+  assert.equal(a.ok && b.ok && a.value.orderId === b.value.orderId, true);
+  assert.equal(await prisma.order.count({ where: { storeId: fx.storeId } }), 1);
+  assert.equal(await onHand(fx, fx.sin25.id, fx.s1), 9);
+});
+
+test("M5: ₱100 at ₱52/kg = 1.923 kg for exactly ₱100; 1.25 kg = ₱65; Store 2 sells at its own price", async () => {
+  const fx = await fixture();
+  const r = await svc.sell(fx.storeId, fx.staff1, {
+    idempotencyKey: key(), locationId: fx.s1, payment: { method: "cash" },
+    lines: [{ productId: fx.loose.id, amountMinor: 10_000 }, { productId: fx.loose.id, kilos: "1.25" }],
+  });
+  assert.equal(r.ok, true, msg(r));
+  if (!r.ok) return;
+  assert.equal(r.value.totalMinor, 16_500);
+  assert.deepEqual(r.value.lines.map((l) => [l.soldBy, l.grams, l.lineTotalMinor, l.enteredAmountMinor]), [["PESO", 1_923, 10_000, 10_000], ["KILO", 1_250, 6_500, null]]);
+  assert.equal(await onHand(fx, fx.loose.id, fx.s1), 50_000 - 1_923 - 1_250, "grams leave the ledger exactly");
+  const moves = await prisma.stockMovement.findMany({ where: { storeId: fx.storeId, documentType: "SALE", documentId: r.value.orderId }, select: { delta: true, warehouseId: true } });
+  assert.deepEqual(moves.map((m) => m.delta).sort((x, y) => x - y), [-1_923, -1_250]);
+  assert.equal(moves.every((m) => m.warehouseId === fx.s1), true);
+
+  const cat = await svc.catalog(fx.storeId, fx.staff2, undefined);
+  assert.equal(cat.ok && cat.value.location.id, fx.s2, "Kuya Ben's screen opens at his home location");
+  assert.equal(cat.ok && cat.value.products.find((p) => p.id === fx.loose.id)?.priceMinor, 5_400, "Store 2's own price");
+  assert.equal(cat.ok && cat.value.products.find((p) => p.id === fx.sin25.id)?.stock[fx.s1], 10);
+  const s2 = await svc.sell(fx.storeId, fx.staff2, { idempotencyKey: key(), lines: [{ productId: fx.loose.id, kilos: "1" }], payment: { method: "cash" } });
+  assert.equal(s2.ok && s2.value.totalMinor, 5_400, msg(s2));
+  assert.equal(s2.ok && s2.value.locationId, fx.s2);
+});
+
+test("M5: a manual item sells at once, waits in Susuriin, and the owner confirms it", async () => {
+  const fx = await fixture();
+  const noSig = await svc.manualItem(fx.storeId, fx.staff1, { name: "Jasmine 25 kg", soldAs: "SACK", gramsPerSack: 25_000, priceMinor: 150_000, costMinor: 120_000, openingQty: 3 });
+  assert.equal(noSig.ok, false);
+  assert.match(msg(noSig), /Kulang ang pirma/);
+  assert.equal(await prisma.product.count({ where: { storeId: fx.storeId, name: "Jasmine 25 kg" } }), 0, "nothing half-made");
+
+  const m = await svc.manualItem(fx.storeId, fx.staff1, { name: "Jasmine 25 kg", soldAs: "SACK", gramsPerSack: 25_000, priceMinor: 150_000, costMinor: 120_000, openingQty: 3, signatures: staffSig });
+  assert.equal(m.ok, true, msg(m));
+  if (!m.ok) return;
+  assert.match(m.value.stockInDocNumber, /^IN-\d{6}$/);
+  assert.equal(await onHand(fx, m.value.productId, fx.s1), 3);
+  const sale = await svc.sell(fx.storeId, fx.staff1, { idempotencyKey: key(), lines: [{ productId: m.value.productId, quantity: 1 }], payment: { method: "cash" } });
+  assert.equal(sale.ok && sale.value.totalMinor, 150_000, msg(sale));
+  const review = await svc.reviewList(fx.storeId);
+  assert.deepEqual(review.map((p) => [p.name, p.timesSold]), [["Jasmine 25 kg", 1]]);
+  const appr = await prisma.approvalRequest.findUniqueOrThrow({ where: { id: m.value.approvalId } });
+  assert.deepEqual([appr.kind, appr.status, appr.documentId], ["MANUAL_ITEM", "PENDING", m.value.productId]);
+  assert.match(appr.summary, /Jasmine 25 kg/);
+
+  const people = new PeopleService();
+  const staffTry = await people.decideApproval(fx.storeId, appr.id, fx.staff1, { decision: "APPROVE", pin: PIN });
+  assert.equal(staffTry.ok, false, "staff cannot confirm");
+  const ok = await people.decideApproval(fx.storeId, appr.id, fx.owner, { decision: "APPROVE", pin: PIN });
+  assert.equal(ok.ok, true, msg(ok));
+  assert.equal((await prisma.product.findUniqueOrThrow({ where: { id: m.value.productId } })).reviewStatus, "ACTIVE");
+  assert.equal((await svc.reviewList(fx.storeId)).length, 0);
+});
+
+test("M5: merging a manual item moves its stock into the real product by weight", async () => {
+  const fx = await fixture();
+  const m = await svc.manualItem(fx.storeId, fx.staff1, { name: "Sinandomeng 25kg (bago)", soldAs: "SACK", gramsPerSack: 25_000, priceMinor: 130_000, costMinor: 110_000, openingQty: 2, signatures: staffSig });
+  assert.equal(m.ok, true, msg(m));
+  if (!m.ok) return;
+  const staff = await svc.merge(fx.storeId, fx.staff1, m.value.productId, fx.sin25.id);
+  assert.equal(staff.ok, false, "staff cannot merge");
+  const r = await svc.merge(fx.storeId, fx.owner, m.value.productId, fx.sin25.id);
+  assert.equal(r.ok, true, msg(r));
+  assert.equal(await onHand(fx, fx.sin25.id, fx.s1), 12, "10 + the 2 merged sacks");
+  assert.equal(await onHand(fx, m.value.productId, fx.s1), 0);
+  const p = await prisma.product.findUniqueOrThrow({ where: { id: m.value.productId } });
+  assert.deepEqual([p.reviewStatus, p.isActive, p.mergedIntoId], ["MERGED", false, fx.sin25.id]);
+  assert.equal((await prisma.approvalRequest.findUniqueOrThrow({ where: { id: m.value.approvalId } })).status, "APPROVED");
+  const moves = await prisma.stockMovement.findMany({ where: { storeId: fx.storeId, documentType: "PRODUCT_MERGE" }, select: { type: true, delta: true } });
+  assert.deepEqual(moves.map((x) => `${x.type}${x.delta}`).sort(), ["MERGE_IN2", "MERGE_OUT-2"]);
+  const again = await svc.merge(fx.storeId, fx.owner, m.value.productId, fx.sin25.id);
+  assert.equal(again.ok, false, "a merge happens once");
+});
+
+test("M5: an encoded paper slip keeps its real time and number, once", async () => {
+  const fx = await fixture();
+  const when = new Date(Date.now() - 26 * 3_600_000); // yesterday afternoon
+  const slip = { slipNo: "0123", occurredAt: when.toISOString() };
+  const noPhoto = await svc.sell(fx.storeId, fx.staff1, { idempotencyKey: key(), lines: [{ productId: fx.sin25.id, quantity: 1 }], payment: { method: "cash" }, paperSlip: slip, signatures: staffSig });
+  assert.equal(noPhoto.ok, false);
+  assert.match(msg(noPhoto), /litrato ng papel/);
+  assert.equal(await onHand(fx, fx.sin25.id, fx.s1), 10, "nothing moved");
+
+  const sigs: SignatureInput[] = [...staffSig, { signerKind: "SLIP_PHOTO", imagePng: JPEG }];
+  const r = await svc.sell(fx.storeId, fx.staff1, { idempotencyKey: key(), lines: [{ productId: fx.sin25.id, quantity: 1 }], payment: { method: "cash" }, paperSlip: slip, signatures: sigs });
+  assert.equal(r.ok, true, msg(r));
+  if (!r.ok) return;
+  const o = await prisma.order.findUniqueOrThrow({ where: { id: r.value.orderId } });
+  assert.equal(o.occurredAt?.toISOString(), when.toISOString(), "the real time from the slip");
+  assert.equal(o.encodedLater, true);
+  assert.equal(o.paperSlipNo, "0123");
+  assert.ok(o.createdAt.getTime() - when.getTime() > 25 * 3_600_000, "encoded a day later");
+  assert.equal(await prisma.signature.count({ where: { storeId: fx.storeId, documentType: "PAPER_SLIP", documentId: o.id } }), 2);
+
+  const twice = await svc.sell(fx.storeId, fx.staff1, { idempotencyKey: key(), lines: [{ productId: fx.sin25.id, quantity: 1 }], payment: { method: "cash" }, paperSlip: slip, signatures: sigs });
+  assert.equal(twice.ok, false);
+  assert.match(msg(twice), /Na-encode na ang papel #0123/);
+  assert.equal(await onHand(fx, fx.sin25.id, fx.s1), 9, "the second encode moved nothing");
+  const future = await svc.sell(fx.storeId, fx.staff1, { idempotencyKey: key(), lines: [{ productId: fx.sin25.id, quantity: 1 }], payment: { method: "cash" }, paperSlip: { slipNo: "0124", occurredAt: new Date(Date.now() + 86_400_000).toISOString() }, signatures: sigs });
+  assert.equal(future.ok, false);
+});
+
+test("M5: utang needs a customer on the list and their signature; GCash needs a reference", async () => {
+  const fx = await fixture();
+  const noCust = await svc.sell(fx.storeId, fx.staff1, { idempotencyKey: key(), lines: [{ productId: fx.sin25.id, quantity: 1 }], payment: { method: "utang" } });
+  assert.match(msg(noCust), /customer/);
+  const noSig = await svc.sell(fx.storeId, fx.staff1, { idempotencyKey: key(), lines: [{ productId: fx.sin25.id, quantity: 1 }], payment: { method: "utang" }, customerId: fx.customerId });
+  assert.equal(noSig.ok, false);
+  assert.match(msg(noSig), /Kulang ang pirma: customer/);
+  assert.equal(await onHand(fx, fx.sin25.id, fx.s1), 10);
+  const ok = await svc.sell(fx.storeId, fx.staff1, {
+    idempotencyKey: key(), lines: [{ productId: fx.sin25.id, quantity: 1 }], payment: { method: "utang" }, customerId: fx.customerId,
+    signatures: [{ signerKind: "CUSTOMER", signerName: "Juan", imagePng: PNG }],
+  });
+  assert.equal(ok.ok, true, msg(ok));
+  assert.equal((await prisma.storeCustomer.findUniqueOrThrow({ where: { id: fx.customerId } })).creditBalanceMinor, 130_000);
+  const o = await prisma.order.findUniqueOrThrow({ where: { id: ok.ok ? ok.value.orderId : "" } });
+  assert.deepEqual([o.paymentMethod, o.paymentStatus], ["credit", "PENDING"]);
+
+  const noRef = await svc.sell(fx.storeId, fx.staff1, { idempotencyKey: key(), lines: [{ productId: fx.sin25.id, quantity: 1 }], payment: { method: "gcash" } });
+  assert.match(msg(noRef), /reference/);
+  const gcash = await svc.sell(fx.storeId, fx.staff1, { idempotencyKey: key(), lines: [{ productId: fx.sin25.id, quantity: 1 }], payment: { method: "gcash", reference: "1234567890" } });
+  assert.equal(gcash.ok, true, msg(gcash));
+  assert.equal((await prisma.payment.findFirstOrThrow({ where: { orderId: gcash.ok ? gcash.value.orderId : "" } })).method, "gcash");
+});
+
+test("M5: 'kulang' says where the stock is; Kunin sa ibang tindahan holds it there", async () => {
+  const fx = await fixture();
+  const short = await svc.sell(fx.storeId, fx.staff1, { idempotencyKey: key(), lines: [{ productId: fx.sin25.id, quantity: 11 }], payment: { method: "cash" } });
+  assert.equal(short.ok, false);
+  assert.match(msg(short), /10 na lang na Sinandomeng 25 kg sa Store 1\. Bawasan, o kunin sa Store 2 \(may 5\)/);
+  assert.equal(await prisma.order.count({ where: { storeId: fx.storeId } }), 0, "nothing half-sold");
+
+  const r = await svc.sell(fx.storeId, fx.staff1, { idempotencyKey: key(), lines: [{ productId: fx.sin25.id, quantity: 2, sourceLocationId: fx.s2 }], payment: { method: "cash" } });
+  assert.equal(r.ok, true, msg(r));
+  assert.match(r.ok ? r.value.releases[0]!.docNumber : "", /^REL-\d{6}$/);
+  const s2 = await prisma.stockLevel.findFirstOrThrow({ where: { storeId: fx.storeId, productId: fx.sin25.id, warehouseId: fx.s2 } });
+  assert.deepEqual([s2.quantityOnHand, s2.quantityReserved], [5, 2], "held at Store 2 until its Ilabas");
+  assert.equal(await onHand(fx, fx.sin25.id, fx.s1), 10, "Store 1's own stock untouched");
+});
+
+test("M5: staff sell only at their own location; another store's product is not found", async () => {
+  const fx = await fixture();
+  const other = await fixture();
+  const away = await svc.sell(fx.storeId, fx.staff2, { idempotencyKey: key(), locationId: fx.s1, lines: [{ productId: fx.sin25.id, quantity: 1 }], payment: { method: "cash" } });
+  assert.equal(away.ok, false);
+  assert.equal(!away.ok && away.error.type, "forbidden");
+  const cross = await svc.sell(fx.storeId, fx.staff1, { idempotencyKey: key(), lines: [{ productId: other.sin25.id, quantity: 1 }], payment: { method: "cash" } });
+  assert.equal(cross.ok, false);
+  assert.equal(await onHand(other, other.sin25.id, other.s1), 10, "the other store's stock is untouched");
+  const reuse = await svc.sell(other.storeId, other.staff1, { idempotencyKey: "same-key-1234", lines: [{ productId: other.sin25.id, quantity: 1 }], payment: { method: "cash" } });
+  const mine = await svc.sell(fx.storeId, fx.staff1, { idempotencyKey: "same-key-1234", lines: [{ productId: fx.sin25.id, quantity: 1 }], payment: { method: "cash" } });
+  assert.equal(reuse.ok && mine.ok && reuse.value.orderId !== mine.value.orderId && !mine.value.replayed, true, "keys never cross stores");
+});
+
+test("M5: Manual na pasok adds signed stock and records the latest cost", async () => {
+  const fx = await fixture();
+  const noSig = await svc.stockIn(fx.storeId, fx.staff1, { lines: [{ productId: fx.sin25.id, quantity: 4, unitCostMinor: 112_000 }] });
+  assert.equal(noSig.ok, false);
+  const r = await svc.stockIn(fx.storeId, fx.staff1, { supplierName: "Mang Tonyo", lines: [{ productId: fx.sin25.id, quantity: 4, unitCostMinor: 112_000 }], signatures: staffSig });
+  assert.equal(r.ok, true, msg(r));
+  assert.match(r.ok ? r.value.docNumber : "", /^IN-\d{6}$/);
+  assert.equal(await onHand(fx, fx.sin25.id, fx.s1), 14);
+  assert.equal((await prisma.product.findUniqueOrThrow({ where: { id: fx.sin25.id } })).costMinor, 112_000);
+  const mv = await prisma.stockMovement.findFirstOrThrow({ where: { storeId: fx.storeId, type: "STOCK_IN" } });
+  assert.deepEqual([mv.delta, mv.warehouseId, mv.documentType], [4, fx.s1, "STOCK_IN"]);
+  const away = await svc.stockIn(fx.storeId, fx.staff2, { locationId: fx.s1, lines: [{ productId: fx.sin25.id, quantity: 1 }], signatures: staffSig });
+  assert.equal(away.ok, false, "Store 2 staff cannot receive at Store 1");
+});

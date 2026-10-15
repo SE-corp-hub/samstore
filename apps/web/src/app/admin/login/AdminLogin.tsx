@@ -306,8 +306,7 @@ export default function AdminLogin() {
             </button>
             <hr className="my-4" />
             <p className="text-muted small mb-0 text-center">
-              Don&apos;t have an account?{" "}
-              <a href="/admin/register">Register a store owner</a>
+              Walang account? Ang may-ari ng tindahan ang magdadagdag sa iyo.
             </p>
           </div>
         )}

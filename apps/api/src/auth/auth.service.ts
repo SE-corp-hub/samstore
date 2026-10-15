@@ -7,9 +7,11 @@ import { hashPassword, verifyPassword, signToken, AuthConfig } from "./auth.doma
 import { toE164 } from "../domain/phone.js";
 import {
   type AuthRepository,
+  LOGIN_LOCK_MINUTES,
 } from "./auth.repository.js";
 import { prisma } from "../persistence/prisma-repositories.js";
 import { bustMemberships } from "./membership-cache.js";
+import { accountBelongsToStore, alignGlobalRole } from "./account-scope.js";
 import { PIN_LOCK_MINUTES, PIN_MAX_FAILS, pinLockSecondsLeft } from "../domain/people.js";
 
 /** bcrypt of a random never-used PIN; compared against when the number has no PIN, to keep timing flat. */
@@ -135,10 +137,27 @@ export class AuthService {
     password: string;
   }): Promise<LoginResult<{ token: string; user: AuthUserSummary }>> {
     const identifier = (input.identifier ?? input.email ?? "").trim().toLowerCase();
+    const generic = { ok: false as const, error: { type: "unauthorized" as const, message: "Invalid phone/email or password" } };
     const user = await this.repo.findByIdentifier(identifier);
-    if (!user) return { ok: false, error: { type: "unauthorized", message: "Invalid phone/email or password" } };
+    if (!user) {
+      await verifyPassword(input.password || "x", DUMMY_PIN_HASH); // same time whether or not the account exists
+      return generic;
+    }
+    // Rice Ops M11: 5 wrong passwords → password login locked for 15 minutes. The try
+    // is counted before the check, so a burst of parallel guesses still gets only 5.
+    const tryRes = this.repo.reserveLoginTry ? await this.repo.reserveLoginTry(user.id) : null;
+    if (tryRes?.locked) {
+      const mins = Math.max(1, Math.ceil(tryRes.secondsLeft / 60));
+      return { ok: false, error: { type: "rate_limited", message: `Too many wrong passwords. Try again in ${mins} minute(s), or ask the owner to reset your password.` } };
+    }
     const valid = await verifyPassword(input.password ?? "", user.passwordHash);
-    if (!valid) return { ok: false, error: { type: "unauthorized", message: "Invalid phone/email or password" } };
+    if (!valid) {
+      if (tryRes && !tryRes.locked && tryRes.used === 0) {
+        return { ok: false, error: { type: "rate_limited", message: `Too many wrong passwords — login is locked for ${LOGIN_LOCK_MINUTES} minutes.` } };
+      }
+      return generic;
+    }
+    if (this.repo.clearLoginFails) await this.repo.clearLoginFails(user.id);
 
     // v6 B3: an admin reset the password → the temp password only unlocks the
     // must-change flow. No token is issued until the user sets a new password.
@@ -257,11 +276,23 @@ export class AuthService {
     storeId: string;
     resetBy: string;
     newPassword?: string;
+    /** True only on the platform-admin route (the controller decides from the verified token). */
+    byPlatformAdmin?: boolean;
   }): Promise<AuthResult<{ userId: string; tempPassword: string; mustChangePassword: true }>> {
     const admin = this.adminRepo();
     const membership = (await admin.findMemberships(input.userId)).find((m) => m.storeId === input.storeId);
     if (!membership) {
       return { ok: false, error: { type: "not_found", message: "User is not a member of this store" } };
+    }
+    // M11: a store owner may reset only an account that is this store's alone. Someone
+    // who also works at another store (or a platform admin) is reset by the platform
+    // admin or changes their own password — otherwise inviting another store's owner
+    // and resetting their password would hand over that store.
+    if (!input.byPlatformAdmin && !(await accountBelongsToStore(prisma, input.userId, input.storeId))) {
+      return {
+        ok: false,
+        error: { type: "forbidden", message: "This person also works at another store. Ask them to change their own password, or ask the platform admin." },
+      };
     }
 
     const provided = input.newPassword?.trim() ?? "";
@@ -303,9 +334,23 @@ export class AuthService {
       return { ok: false, error: { type: "validation", errors: ["New passwords do not match"] } };
     }
     const user = await this.repo.findByIdentifier(identifier);
-    if (!user) return { ok: false, error: { type: "unauthorized", message: "Invalid phone/email or password" } };
+    if (!user) {
+      await verifyPassword(input.currentPassword || "x", DUMMY_PIN_HASH);
+      return { ok: false, error: { type: "unauthorized", message: "Invalid phone/email or password" } };
+    }
+    // M11: the same lockout as login — otherwise this public route is a way around it.
+    const tryRes = this.repo.reserveLoginTry ? await this.repo.reserveLoginTry(user.id) : null;
+    if (tryRes?.locked) {
+      const mins = Math.max(1, Math.ceil(tryRes.secondsLeft / 60));
+      return { ok: false, error: { type: "rate_limited", message: `Too many wrong passwords. Try again in ${mins} minute(s), or ask the owner to reset your password.` } };
+    }
     const valid = await verifyPassword(input.currentPassword ?? "", user.passwordHash);
-    if (!valid) return { ok: false, error: { type: "unauthorized", message: "Current password is incorrect" } };
+    if (!valid) {
+      if (tryRes && !tryRes.locked && tryRes.used === 0) {
+        return { ok: false, error: { type: "rate_limited", message: `Too many wrong passwords — login is locked for ${LOGIN_LOCK_MINUTES} minutes.` } };
+      }
+      return { ok: false, error: { type: "unauthorized", message: "Current password is incorrect" } };
+    }
 
     const admin = this.adminRepo();
     await admin.resetPassword(user.id, await hashPassword(input.newPassword));
@@ -377,11 +422,8 @@ export class AuthService {
       where: { userId_storeId: { userId: input.userId, storeId: input.storeId } },
       data: { role: input.role as StoreRole },
     });
-    // Keep the user's global role claim aligned (same convention as TeamService).
-    await prisma.user.update({
-      where: { id: input.userId },
-      data: { role: input.role === "OWNER" ? "STORE_OWNER" : input.role },
-    });
+    // Keep the account-wide role aligned — only for a single-store account (M11).
+    await alignGlobalRole(prisma, input.userId, input.storeId, input.role);
     await bustMemberships();
     return { ok: true, value: { userId: input.userId, role: updated.role } };
   }
@@ -434,12 +476,9 @@ export class AuthService {
         let tempPassword: string | undefined;
         if (existing) {
           userId = existing.id;
-          // Align the bound user's global role claim with the membership role
-          // (same convention as changeRole).
-          await tx.user.update({
-            where: { id: existing.id },
-            data: { role: input.role === "OWNER" ? "STORE_OWNER" : input.role },
-          });
+          // Align the bound user's account-wide role with the membership role — only
+          // when this is their only store, and never for a platform admin (M11).
+          if (storeId) await alignGlobalRole(tx, existing.id, storeId, input.role);
         } else {
           tempPassword = randomBytes(9).toString("base64url");
           const user = await tx.user.create({

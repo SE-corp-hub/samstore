@@ -10,10 +10,11 @@ import { bustMemberships } from "../auth/membership-cache.js";
 import { bustTokenVersion } from "../auth/token-version.js";
 import {
   ALL_LOCATION_ROLES, APPROVAL_KINDS, DEFAULT_APPROVERS, DRAFT_FLOWS, MAX_DRAFT_BYTES, canActAtLocation, canDecide,
-  checkSignatureImage, counterKind, formatDocNumber, isDraftStale, missingMessage, missingSigners,
+  checkPhotoImage, checkSignatureImage, counterKind, formatDocNumber, isDraftStale, missingMessage, missingSigners,
   pinProblem, ruleFor, type ApprovalKind, type DocPrefix, type SignerKindName,
 } from "../domain/people.js";
 import { toE164 } from "../domain/phone.js";
+import { accountBelongsToStore } from "../auth/account-scope.js";
 
 export type PeopleResult<T> = { ok: true; value: T } | { ok: false; error: ApiError };
 type Tx = Prisma.TransactionClient;
@@ -105,7 +106,7 @@ export async function captureSignatures(
   if (!Array.isArray(inputs) || inputs.length > 6) throw new SignatureInputError("Hanggang 6 na pirma lang bawat hakbang");
   let n = 0;
   for (const s of inputs) {
-    const img = checkSignatureImage(s?.imagePng);
+    const img = s?.signerKind === "SLIP_PHOTO" ? checkPhotoImage(s?.imagePng) : checkSignatureImage(s?.imagePng);
     if (!img.ok) throw new SignatureInputError(img.error);
     let signerName: string;
     let signerUserId: string | null = null;
@@ -270,6 +271,10 @@ export class PeopleService {
     if (input.pin !== undefined) {
       const problem = pinProblem(input.pin);
       if (problem) return fail("validation", problem);
+      // M11: a PIN opens the whole account — only set it for someone who works at this store alone.
+      if (!(await accountBelongsToStore(prisma, userId, storeId))) {
+        return forbidden("May iba pang tindahan ang taong ito — siya mismo ang magpapalit ng PIN niya.");
+      }
       pinHash = await bcrypt.hash(input.pin, 10);
     }
     await prisma.$transaction(async (tx) => {

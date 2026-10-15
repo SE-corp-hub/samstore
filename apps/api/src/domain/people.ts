@@ -70,6 +70,7 @@ export const SIGNATURE_RULES: Record<string, StepRule> = {
   "SALE:UTANG": { always: ["CUSTOMER"] },
   "UTANG:PAYMENT": { always: ["STAFF"], withCustomer: ["CUSTOMER"] },
   "COUNT:SUBMIT": { always: ["STAFF"] },
+  "COUNT:QUICK": { always: ["STAFF"] },
   "WRITE_OFF:CREATE": { always: ["STAFF"] },
   "STOCK_IN:RECEIVE": { always: ["STAFF"] },
   "PAPER_SLIP:ENCODE": { always: ["STAFF", "SLIP_PHOTO"] },
@@ -132,6 +133,21 @@ export function checkSignatureImage(dataUrl: unknown): { ok: true; sha256: strin
   return { ok: true, sha256: createHash("sha256").update(bytes).digest("hex") };
 }
 
+/** Rice Ops M5: a photo of a paper slip (or a delivery slip) — a JPEG from the phone camera, or a PNG. */
+export const MAX_PHOTO_BYTES = 400_000;
+const JPEG_PREFIX = "data:image/jpeg;base64,";
+export function checkPhotoImage(dataUrl: unknown): { ok: true; sha256: string } | { ok: false; error: string } {
+  if (typeof dataUrl !== "string" || !(dataUrl.startsWith(JPEG_PREFIX) || dataUrl.startsWith(PREFIX))) return { ok: false, error: "Ang litrato ay dapat JPEG o PNG" };
+  const isJpeg = dataUrl.startsWith(JPEG_PREFIX);
+  const b64 = dataUrl.slice(isJpeg ? JPEG_PREFIX.length : PREFIX.length);
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(b64)) return { ok: false, error: "Sira ang litrato" };
+  const bytes = Buffer.from(b64, "base64");
+  if (bytes.length > MAX_PHOTO_BYTES) return { ok: false, error: "Masyadong malaki ang litrato — kumuha ulit" };
+  const magicOk = isJpeg ? bytes.length > 100 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff : bytes.length >= 67 && bytes.subarray(0, 8).equals(PNG_MAGIC);
+  if (!magicOk) return { ok: false, error: "Sira ang litrato" };
+  return { ok: true, sha256: createHash("sha256").update(bytes).digest("hex") };
+}
+
 // ─────────────────────────────── Numbering ───────────────────────────────
 
 /** Document number prefixes, one counter each (StoreCounter kind "DOC_<prefix>"). */
@@ -149,7 +165,7 @@ export function counterKind(prefix: DocPrefix): string {
 
 // ─────────────────────────────── Approvals ───────────────────────────────
 
-export const APPROVAL_KINDS = ["LOSS_OVER_TOLERANCE", "UTANG_OVER_LIMIT", "MANUAL_ITEM", "WRITE_OFF", "VOID", "TRANSFER", "STOCK_OVERRIDE", "TRANSIT_SHORT", "REFUND"] as const;
+export const APPROVAL_KINDS = ["LOSS_OVER_TOLERANCE", "UTANG_OVER_LIMIT", "MANUAL_ITEM", "WRITE_OFF", "VOID", "TRANSFER", "STOCK_OVERRIDE", "TRANSIT_SHORT", "REFUND", "COUNT"] as const;
 export type ApprovalKind = (typeof APPROVAL_KINDS)[number];
 
 /** Default deciders per kind. Losses are the store owner's call (operator decision). */
@@ -163,6 +179,7 @@ export const DEFAULT_APPROVERS: Record<ApprovalKind, string[]> = {
   STOCK_OVERRIDE: ["OWNER", "MANAGER"],
   TRANSIT_SHORT: ["OWNER"], // M3: rice lost on a trip (Kulang sa lipat)
   REFUND: ["OWNER", "MANAGER"], // M3: refused delivery / returned rice — settle the money
+  COUNT: ["OWNER"], // M8: a full count's adjustments post when the owner approves
 };
 
 /** May `role` decide an approval that lists `approverRoles`? Platform admin never decides store business. */

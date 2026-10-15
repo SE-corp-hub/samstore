@@ -280,6 +280,19 @@ export class RegisterService {
    * open. Never enforces — off-counter money still records, it just is not part of a
    * drawer's expected cash.
    */
+  /**
+   * Rice Ops M5/M6: the open drawer shift at a location — a register placed at that
+   * location wins, else a location-less register (one drawer for the whole store).
+   */
+  async sessionAt(storeId: string, locationId: string | null): Promise<string | null> {
+    const sessions = await prisma.registerSession.findMany({
+      where: { storeId, status: "OPEN", register: locationId ? { OR: [{ locationId }, { locationId: null }] } : { locationId: null } },
+      select: { id: true, register: { select: { locationId: true } } },
+      orderBy: { openedAt: "desc" },
+    });
+    return (sessions.find((x) => x.register.locationId === locationId) ?? sessions[0])?.id ?? null;
+  }
+
   async attachOpenSession(storeId: string): Promise<string | null> {
     const session = await prisma.registerSession.findFirst({ where: { storeId, status: "OPEN" }, select: { id: true } });
     return session?.id ?? null;

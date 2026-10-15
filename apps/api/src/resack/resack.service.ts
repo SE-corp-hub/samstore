@@ -20,6 +20,7 @@ import {
   captureSignatures, locationRefusal, nextDocNumber, requestApproval, requireSignatures, signatureErrorResult,
   type Actor, type SignatureInput,
 } from "../people/people.service.js";
+import { txOptions } from "../persistence/tx-options.js";
 
 export type ResackResult<T> = { ok: true; value: T } | { ok: false; error: ApiError };
 type Tx = Prisma.TransactionClient;
@@ -193,7 +194,7 @@ export class ResackService {
         const job = await this.writeStart(tx, storeId, actor, { locationId: loc.id, input: inP, inputQty: qty, inputGrams, kargadorId: kargador?.id ?? null, note: input.note?.trim() || null, openSack: !!input.openSack }, undefined, false);
         const approvalId = await this.writeFinish(tx, storeId, actor, job, inP, loc.name, outs, plan, input.signatures);
         out = { id: job.id, docNumber: job.docNumber, approvalId };
-      }, { timeout: 30_000 });
+      }, txOptions());
       return { ...out, status: "FINISHED", gramsIn: plan.gramsIn, gramsOut: plan.gramsOut, lossGrams: plan.lossGrams, lossBp: plan.lossBp, needsApproval: plan.needsApproval, varietyChange: plan.varietyChange };
     });
   }
@@ -216,7 +217,7 @@ export class ResackService {
       await prisma.$transaction(async (tx) => {
         const job = await this.writeStart(tx, storeId, actor, { locationId: loc.id, input: inP, inputQty: qty, inputGrams, kargadorId: kargador?.id ?? null, note: input.note?.trim() || null, openSack: false }, input.signatures, true);
         out = { id: job.id, docNumber: job.docNumber };
-      }, { timeout: 30_000 });
+      }, txOptions());
       return { ...out, status: "STARTED", gramsIn: inputGrams };
     });
   }
@@ -236,7 +237,7 @@ export class ResackService {
       let approvalId: string | null = null;
       await prisma.$transaction(async (tx) => {
         approvalId = await this.writeFinish(tx, storeId, actor, job, inP, job.location.name, outs, plan, input.signatures);
-      }, { timeout: 30_000 });
+      }, txOptions());
       return { id, docNumber: job.docNumber, status: "FINISHED", approvalId, gramsIn: plan.gramsIn, gramsOut: plan.gramsOut, lossGrams: plan.lossGrams, lossBp: plan.lossBp, needsApproval: plan.needsApproval, varietyChange: plan.varietyChange };
     });
   }

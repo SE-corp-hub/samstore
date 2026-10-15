@@ -1,5 +1,46 @@
 # PINDIAN — Progress Log
 
+## M5–M12 — Rice Ops, built back to back (2026-10-15)
+
+The operator asked to go straight from M5 to M12, with Claude running the tests on the operator machine and the operator committing and pushing at the end. Each module was committed locally, checked by `verify.bat` on the operator PC against the live Supabase DB, and fixed until it passed.
+
+| Module | What it delivers | Tests |
+|---|---|---|
+| M5 Benta (`20d9fbe`) | Sell by sack, kilo or peso; cash, GCash or utang; per-location prices; Bagong item (FOR_REVIEW until the owner merges or confirms); Manual na pasok; Galing sa papel (slip no. unique per store, up to 31 days back, photo); a real idempotency key on POS and Benta. | `selling.test` 10, `benta-m5.test` 10 |
+| M6 Utang and texts (`d256f39`) | Over-limit utang waits for the owner with the rice held; Bayad sa utang at any store, guarded so it never goes below zero; sale, payment, monthly and overdue texts through an outbox with retry and Ipadala ulit; returns reduce utang. **SMS is mock-only**: Semaphore turns on only with `SMS_PROVIDER=semaphore` and a key, after the owner approves. | `utang.test` 8, `utang-m6.test` 7 |
+| M7 Agent orders (`faaf0f8`) | The agent's 3-button app; the store approves (stock held where it comes from) or declines with a reason; the release flow; pay only for what was delivered. | `agent-order.test` 4, `agent-orders-m7.test` 6 |
+| M8 Bilangin (`211c0d0`) | Blind counts with the owner's approval; quick count / zero check from Benta; top-5 count at closing; Balance; Manual na bawas (over 1% → owner). | `counting.test` 4, `counts-m8.test` 5 |
+| M9 Reports (`5275e49`, `a65710b`) | Stock Live with a change stream, Daily with Pagsasara (locks the day), Monthly with frozen costs, Kulang ranking, Trace, kargador pay sheet, alerts, CSV export. | `reports.test` 4, `reports-m9.test` 3 |
+| M10 Phone polish (`b90742e`) | Offline queue backed by a server Idempotency-Key (one answer per key), installable app, Taglish/English switch, large high-contrast screens (contrast test), usability script. | `riceTheme.test` 4, `idempotency-m10.test` 3 |
+| M11 Security bundle (`345cf18`) | No committed JWT/claim secret: production refuses missing, short or placeholder secrets, and development uses a random secret per run. CORS limited to `CORS_ORIGINS` (localhost in dev). Password login lockout in the DB: 5 wrong → 15 min, counted before the check, also on change-password. **Account scope:** a store changes the account-wide role, resets the password, sets the PIN or signs out everywhere only for an account that belongs to that store alone. This closes "store A invites store B's owner, resets the password, takes over store B". Public owner sign-up is closed (`ALLOW_OWNER_SIGNUP=true` reopens it). Order numbers are unique per store. The toast already used textContent (fixed in M1); it now has a test. | `security-m11.test` 9, `toast.test` 1, plus the existing auth/team tests added to verify |
+| M12 Go-live prep (`cd52325`) | `npm run rice:import -- --store <slug> [--apply]` imports products + per-location prices, customers + opening utang (written once, dated for reminders and aging), staff + PINs, and kargadors. Dry run is the default; any bad row blocks the whole import; re-runs change nothing. Produces a printable owner sign-off sheet read back from the DB. Also adds CSV templates, a one-page Taglish guide per flow (`docs/rice-ops/gabay/`) and `docs/rice-ops/go-live-checklist.md`. `go-live/` is git-ignored. | `rice-import.test` 6, `imports-m12.test` 2 |
+
+**Fixes from the operator-PC runs (slow link to Supabase, Sydney):**
+- typed daily-report sections (TS7034);
+- `txOptions()` with `TX_TIMEOUT_MS` (it can only raise the limit; verify sets 120 s);
+- the Stock Live watcher polls one at a time, with no pile-up on the pooler;
+- the daily report runs at most 4 queries at once;
+- the idempotency bad-key error is now returned on the stream;
+- the concurrent-send test accepts a 409 or the stored answer (never a second run).
+
+**Known limits (deliberate):**
+- SMS is mock-only until a provider is chosen.
+- Agent-order utang over the limit is refused (not routed for approval).
+- There is no manager PIN override for selling below zero; the quick count is used instead.
+- The monthly report is computed live, not frozen at month end.
+- The language switch covers navigation and shared screens only.
+- Kargador photos are https links (no in-app camera yet).
+- The usability check needs a real staff member.
+- Two parallel agent orders for a brand-new customer can create duplicate Customer rows.
+- Lockouts can be triggered by someone guessing (the owner or platform admin resets).
+- Store A can still link an existing account as its staff by phone; it just cannot take that account over.
+
+**Not done (needs the owner):** production deploy and its settings; choosing an SMS provider; the real import plus sign-off; the usability check; go-live day. See `docs/rice-ops/go-live-checklist.md`.
+
+| Item | Detail |
+|---|---|
+| Verified on the operator machine (2026-10-15, live Supabase DB, `verify.bat`, 3397 s) | **VERIFY RESULT: PASS — ready to commit.** No pending migrations (M10 and M11 applied after a backup); typecheck OK (contracts, api, web). Every count below is pass / 0 fail, no retries.<br>**Pure tests:** weight 7, stock-location 10, people 10, transfer-flow 6, resack 8, selling 10, utang 8, agent-order 4, counting 4, reports 4, rice-import 6, riceTheme 4, toast 1.<br>**Database tests:** ledger-m1 11, people-m2 16, transfers-m3 9, resack-m4 8, benta-m5 10, utang-m6 7, agent-orders-m7 6, counts-m8 5, reports-m9 3, idempotency-m10 3, security-m11 9, imports-m12 2.<br>**Existing suites:** auth.service 18, store-access-users 11, platform-users 6, team.service 4, pos.service 22. |
+
 ## M4 — Resack (Rice Ops, 2026-10-15)
 
 | Item | Detail |
@@ -10,6 +51,8 @@
 | Steps | One step `POST /admin/resacks`; Simulan `POST /admin/resacks/start` (input leaves the shelf, shows as "nasa resack"); Tapusin `POST /admin/resacks/:id/finish` (once; uses the value recorded at Simulan); cancel `POST /admin/resacks/:id/cancel` (reason; input back); Buksan ang sako `POST /admin/resacks/open-sack` (one sack → loose kilos); `GET /admin/resacks`. Ledger: `RESACK_OUT` (guarded), `RESACK_IN`, `RESACK_RETURN`, all with the job as document. Staff signs (+ kargador when one did the work); staff act only at their location. |
 | Screen | **Resack** (Bigas menu): Resack ngayon / Simulan / Buksan ang sako; in vs out kilos, "Kulang 0.2 kg (0.8%) — OK" or "lampas 1%: ipapaalam sa may-ari", read-back sentence, signatures; "Nasa resack" list with Tapusin / Kanselahin; recent jobs with Ibang klase / Sa may-ari badges. |
 | Known limits (deliberate) | `Product.costMinor` stays one number per product: the carried cost is recorded on each job for the reports (M9), it does not re-average the product's cost. Product.variety has no field on the Products screen yet (the name rule covers the usual names). |
+| First run on the operator machine (2026-10-15) | Backup OK; M4 migration applied to the live DB; typecheck clean; resack-m4 7/8. The one failure was the owner's approval text ("25 kg kg", loose rice shown as "24500 ×"): `formatKilos` already ends in "kg". Fixed: "Kulang 0.5 kg (2.00%)", loose outputs read as kilos. |
+| Verified on the operator machine (2026-10-15, live Supabase DB, `verify.bat`, 1544 s) | **VERIFY RESULT: PASS.** Migrations up to date; typecheck OK; weight 7/7, stock-location 10/10, people 9/9, transfer-flow 6/6, resack 8/8, ledger-m1 11/11, people-m2 16/16, transfers-m3 9/9, **resack-m4 8/8**. One M3 test lost its database connection on the first attempt ("Can't reach database server", a network drop) and passed on verify's automatic retry. |
 
 ## M3 — Transfers, releases and returns (Rice Ops, 2026-10-14)
 

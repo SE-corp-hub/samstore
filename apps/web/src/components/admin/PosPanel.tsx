@@ -7,6 +7,7 @@
 // the Pre Order panel (preorders). Loyalty points redeemable on utang.
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { newSaleKey } from "../../lib/saleKey";
 import { API_URL } from "../../config";
 import { adminHeaders } from "../../lib/admin";
 import { toast } from "../../lib/toast";
@@ -130,6 +131,7 @@ function SignaturePad({ onSignature }: { onSignature: (dataUrl: string | null) =
 }
 
 export default function PosPanel({ onNavigate }: { onNavigate?: (tab: string) => void } = {}) {
+  const saleKeyRef = useRef<string | null>(null);
   const [products, setProducts] = useState<PosProduct[]>([]);
   const [customers, setCustomers] = useState<PosCustomer[]>([]);
   const [holds, setHolds] = useState<HeldOrder[]>([]);
@@ -337,7 +339,11 @@ export default function PosPanel({ onNavigate }: { onNavigate?: (tab: string) =>
     try {
       const customer = await ensureCustomer();
       if (payment === "credit" && !customer) { setError("Add or select a customer for utang"); setBusy(false); return; }
+      // Rice Ops M5: one key per sale — a double-tap or a retry after a dropped signal
+      // returns the same sale instead of making a second one. Cleared when the sale is done.
+      if (!saleKeyRef.current) saleKeyRef.current = newSaleKey();
       const payload = {
+        idempotencyKey: workingHoldId ? undefined : saleKeyRef.current,
         items: itemsPayload(),
         paymentMethod: payment,
         tenderedMinor: payment === "cash" ? tenderedMinor : undefined,
@@ -364,6 +370,7 @@ export default function PosPanel({ onNavigate }: { onNavigate?: (tab: string) =>
   };
 
   const resetSale = () => {
+    saleKeyRef.current = null;
     setCart([]); setCustomerId(""); setNewName(""); setNewPhone(""); setPriceReason("");
     setTendered(""); setStartAt(""); setDueAt(""); setWorkingHoldId(null);
     setUsePoints(false); setCreditSig(null); setCreditSigError(false);

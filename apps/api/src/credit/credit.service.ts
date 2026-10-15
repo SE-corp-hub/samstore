@@ -46,7 +46,7 @@ export class CreditService {
   }
 
   /** Effective limit for a customer (per-customer override, else store default). */
-  private async effectiveLimit(storeId: string, sc: { creditLimitMinor: number }): Promise<number> {
+  async effectiveLimit(storeId: string, sc: { creditLimitMinor: number }): Promise<number> {
       if (sc.creditLimitMinor > 0) return sc.creditLimitMinor;
       const settings = await this._prisma.storeSettings.findUnique({ where: { storeId } });
       return settings?.creditLimitMinor ?? 0;
@@ -66,27 +66,40 @@ export class CreditService {
     return { start, due: new Date(start.getTime() + term * 86_400_000) };
   }
 
-  /** Record a credit purchase (debt) against a customer. Call inside the order transaction. */
-  async sellOnCredit(tx: Parameters<Parameters<typeof prisma.$transaction>[0]>[0], storeId: string, storeCustomerId: string, orderId: string, amountMinor: number, actorId: string, opts: { startAt?: string; dueAt?: string } = {}): Promise<CreditResult<{ balanceMinor: number }>> {
+  /**
+   * Record a credit purchase (debt) against a customer. Call inside the order transaction.
+   * Rice Ops M6: the limit is enforced in ONE guarded statement (two sales racing can no
+   * longer both slip under the limit). `overLimitApprovedBy` = the owner approved this
+   * sale over the limit (Para sa iyo) — the only way past it.
+   */
+  async sellOnCredit(tx: Parameters<Parameters<typeof prisma.$transaction>[0]>[0], storeId: string, storeCustomerId: string, orderId: string, amountMinor: number, actorId: string, opts: { startAt?: string; dueAt?: string; overLimitApprovedBy?: string } = {}): Promise<CreditResult<{ balanceMinor: number }>> {
     const sc = await tx.storeCustomer.findFirst({ where: { storeId, id: storeCustomerId } });
     if (!sc) return { ok: false, error: { type: "not_found", message: "Customer not found in this store" } };
     if (!sc.creditApproved) return { ok: false, error: { type: "conflict", message: "Customer is not approved for credit" } };
-    const limit = await this.effectiveLimit(storeId, sc);
-    if (limit <= 0) return { ok: false, error: { type: "conflict", message: "Credit is disabled for this store" } };
-    if (sc.creditBalanceMinor + amountMinor > limit) {
-      return { ok: false, error: { type: "conflict", message: `Credit limit exceeded (limit ₱${(limit / 100).toFixed(2)})` } };
+    if (!opts.overLimitApprovedBy) {
+      const limit = await this.effectiveLimit(storeId, sc);
+      if (limit <= 0) return { ok: false, error: { type: "conflict", message: "Credit is disabled for this store" } };
+      const guarded = await tx.storeCustomer.updateMany({
+        where: { id: sc.id, storeId, creditBalanceMinor: { lte: limit - amountMinor } },
+        data: { creditBalanceMinor: { increment: amountMinor } },
+      });
+      if (guarded.count === 0) {
+        return { ok: false, error: { type: "conflict", message: `Credit limit exceeded (limit ₱${(limit / 100).toFixed(2)})` } };
+      }
+    } else {
+      await tx.storeCustomer.update({ where: { id: sc.id }, data: { creditBalanceMinor: { increment: amountMinor } } });
     }
     const { start, due } = await this.defaultDueAt(storeId, opts.startAt ? new Date(opts.startAt) : undefined, opts.dueAt);
     await tx.creditEntry.create({
-      data: { storeId, storeCustomerId, orderId, type: "purchase", amountMinor, startAt: start, dueAt: due, note: "POS credit sale", createdBy: actorId },
+      data: {
+        storeId, storeCustomerId, orderId, type: "purchase", amountMinor, startAt: start, dueAt: due, createdBy: actorId,
+        note: opts.overLimitApprovedBy ? "Utang (aprubado ng may-ari, lampas sa limit)" : "POS credit sale",
+      },
     });
-    const updated = await tx.storeCustomer.update({
-          where: { id: sc.id },
-          data: { creditBalanceMinor: { increment: amountMinor } },
-        });
-        await bustLedger(storeId);
-        return { ok: true, value: { balanceMinor: updated.creditBalanceMinor } };
-      }
+    const updated = await tx.storeCustomer.findUniqueOrThrow({ where: { id: sc.id }, select: { creditBalanceMinor: true } });
+    await bustLedger(storeId);
+    return { ok: true, value: { balanceMinor: updated.creditBalanceMinor } };
+  }
 
   /** Read-only eligibility check for online credit checkout. */
   async checkCredit(storeId: string, storeCustomerId: string, amountMinor: number): Promise<{ ok: true } | { ok: false; message: string }> {

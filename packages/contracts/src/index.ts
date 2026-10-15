@@ -302,6 +302,8 @@ export interface PosSellRequest {
   loyaltyPoints?: number;
   /** v4: REQUIRED for credit sales — finger-drawn signature (data-URL PNG) */
   signatureData?: string;
+  /** Rice Ops M5: one sale per key — a double-tap or a retry returns the first sale. */
+  idempotencyKey?: string;
 }
 
 export interface PosHoldRequest {

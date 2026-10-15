@@ -6,6 +6,7 @@
 // never re-processed.
 
 import { prisma } from "../persistence/prisma-repositories.js";
+import { handleSmsEvent } from "../sms/sms.service.js";
 
 export interface OutboxEventInput {
   storeId: string;
@@ -120,6 +121,10 @@ export class OutboxWorker {
             delivered: false,
           },
         });
+        return;
+      case "sms.send":
+        // Rice Ops M6: utang texts — mock provider until the SMS account is approved.
+        await handleSmsEvent(payload);
         return;
       default:
         // Unknown event types are treated as already-handled (no-op) so the

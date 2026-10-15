@@ -43,3 +43,7 @@ vids/
 backups/
 *.dump
 verify-logs/
+
+# Rice Ops M12: the owner's real go-live lists (customers, utang, staff PINs) and the
+# one-time staff logins — personal data, never committed.
+go-live/

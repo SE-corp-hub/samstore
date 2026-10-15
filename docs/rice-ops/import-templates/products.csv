@@ -1,0 +1,5 @@
+sku,name,variety,sold_as,kg_per_sack,cost,price,price_S1,price_S2,price_S3,price_WH
+SIN-25,Sinandomeng 25 kg,Sinandomeng,SACK,25,"1,180","1,300",,,,"1,250"
+SIN-K,Sinandomeng (kilo),Sinandomeng,KILO,,48,54,,55,,
+JAS-50,Jasmine 50 kg,Jasmine,SACK,50,"2,600","2,850",,,,
+SUKA-1L,Suka 1 litro,,PIECE,,20,35,,,,

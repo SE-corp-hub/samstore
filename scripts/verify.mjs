@@ -37,16 +37,37 @@ const TEST_FILES = [
   "apps/api/src/domain/people.test.ts",
   "apps/api/src/domain/transfer-flow.test.ts",
   "apps/api/src/domain/resack.test.ts",
+  "apps/api/src/domain/selling.test.ts",
+  "apps/api/src/domain/utang.test.ts",
+  "apps/api/src/domain/agent-order.test.ts",
+  "apps/api/src/domain/counting.test.ts",
+  "apps/api/src/domain/reports.test.ts",
+  "apps/api/src/domain/rice-import.test.ts",
+  "apps/web/src/lib/riceTheme.test.ts",
   "apps/api/src/inventory/ledger-m1.test.ts",
   "apps/api/src/people/people-m2.test.ts",
   "apps/api/src/transfers/transfers-m3.test.ts",
   "apps/api/src/resack/resack-m4.test.ts",
+  "apps/api/src/selling/benta-m5.test.ts",
+  "apps/api/src/utang/utang-m6.test.ts",
+  "apps/api/src/agent/agent-orders-m7.test.ts",
+  "apps/api/src/counts/counts-m8.test.ts",
+  "apps/api/src/reports/reports-m9.test.ts",
+  "apps/api/src/security/idempotency-m10.test.ts",
+  "apps/web/src/lib/toast.test.ts",
+  "apps/api/src/security/security-m11.test.ts",
+  "apps/api/src/imports/imports-m12.test.ts",
+  "apps/api/src/auth/auth.service.test.ts",
+  "apps/api/src/auth/store-access-users.test.ts",
+  "apps/api/src/admin/platform-users.test.ts",
+  "apps/api/src/admin/team.service.test.ts",
+  "apps/api/src/pos/pos.service.test.ts",
 ];
 
 function run(label, cmd) {
   return new Promise((done) => {
     out(`\n[${stamp()}] ▶ ${label}\n$ ${cmd}\n`);
-    const child = spawn(cmd, { cwd: root, shell: true, env: { ...process.env, FORCE_COLOR: "0", NO_COLOR: "1" } });
+    const child = spawn(cmd, { cwd: root, shell: true, env: { ...process.env, FORCE_COLOR: "0", NO_COLOR: "1", TX_TIMEOUT_MS: process.env.TX_TIMEOUT_MS ?? "120000" } /* slow link to the cloud DB: let long steps finish (see persistence/tx-options.ts) */ });
     let text = "";
     const take = (b) => {
       const s = b.toString();

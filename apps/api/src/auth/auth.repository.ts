@@ -47,7 +47,20 @@ export interface AuthRepository {
   setMustChange?(userId: string, mustChange: boolean): Promise<void>;
   findMemberships?(userId: string): Promise<MembershipLookup[]>;
   updateProfile?(userId: string, name: string | null, email: string): Promise<void>;
+  /**
+   * Rice Ops M11 — password login lockout. Counts one try BEFORE the password is
+   * checked, in one guarded UPDATE (parallel guesses cannot slip past the limit).
+   * Optional so in-memory test doubles keep working without a database.
+   */
+  reserveLoginTry?(userId: string): Promise<LoginTry>;
+  clearLoginFails?(userId: string): Promise<void>;
 }
+
+/** used = tries counted so far after this one (0 means this try just started a lock). */
+export type LoginTry = { locked: true; secondsLeft: number } | { locked: false; used: number };
+
+export const LOGIN_MAX_FAILS = 5;
+export const LOGIN_LOCK_MINUTES = 15;
 
 export class PrismaAuthRepository implements AuthRepository {
   async findByEmail(email: string): Promise<AuthUserRecord | null> {
@@ -120,7 +133,26 @@ export class PrismaAuthRepository implements AuthRepository {
 
   /** Replace the user's bcrypt password hash (admin password reset / self change). */
   async resetPassword(userId: string, passwordHash: string): Promise<void> {
-    await prisma.user.update({ where: { id: userId }, data: { passwordHash } });
+    // A new password also lifts a password-login lock (M11).
+    await prisma.user.update({ where: { id: userId }, data: { passwordHash, loginFailedCount: 0, loginLockedUntil: null } });
+  }
+
+  async reserveLoginTry(userId: string): Promise<LoginTry> {
+    const rows = await prisma.$queryRaw<{ loginFailedCount: number }[]>`
+      UPDATE "User"
+         SET "loginFailedCount" = CASE WHEN "loginFailedCount" + 1 >= ${LOGIN_MAX_FAILS}::int THEN 0 ELSE "loginFailedCount" + 1 END,
+             "loginLockedUntil" = CASE WHEN "loginFailedCount" + 1 >= ${LOGIN_MAX_FAILS}::int
+                                       THEN now() + make_interval(mins => ${LOGIN_LOCK_MINUTES}::int) ELSE "loginLockedUntil" END
+       WHERE id = ${userId} AND ("loginLockedUntil" IS NULL OR "loginLockedUntil" <= now())
+   RETURNING "loginFailedCount"`;
+    if (rows.length > 0) return { locked: false, used: Number(rows[0]!.loginFailedCount) };
+    const u = await prisma.user.findUnique({ where: { id: userId }, select: { loginLockedUntil: true } });
+    const left = u?.loginLockedUntil ? Math.ceil((u.loginLockedUntil.getTime() - Date.now()) / 1000) : 0;
+    return { locked: true, secondsLeft: Math.max(1, left) };
+  }
+
+  async clearLoginFails(userId: string): Promise<void> {
+    await prisma.user.updateMany({ where: { id: userId, OR: [{ loginFailedCount: { gt: 0 } }, { loginLockedUntil: { not: null } }] }, data: { loginFailedCount: 0, loginLockedUntil: null } });
   }
 
   /** v6: set/unset the must-change-password-on-next-login flag. */

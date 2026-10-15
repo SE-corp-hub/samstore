@@ -1,0 +1,376 @@
+"use client";
+
+// Rice Ops M9 — Ulat (reports) on the owner's phone, and Pagsasara for the closing staff.
+//   Stock Live · Ngayong araw (+ Pagsasara) · Ngayong buwan · Kulang · Hanapin · Alerts
+// Stock Live listens to the server's change stream and refreshes within seconds of any
+// signed step (every 30 s as a backup). Every table exports to Excel (CSV).
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import { API_URL } from "../../config";
+import { adminHeaders, isOwnerRole } from "../../lib/admin";
+import { toast } from "../../lib/toast";
+import NumPad from "./NumPad";
+import SignaturePad from "./SignaturePad";
+
+type ApiBody = { message?: string; errors?: string[] } & Record<string, unknown>;
+interface Loc { id: string; name: string; code: string | null; type: string }
+interface Cell { onHand: number; reserved: number; available: number; flag: "ZERO" | "LOW" | "OK" }
+interface LiveRow { productId: string; name: string; loose: boolean; gramsPerUnit: number | null; cells: Record<string, Cell>; inTransit: number; inResack: number; total: number; totalGrams: number | null }
+
+const peso = (m: number) => `₱${(m / 100).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const kg = (g: number) => `${(g / 1000).toLocaleString("en-PH", { maximumFractionDigits: 1 })} kg`;
+const qty = (loose: boolean, n: number) => (loose ? kg(n) : `${n}`);
+const errText = (d: ApiBody | null, f: string) => d?.errors?.join(", ") ?? d?.message ?? f;
+const today = () => new Date(Date.now() + 8 * 3_600_000).toISOString().slice(0, 10);
+
+async function getJson(path: string): Promise<{ ok: boolean; data: ApiBody | null }> {
+  const res = await fetch(`${API_URL}${path}`, { headers: adminHeaders() });
+  return { ok: res.ok, data: (await res.json().catch(() => null)) as ApiBody | null };
+}
+
+/** Excel opens a CSV with a BOM; cells quoted when needed. */
+function downloadCsv(name: string, rows: (string | number | null | undefined)[][]) {
+  const cell = (v: string | number | null | undefined) => { const s = v === null || v === undefined ? "" : String(v); return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+  const blob = new Blob([`﻿${rows.map((r) => r.map(cell).join(",")).join("\r\n")}\r\n`], { type: "text/csv;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2_000);
+}
+
+type Tab = "live" | "daily" | "monthly" | "kulang" | "trace" | "alerts";
+
+export default function UlatPanel({ role }: { role?: string; onNavigate?: (tab: string) => void }) {
+  const owner = !!role && (isOwnerRole(role) || role === "MANAGER");
+  const [tab, setTab] = useState<Tab>(owner ? "live" : "daily");
+  const tabs: [Tab, string][] = owner
+    ? [["live", "Stock Live"], ["daily", "Ngayong araw"], ["monthly", "Ngayong buwan"], ["kulang", "Kulang"], ["trace", "Hanapin"], ["alerts", "Alerts"]]
+    : [["live", "Stock Live"], ["daily", "Pagsasara"]];
+  return (
+    <div style={{ fontSize: 17 }}>
+      <h1 className="h4">Ulat</h1>
+      <ul className="nav nav-tabs mb-3 flex-nowrap overflow-auto">
+        {tabs.map(([k, label]) => <li key={k} className="nav-item"><button className={`nav-link text-nowrap ${tab === k ? "active" : ""}`} onClick={() => setTab(k)}>{label}</button></li>)}
+      </ul>
+      {tab === "live" && <StockLive />}
+      {tab === "daily" && <Daily owner={owner} />}
+      {tab === "monthly" && owner && <Monthly />}
+      {tab === "kulang" && owner && <Kulang />}
+      {tab === "trace" && owner && <Trace />}
+      {tab === "alerts" && owner && <Alerts />}
+    </div>
+  );
+}
+
+function StockLive() {
+  const [locations, setLocations] = useState<Loc[]>([]);
+  const [rows, setRows] = useState<LiveRow[]>([]);
+  const [at, setAt] = useState<string>("");
+  const [live, setLive] = useState(false);
+  const [detail, setDetail] = useState<{ row: LiveRow; loc: Loc | null; moves: { id: string; type: string; delta: number; createdAt: string; by: string | null; documentType: string | null; reservedOnly: boolean }[] } | null>(null);
+  const load = useCallback(async () => {
+    const r = await getJson("/admin/rice/stock-live");
+    if (!r.ok || !r.data) return;
+    setLocations(r.data.locations as Loc[]);
+    setRows(r.data.rows as LiveRow[]);
+    setAt(String(r.data.at));
+  }, []);
+  useEffect(() => {
+    void load();
+    const backup = setInterval(() => void load(), 30_000);
+    // The change stream: refetch within seconds of any signed step.
+    const ctrl = new AbortController();
+    (async () => {
+      try {
+        const res = await fetch(`${API_URL}/admin/rice/stream`, { headers: adminHeaders(), signal: ctrl.signal });
+        if (!res.ok || !res.body) return;
+        setLive(true);
+        const reader = res.body.getReader();
+        const dec = new TextDecoder();
+        let buf = "";
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buf += dec.decode(value, { stream: true });
+          const parts = buf.split("\n\n");
+          buf = parts.pop() ?? "";
+          if (parts.some((p) => p.startsWith("event: stock"))) void load();
+        }
+      } catch { /* stream closed — the 30 s refresh keeps going */ } finally { setLive(false); }
+    })();
+    return () => { clearInterval(backup); ctrl.abort(); };
+  }, [load]);
+
+  const open = async (row: LiveRow, loc: Loc | null) => {
+    const r = await getJson(`/admin/rice/movements?productId=${row.productId}${loc ? `&locationId=${loc.id}` : ""}`);
+    setDetail({ row, loc, moves: (r.data?.movements ?? []) as never });
+  };
+  const exportCsv = () => downloadCsv(`stock-live-${today()}.csv`, [
+    ["Produkto", ...locations.map((l) => l.code ?? l.name), "Nasa daan", "Nasa resack", "Kabuuan", "Kabuuang kilo"],
+    ...rows.map((r) => [r.name, ...locations.map((l) => r.cells[l.id]?.onHand ?? 0), r.inTransit, r.inResack, r.total, r.totalGrams === null ? "" : r.totalGrams / 1000]),
+  ]);
+
+  return (
+    <div>
+      <div className="d-flex justify-content-between align-items-center mb-2">
+        <span className="small text-muted">{live ? <span className="badge text-bg-success me-1">Live</span> : null}{at && `Huling update ${new Date(at).toLocaleTimeString("en-PH")}`}</span>
+        <button type="button" className="btn btn-outline-dark btn-sm" onClick={exportCsv}>Excel</button>
+      </div>
+      <div className="table-responsive">
+        <table className="table table-sm table-bordered align-middle" style={{ fontVariantNumeric: "tabular-nums" }}>
+          <thead><tr><th>Bigas</th>{locations.map((l) => <th key={l.id} className="text-end">{l.code ?? l.name}</th>)}<th className="text-end">Nasa daan</th><th className="text-end">Resack</th><th className="text-end">Kabuuan</th></tr></thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.productId}>
+                <td>{r.name}</td>
+                {locations.map((l) => {
+                  const c = r.cells[l.id];
+                  const cls = !c ? "text-muted" : c.flag === "ZERO" ? "table-danger" : c.flag === "LOW" ? "table-warning" : "";
+                  return (
+                    <td key={l.id} className={`text-end ${cls}`} role="button" onClick={() => void open(r, l)}>
+                      {c ? qty(r.loose, c.onHand) : "—"}{c && c.reserved > 0 && <span className="d-block small text-muted">reserba {qty(r.loose, c.reserved)}</span>}
+                      {c?.flag === "ZERO" && <span className="d-block small fw-semibold">Ubos</span>}
+                    </td>
+                  );
+                })}
+                <td className="text-end">{r.inTransit ? qty(r.loose, r.inTransit) : ""}</td>
+                <td className="text-end">{r.inResack ? qty(r.loose, r.inResack) : ""}</td>
+                <td className="text-end fw-semibold" role="button" onClick={() => void open(r, null)}>{qty(r.loose, r.total)}{!r.loose && r.totalGrams ? <span className="d-block small text-muted">{kg(r.totalGrams)}</span> : null}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {detail && (
+        <div className="card mt-2">
+          <div className="card-body">
+            <div className="d-flex justify-content-between"><strong>{detail.row.name}{detail.loc ? ` · ${detail.loc.name}` : ""}</strong><button type="button" className="btn-close" aria-label="Isara" onClick={() => setDetail(null)} /></div>
+            <ul className="list-unstyled small mb-0 mt-2" style={{ fontVariantNumeric: "tabular-nums" }}>
+              {detail.moves.filter((m) => !m.reservedOnly).map((m) => (
+                <li key={m.id} className="border-bottom py-1">{new Date(m.createdAt).toLocaleString("en-PH")} · {m.type} {m.delta > 0 ? "+" : ""}{qty(detail.row.loose, m.delta)} · {m.documentType ?? ""} · {m.by ?? ""}</li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface DaySection {
+  location: Loc; locked: boolean; closedAt: string | null; cashCountedMinor: number | null; cashVarianceMinor: number | null;
+  sales: { count: number; totalMinor: number; cashMinor: number; gcashMinor: number; utangMinor: number; encodedLater: number; grossProfitMinor: number };
+  kilosByVariety: { variety: string; grams: number; salesMinor: number }[];
+  utang: { givenMinor: number; collectedMinor: number }; cash: { expectedMinor: number };
+  stockIn: { documents: number }; trips: { releasedOut: number; receivedIn: number; returnedIn: number };
+  resack: { jobs: number; lossGrams: number; lossValueMinor: number }; writeOffs: { count: number; valueMinor: number }; counts: { kulangMinor: number; sobraMinor: number };
+  kargadors: { name: string; transactions: number }[];
+  openHandOffs: { trips: { docNumber: string | null; status: string; product: string }[]; resacks: { docNumber: string; product: string }[] };
+}
+
+function Daily({ owner }: { owner: boolean }) {
+  const [date, setDate] = useState(today());
+  const [data, setData] = useState<{ sections: DaySection[]; total: Record<string, number> } | null>(null);
+  const [closing, setClosing] = useState<DaySection | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const load = useCallback(async () => {
+    const r = await getJson(`/admin/rice/daily?date=${date}`);
+    if (!r.ok) { setError(errText(r.data, "Hindi ma-load")); return; }
+    setError(null);
+    setData(r.data as never);
+  }, [date]);
+  useEffect(() => { void load(); }, [load]);
+  if (closing) return <CloseDay section={closing} date={date} onCancel={() => setClosing(null)} onDone={async () => { setClosing(null); await load(); }} />;
+  return (
+    <div>
+      <div className="d-flex gap-2 mb-3 align-items-center">
+        <input type="date" className="form-control" style={{ maxWidth: 200 }} aria-label="Petsa" value={date} onChange={(e) => setDate(e.target.value)} />
+        {data && <button type="button" className="btn btn-outline-dark btn-sm" onClick={() => downloadCsv(`ulat-${date}.csv`, [["Lokasyon", "Benta", "Cash", "GCash", "Utang", "Kita", "Utang na nabayaran", "Inaasahang cash", "Nabilang na cash", "Bawas", "Resack kulang", "Bilang kulang"], ...data.sections.map((s) => [s.location.name, s.sales.totalMinor / 100, s.sales.cashMinor / 100, s.sales.gcashMinor / 100, s.sales.utangMinor / 100, s.sales.grossProfitMinor / 100, s.utang.collectedMinor / 100, s.cash.expectedMinor / 100, s.cashCountedMinor === null ? "" : s.cashCountedMinor / 100, s.writeOffs.valueMinor / 100, s.resack.lossValueMinor / 100, s.counts.kulangMinor / 100])])}>Excel</button>}
+      </div>
+      {error && <div className="alert alert-danger py-2">{error}</div>}
+      {data && owner && data.sections.length > 1 && (
+        <div className="alert alert-light border" style={{ fontVariantNumeric: "tabular-nums" }}>
+          Lahat: benta <strong>{peso(data.total.salesMinor ?? 0)}</strong> · kita <strong>{peso(data.total.grossProfitMinor ?? 0)}</strong> · utang nabayaran {peso(data.total.utangCollectedMinor ?? 0)} · bawas {peso(data.total.writeOffMinor ?? 0)}
+        </div>
+      )}
+      <div className="d-grid gap-3" style={{ maxWidth: 760 }}>
+        {data?.sections.map((s) => (
+          <div key={s.location.id} className="card">
+            <div className="card-body" style={{ fontVariantNumeric: "tabular-nums" }}>
+              <div className="d-flex justify-content-between align-items-center">
+                <h2 className="h5 mb-0">{s.location.name}</h2>
+                {s.locked ? <span className="badge text-bg-secondary">Sarado {s.closedAt ? new Date(s.closedAt).toLocaleTimeString("en-PH") : ""}</span>
+                  : date === today() ? <button type="button" className="btn btn-success" onClick={() => setClosing(s)}>Pagsasara</button> : null}
+              </div>
+              <div className="fs-4 mt-1">Benta {peso(s.sales.totalMinor)} <span className="fs-6 text-muted">({s.sales.count})</span></div>
+              <div className="small">Cash {peso(s.sales.cashMinor)} · GCash {peso(s.sales.gcashMinor)} · Utang {peso(s.sales.utangMinor)}{s.sales.encodedLater ? ` · ${s.sales.encodedLater} galing sa papel` : ""}</div>
+              {owner && <div className="small">Kita (gross) {peso(s.sales.grossProfitMinor)}</div>}
+              <div className="small">Kilo: {s.kilosByVariety.map((v) => `${v.variety} ${kg(v.grams)}`).join(" · ") || "—"}</div>
+              <div className="small">Utang ibinigay {peso(s.utang.givenMinor)} · nabayaran {peso(s.utang.collectedMinor)}</div>
+              <div className="small">Cash na dapat nasa kaha {peso(s.cash.expectedMinor)}{s.cashCountedMinor !== null && <> · nabilang {peso(s.cashCountedMinor)} <strong className={s.cashVarianceMinor && s.cashVarianceMinor < 0 ? "text-danger" : ""}>({s.cashVarianceMinor! >= 0 ? "+" : ""}{peso(s.cashVarianceMinor!)})</strong></>}</div>
+              <div className="small">Lipat: labas {s.trips.releasedOut} · pasok {s.trips.receivedIn} · balik {s.trips.returnedIn} · Pasok (supplier) {s.stockIn.documents}</div>
+              <div className="small">Resack {s.resack.jobs} (kulang {kg(s.resack.lossGrams)}, {peso(s.resack.lossValueMinor)}) · Bawas {s.writeOffs.count} ({peso(s.writeOffs.valueMinor)}) · Bilang: kulang <span className="text-danger">{peso(s.counts.kulangMinor)}</span>, sobra {peso(s.counts.sobraMinor)}</div>
+              {s.kargadors.length > 0 && <div className="small">Kargador: {s.kargadors.map((k) => `${k.name} ${k.transactions}`).join(" · ")}</div>}
+              {(s.openHandOffs.trips.length + s.openHandOffs.resacks.length) > 0 && (
+                <div className="alert alert-warning py-1 px-2 mt-2 mb-0 small">Bukas pa: {[...s.openHandOffs.trips.map((t) => `${t.docNumber} ${t.product}`), ...s.openHandOffs.resacks.map((r) => `${r.docNumber} ${r.product}`)].join(" · ")}</div>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function CloseDay({ section, date, onCancel, onDone }: { section: DaySection; date: string; onCancel: () => void; onDone: () => void | Promise<void> }) {
+  const [cash, setCash] = useState("");
+  const [sig, setSig] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const counted = Math.round(Number(cash || "0") * 100);
+  const save = async () => {
+    setBusy(true); setError(null);
+    const res = await fetch(`${API_URL}/admin/rice/close`, { method: "POST", headers: { "Content-Type": "application/json", ...adminHeaders() }, body: JSON.stringify({ locationId: section.location.id, date, cashCountedMinor: counted, signatures: [{ signerKind: "STAFF", imagePng: sig }] }) });
+    const d = (await res.json().catch(() => null)) as ApiBody | null;
+    setBusy(false);
+    if (!res.ok) { setError(errText(d, "Hindi naisara")); return; }
+    toast("Sarado na ang araw — naipadala sa may-ari");
+    await onDone();
+  };
+  return (
+    <div className="card border-success" style={{ maxWidth: 520, fontSize: 18 }}>
+      <div className="card-body">
+        <div className="small text-muted">Pagsasara · {section.location.name} · {date}</div>
+        <h2 className="h5">1. Bilangin ang cash sa kaha</h2>
+        <p className="mb-2">Dapat: <strong>{peso(section.cash.expectedMinor)}</strong> (benta at bayad sa utang na cash ngayong araw, hindi kasama ang panukli)</p>
+        {error && <div className="alert alert-danger py-2">{error}</div>}
+        <NumPad value={cash} onChange={setCash} decimals={2} label="Nabilang na cash" unit="₱" />
+        {cash && <div className={`fs-5 mt-2 ${counted - section.cash.expectedMinor < 0 ? "text-danger" : ""}`}>{counted - section.cash.expectedMinor === 0 ? "Tama" : counted - section.cash.expectedMinor < 0 ? `Kulang ${peso(section.cash.expectedMinor - counted)}` : `Sobra ${peso(counted - section.cash.expectedMinor)}`}</div>}
+        <h2 className="h5 mt-3">2. Bilang ng top 5</h2>
+        <p className="small">Gawin sa “Bilangin → Bilang sa pagsasara”.</p>
+        <h2 className="h5">3. Mga bukas pa</h2>
+        <p className="small">{(section.openHandOffs.trips.length + section.openHandOffs.resacks.length) === 0 ? "Wala." : [...section.openHandOffs.trips.map((t) => `${t.docNumber} ${t.product}`), ...section.openHandOffs.resacks.map((r) => `${r.docNumber} ${r.product}`)].join(" · ")}</p>
+        <div className="fw-semibold">4. Pirma mo</div>
+        <SignaturePad onSignature={setSig} />
+        <div className="d-flex justify-content-between mt-3">
+          <button type="button" className="btn btn-outline-secondary btn-lg" disabled={busy} onClick={onCancel}>Bumalik</button>
+          <button type="button" className="btn btn-success btn-lg" disabled={busy || !sig || cash === ""} onClick={() => void save()}>{busy ? "Sandali…" : "Isara ang araw"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Monthly() {
+  const [month, setMonth] = useState(today().slice(0, 7));
+  const [data, setData] = useState<Record<string, unknown> | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => { void getJson(`/admin/rice/monthly?month=${month}`).then((r) => { if (!r.ok) setError(errText(r.data, "Hindi ma-load")); else { setError(null); setData(r.data); } }); }, [month]);
+  const d = data as null | {
+    locations: { location: Loc; salesMinor: number; grossProfitMinor: number; grams: number; resackLossPct: number; transitShortGrams: number; writeOffMinor: number }[];
+    varieties: { variety: string; grams: number; salesMinor: number; grossProfitMinor: number }[];
+    kargadorLoss: { name: string; resackLossPct: number; transitShortGrams: number }[];
+    utangAging: { d0_30: number; d31_60: number; d60plus: number }; manualItemsForReview: number;
+    turnover: { ratio: number | null }; kargadorPay: { name: string; count: number; transactions: { date: string; kind: string; docNumber: string }[] }[];
+  };
+  return (
+    <div style={{ fontVariantNumeric: "tabular-nums", maxWidth: 820 }}>
+      <input type="month" className="form-control mb-3" style={{ maxWidth: 200 }} aria-label="Buwan" value={month} onChange={(e) => setMonth(e.target.value)} />
+      {error && <div className="alert alert-danger py-2">{error}</div>}
+      {d && (
+        <>
+          <h2 className="h6">Benta at kita bawat lokasyon <button type="button" className="btn btn-link btn-sm" onClick={() => downloadCsv(`buwan-${month}.csv`, [["Lokasyon", "Benta", "Kita", "Kilo", "Resack kulang %", "Kulang sa lipat (kg)", "Bawas"], ...d.locations.map((l) => [l.location.name, l.salesMinor / 100, l.grossProfitMinor / 100, l.grams / 1000, l.resackLossPct, l.transitShortGrams / 1000, l.writeOffMinor / 100])])}>Excel</button></h2>
+          <table className="table table-sm"><thead><tr><th>Lokasyon</th><th className="text-end">Benta</th><th className="text-end">Kita</th><th className="text-end">Kilo</th><th className="text-end">Resack kulang</th><th className="text-end">Bawas</th></tr></thead>
+            <tbody>{d.locations.map((l) => <tr key={l.location.id}><td>{l.location.name}</td><td className="text-end">{peso(l.salesMinor)}</td><td className="text-end">{peso(l.grossProfitMinor)}</td><td className="text-end">{kg(l.grams)}</td><td className="text-end">{l.resackLossPct}%</td><td className="text-end">{peso(l.writeOffMinor)}</td></tr>)}</tbody></table>
+          <h2 className="h6">Bawat klase ng bigas</h2>
+          <table className="table table-sm"><tbody>{d.varieties.map((v) => <tr key={v.variety}><td className="text-capitalize">{v.variety}</td><td className="text-end">{kg(v.grams)}</td><td className="text-end">{peso(v.salesMinor)}</td><td className="text-end">kita {peso(v.grossProfitMinor)}</td></tr>)}</tbody></table>
+          <h2 className="h6">Utang (edad)</h2>
+          <p>0–30 araw {peso(d.utangAging.d0_30)} · 31–60 {peso(d.utangAging.d31_60)} · <span className="text-danger">60+ {peso(d.utangAging.d60plus)}</span></p>
+          <p className="small">Turnover {d.turnover.ratio ?? "—"} · Bagong item na susuriin: {d.manualItemsForReview}</p>
+          <h2 className="h6">Kargador — kulang</h2>
+          <table className="table table-sm"><tbody>{d.kargadorLoss.map((k) => <tr key={k.name}><td>{k.name}</td><td className="text-end">resack {k.resackLossPct}%</td><td className="text-end">lipat {kg(k.transitShortGrams)}</td></tr>)}</tbody></table>
+          <h2 className="h6">Sahod ng kargador (bawat transaksyon) <button type="button" className="btn btn-link btn-sm" onClick={() => downloadCsv(`kargador-${month}.csv`, [["Kargador", "Petsa", "Uri", "Dokumento"], ...d.kargadorPay.flatMap((k) => k.transactions.map((t) => [k.name, t.date, t.kind, t.docNumber]))])}>Excel</button></h2>
+          <table className="table table-sm"><tbody>{d.kargadorPay.map((k) => <tr key={k.name}><td>{k.name}</td><td className="text-end fw-semibold">{k.count}</td></tr>)}</tbody></table>
+        </>
+      )}
+    </div>
+  );
+}
+
+function Kulang() {
+  const [data, setData] = useState<{ items: { product: string; loose: boolean; location: string; countDoc: string; kulangQty: number; kulangValueMinor: number; people: string[]; kargadors: string[]; since: { docNumber: string } | null }[] } | null>(null);
+  useEffect(() => { void getJson("/admin/rice/balance").then((r) => r.ok && setData(r.data as never)); }, []);
+  if (!data) return null;
+  return (
+    <div style={{ maxWidth: 760 }}>
+      {data.items.length === 0 ? <p className="text-muted">Walang kulang sa mga bilang nitong nakaraang buwan.</p> : (
+        <div className="list-group">
+          {data.items.map((i, n) => (
+            <div key={n} className="list-group-item">
+              <div className="d-flex justify-content-between"><strong>{i.product}</strong><span className="text-danger fw-semibold">Kulang {qty(i.loose, i.kulangQty)} · {peso(i.kulangValueMinor)}</span></div>
+              <div className="small text-muted">{i.location} · {i.countDoc}{i.since ? ` (mula ${i.since.docNumber})` : ""}</div>
+              <div className="small">Humawak: {[...i.people, ...i.kargadors.map((k) => `${k} (kargador)`)].join(", ") || "—"}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Trace() {
+  const [q, setQ] = useState("");
+  const [results, setResults] = useState<{ type: string; docNumber: string; signatures: { step: string; signer: string; at: string; location: string | null }[]; movements: { type: string; delta: number; product: string | null; location: string | null; by: string | null; at: string }[] }[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const search = async () => {
+    const r = await getJson(`/admin/rice/trace?q=${encodeURIComponent(q.trim())}`);
+    if (!r.ok) { setError(errText(r.data, "Walang nahanap")); return; }
+    setError(null);
+    setResults((r.data?.results ?? []) as never);
+  };
+  return (
+    <div style={{ maxWidth: 760 }}>
+      <div className="d-flex gap-2 mb-3">
+        <input className="form-control form-control-lg" placeholder="REL-000123, pangalan ng customer, kargador, staff o bigas" aria-label="Hanapin" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void search(); }} />
+        <button type="button" className="btn btn-success btn-lg" onClick={() => void search()}>Hanapin</button>
+      </div>
+      {error && <div className="alert alert-danger py-2">{error}</div>}
+      {results?.length === 0 && <p className="text-muted">Walang nahanap.</p>}
+      {results?.map((r) => (
+        <div key={r.docNumber} className="card mb-2">
+          <div className="card-body small">
+            <div className="fw-semibold fs-6">{r.docNumber} <span className="badge text-bg-light border">{r.type}</span></div>
+            {r.signatures.map((s, i) => <div key={i}>✍ {s.step} — {s.signer}{s.location ? ` @ ${s.location}` : ""} · {new Date(s.at).toLocaleString("en-PH")}</div>)}
+            {r.movements.filter((m) => !["RESERVE", "RELEASE_RESERVATION"].includes(m.type)).map((m, i) => <div key={i} className="text-muted">↔ {m.type} {m.delta > 0 ? "+" : ""}{m.delta} {m.product ?? ""} @ {m.location ?? ""} · {m.by ?? ""} · {new Date(m.at).toLocaleString("en-PH")}</div>)}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function Alerts() {
+  const [a, setA] = useState<null | { approvals: { id: string; kind: string; summary: string }[]; bigKulang: { docNumber: string; kulangValueMinor: number; location: string }[]; lateReleases: { docNumber: string | null; product: string; kargador: string | null; releasedAt: string }[]; unfinishedResacks: { docNumber: string; location: string }[]; utang: { name: string | null; balanceMinor: number; overLimit: boolean; oldestDays: number }[]; staleDrafts: number; ledgerMismatch: number }>(null);
+  const timer = useRef<ReturnType<typeof setInterval> | null>(null);
+  useEffect(() => {
+    const load = () => void getJson("/admin/rice/alerts").then((r) => r.ok && setA(r.data as never));
+    load();
+    timer.current = setInterval(load, 60_000);
+    return () => { if (timer.current) clearInterval(timer.current); };
+  }, []);
+  if (!a) return null;
+  const none = !a.approvals.length && !a.bigKulang.length && !a.lateReleases.length && !a.unfinishedResacks.length && !a.utang.length && !a.staleDrafts && !a.ledgerMismatch;
+  return (
+    <div style={{ maxWidth: 720 }}>
+      {none && <div className="alert alert-success">Walang kailangang tingnan ngayon.</div>}
+      {a.approvals.length > 0 && <div className="alert alert-warning"><strong>{a.approvals.length} naghihintay sa Para sa iyo.</strong><ul className="mb-0 small">{a.approvals.slice(0, 5).map((x) => <li key={x.id}>{x.summary}</li>)}</ul></div>}
+      {a.bigKulang.map((c) => <div key={c.docNumber} className="alert alert-danger py-2">Bilang {c.docNumber} sa {c.location}: kulang {peso(c.kulangValueMinor)}</div>)}
+      {a.lateReleases.map((t, i) => <div key={i} className="alert alert-danger py-2">{t.docNumber} {t.product} — nailabas {new Date(t.releasedAt).toLocaleTimeString("en-PH")}, hindi pa naihahatid{t.kargador ? ` (${t.kargador})` : ""}</div>)}
+      {a.unfinishedResacks.map((r) => <div key={r.docNumber} className="alert alert-warning py-2">Resack {r.docNumber} sa {r.location} — hindi natapos kahapon</div>)}
+      {a.utang.map((u, i) => <div key={i} className="alert alert-warning py-2">Utang ni {u.name}: {peso(u.balanceMinor)}{u.overLimit ? " — lampas sa limit" : ""}{u.oldestDays > 60 ? ` — ${u.oldestDays} araw na` : ""}</div>)}
+      {a.staleDrafts > 0 && <div className="alert alert-info py-2">{a.staleDrafts} na naiwang gawain (Tapusin) lampas 2 oras.</div>}
+      {a.ledgerMismatch > 0 && <div className="alert alert-danger py-2">May {a.ledgerMismatch} stock na hindi tugma sa talaan — ipaalam agad.</div>}
+    </div>
+  );
+}

@@ -32,10 +32,11 @@ export class PosController {
 
   /** POST /admin/pos/sell — immediate cash/utang sale (V1: tendered + change, credit dates). */
   @Post("sell")
-  async sell(@Req() req: Request & { user?: AuthPrincipal }, @Body() body: PosSellRequest, @Headers("x-store-id") headerStoreId?: string) {
+  async sell(@Req() req: Request & { user?: AuthPrincipal }, @Body() body: PosSellRequest, @Headers("x-store-id") headerStoreId?: string, @Headers("idempotency-key") idempotencyKey?: string) {
     const user = req.user!;
     const storeId = await this.guardAndStore(req, headerStoreId);
-    const result = await this.pos.sell(storeId, user.sub, body);
+    // Rice Ops M5: the key may come in the body or the Idempotency-Key header.
+    const result = await this.pos.sell(storeId, user.sub, { ...body, ...(body?.idempotencyKey === undefined && idempotencyKey ? { idempotencyKey } : {}) });
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
     return { ...result.value, storeId };
   }
