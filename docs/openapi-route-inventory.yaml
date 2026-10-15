@@ -1327,6 +1327,15 @@ paths:
         '401': { description: Unauthorized }
         '404': { description: Not found }
       security: [{ bearerAuth: [] }]
+  /admin/returns:
+    post:
+      summary: Controller route (apps/api/src/transfers\transfer-flow.controller.ts)
+      responses:
+        '200': { description: Successful response }
+        '400': { description: Validation error }
+        '401': { description: Unauthorized }
+        '404': { description: Not found }
+      security: [{ bearerAuth: [] }]
   /admin/role-permissions:
     get:
       summary: Controller route (apps/api/src/admin\role-permissions.controller.ts)
@@ -1673,6 +1682,69 @@ paths:
       security: [{ bearerAuth: [] }]
     post:
       summary: Controller route (apps/api/src/admin\admin.controller.ts)
+      responses:
+        '200': { description: Successful response }
+        '400': { description: Validation error }
+        '401': { description: Unauthorized }
+        '404': { description: Not found }
+      security: [{ bearerAuth: [] }]
+  /admin/trips/{id}/cancel:
+    post:
+      summary: Controller route (apps/api/src/transfers\transfer-flow.controller.ts)
+      responses:
+        '200': { description: Successful response }
+        '400': { description: Validation error }
+        '401': { description: Unauthorized }
+        '404': { description: Not found }
+      security: [{ bearerAuth: [] }]
+  /admin/trips/{id}/deliver:
+    post:
+      summary: Controller route (apps/api/src/transfers\transfer-flow.controller.ts)
+      responses:
+        '200': { description: Successful response }
+        '400': { description: Validation error }
+        '401': { description: Unauthorized }
+        '404': { description: Not found }
+      security: [{ bearerAuth: [] }]
+  /admin/trips/{id}/readback:
+    get:
+      summary: Controller route (apps/api/src/transfers\transfer-flow.controller.ts)
+      responses:
+        '200': { description: Successful response }
+        '400': { description: Validation error }
+        '401': { description: Unauthorized }
+        '404': { description: Not found }
+      security: [{ bearerAuth: [] }]
+  /admin/trips/{id}/receive:
+    post:
+      summary: Controller route (apps/api/src/transfers\transfer-flow.controller.ts)
+      responses:
+        '200': { description: Successful response }
+        '400': { description: Validation error }
+        '401': { description: Unauthorized }
+        '404': { description: Not found }
+      security: [{ bearerAuth: [] }]
+  /admin/trips/{id}/release:
+    post:
+      summary: Controller route (apps/api/src/transfers\transfer-flow.controller.ts)
+      responses:
+        '200': { description: Successful response }
+        '400': { description: Validation error }
+        '401': { description: Unauthorized }
+        '404': { description: Not found }
+      security: [{ bearerAuth: [] }]
+  /admin/trips/{id}/return:
+    post:
+      summary: Controller route (apps/api/src/transfers\transfer-flow.controller.ts)
+      responses:
+        '200': { description: Successful response }
+        '400': { description: Validation error }
+        '401': { description: Unauthorized }
+        '404': { description: Not found }
+      security: [{ bearerAuth: [] }]
+  /admin/trips:
+    get:
+      summary: Controller route (apps/api/src/transfers\transfer-flow.controller.ts)
       responses:
         '200': { description: Successful response }
         '400': { description: Validation error }

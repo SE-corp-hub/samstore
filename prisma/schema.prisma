@@ -223,6 +223,7 @@ model Store {
   warehouses             Warehouse[]
   locationPrices         LocationPrice[]
   kargadors              Kargador[]
+  stockReturns           StockReturn[]
   signatures             Signature[]
   approvalRequests       ApprovalRequest[]
   flowDrafts             FlowDraft[]
@@ -372,6 +373,7 @@ model Product {
   purchaseItems  PurchaseItem[]
   stockMovements StockMovement[]
   transfersFrom  StockTransfer[]
+  stockReturns   StockReturn[]
   stockLevelId   String?
 
   @@unique([storeId, sku])
@@ -778,6 +780,7 @@ model Warehouse {
   transfersTo    StockTransfer[] @relation("TransferTo")
   prices         LocationPrice[]
   members        UserStore[]       @relation("MemberHomeLocation")
+  stockReturns   StockReturn[]
   kargadors      Kargador[]
   signatures     Signature[]
   approvals      ApprovalRequest[]
@@ -814,9 +817,15 @@ model LocationPrice {
 enum TransferStatus {
   REQUESTED
   APPROVED
-  IN_TRANSIT
+  IN_TRANSIT // M3: released and signed at the source; on the road with the kargador
   COMPLETED
   CANCELLED
+  RETURNING // M3: delivery refused or partial — the rest is coming back to the source
+}
+
+enum TransferKind {
+  RESTOCK // location → location (Lipat)
+  ORDER_RELEASE // a sale at one location served from another location's stock
 }
 
 model StockTransfer {
@@ -838,8 +847,60 @@ model StockTransfer {
   reason          String?
   createdAt       DateTime       @default(now())
   completedAt     DateTime?
+  // ── Rice Ops M3: a numbered, signed trip ──
+  docNumber       String? // TR-000123 (RESTOCK) / REL-000123 (ORDER_RELEASE)
+  kind            TransferKind   @default(RESTOCK)
+  orderId         String? // ORDER_RELEASE: the sale this release serves
+  order           Order?         @relation(fields: [orderId], references: [id])
+  kargadorId      String?
+  kargador        Kargador?      @relation(fields: [kargadorId], references: [id])
+  reservedQty     Int            @default(0) // held at the source from approval until release
+  releasedQty     Int? // counted out at the source (Ilabas)
+  receivedQty     Int? // counted in at the destination (Tanggapin)
+  deliveredQty    Int? // ORDER_RELEASE: handed to the customer (Naihatid)
+  returnedQty     Int? // counted back in at the source (Tanggapin pabalik)
+  shortQty        Int            @default(0) // lost on the way (Kulang sa lipat)
+  releasedAt      DateTime?
+  releasedById    String?
+  receivedAt      DateTime?
+  receivedById    String?
+  customerName    String? // ORDER_RELEASE: who the delivery is for
+  deliveryNote    String?
 
+  @@unique([storeId, docNumber])
   @@index([storeId, status])
+  @@index([storeId, fromWarehouseId, status])
+  @@index([storeId, toWarehouseId, status])
+  @@index([storeId, orderId])
+}
+
+enum ReturnCondition {
+  GOOD // back on the shelf
+  DAMAGED // recorded, not sellable
+}
+
+// Rice Ops M3: Ibinalik — rice a customer brings back after a sale.
+model StockReturn {
+  id          String          @id @default(cuid())
+  storeId     String
+  store       Store           @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  docNumber   String
+  orderId     String?
+  order       Order?          @relation(fields: [orderId], references: [id])
+  locationId  String
+  location    Warehouse       @relation(fields: [locationId], references: [id])
+  productId   String
+  product     Product         @relation(fields: [productId], references: [id])
+  quantity    Int
+  condition   ReturnCondition
+  reason      String
+  kargadorId  String?
+  kargador    Kargador?       @relation(fields: [kargadorId], references: [id])
+  createdById String
+  createdAt   DateTime        @default(now())
+
+  @@unique([storeId, docNumber])
+  @@index([storeId, createdAt])
 }
 
 model StockLevel {
@@ -1291,6 +1352,8 @@ model Order {
   items                  OrderItem[]
   statusHistory          OrderStatusHistory[]
   stockMovements         StockMovement[]
+  stockTransfers         StockTransfer[] // Rice Ops M3: releases from other locations
+  stockReturns           StockReturn[] // Rice Ops M3: Ibinalik
   redemptions            VoucherRedemption[]
   claimTokens            OrderClaimToken[]
   payments               Payment[]
@@ -1690,6 +1753,8 @@ model Kargador {
   updatedAt      DateTime   @updatedAt
 
   signatures Signature[]
+  transfers  StockTransfer[]
+  returns    StockReturn[]
 
   @@unique([storeId, name])
   @@index([storeId, isActive])

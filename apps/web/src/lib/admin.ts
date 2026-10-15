@@ -124,6 +124,7 @@ export const NAV_GROUPS: NavGroup[] = [
     label: "Bigas",
     items: [
       { id: "approvals", label: "Para sa iyo", icon: "bi-inbox" },
+      { id: "trips", label: "Lipat at Ilabas", icon: "bi-truck" },
       { id: "drafts", label: "Tapusin", icon: "bi-hourglass-split" },
       { id: "kargadors", label: "Kargadors", icon: "bi-person-walking" },
     ],
@@ -171,12 +172,12 @@ export const NAV_GROUPS: NavGroup[] = [
 export const TABS_BY_ROLE: Record<string, string[]> = {
   // M7: OWNER is the tenant (store membership) role; STORE_OWNER is the legacy global
   // role — both are store owners and must see the same surface.
-  STORE_OWNER: ["overview", "pos", "preorders", "orders", "utang", "products", "inventory", "expenses", "purchases", "team", "customers", "vouchers", "crm", "erp", "analytics", "reports", "settings", "storelink", "warehouses", "approvals", "drafts", "kargadors"],
-  OWNER: ["overview", "pos", "preorders", "orders", "utang", "products", "inventory", "expenses", "purchases", "team", "customers", "vouchers", "crm", "erp", "analytics", "reports", "settings", "storelink", "warehouses", "approvals", "drafts", "kargadors"],
+  STORE_OWNER: ["overview", "pos", "preorders", "orders", "utang", "products", "inventory", "expenses", "purchases", "team", "customers", "vouchers", "crm", "erp", "analytics", "reports", "settings", "storelink", "warehouses", "approvals", "trips", "drafts", "kargadors"],
+  OWNER: ["overview", "pos", "preorders", "orders", "utang", "products", "inventory", "expenses", "purchases", "team", "customers", "vouchers", "crm", "erp", "analytics", "reports", "settings", "storelink", "warehouses", "approvals", "trips", "drafts", "kargadors"],
   // Platform operators manage tenants/access and monitor the platform; daily POS/catalog tabs belong to store roles.
   PLATFORM_ADMIN: ["overview", "stores", "useraccess", "maintenance", "analytics", "reports", "settings"],
-  MANAGER: ["overview", "pos", "preorders", "orders", "utang", "products", "inventory", "expenses", "purchases", "team", "customers", "vouchers", "crm", "erp", "analytics", "reports", "settings", "warehouses", "approvals", "drafts", "kargadors"],
-  STAFF: ["overview", "pos", "preorders", "orders", "products", "inventory", "customers", "drafts", "kargadors"],
+  MANAGER: ["overview", "pos", "preorders", "orders", "utang", "products", "inventory", "expenses", "purchases", "team", "customers", "vouchers", "crm", "erp", "analytics", "reports", "settings", "warehouses", "approvals", "trips", "drafts", "kargadors"],
+  STAFF: ["overview", "pos", "preorders", "orders", "products", "inventory", "customers", "trips", "drafts", "kargadors"],
   SALES_AGENT: ["overview", "orders", "customers", "crm", "reports"],
   DELIVERY: [],
 };

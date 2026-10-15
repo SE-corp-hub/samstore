@@ -63,6 +63,7 @@ export const SIGNATURE_RULES: Record<string, StepRule> = {
   "TRANSFER:RECEIVE": { always: ["STAFF"], withKargador: ["KARGADOR"] },
   "RELEASE:RELEASE": { always: ["STAFF", "KARGADOR"] },
   "RELEASE:DELIVERED": { always: ["STAFF", "KARGADOR"], withCustomer: ["CUSTOMER"] },
+  "RELEASE:RETURN": { always: ["STAFF", "KARGADOR"] },
   "RETURN:RECEIVE": { always: ["STAFF"], withKargador: ["KARGADOR"] },
   "RESACK:FINISH": { always: ["STAFF"], withKargador: ["KARGADOR"] },
   "SALE:UTANG": { always: ["CUSTOMER"] },
@@ -147,7 +148,7 @@ export function counterKind(prefix: DocPrefix): string {
 
 // ─────────────────────────────── Approvals ───────────────────────────────
 
-export const APPROVAL_KINDS = ["LOSS_OVER_TOLERANCE", "UTANG_OVER_LIMIT", "MANUAL_ITEM", "WRITE_OFF", "VOID", "TRANSFER", "STOCK_OVERRIDE"] as const;
+export const APPROVAL_KINDS = ["LOSS_OVER_TOLERANCE", "UTANG_OVER_LIMIT", "MANUAL_ITEM", "WRITE_OFF", "VOID", "TRANSFER", "STOCK_OVERRIDE", "TRANSIT_SHORT", "REFUND"] as const;
 export type ApprovalKind = (typeof APPROVAL_KINDS)[number];
 
 /** Default deciders per kind. Losses are the store owner's call (operator decision). */
@@ -159,6 +160,8 @@ export const DEFAULT_APPROVERS: Record<ApprovalKind, string[]> = {
   VOID: ["OWNER", "MANAGER"],
   TRANSFER: ["OWNER", "MANAGER"],
   STOCK_OVERRIDE: ["OWNER", "MANAGER"],
+  TRANSIT_SHORT: ["OWNER"], // M3: rice lost on a trip (Kulang sa lipat)
+  REFUND: ["OWNER", "MANAGER"], // M3: refused delivery / returned rice — settle the money
 };
 
 /** May `role` decide an approval that lists `approverRoles`? Platform admin never decides store business. */

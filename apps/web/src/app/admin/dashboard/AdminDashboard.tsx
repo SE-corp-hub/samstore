@@ -48,6 +48,7 @@ const ReportsPanel = panel(() => import("../../../components/admin/ReportsPanel"
 const ApprovalsPanel = panel(() => import("../../../components/admin/ApprovalsPanel"));
 const DraftsPanel = panel(() => import("../../../components/admin/DraftsPanel"));
 const KargadorsPanel = panel(() => import("../../../components/admin/KargadorsPanel"));
+const TripsPanel = panel(() => import("../../../components/admin/TripsPanel"));
 
 interface MyStore { id: string; name: string; slug: string; role: string; }
 
@@ -242,6 +243,7 @@ case "erp": return <ErpPanel />;
       case "approvals": return <ApprovalsPanel />;
       case "drafts": return <DraftsPanel />;
       case "kargadors": return <KargadorsPanel />;
+      case "trips": return <TripsPanel />;
       case "stores": return <StoresPanel />;
       default: return <OrdersPanel />;
     }

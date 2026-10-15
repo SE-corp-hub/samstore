@@ -25,6 +25,7 @@ after(async () => {
     await prisma.stockLevel.deleteMany({ where });
     await prisma.order.deleteMany({ where });
     await prisma.product.deleteMany({ where });
+    await prisma.storeCounter.deleteMany({ where }); // M3: TR- document numbers
     await prisma.warehouse.deleteMany({ where });
     await prisma.store.deleteMany({ where: { id: { in: storeIds } } });
   }
@@ -162,13 +163,15 @@ test("M1: two concurrent completions move the stock exactly once", async () => {
   const req = await svc.requestTransfer(fx.storeId, fx.wh, fx.s1, fx.productId, 10, fx.actorId, "restock S1");
   assert.equal(req.ok, true);
   const id = req.ok ? req.value.id : "";
-  assert.equal((await svc.approveTransfer(fx.storeId, id, fx.actorId)).ok, true);
+  // M3: a request from the warehouse is approved on request (and its stock held).
+  assert.equal(req.ok && req.value.status, "APPROVED");
   const [a, b] = await Promise.all([receive(svc, fx, id), receive(svc, fx, id)]);
   assert.equal([a.ok, b.ok].filter(Boolean).length, 1, "exactly one completion wins");
   assert.equal(await onHand(fx.storeId, fx.productId, fx.wh), 20);
   assert.equal(await onHand(fx.storeId, fx.productId, fx.s1), 10);
   const mv = await prisma.stockMovement.findMany({ where: { storeId: fx.storeId, documentType: "TRANSFER", documentId: id } });
-  assert.deepEqual(mv.map((m) => m.type).sort(), ["TRANSFER_IN", "TRANSFER_OUT"]);
+  // M3: the hold (RESERVE) is dropped (RELEASE_RESERVATION) as the stock moves.
+  assert.deepEqual(mv.map((m) => m.type).sort(), ["RELEASE_RESERVATION", "RESERVE", "TRANSFER_IN", "TRANSFER_OUT"]);
   assert.ok(mv.every((m) => m.createdBy === fx.actorId), "both ledger rows name who completed it");
   // Approving or cancelling a completed transfer is refused.
   assert.equal((await svc.approveTransfer(fx.storeId, id, fx.actorId)).ok, false);

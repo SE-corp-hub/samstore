@@ -36,6 +36,9 @@
     "reconcile": "tsx scripts/reconcile.ts",
     "setup:locations": "tsx scripts/setup-locations.ts",
     "db:doctor": "tsx scripts/db-doctor.ts",
+    "stock:trace": "tsx scripts/stock-trace.ts",
+    "ledger:rebase": "tsx scripts/ledger-rebase.ts",
+    "verify": "node scripts/verify.mjs",
     "fixtures:cleanup": "tsx scripts/cleanup-test-fixtures.ts"
   },
   "devDependencies": {

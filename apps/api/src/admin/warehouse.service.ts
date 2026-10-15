@@ -8,9 +8,10 @@
 
 import { LocationType } from "@prisma/client";
 import { prisma } from "../persistence/prisma-repositories.js";
-import { adjustStock, InsufficientStockError, transferStock } from "../domain/movements.js";
+import { adjustStock, InsufficientStockError, reserveForTrip, transferStock, unreserveForTrip } from "../domain/movements.js";
+import { autoApproves } from "../domain/transfer-flow.js";
 import type { ApiError } from "@sam-store/contracts";
-import { captureSignatures, locationRefusal, requireSignatures, signatureErrorResult, type Actor, type SignatureInput } from "../people/people.service.js";
+import { captureSignatures, locationRefusal, nextDocNumber, requireSignatures, signatureErrorResult, type Actor, type SignatureInput } from "../people/people.service.js";
 
 export type WarehouseResult<T> = { ok: true; value: T } | { ok: false; error: ApiError };
 
@@ -177,7 +178,7 @@ export class WarehouseService {
     quantity: number,
     requestedById: string,
     reason?: string,
-  ): Promise<WarehouseResult<{ id: string }>> {
+  ): Promise<WarehouseResult<{ id: string; docNumber: string; status: string }>> {
     if (!Number.isInteger(quantity) || quantity <= 0) {
       return { ok: false, error: { type: "validation", errors: ["quantity must be a positive integer"] } };
     }
@@ -198,31 +199,65 @@ export class WarehouseService {
       return { ok: false, error: { type: "conflict", message: `Insufficient stock at ${from.name} (${Math.max(0, available)} available)` } };
     }
 
-    const transfer = await prisma.stockTransfer.create({
-      data: {
-        storeId,
-        fromWarehouseId,
-        toWarehouseId,
-        productId,
-        quantity,
-        status: "REQUESTED",
-        requestedById,
-        reason: reason?.trim() || null,
-      },
-    });
-    return { ok: true, value: { id: transfer.id } };
+    // Rice Ops M3: a numbered trip. From a WAREHOUSE it is approved on request (operator
+    // decision) and the stock is held at the source at once; store-to-store waits for
+    // the owner/manager, and is held on approval.
+    const auto = autoApproves(from.type);
+    try {
+      const out = await prisma.$transaction(async (tx) => {
+        const docNumber = await nextDocNumber(tx, storeId, "TR");
+        const transfer = await tx.stockTransfer.create({
+          data: {
+            storeId,
+            fromWarehouseId,
+            toWarehouseId,
+            productId,
+            quantity,
+            status: auto ? "APPROVED" : "REQUESTED",
+            requestedById,
+            approvedById: auto ? requestedById : null,
+            reservedQty: auto ? quantity : 0,
+            reason: reason?.trim() || null,
+            docNumber,
+          },
+        });
+        if (auto) {
+          await reserveForTrip(tx, { storeId, productId, warehouseId: fromWarehouseId, actorId: requestedById, documentType: "TRANSFER", documentId: transfer.id, note: `hold for ${docNumber}` }, quantity);
+        }
+        await tx.auditLog.create({
+          data: { storeId, actorType: "USER", actorId: requestedById, action: auto ? "transfer.request.auto_approved" : "transfer.request", entityType: "StockTransfer", entityId: transfer.id, after: { docNumber, quantity, from: from.name, to: to.name, autoApproved: auto } },
+        });
+        return { id: transfer.id, docNumber, status: auto ? "APPROVED" : "REQUESTED" };
+      });
+      return { ok: true, value: out };
+    } catch (e) {
+      if (e instanceof InsufficientStockError) {
+        return { ok: false, error: { type: "conflict", message: `Insufficient stock at ${from.name} (short by ${e.shortfall})` } };
+      }
+      throw e;
+    }
   }
 
-  /** Approve a REQUESTED transfer. The status is claimed atomically (no double approval). */
+  /** Approve a REQUESTED transfer and hold its stock at the source. Claimed atomically (no double approval). */
   async approveTransfer(storeId: string, transferId: string, approvedById: string): Promise<WarehouseResult<{ id: string; status: string }>> {
-    const claimed = await prisma.stockTransfer.updateMany({
-      where: { id: transferId, storeId, status: "REQUESTED" },
-      data: { status: "APPROVED", approvedById },
-    });
-    if (claimed.count === 0) {
-      const exists = await prisma.stockTransfer.findFirst({ where: { id: transferId, storeId }, select: { status: true } });
-      if (!exists) return { ok: false, error: { type: "not_found", message: "Transfer not found" } };
-      return { ok: false, error: { type: "conflict", message: `Transfer is ${exists.status}, not REQUESTED` } };
+    const t = await prisma.stockTransfer.findFirst({ where: { id: transferId, storeId }, include: { fromWarehouse: { select: { name: true } } } });
+    if (!t) return { ok: false, error: { type: "not_found", message: "Transfer not found" } };
+    try {
+      await prisma.$transaction(async (tx) => {
+        const claimed = await tx.stockTransfer.updateMany({
+          where: { id: transferId, storeId, status: "REQUESTED" },
+          data: { status: "APPROVED", approvedById, reservedQty: t.quantity },
+        });
+        if (claimed.count === 0) {
+          const now = await tx.stockTransfer.findUnique({ where: { id: transferId }, select: { status: true } });
+          throw new TransferStateError(`Transfer is ${now?.status ?? t.status}, not REQUESTED`);
+        }
+        await reserveForTrip(tx, { storeId, productId: t.productId, warehouseId: t.fromWarehouseId, actorId: approvedById, documentType: "TRANSFER", documentId: t.id, note: `hold for ${t.docNumber ?? t.id}` }, t.quantity);
+      });
+    } catch (e) {
+      if (e instanceof TransferStateError) return { ok: false, error: { type: "conflict", message: e.message } };
+      if (e instanceof InsufficientStockError) return { ok: false, error: { type: "conflict", message: `Not enough stock at ${t.fromWarehouse.name} to approve (short by ${e.shortfall})` } };
+      throw e;
     }
     return { ok: true, value: { id: transferId, status: "APPROVED" } };
   }
@@ -255,9 +290,15 @@ export class WarehouseService {
 
     try {
       await prisma.$transaction(async (tx) => {
+        // Rice Ops M3: the one-step move (owner, both ends at once) is for APPROVED
+        // restocks only; a released trip finishes with Tanggapin, a sale with Naihatid.
         const claimed = await tx.stockTransfer.updateMany({
-          where: { id: transferId, storeId, status: { in: ["APPROVED", "IN_TRANSIT"] } },
-          data: { status: "COMPLETED", completedAt: new Date() },
+          where: { id: transferId, storeId, status: "APPROVED", kind: "RESTOCK" },
+          data: {
+            status: "COMPLETED", completedAt: new Date(), reservedQty: 0,
+            releasedQty: transfer.quantity, receivedQty: transfer.quantity,
+            releasedAt: new Date(), releasedById: actorId, receivedAt: new Date(), receivedById: actorId,
+          },
         });
         if (claimed.count === 0) {
           const now = await tx.stockTransfer.findUnique({ where: { id: transferId }, select: { status: true } });
@@ -266,6 +307,7 @@ export class WarehouseService {
         const doc = { documentType: "TRANSFER", documentId: transfer.id, step: "RECEIVE" };
         await captureSignatures(tx, storeId, actor, { ...doc, locationId: transfer.toWarehouseId }, signatures);
         await requireSignatures(tx, storeId, doc);
+        await unreserveForTrip(tx, { storeId, productId: transfer.productId, warehouseId: transfer.fromWarehouseId, actorId, documentType: "TRANSFER", documentId: transfer.id, note: "direct move" }, transfer.reservedQty);
         await transferStock(tx, {
           storeId,
           productId: transfer.productId,
@@ -290,20 +332,30 @@ export class WarehouseService {
     return { ok: true, value: { id: transferId, status: "COMPLETED" } };
   }
 
-  /** Cancel a transfer that has not moved stock yet (REQUESTED or APPROVED). */
+  /** Cancel a transfer that has not moved stock yet (REQUESTED or APPROVED); drops the hold. */
   async cancelTransfer(storeId: string, transferId: string, actorId: string, reason?: string): Promise<WarehouseResult<{ id: string; status: string }>> {
-    const claimed = await prisma.stockTransfer.updateMany({
-      where: { id: transferId, storeId, status: { in: ["REQUESTED", "APPROVED"] } },
-      data: { status: "CANCELLED" },
-    });
-    if (claimed.count === 0) {
-      const exists = await prisma.stockTransfer.findFirst({ where: { id: transferId, storeId }, select: { status: true } });
-      if (!exists) return { ok: false, error: { type: "not_found", message: "Transfer not found" } };
-      return { ok: false, error: { type: "conflict", message: `Transfer is ${exists.status} and can no longer be cancelled` } };
+    const t = await prisma.stockTransfer.findFirst({ where: { id: transferId, storeId } });
+    if (!t) return { ok: false, error: { type: "not_found", message: "Transfer not found" } };
+    if (t.kind === "ORDER_RELEASE") return { ok: false, error: { type: "conflict", message: "A sale's release is cancelled from the store app, so the money is settled too" } };
+    try {
+      await prisma.$transaction(async (tx) => {
+        const claimed = await tx.stockTransfer.updateMany({
+          where: { id: transferId, storeId, status: { in: ["REQUESTED", "APPROVED"] } },
+          data: { status: "CANCELLED", reservedQty: 0 },
+        });
+        if (claimed.count === 0) {
+          const now = await tx.stockTransfer.findUnique({ where: { id: transferId }, select: { status: true } });
+          throw new TransferStateError(`Transfer is ${now?.status ?? t.status} and can no longer be cancelled`);
+        }
+        await unreserveForTrip(tx, { storeId, productId: t.productId, warehouseId: t.fromWarehouseId, actorId, documentType: t.kind === "ORDER_RELEASE" ? "RELEASE" : "TRANSFER", documentId: t.id, note: `cancel${reason?.trim() ? `: ${reason.trim()}` : ""}` }, t.reservedQty);
+        await tx.auditLog.create({
+          data: { storeId, actorType: "USER", actorId, action: "transfer.cancel", entityType: "StockTransfer", entityId: transferId, after: { reason: reason?.trim() || null } },
+        });
+      });
+    } catch (e) {
+      if (e instanceof TransferStateError) return { ok: false, error: { type: "conflict", message: e.message } };
+      throw e;
     }
-    await prisma.auditLog.create({
-      data: { storeId, actorType: "USER", actorId, action: "transfer.cancel", entityType: "StockTransfer", entityId: transferId, after: { reason: reason?.trim() || null } },
-    });
     return { ok: true, value: { id: transferId, status: "CANCELLED" } };
   }
 

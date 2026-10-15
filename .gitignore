@@ -42,3 +42,4 @@ vids/
 # Database backups made by `npm run db:backup` — contain customer data, never commit
 backups/
 *.dump
+verify-logs/

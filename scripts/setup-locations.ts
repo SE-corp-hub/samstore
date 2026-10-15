@@ -2,6 +2,10 @@
 //
 //   npx tsx scripts/setup-locations.ts --store <slug>            (dry run: prints the plan)
 //   npx tsx scripts/setup-locations.ts --store <slug> --apply    (makes the changes)
+//   Options: --default-name "Store 1"   rename the current default location
+//            --off "<name>"             switch off a location (repeatable; e.g. demo data).
+//                                       Its history stays; it takes no new stock.
+// More stores and warehouses (S4, WH2, …) are added any time in Admin → Locations.
 //
 // Idempotent: run it again and it reports "nothing to change".
 //   * The store's current default location becomes S1 "Store 1" (keeps its stock;
@@ -28,9 +32,17 @@ function arg(name: string): string | undefined {
   return i >= 0 ? process.argv[i + 1] : undefined;
 }
 
+function args(name: string): string[] {
+  const out: string[] = [];
+  process.argv.forEach((a, i) => { if (a === name && process.argv[i + 1]) out.push(process.argv[i + 1]!); });
+  return out;
+}
+
 async function main(): Promise<number> {
   const slug = arg("--store");
   const apply = process.argv.includes("--apply");
+  const defaultName = arg("--default-name")?.trim();
+  const offNames = args("--off").map((n) => n.trim().toLowerCase());
   if (!slug) {
     console.error("usage: npx tsx scripts/setup-locations.ts --store <slug> [--apply]");
     return 2;
@@ -49,9 +61,17 @@ async function main(): Promise<number> {
   else {
     if (!def.isDefault) plan.push(`make "${def.name}" the default location`);
     if (!def.code && !existing.some((w) => w.code === "S1")) plan.push(`give "${def.name}" code S1 (type STORE)`);
+    if (defaultName && defaultName !== def.name) plan.push(`rename "${def.name}" → "${defaultName}"`);
   }
+  const toSwitchOff = existing.filter((w) => offNames.includes(w.name.toLowerCase()));
+  for (const n of offNames) {
+    const w = existing.find((x) => x.name.toLowerCase() === n);
+    if (!w) { console.error(`No location named "${n}".`); return 2; }
+    if (w.id === def?.id) { console.error(`"${w.name}" is the default location and cannot be switched off.`); return 2; }
+  }
+  for (const w of toSwitchOff) if (w.isActive) plan.push(`switch off "${w.name}" (history kept, no new stock)`);
   for (const t of TARGETS.slice(1)) {
-    if (!existing.some((w) => w.code === t.code || w.name === t.name)) plan.push(`create ${t.code} "${t.name}" (${t.type})`);
+    if (!existing.some((w) => w.code === t.code || w.name === t.name) && !(t.code === "S1")) plan.push(`create ${t.code} "${t.name}" (${t.type})`);
   }
   const nullLevels = await prisma.stockLevel.count({ where: { storeId, warehouseId: null } });
   const nullMoves = await prisma.stockMovement.count({ where: { storeId, warehouseId: null, variantId: null } });
@@ -77,6 +97,7 @@ async function main(): Promise<number> {
         data: {
           isDefault: true,
           ...(!def.code && !existing.some((w) => w.code === "S1") ? { code: "S1", type: LocationType.STORE } : {}),
+          ...(defaultName && defaultName !== def.name ? { name: defaultName } : {}),
         },
       });
     }
@@ -84,6 +105,7 @@ async function main(): Promise<number> {
       if (existing.some((w) => w.code === t.code || w.name === t.name)) continue;
       await tx.warehouse.create({ data: { storeId, name: t.name, code: t.code, type: t.type } });
     }
+    for (const w of toSwitchOff) if (w.isActive) await tx.warehouse.update({ where: { id: w.id }, data: { isActive: false } });
     const defaultId = def.id;
     // A location-less row for a product that ALREADY has a row at the default
     // location is merged into it (quantities summed — the ledger counts both);

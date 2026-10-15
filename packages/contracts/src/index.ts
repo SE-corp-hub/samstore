@@ -262,6 +262,12 @@ export interface PosSellItem {
   unitPriceMinorOverride?: number;
   /** Required (3–140 chars) whenever `unitPriceMinorOverride` deviates from the catalog price. */
   priceOverrideReason?: string;
+  /**
+   * Rice Ops M3 (Kunin sa ibang tindahan): serve this line from ANOTHER location. The
+   * stock is held there and leaves only at its signed release (Ilabas); the sale is
+   * this store's. Immediate sales only (not holds / pre-orders); product lines only.
+   */
+  sourceLocationId?: string;
 }
 
 export interface PosTender {
@@ -341,6 +347,8 @@ export interface PosSellResponse {
   changeMinor?: number;
   /** v4: loyalty points redeemed on this sale */
   loyaltyPointsRedeemed?: number;
+  /** Rice Ops M3: releases waiting at other locations (Kunin sa ibang tindahan). */
+  releases?: { id: string; docNumber: string }[];
 }
 
 // ─────────────────────────────── POS Pre-orders (v4) ───────────────────────────────

@@ -9,6 +9,7 @@ import { prisma } from "../persistence/prisma-repositories.js";
 import { cacheBust, cacheKey } from "../persistence/ttl-cache.js";
 import { deductStock, restoreStock as restoreStockLedger } from "../domain/movements.js";
 import { pickDeductionLevel } from "../domain/stock-location.js";
+import { TransferFlowService } from "../transfers/transfer-flow.service.js";
 import { RegisterService } from "../registers/register.service.js";
 import { PrismaOrderSequenceRepository } from "../persistence/prisma-repositories.js";
 import { computeOrderTotals } from "../domain/pricing.js";
@@ -36,11 +37,14 @@ export interface LoadedLine {
   /** True only when staff deliberately sold this line at a different price. */
   priceOverridden: boolean;
   priceOverrideReason: string | null;
+  /** Rice Ops M3: served from another location (null = this store's own stock). */
+  sourceLocationId?: string | null;
 }
 
 export class PosService {
   private readonly sequences = new PrismaOrderSequenceRepository();
   private readonly credit = new CreditService();
+  private readonly flow = new TransferFlowService();
 
   constructor(private readonly loyalty: LoyaltyService, private readonly registers: RegisterService = new RegisterService()) {}
 
@@ -59,8 +63,22 @@ export class PosService {
 
   /** Load fresh products for a store (active) + validate availability. P2b: variant lines
  *  resolve their own price + stock (variant must belong to the product and be active). */
-  private async loadProducts(storeId: string, items: PosSellItem[]): Promise<PosResult<{ products: any[]; lines: LoadedLine[]; totals: any }>> {
+  private async loadProducts(storeId: string, items: PosSellItem[], opts: { allowRemote?: boolean } = {}): Promise<PosResult<{ products: any[]; lines: LoadedLine[]; totals: any }>> {
     const ids = items.map((i) => i.productId);
+    // Rice Ops M3: a line may be served from another location — immediate sales only.
+    const remoteIds = [...new Set(items.map((i) => i.sourceLocationId).filter((x): x is string => typeof x === "string" && x.length > 0))];
+    if (remoteIds.length > 0 && !opts.allowRemote) {
+      return { ok: false, error: { type: "validation", errors: ["Kunin sa ibang tindahan is for immediate sales only"] } };
+    }
+    if (items.some((i) => i.sourceLocationId && i.variantId)) {
+      return { ok: false, error: { type: "validation", errors: ["Variant lines cannot be served from another location"] } };
+    }
+    const remoteLocations = remoteIds.length
+      ? await prisma.warehouse.findMany({ where: { storeId, id: { in: remoteIds }, isActive: true }, select: { id: true, name: true } })
+      : [];
+    if (remoteLocations.length !== remoteIds.length) {
+      return { ok: false, error: { type: "validation", errors: ["Unknown or inactive source location"] } };
+    }
     const products = await prisma.product.findMany({
       where: { storeId, id: { in: ids }, isActive: true },
       include: { stockLevels: true },
@@ -90,7 +108,13 @@ export class PosService {
           return { ok: false, error: { type: "conflict", message: `Only ${available} in stock for ${p.name} (${v.name})` } };
         }
       } else {
-        const pick = pickDeductionLevel(p.stockLevels, it.quantity, { defaultWarehouseId: defaultLocation?.id ?? null });
+        const remote = it.sourceLocationId && it.sourceLocationId !== defaultLocation?.id ? it.sourceLocationId : null;
+        const pick = pickDeductionLevel(p.stockLevels, it.quantity, remote ? { warehouseId: remote, defaultWarehouseId: defaultLocation?.id ?? null } : { defaultWarehouseId: defaultLocation?.id ?? null });
+        if (!pick.ok && remote) {
+          const where = remoteLocations.find((l) => l.id === remote)?.name ?? "that location";
+          const available = pick.reason === "short" ? pick.available : 0;
+          return { ok: false, error: { type: "conflict", message: `Only ${available} of ${p.name} at ${where}` } };
+        }
         if (!pick.ok) {
           const available = pick.reason === "short" ? pick.available : 0;
           const elsewhere = pick.reason === "untracked" ? 0 : pick.elsewhere;
@@ -133,6 +157,7 @@ export class PosService {
         priceOverrideReason: price.reason,
         name: p.name,
         sku: v?.sku ?? p.sku,
+        sourceLocationId: !v && it.sourceLocationId && it.sourceLocationId !== defaultLocation?.id ? it.sourceLocationId : null,
       });
     }
 
@@ -321,9 +346,15 @@ export class PosService {
       return { ok: false, error: { type: "validation", errors: ["tenderedMinor must be an integer"] } };
     }
 
-    const loaded = await this.loadProducts(storeId, input.items);
+    const loaded = await this.loadProducts(storeId, input.items, { allowRemote: true });
     if (!loaded.ok) return loaded;
     const { products, lines, totals } = loaded.value;
+    const localLines = lines.filter((l) => !l.sourceLocationId);
+    const remoteLines = lines.filter((l) => l.sourceLocationId);
+    const sellingLocation = remoteLines.length ? await prisma.warehouse.findFirst({ where: { storeId, isDefault: true }, select: { id: true } }) : null;
+    if (remoteLines.length && !sellingLocation) {
+      return { ok: false, error: { type: "conflict", message: "Set a default location before selling from another location" } };
+    }
 
     const { storeCustomerId: custId, displayName } = await this.resolveCustomer(storeId, input);
     if (input.paymentMethod === "credit" && !custId) {
@@ -378,6 +409,7 @@ export class PosService {
     const plan = prepared.value;
 
     let changeMinor = 0;
+    const releases: { id: string; docNumber: string }[] = [];
     await prisma.$transaction(async (tx) => {
       await this.makeOrder(tx, storeId, actorId, {
         id, orderNumber, status: "COMPLETED", paymentMethod: input.paymentMethod,
@@ -394,7 +426,16 @@ export class PosService {
         registerSessionId,
         creditTerms: { startAt: input.startAt, dueAt: input.dueAt },
       });
-      await this.decrementStock(tx, storeId, lines, { orderId: id, createdBy: actorId });
+      if (localLines.length) await this.decrementStock(tx, storeId, localLines, { orderId: id, createdBy: actorId });
+      // Rice Ops M3: lines served from another location are held there and wait on its
+      // Ilabas list; stock leaves that location only at the signed release.
+      for (const l of remoteLines) {
+        releases.push(await this.flow.createOrderRelease(tx, {
+          storeId, orderId: id, productId: l.productId, quantity: l.quantity,
+          sourceLocationId: l.sourceLocationId!, sellingLocationId: sellingLocation!.id,
+          customerName: displayName, actorId,
+        }));
+      }
     }, { timeout: 30_000 });
 
     // v4: record the redemption only after the order exists (checkout pattern).
@@ -410,6 +451,7 @@ export class PosService {
         orderId: id, orderNumber, status: "COMPLETED", totalMinor: finalTotal,
         currencyCode: store.currencyCode, paymentMethod: input.paymentMethod, changeMinor,
         ...(loyaltyRedeemed > 0 ? { loyaltyPointsRedeemed: loyaltyRedeemed } : {}),
+        ...(releases.length ? { releases } : {}),
       },
     };
   }

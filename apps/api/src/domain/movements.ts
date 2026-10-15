@@ -413,3 +413,98 @@ export async function transferStock(
   await recordMovement(tx, { ...common, warehouseId: toWarehouseId, delta: quantity, type: "TRANSFER_IN", balanceAfter: dest.quantityOnHand });
   return { fromBalance, toBalance: dest.quantityOnHand };
 }
+
+// ─────────────────────────── Rice Ops M3: trips between locations ───────────────────────────
+//
+// A trip holds stock at the source from approval (RESERVE), takes it out when it is
+// signed out (RELEASE_OUT, and the hold is dropped in the same statement), and adds it
+// where it is counted in (RECEIVE_IN at the destination, RETURN_IN back at the source).
+// Every write is one guarded UPDATE, so no trip can create rice or push a row negative.
+// Movements carry the trip as their document (never orderId — order reservations are
+// settled by stock-settlement.ts, which must not see these).
+
+interface TripLeg {
+  storeId: string;
+  productId: string;
+  warehouseId: string;
+  actorId: string | null;
+  documentType: string;
+  documentId: string;
+  note?: string | null;
+}
+
+async function levelFor(tx: MovementTx, leg: TripLeg) {
+  return tx.stockLevel.findFirst({ where: { storeId: leg.storeId, productId: leg.productId, warehouseId: leg.warehouseId }, select: { id: true } });
+}
+
+/** Hold `qty` of AVAILABLE stock at a location for a trip. Throws InsufficientStockError. */
+export async function reserveForTrip(tx: MovementTx, leg: TripLeg, qty: number): Promise<number> {
+  if (!Number.isInteger(qty) || qty <= 0) throw new Error("reserve quantity must be a positive whole number");
+  const level = await levelFor(tx, leg);
+  if (!level) throw new InsufficientStockError(leg.productId, qty);
+  const rows = await tx.$queryRaw<{ quantityReserved: number }[]>`
+    UPDATE "StockLevel" SET "quantityReserved" = "quantityReserved" + ${qty}::int, "updatedAt" = now()
+     WHERE id = ${level.id} AND "quantityOnHand" - "quantityReserved" >= ${qty}::int
+    RETURNING "quantityReserved"`;
+  if (!rows[0]) {
+    const fresh = await tx.stockLevel.findUnique({ where: { id: level.id }, select: { quantityOnHand: true, quantityReserved: true } });
+    throw new InsufficientStockError(leg.productId, qty - Math.max(0, (fresh?.quantityOnHand ?? 0) - (fresh?.quantityReserved ?? 0)));
+  }
+  await recordMovement(tx, { ...leg, orderId: null, createdBy: leg.actorId, delta: qty, type: "RESERVE", balanceAfter: rows[0].quantityReserved });
+  return rows[0].quantityReserved;
+}
+
+/** Drop a trip's hold (cancel). Never below zero. */
+export async function unreserveForTrip(tx: MovementTx, leg: TripLeg, qty: number): Promise<void> {
+  if (qty <= 0) return;
+  const level = await levelFor(tx, leg);
+  if (!level) return;
+  const rows = await tx.$queryRaw<{ quantityReserved: number }[]>`
+    UPDATE "StockLevel" SET "quantityReserved" = GREATEST(0, "quantityReserved" - ${qty}::int), "updatedAt" = now()
+     WHERE id = ${level.id}
+    RETURNING "quantityReserved"`;
+  await recordMovement(tx, { ...leg, orderId: null, createdBy: leg.actorId, delta: qty, type: "RELEASE_RESERVATION", balanceAfter: rows[0]?.quantityReserved ?? null });
+}
+
+/**
+ * Ilabas: drop the trip's hold and take `releaseQty` off the shelf in ONE statement.
+ * The released units must be covered by the hold plus what else is available.
+ */
+export async function releaseForTrip(tx: MovementTx, leg: TripLeg, heldQty: number, releaseQty: number): Promise<number> {
+  if (!Number.isInteger(releaseQty) || releaseQty <= 0) throw new Error("release quantity must be a positive whole number");
+  const level = await levelFor(tx, leg);
+  if (!level) throw new InsufficientStockError(leg.productId, releaseQty);
+  const rows = await tx.$queryRaw<{ quantityOnHand: number; quantityReserved: number }[]>`
+    UPDATE "StockLevel"
+       SET "quantityReserved" = "quantityReserved" - ${heldQty}::int,
+           "quantityOnHand"   = "quantityOnHand" - ${releaseQty}::int,
+           "updatedAt" = now()
+     WHERE id = ${level.id}
+       AND "quantityReserved" >= ${heldQty}::int
+       AND "quantityOnHand" - ("quantityReserved" - ${heldQty}::int) >= ${releaseQty}::int
+    RETURNING "quantityOnHand", "quantityReserved"`;
+  if (!rows[0]) {
+    const fresh = await tx.stockLevel.findUnique({ where: { id: level.id }, select: { quantityOnHand: true, quantityReserved: true } });
+    const avail = (fresh?.quantityOnHand ?? 0) - Math.max(0, (fresh?.quantityReserved ?? 0) - heldQty);
+    throw new InsufficientStockError(leg.productId, releaseQty - Math.max(0, avail));
+  }
+  if (heldQty > 0) {
+    await recordMovement(tx, { ...leg, orderId: null, createdBy: leg.actorId, delta: heldQty, type: "RELEASE_RESERVATION", balanceAfter: rows[0].quantityReserved });
+  }
+  await recordMovement(tx, { ...leg, orderId: null, createdBy: leg.actorId, delta: -releaseQty, type: "RELEASE_OUT", balanceAfter: rows[0].quantityOnHand });
+  return rows[0].quantityOnHand;
+}
+
+/** Tanggapin / Tanggapin pabalik / Ibinalik: add counted stock at a location (row created if new). */
+export async function addForTrip(tx: MovementTx, leg: TripLeg, qty: number, type: "RECEIVE_IN" | "RETURN_IN"): Promise<number> {
+  if (!Number.isInteger(qty) || qty < 0) throw new Error("quantity must be a whole number ≥ 0");
+  if (qty === 0) return 0;
+  const row = await tx.stockLevel.upsert({
+    where: { storeId_productId_warehouseId: { storeId: leg.storeId, productId: leg.productId, warehouseId: leg.warehouseId } },
+    create: { storeId: leg.storeId, productId: leg.productId, warehouseId: leg.warehouseId, quantityOnHand: qty, quantityReserved: 0 },
+    update: { quantityOnHand: { increment: qty } },
+    select: { quantityOnHand: true },
+  });
+  await recordMovement(tx, { ...leg, orderId: null, createdBy: leg.actorId, delta: qty, type, balanceAfter: row.quantityOnHand });
+  return row.quantityOnHand;
+}

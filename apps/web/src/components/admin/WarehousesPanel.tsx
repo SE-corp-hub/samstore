@@ -22,6 +22,9 @@ interface Location {
 }
 interface Transfer {
   id: string;
+  docNumber?: string | null;
+  kind?: "RESTOCK" | "ORDER_RELEASE";
+  shortQty?: number;
   status: string;
   quantity: number;
   reason: string | null;
@@ -58,7 +61,7 @@ async function call(url: string, method: string, body?: unknown): Promise<{ ok: 
 
 const STATUS_BADGE: Record<string, string> = {
   REQUESTED: "text-bg-warning", APPROVED: "text-bg-info", IN_TRANSIT: "text-bg-primary",
-  COMPLETED: "text-bg-success", CANCELLED: "text-bg-secondary",
+  COMPLETED: "text-bg-success", CANCELLED: "text-bg-secondary", RETURNING: "text-bg-warning",
 };
 
 export default function WarehousesPanel() {
@@ -337,7 +340,7 @@ export default function WarehousesPanel() {
                   <tbody>
                     {transfers.map((t) => (
                       <tr key={t.id}>
-                        <td className="small">{t.product.name}{t.reason && <div className="text-muted">{t.reason}</div>}</td>
+                        <td className="small">{t.docNumber && <div className="text-muted">{t.docNumber}</div>}{t.product.name}{t.reason && <div className="text-muted">{t.reason}</div>}{!!t.shortQty && <div><span className="badge text-bg-danger">Kulang {t.shortQty}</span></div>}</td>
                         <td className="small text-muted">{label(t.fromWarehouse)} → {label(t.toWarehouse)}</td>
                         <td className="text-end">{t.quantity}</td>
                         <td><span className={`badge ${STATUS_BADGE[t.status] ?? "text-bg-secondary"}`}>{t.status}</span></td>
@@ -345,10 +348,10 @@ export default function WarehousesPanel() {
                           {t.status === "REQUESTED" && (
                             <button type="button" className="btn btn-sm btn-outline-success me-1" onClick={() => void act(t, "approve", "Transfer approved")}>Approve</button>
                           )}
-                          {(t.status === "APPROVED" || t.status === "IN_TRANSIT") && (
-                            <button type="button" className="btn btn-sm btn-outline-primary me-1" onClick={() => setReceiving(t)}>Tanggapin</button>
+                          {t.status === "APPROVED" && t.kind !== "ORDER_RELEASE" && (
+                            <button type="button" className="btn btn-sm btn-outline-primary me-1" title="Owner: move it in one step (both ends at once). Staff use Lipat at Ilabas." onClick={() => setReceiving(t)}>Ilipat agad</button>
                           )}
-                          {(t.status === "REQUESTED" || t.status === "APPROVED") && (
+                          {(t.status === "REQUESTED" || t.status === "APPROVED") && t.kind !== "ORDER_RELEASE" && (
                             <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => void act(t, "cancel", "Transfer cancelled")}>Cancel</button>
                           )}
                         </td>

@@ -14,7 +14,7 @@
 import { prisma } from "../apps/api/src/persistence/prisma-repositories.js";
 
 /** Store slugs created by test runs (see the prefixes in the api test files). */
-const TEST_STORE_SLUG = /^(?:m[456]\d{6,}|m5|rc\d{6,}|sg\d{6,}|obx\d{6,}|pay\d{6,}|tx[joz]-\w+|probe-|pay-|m5-idem|p1c\d+|p1ad\d+|p2c\d+|posx-|v6t\d+|\d{2}p3v\d+)/i;
+const TEST_STORE_SLUG = /^(?:m[456]\d{6,}|m5|rc\d{6,}|sg\d{6,}|obx\d{6,}|pay\d{6,}|tx[joz]-\w+|probe-|pay-|m5-idem|p1c\d+|p1ad\d+|p2c\d+|posx-|v6t\d+|\d{2}p3v\d+|m[123]r\d{6,}|[a-p]{6}-m3r\d{6,})/i; // Rice Ops M1–M3 test stores
 
 async function main() {
   const apply = process.argv.includes("--apply");
@@ -39,6 +39,14 @@ async function main() {
 
   for (const s of junk) {
     const orderIds = (await prisma.order.findMany({ where: { storeId: s.id }, select: { id: true } })).map((o) => o.id);
+    // Rice Ops M1–M3 tables (children first).
+    await prisma.auditLog.deleteMany({ where: { storeId: s.id } });
+    await prisma.signature.deleteMany({ where: { storeId: s.id } });
+    await prisma.approvalRequest.deleteMany({ where: { storeId: s.id } });
+    await prisma.flowDraft.deleteMany({ where: { storeId: s.id } });
+    await prisma.stockReturn.deleteMany({ where: { storeId: s.id } });
+    await prisma.stockTransfer.deleteMany({ where: { storeId: s.id } });
+    await prisma.locationPrice.deleteMany({ where: { storeId: s.id } });
     await prisma.notificationLog.deleteMany({ where: { storeId: s.id } });
     await prisma.outboxEvent.deleteMany({ where: { storeId: s.id } });
     await prisma.stockMovement.deleteMany({ where: { storeId: s.id } });
@@ -71,6 +79,9 @@ async function main() {
     await prisma.purchaseItem.deleteMany({ where: { storeId: s.id } });
     await prisma.purchase.deleteMany({ where: { storeId: s.id } });
     await prisma.supplier.deleteMany({ where: { storeId: s.id } });
+    await prisma.kargador.deleteMany({ where: { storeId: s.id } });
+    await prisma.userStore.deleteMany({ where: { storeId: s.id } });
+    await prisma.warehouse.deleteMany({ where: { storeId: s.id } });
     await prisma.store.delete({ where: { id: s.id } });
     console.log(`  deleted ${s.slug}`);
   }

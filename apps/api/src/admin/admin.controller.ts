@@ -32,7 +32,7 @@ import { StoreAdminService } from "./store-admin.service.js";
 import { AnalyticsService } from "./analytics.service.js";
 import { TeamService } from "./team.service.js";
 import { WarehouseService } from "./warehouse.service.js";
-import { loadActor } from "../people/people.service.js";
+import { loadActor, locationRefusal } from "../people/people.service.js";
 import { signaturesFrom } from "../people/signature-input.js";
 import { LoyaltyService } from "../loyalty/loyalty.service.js";
 import { CartRecoveryService } from "../cart/recovery.service.js";
@@ -1262,7 +1262,10 @@ export class AdminController {
   ) {
     const user = req.user;
     requireUser(user);
-    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
+    const { storeId, role } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
+    // Rice Ops M3: staff ask for stock for THEIR location (owner/manager: any).
+    const refusal = locationRefusal(await loadActor(storeId, user.sub, role), body?.toWarehouseId);
+    if (refusal) throw new HttpException({ type: "forbidden", message: refusal }, HttpStatus.FORBIDDEN);
     const result = await this.warehouses.requestTransfer(storeId, body.fromWarehouseId, body.toWarehouseId, body.productId, body.quantity, user.sub, body.reason);
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
     return result.value;
