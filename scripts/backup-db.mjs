@@ -9,7 +9,7 @@
 // Exit code 0 = backup written AND verified; anything else = no usable backup.
 
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -56,6 +56,11 @@ export function dumpableUrl(raw) {
   if (!u.searchParams.has("sslmode")) u.searchParams.set("sslmode", "require");
   // Fail in seconds instead of hanging when the host is unreachable (e.g. an IPv6-only host on IPv4).
   if (!u.searchParams.has("connect_timeout")) u.searchParams.set("connect_timeout", "20");
+  // pg_dump's first catalog queries can run for minutes with no bytes on the wire; home
+  // routers and mobile networks drop such "silent" connections ("SSL SYSCALL error: EOF
+  // detected"). TCP keepalives every 10–30 s keep the connection open.
+  const keep = { keepalives: "1", keepalives_idle: "30", keepalives_interval: "10", keepalives_count: "6" };
+  for (const [k, v] of Object.entries(keep)) if (!u.searchParams.has(k)) u.searchParams.set(k, v);
   return { url: u.toString(), notes, where: `${u.hostname}:${u.port || "5432"}` };
 }
 
@@ -164,13 +169,21 @@ async function main() {
   console.log(`${pgDump.version} → ${file}`);
   console.log(`connecting to ${target.where} (password hidden) — progress is shown below; a few minutes is normal.`);
   const started = Date.now();
-  const dump = await runStreaming(
-    pgDump.path,
-    ["--format=custom", "--no-owner", "--no-privileges", "--verbose", "--lock-wait-timeout=120s", "--file", file, "--dbname", target.url],
-    target.url,
-  );
+  const MAX_TRIES = 3;
+  let dump;
+  for (let attempt = 1; attempt <= MAX_TRIES; attempt++) {
+    if (attempt > 1) console.log(`\nThe connection dropped. Trying again (${attempt} of ${MAX_TRIES})…`);
+    dump = await runStreaming(
+      pgDump.path,
+      ["--format=custom", "--no-owner", "--no-privileges", "--verbose", "--lock-wait-timeout=120s", "--file", file, "--dbname", target.url],
+      target.url,
+    );
+    if (dump.status === 0) break;
+    if (!/SSL SYSCALL|EOF detected|server closed the connection|connection.*(reset|lost)|could not receive data/i.test(dump.tail)) break;
+  }
   if (dump.status !== 0) {
     const msg = dump.tail;
+    try { if (existsSync(file) && statSync(file).size === 0) unlinkSync(file); } catch { /* leave it */ }
     console.error(`BACKUP FAILED: pg_dump exited with ${dump.status} after ${Math.round((Date.now() - started) / 1000)} s.`);
     if (/server version/i.test(msg)) {
       console.error("Your pg_dump is older than the database server. Install a newer PostgreSQL client (see above).");
@@ -178,6 +191,9 @@ async function main() {
     if (/timeout expired|could not connect|Network is unreachable|could not translate host/i.test(msg)) {
       console.error(`Could not reach ${target.where}. If this is Supabase's direct host (db.<ref>.supabase.co), it is IPv6-only:`);
       console.error("use the Session pooler connection string from Supabase → Connect (host …pooler.supabase.com, port 5432).");
+    }
+    if (/SSL SYSCALL|EOF detected|server closed the connection/i.test(msg)) {
+      console.error("The connection kept dropping. Try a steadier internet connection (wired/Wi-Fi instead of mobile data), then run again.");
     }
     if (/lock/i.test(msg)) console.error("Another session is holding a table lock. Stop the dev server and try again.");
     return 4;

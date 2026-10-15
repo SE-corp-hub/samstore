@@ -65,6 +65,7 @@ export const SIGNATURE_RULES: Record<string, StepRule> = {
   "RELEASE:DELIVERED": { always: ["STAFF", "KARGADOR"], withCustomer: ["CUSTOMER"] },
   "RELEASE:RETURN": { always: ["STAFF", "KARGADOR"] },
   "RETURN:RECEIVE": { always: ["STAFF"], withKargador: ["KARGADOR"] },
+  "RESACK:START": { always: ["STAFF"], withKargador: ["KARGADOR"] },
   "RESACK:FINISH": { always: ["STAFF"], withKargador: ["KARGADOR"] },
   "SALE:UTANG": { always: ["CUSTOMER"] },
   "UTANG:PAYMENT": { always: ["STAFF"], withCustomer: ["CUSTOMER"] },

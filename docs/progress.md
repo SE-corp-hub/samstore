@@ -1,5 +1,16 @@
 # PINDIAN — Progress Log
 
+## M4 — Resack (Rice Ops, 2026-10-15)
+
+| Item | Detail |
+|---|---|
+| Plan | `SAM STORE — Rice Operations Upgrade Plan`, module M4 of 13: any rice → any rice, multiple outputs, Buksan ang sako, Simulan/Tapusin, owner approval over 1%. |
+| Model | New `ResackJob` (RSK-…, location, input product × qty, grams in/out/loss, loss in basis points, loss value, `varietyChange`, `openSack`, kargador, approval link, who/when) and `ResackOutput` (product, quantity, grams, carried value). `Product.variety` (optional; otherwise taken from the name, "Sinandomeng 25 kg" → "sinandomeng"). DB CHECK: weight can only be lost, never created; a finished job has its numbers. |
+| Rules (`domain/resack.ts`) | Everything in grams from each product's grams-per-unit (set in Products: package size). Same rice family only. Out > in is refused ("timbangin ulit"). Loss over 1% (exact, no rounding) → owner's Para sa iyo (`LOSS_OVER_TOLERANCE`, owner only) — the stock still moves (plan: "the item stays flagged until approved"). Outputs carry the input's cost split by weight (largest remainder, sums exactly); the lost part is valued at the same cost; a variety change (Sinandomeng → Dinorado) is "Ibang klase" and does NOT take Dinorado's cost. Loose rice is stocked in grams and costed per kilo. |
+| Steps | One step `POST /admin/resacks`; Simulan `POST /admin/resacks/start` (input leaves the shelf, shows as "nasa resack"); Tapusin `POST /admin/resacks/:id/finish` (once; uses the value recorded at Simulan); cancel `POST /admin/resacks/:id/cancel` (reason; input back); Buksan ang sako `POST /admin/resacks/open-sack` (one sack → loose kilos); `GET /admin/resacks`. Ledger: `RESACK_OUT` (guarded), `RESACK_IN`, `RESACK_RETURN`, all with the job as document. Staff signs (+ kargador when one did the work); staff act only at their location. |
+| Screen | **Resack** (Bigas menu): Resack ngayon / Simulan / Buksan ang sako; in vs out kilos, "Kulang 0.2 kg (0.8%) — OK" or "lampas 1%: ipapaalam sa may-ari", read-back sentence, signatures; "Nasa resack" list with Tapusin / Kanselahin; recent jobs with Ibang klase / Sa may-ari badges. |
+| Known limits (deliberate) | `Product.costMinor` stays one number per product: the carried cost is recorded on each job for the reports (M9), it does not re-average the product's cost. Product.variety has no field on the Products screen yet (the name rule covers the usual names). |
+
 ## M3 — Transfers, releases and returns (Rice Ops, 2026-10-14)
 
 | Item | Detail |

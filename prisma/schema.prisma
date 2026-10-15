@@ -224,6 +224,7 @@ model Store {
   locationPrices         LocationPrice[]
   kargadors              Kargador[]
   stockReturns           StockReturn[]
+  resackJobs             ResackJob[]
   signatures             Signature[]
   approvalRequests       ApprovalRequest[]
   flowDrafts             FlowDraft[]
@@ -350,6 +351,7 @@ model Product {
   stockBaseUnit         String? // e.g. g, ml, each; required with stockBaseQuantity for conversion
   stockBaseQuantity     Int? // content represented by one product stock unit in stockBaseUnit
   stockConversionFamily String? // only products in the same family may be converted into one another
+  variety               String? // Rice Ops M4: e.g. "Sinandomeng"; empty = taken from the name ("Sinandomeng 25 kg")
   priceMinor            Int // integer minor units; NEVER float
   taxExempt             Boolean   @default(false) // M4: VAT-exempt line (e.g. basic goods / zero-rated)
   costMinor             Int       @default(0) // latest purchase cost (P5) — feeds COGS/profit (P10)
@@ -374,6 +376,8 @@ model Product {
   stockMovements StockMovement[]
   transfersFrom  StockTransfer[]
   stockReturns   StockReturn[]
+  resacksIn      ResackJob[]
+  resackOutputs  ResackOutput[]
   stockLevelId   String?
 
   @@unique([storeId, sku])
@@ -781,6 +785,7 @@ model Warehouse {
   prices         LocationPrice[]
   members        UserStore[]       @relation("MemberHomeLocation")
   stockReturns   StockReturn[]
+  resacks        ResackJob[]
   kargadors      Kargador[]
   signatures     Signature[]
   approvals      ApprovalRequest[]
@@ -1755,6 +1760,7 @@ model Kargador {
   signatures Signature[]
   transfers  StockTransfer[]
   returns    StockReturn[]
+  resacks    ResackJob[]
 
   @@unique([storeId, name])
   @@index([storeId, isActive])
@@ -1848,4 +1854,63 @@ model FlowDraft {
   updatedAt   DateTime    @updatedAt
 
   @@index([storeId, status, locationId])
+}
+
+// ─────────────────────────── Rice Ops M4: resack ───────────────────────────
+
+enum ResackStatus {
+  STARTED // Simulan: the input is off the shelf ("nasa resack")
+  FINISHED // Tapusin: outputs on the shelf, loss recorded
+  CANCELLED // stopped before finishing: the input went back
+}
+
+// Any rice into any rice at one location. Weighed in grams; the outputs carry the
+// input's cost (split by weight); a loss over 1% is the owner's call (Para sa iyo).
+model ResackJob {
+  id              String         @id @default(cuid())
+  storeId         String
+  store           Store          @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  docNumber       String // RSK-000123
+  locationId      String
+  location        Warehouse      @relation(fields: [locationId], references: [id])
+  inputProductId  String
+  inputProduct    Product        @relation(fields: [inputProductId], references: [id])
+  inputQty        Int
+  inputGrams      Int
+  inputValueMinor Int // input cost at the time (qty × cost)
+  outputGrams     Int?
+  lossGrams       Int?
+  lossBp          Int? // basis points (100 = 1%)
+  lossValueMinor  Int?
+  varietyChange   Boolean        @default(false) // Ibang klase
+  openSack        Boolean        @default(false) // Buksan ang sako (sack → loose)
+  status          ResackStatus   @default(STARTED)
+  kargadorId      String?
+  kargador        Kargador?      @relation(fields: [kargadorId], references: [id])
+  approvalId      String? // loss over tolerance → ApprovalRequest
+  note            String?
+  startedById     String
+  startedAt       DateTime       @default(now())
+  finishedById    String?
+  finishedAt      DateTime?
+  cancelReason    String?
+  outputs         ResackOutput[]
+
+  @@unique([storeId, docNumber])
+  @@index([storeId, status, locationId])
+  @@index([storeId, startedAt])
+}
+
+model ResackOutput {
+  id         String    @id @default(cuid())
+  storeId    String
+  jobId      String
+  job        ResackJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  productId  String
+  product    Product   @relation(fields: [productId], references: [id])
+  quantity   Int // stock units of the output product (grams for loose rice)
+  grams      Int
+  valueMinor Int // the input cost carried into this output
+
+  @@index([storeId, jobId])
 }

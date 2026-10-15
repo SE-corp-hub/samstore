@@ -1327,6 +1327,59 @@ paths:
         '401': { description: Unauthorized }
         '404': { description: Not found }
       security: [{ bearerAuth: [] }]
+  /admin/resacks/{id}/cancel:
+    post:
+      summary: Controller route (apps/api/src/resack\resack.controller.ts)
+      responses:
+        '200': { description: Successful response }
+        '400': { description: Validation error }
+        '401': { description: Unauthorized }
+        '404': { description: Not found }
+      security: [{ bearerAuth: [] }]
+  /admin/resacks/{id}/finish:
+    post:
+      summary: Controller route (apps/api/src/resack\resack.controller.ts)
+      responses:
+        '200': { description: Successful response }
+        '400': { description: Validation error }
+        '401': { description: Unauthorized }
+        '404': { description: Not found }
+      security: [{ bearerAuth: [] }]
+  /admin/resacks/open-sack:
+    post:
+      summary: Controller route (apps/api/src/resack\resack.controller.ts)
+      responses:
+        '200': { description: Successful response }
+        '400': { description: Validation error }
+        '401': { description: Unauthorized }
+        '404': { description: Not found }
+      security: [{ bearerAuth: [] }]
+  /admin/resacks/start:
+    post:
+      summary: Controller route (apps/api/src/resack\resack.controller.ts)
+      responses:
+        '200': { description: Successful response }
+        '400': { description: Validation error }
+        '401': { description: Unauthorized }
+        '404': { description: Not found }
+      security: [{ bearerAuth: [] }]
+  /admin/resacks:
+    get:
+      summary: Controller route (apps/api/src/resack\resack.controller.ts)
+      responses:
+        '200': { description: Successful response }
+        '400': { description: Validation error }
+        '401': { description: Unauthorized }
+        '404': { description: Not found }
+      security: [{ bearerAuth: [] }]
+    post:
+      summary: Controller route (apps/api/src/resack\resack.controller.ts)
+      responses:
+        '200': { description: Successful response }
+        '400': { description: Validation error }
+        '401': { description: Unauthorized }
+        '404': { description: Not found }
+      security: [{ bearerAuth: [] }]
   /admin/returns:
     post:
       summary: Controller route (apps/api/src/transfers\transfer-flow.controller.ts)

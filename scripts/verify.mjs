@@ -101,8 +101,8 @@ async function main() {
       out("  (connection dropped — running this file once more)\n");
       r = await run(`test ${f} (retry)`, `npx tsx --test ${f}`);
     }
-    const pass = r.text.match(/ℹ pass (\d+)/)?.[1] ?? "?";
-    const fails = r.text.match(/ℹ fail (\d+)/)?.[1] ?? "?";
+    const pass = r.text.match(/(?:ℹ|#) pass (\d+)/)?.[1] ?? "?";
+    const fails = r.text.match(/(?:ℹ|#) fail (\d+)/)?.[1] ?? "?";
     results.push(`${f}: pass ${pass}, fail ${fails}${r.code === 0 ? "" : "  ← FAILED"}`);
     if (r.code !== 0) failed++;
   }

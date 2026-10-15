@@ -423,7 +423,7 @@ export async function transferStock(
 // Movements carry the trip as their document (never orderId — order reservations are
 // settled by stock-settlement.ts, which must not see these).
 
-interface TripLeg {
+export interface TripLeg {
   storeId: string;
   productId: string;
   warehouseId: string;
@@ -470,7 +470,7 @@ export async function unreserveForTrip(tx: MovementTx, leg: TripLeg, qty: number
  * Ilabas: drop the trip's hold and take `releaseQty` off the shelf in ONE statement.
  * The released units must be covered by the hold plus what else is available.
  */
-export async function releaseForTrip(tx: MovementTx, leg: TripLeg, heldQty: number, releaseQty: number): Promise<number> {
+export async function releaseForTrip(tx: MovementTx, leg: TripLeg, heldQty: number, releaseQty: number, type: "RELEASE_OUT" | "RESACK_OUT" = "RELEASE_OUT"): Promise<number> {
   if (!Number.isInteger(releaseQty) || releaseQty <= 0) throw new Error("release quantity must be a positive whole number");
   const level = await levelFor(tx, leg);
   if (!level) throw new InsufficientStockError(leg.productId, releaseQty);
@@ -491,12 +491,12 @@ export async function releaseForTrip(tx: MovementTx, leg: TripLeg, heldQty: numb
   if (heldQty > 0) {
     await recordMovement(tx, { ...leg, orderId: null, createdBy: leg.actorId, delta: heldQty, type: "RELEASE_RESERVATION", balanceAfter: rows[0].quantityReserved });
   }
-  await recordMovement(tx, { ...leg, orderId: null, createdBy: leg.actorId, delta: -releaseQty, type: "RELEASE_OUT", balanceAfter: rows[0].quantityOnHand });
+  await recordMovement(tx, { ...leg, orderId: null, createdBy: leg.actorId, delta: -releaseQty, type, balanceAfter: rows[0].quantityOnHand });
   return rows[0].quantityOnHand;
 }
 
 /** Tanggapin / Tanggapin pabalik / Ibinalik: add counted stock at a location (row created if new). */
-export async function addForTrip(tx: MovementTx, leg: TripLeg, qty: number, type: "RECEIVE_IN" | "RETURN_IN"): Promise<number> {
+export async function addForTrip(tx: MovementTx, leg: TripLeg, qty: number, type: "RECEIVE_IN" | "RETURN_IN" | "RESACK_IN" | "RESACK_RETURN"): Promise<number> {
   if (!Number.isInteger(qty) || qty < 0) throw new Error("quantity must be a whole number ≥ 0");
   if (qty === 0) return 0;
   const row = await tx.stockLevel.upsert({

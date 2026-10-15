@@ -49,6 +49,7 @@ const ApprovalsPanel = panel(() => import("../../../components/admin/ApprovalsPa
 const DraftsPanel = panel(() => import("../../../components/admin/DraftsPanel"));
 const KargadorsPanel = panel(() => import("../../../components/admin/KargadorsPanel"));
 const TripsPanel = panel(() => import("../../../components/admin/TripsPanel"));
+const ResackPanel = panel(() => import("../../../components/admin/ResackPanel"));
 
 interface MyStore { id: string; name: string; slug: string; role: string; }
 
@@ -244,6 +245,7 @@ case "erp": return <ErpPanel />;
       case "drafts": return <DraftsPanel />;
       case "kargadors": return <KargadorsPanel />;
       case "trips": return <TripsPanel />;
+      case "resack": return <ResackPanel />;
       case "stores": return <StoresPanel />;
       default: return <OrdersPanel />;
     }
