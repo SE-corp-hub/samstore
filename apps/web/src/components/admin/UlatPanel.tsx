@@ -40,13 +40,13 @@ function downloadCsv(name: string, rows: (string | number | null | undefined)[][
   setTimeout(() => URL.revokeObjectURL(a.href), 2_000);
 }
 
-type Tab = "live" | "daily" | "monthly" | "kulang" | "trace" | "alerts";
+type Tab = "live" | "daily" | "monthly" | "kulang" | "trace" | "alerts" | "check";
 
 export default function UlatPanel({ role }: { role?: string; onNavigate?: (tab: string) => void }) {
   const owner = !!role && (isOwnerRole(role) || role === "MANAGER");
   const [tab, setTab] = useState<Tab>(owner ? "live" : "daily");
   const tabs: [Tab, string][] = owner
-    ? [["live", "Stock Live"], ["daily", "Today"], ["monthly", "This month"], ["kulang", "Short"], ["trace", "Trace"], ["alerts", "Alerts"]]
+    ? [["live", "Stock Live"], ["daily", "Today"], ["monthly", "This month"], ["kulang", "Short"], ["trace", "Trace"], ["alerts", "Alerts"], ["check", "Stock check"]]
     : [["live", "Stock Live"], ["daily", "Closing"]];
   return (
     <div style={{ fontSize: 17 }}>
@@ -60,6 +60,68 @@ export default function UlatPanel({ role }: { role?: string; onNavigate?: (tab: 
       {tab === "kulang" && owner && <Kulang />}
       {tab === "trace" && owner && <Trace />}
       {tab === "alerts" && owner && <Alerts />}
+      {tab === "check" && owner && <StockCheck />}
+    </div>
+  );
+}
+
+interface CheckBreak { type: string; docNumber: string | null; at: string; expected: number; actual: number; gap: number }
+interface CheckItem { productId: string; name: string; loose: boolean; locationId: string; location: string; status: "off" | "no_ledger"; onHand: number; ledgerBalance: number | null; difference: number; breaks: CheckBreak[] }
+
+/** Stock check — where the shelf and the ledger disagree. Read-only. */
+function StockCheck() {
+  const [locations, setLocations] = useState<Loc[]>([]);
+  const [locationId, setLocationId] = useState("");
+  const [items, setItems] = useState<CheckItem[]>([]);
+  const [summary, setSummary] = useState<{ checked: number; problems: number } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const load = useCallback(async () => {
+    setBusy(true);
+    setError("");
+    const r = await getJson(`/admin/rice/stock-book/check${locationId ? `?locationId=${encodeURIComponent(locationId)}` : ""}`);
+    setBusy(false);
+    if (!r.ok) { setError(errText(r.data, "Could not check the stock")); return; }
+    setItems((r.data?.items as CheckItem[]) ?? []);
+    setSummary({ checked: Number(r.data?.checked ?? 0), problems: Number(r.data?.problems ?? 0) });
+  }, [locationId]);
+
+  useEffect(() => { void getJson("/admin/rice/stock-live").then((r) => { if (r.ok) setLocations((r.data?.locations as Loc[]) ?? []); }); }, []);
+  useEffect(() => { void load(); }, [load]);
+
+  const say = (i: CheckItem) => i.status === "no_ledger"
+    ? `${qty(i.loose, i.onHand)} on the shelf, but the ledger has no record of how it got there`
+    : i.difference < 0
+      ? `The shelf shows ${qty(i.loose, -i.difference)} LESS than the ledger (shelf ${qty(i.loose, i.onHand)}, ledger ${qty(i.loose, i.ledgerBalance ?? 0)})`
+      : `The shelf shows ${qty(i.loose, i.difference)} MORE than the ledger (shelf ${qty(i.loose, i.onHand)}, ledger ${qty(i.loose, i.ledgerBalance ?? 0)})`;
+
+  return (
+    <div>
+      <div className="d-flex gap-2 align-items-center mb-2 flex-wrap">
+        <select className="form-select" style={{ maxWidth: 240 }} value={locationId} onChange={(e) => setLocationId(e.target.value)} aria-label="Location">
+          <option value="">All locations</option>
+          {locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+        </select>
+        <button className="btn btn-outline-secondary" onClick={() => void load()} disabled={busy}><i className="bi bi-arrow-clockwise me-1"></i>Check again</button>
+      </div>
+      {error && <div className="alert alert-danger">{error}</div>}
+      {summary && !error && (
+        <p className={summary.problems === 0 ? "text-success fw-bold" : "fw-bold"}>
+          {summary.problems === 0 ? `All ${summary.checked} product-and-location stocks agree with the ledger.` : `${summary.problems} of ${summary.checked} do not agree.`}
+        </p>
+      )}
+      {items.map((i) => (
+        <div key={`${i.productId}|${i.locationId}`} className="card mb-2"><div className="card-body py-2">
+          <div className="fw-bold">{i.name} <span className="text-muted fw-normal">· {i.location}</span></div>
+          <div>{say(i)}</div>
+          {i.breaks.map((b, n) => (
+            <div key={n} className="small text-muted">
+              {new Date(b.at).toLocaleString("en-PH", { dateStyle: "medium", timeStyle: "short" })} · {b.type}{b.docNumber ? ` · ${b.docNumber}` : ""}: expected {qty(i.loose, b.expected)}, ledger says {qty(i.loose, b.actual)} ({b.gap > 0 ? "+" : ""}{qty(i.loose, b.gap)} with no record)
+            </div>
+          ))}
+        </div></div>
+      ))}
     </div>
   );
 }

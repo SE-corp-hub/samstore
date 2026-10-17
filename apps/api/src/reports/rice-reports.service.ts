@@ -17,6 +17,7 @@ import { prisma } from "../persistence/prisma-repositories.js";
 import { aging, dayRange, lineCost, lineGrams, manilaDate, monthRange, pct, ReportError, stockFlag } from "../domain/reports.js";
 import { varietyOf } from "../domain/resack.js";
 import { costValue, isLooseP } from "../domain/counting.js";
+import { checkChain, type ChainCheck, type LedgerRow } from "../domain/stock-book.js";
 import { isDraftStale } from "../domain/people.js";
 import { captureSignatures, locationRefusal, requireSignatures, signatureErrorResult, type Actor, type SignatureInput } from "../people/people.service.js";
 
@@ -521,6 +522,66 @@ export class RiceReportsService {
         });
       }
       return { from, to, items: out };
+    });
+  }
+
+  // ─────────────────────────── Stock book: does the ledger agree with the shelf? ───────────────────────────
+
+  /**
+   * Read-only. For every product at every location (or one): the stock on hand against what the
+   * ledger says. Only the ones that disagree are listed, each with the exact ledger row where the
+   * chain broke, so a case like "sold from Store 2 but Store 2 shows out of stock" can be traced.
+   */
+  async stockBookCheck(storeId: string, actor: Actor, input: { locationId?: string }) {
+    return this.run(async () => {
+      this.owner(actor);
+      const locFilter = input.locationId ? { warehouseId: input.locationId } : { warehouseId: { not: null } };
+      const [locations, products, levels, moves] = await Promise.all([
+        this.locations(storeId),
+        prisma.product.findMany({ where: { storeId }, select: productSelect }),
+        prisma.stockLevel.findMany({ where: { storeId, ...locFilter }, select: { productId: true, warehouseId: true, quantityOnHand: true } }),
+        prisma.stockMovement.findMany({
+          where: { storeId, ...locFilter, type: { notIn: RESERVED_ONLY } },
+          orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+          select: { id: true, productId: true, warehouseId: true, type: true, delta: true, balanceAfter: true, documentType: true, documentId: true, createdAt: true },
+        }),
+      ]);
+      const byProduct = new Map(products.map((p) => [p.id, p]));
+      const locName = new Map(locations.map((l) => [l.id, l.name]));
+      const key = (productId: string, warehouseId: string) => `${productId}|${warehouseId}`;
+      const history = new Map<string, LedgerRow[]>();
+      for (const m of moves) {
+        const k = key(m.productId, m.warehouseId!);
+        const list = history.get(k) ?? [];
+        list.push({ id: m.id, type: m.type, delta: m.delta, balanceAfter: m.balanceAfter, documentType: m.documentType, documentId: m.documentId, createdAt: m.createdAt });
+        history.set(k, list);
+      }
+      const onHand = new Map<string, number>(levels.map((l): [string, number] => [key(l.productId, l.warehouseId!), l.quantityOnHand]));
+      const keys = new Set<string>([...history.keys(), ...onHand.keys()]);
+      const found: { productId: string; locationId: string; check: ChainCheck }[] = [];
+      let checked = 0;
+      for (const k of keys) {
+        const [productId, locationId] = k.split("|") as [string, string];
+        if (!byProduct.has(productId) || !locName.has(locationId)) continue;
+        checked += 1;
+        const check = checkChain(history.get(k) ?? [], onHand.get(k) ?? 0, []);
+        if (check.status === "off" || check.status === "no_ledger") found.push({ productId, locationId, check });
+      }
+      found.sort((a, b) => Math.abs(b.check.difference) - Math.abs(a.check.difference));
+      const shown = found.slice(0, 200);
+      const docs = await this.docNumbers(storeId, shown.flatMap((f) => f.check.breaks.slice(0, 3)).filter((b) => b.documentType && b.documentId).map((b) => ({ type: b.documentType!, id: b.documentId! })));
+      return {
+        checked,
+        problems: found.length,
+        items: shown.map((f) => {
+          const p = byProduct.get(f.productId)!;
+          return {
+            productId: f.productId, name: p.name, loose: isLooseP(p), locationId: f.locationId, location: locName.get(f.locationId) ?? "",
+            status: f.check.status, onHand: f.check.onHand, ledgerBalance: f.check.ledgerBalance, difference: f.check.difference,
+            breaks: f.check.breaks.slice(0, 3).map((b) => ({ type: b.type, docNumber: b.documentType && b.documentId ? docs.get(`${b.documentType}:${b.documentId}`) ?? null : null, at: b.at, expected: b.expected, actual: b.actual, gap: b.gap })),
+          };
+        }),
+      };
     });
   }
 

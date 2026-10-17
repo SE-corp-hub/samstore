@@ -156,7 +156,9 @@ const CLAIM_SECRET = claimSecret(); // M11: no committed fallback (see security/
           new PrismaAuthRepository(),
           {
             jwtSecret: jwtSecret(),
-            jwtExpiresIn: "7d",
+            // Staff phones stay signed in for 30 days. A PIN reset or deactivating
+            // the person still cuts the old token off at once (tokenVersion / active check).
+            jwtExpiresIn: "30d",
           } as AuthConfig,
         ),
     },

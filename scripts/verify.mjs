@@ -56,6 +56,7 @@ const TEST_FILES = [
   "apps/api/src/security/idempotency-m10.test.ts",
   "apps/web/src/lib/toast.test.ts",
   "apps/web/src/lib/retryable.test.ts",
+  "apps/api/src/domain/stock-book.test.ts",
   "apps/api/src/security/security-m11.test.ts",
   "apps/api/src/imports/imports-m12.test.ts",
   "apps/api/src/auth/auth.service.test.ts",
