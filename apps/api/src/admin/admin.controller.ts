@@ -581,12 +581,23 @@ export class AdminController {
     const user = req.user;
     requireUser(user);
     const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
-    const result = await this.productsAdmin.update(storeId, id, body);
+    const result = await this.productsAdmin.update(storeId, id, body, user.sub);
         if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
         await cacheBust(cacheKey("products", storeId));
         await cacheBust(cacheKey("inventory", storeId));
         return result.value;
       }
+
+  /** GET /admin/products/:id/price-history — every cost and price change, newest first. */
+  @Get("products/:id/price-history")
+  async productPriceHistory(@Req() req: Request & { user?: AuthPrincipal }, @Param("id") id: string, @Headers("x-store-id") headerStoreId?: string) {
+    const user = req.user;
+    requireUser(user);
+    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
+    const result = await this.productsAdmin.priceHistory(storeId, id);
+    if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
+    return result.value;
+  }
 
   /** DELETE /admin/products/:id — soft delete. */
   @Delete("products/:id")

@@ -2,7 +2,7 @@
 // within seconds of any signed step; phones refetch the matrix then (and every 30 s as a
 // backup). The stream is read with fetch (it carries the login header), not EventSource.
 
-import { Body, Controller, Get, Headers, HttpException, HttpStatus, Post, Query, Req, Res, UseGuards, UseInterceptors } from "@nestjs/common";
+import { Body, Controller, Get, Headers, HttpException, HttpStatus, Post, Put, Query, Req, Res, UseGuards, UseInterceptors } from "@nestjs/common";
 import { IdempotencyInterceptor } from "../security/idempotency.interceptor.js";
 import type { Response } from "express";
 import type { ApiError } from "@sam-store/contracts";
@@ -117,6 +117,19 @@ export class RiceReportsController {
   async stockBook(@Req() req: Req_, @Query("productId") productId?: string, @Query("locationId") locationId?: string, @Query("from") from?: string, @Query("to") to?: string, @Headers("x-store-id") h?: string) {
     const { storeId, actor } = await this.ctx(req, h);
     return unwrap(await this.reports.stockBookPage(storeId, actor, { productId, locationId, from, to }));
+  }
+
+  /** GET/PUT /admin/rice/cost-mode — how cost is counted (owner). */
+  @Get("cost-mode")
+  async costMode(@Req() req: Req_, @Headers("x-store-id") h?: string) {
+    const { storeId, actor } = await this.ctx(req, h);
+    return unwrap(await this.reports.getCostMode(storeId, actor));
+  }
+
+  @Put("cost-mode")
+  async setCostMode(@Req() req: Req_, @Body() body: { costMode?: unknown }, @Headers("x-store-id") h?: string) {
+    const { storeId, actor } = await this.ctx(req, h);
+    return unwrap(await this.reports.setCostMode(storeId, actor, body?.costMode));
   }
 
   /** GET /admin/rice/stock-book/check?locationId= — where the shelf and the ledger disagree (owner, read-only). */

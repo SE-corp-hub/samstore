@@ -29,6 +29,42 @@ async function getJson(path: string): Promise<{ ok: boolean; data: ApiBody | nul
   return { ok: res.ok, data: (await res.json().catch(() => null)) as ApiBody | null };
 }
 
+async function putJson(path: string, body: unknown): Promise<{ ok: boolean; data: ApiBody | null }> {
+  const res = await fetch(`${API_URL}${path}`, { method: "PUT", headers: { "Content-Type": "application/json", ...adminHeaders() }, body: JSON.stringify(body) });
+  return { ok: res.ok, data: (await res.json().catch(() => null)) as ApiBody | null };
+}
+
+/** Owner's switch: one cost per product for every location, or each location's own cost. */
+function CostModeSwitch({ onChanged }: { onChanged: () => void }) {
+  const [mode, setMode] = useState("");
+  const [msg, setMsg] = useState("");
+  useEffect(() => { void getJson("/admin/rice/cost-mode").then((r) => { if (r.ok) setMode(String(r.data?.costMode ?? "SHARED")); }); }, []);
+  if (!mode) return null;
+  async function change(next: string) {
+    setMsg("");
+    const r = await putJson("/admin/rice/cost-mode", { costMode: next });
+    if (!r.ok) { setMsg(errText(r.data, "Could not change it")); return; }
+    setMode(next);
+    setMsg("Saved. It applies to stock that arrives and to sales from now on.");
+    onChanged();
+  }
+  return (
+    <div className="card mb-2"><div className="card-body py-2">
+      <label className="form-label fw-bold mb-1" htmlFor="costMode">How cost is counted</label>
+      <select id="costMode" className="form-select" style={{ maxWidth: 360 }} value={mode} onChange={(e) => void change(e.target.value)}>
+        <option value="SHARED">One cost for all locations</option>
+        <option value="PER_LOCATION">Each location has its own cost</option>
+      </select>
+      <div className="small text-muted mt-1">
+        {mode === "PER_LOCATION"
+          ? "Stock-in at a location sets that shelf's cost. A trip carries the cost of the shelf it left. Only the main location changes the product cost."
+          : "The latest stock-in cost is used everywhere."}
+      </div>
+      {msg && <div className="small text-success">{msg}</div>}
+    </div></div>
+  );
+}
+
 /** Excel opens a CSV with a BOM; cells quoted when needed. */
 function downloadCsv(name: string, rows: (string | number | null | undefined)[][]) {
   const cell = (v: string | number | null | undefined) => { const s = v === null || v === undefined ? "" : String(v); return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
@@ -128,7 +164,7 @@ function StockCheck() {
 }
 
 interface BookRow { id: string; at: string; location: string; type: string; docNumber: string | null; note: string | null; delta: number; balanceAfter: number | null; by: string | null; unitPriceMinor: number | null; unitCostMinor: number | null }
-interface BookTotal { locationId: string; location: string; opening: number | null; closing: number | null; inQty: number; outQty: number; stockValueMinor: number | null; salesMinor: number; costOfSoldMinor: number; profitMinor: number; profitPct: number | null; soldQty: number; soldFromOtherQty: number }
+interface BookTotal { locationId: string; location: string; opening: number | null; closing: number | null; inQty: number; outQty: number; stockValueMinor: number | null; unitCostMinor: number; salesMinor: number; costOfSoldMinor: number; profitMinor: number; profitPct: number | null; soldQty: number; soldFromOtherQty: number }
 
 const BOOK_LABEL: Record<string, string> = {
   RECEIPT: "Stock in", STOCK_IN: "Stock in", TRANSFER_IN: "Trip received", TRANSFER_OUT: "Trip sent out", CONSUME: "Sold", ADJUST: "Adjusted",
@@ -179,6 +215,7 @@ function StockBook() {
   const n = (v: number | null) => (v === null ? "?" : qty(loose, v));
   return (
     <div>
+      <CostModeSwitch onChanged={() => void load()} />
       <div className="d-flex gap-2 align-items-center mb-2 flex-wrap">
         <select className="form-select" style={{ maxWidth: 260 }} value={productId} onChange={(e) => setProductId(e.target.value)} aria-label="Product">
           <option value="">Pick a product</option>
@@ -197,7 +234,7 @@ function StockBook() {
       {totals.map((t) => (
         <div key={t.locationId} className="card mb-2"><div className="card-body py-2">
           <div className="fw-bold">{t.location}</div>
-          <div>Start {n(t.opening)} · In +{qty(loose, t.inQty)} · Out −{qty(loose, t.outQty)} · End {n(t.closing)}{t.stockValueMinor !== null ? ` (worth ${peso(t.stockValueMinor)})` : ""}</div>
+          <div>Start {n(t.opening)} · In +{qty(loose, t.inQty)} · Out −{qty(loose, t.outQty)} · End {n(t.closing)}{t.stockValueMinor !== null ? ` (worth ${peso(t.stockValueMinor)} at ${peso(t.unitCostMinor)}${loose ? " per kg" : " each"})` : ""}</div>
           {t.soldFromOtherQty > 0 && <div className="small text-muted">{qty(loose, t.soldFromOtherQty)} of what this location sold came off another location's shelf, so it is not a sale row here. Look for "Sent out … for sale" at the other location.</div>}
           <div>Sold {peso(t.salesMinor)} · Cost {peso(t.costOfSoldMinor)} · <span className={t.profitMinor < 0 ? "text-danger fw-bold" : "text-success fw-bold"}>Profit {peso(t.profitMinor)}{t.profitPct !== null ? ` (${t.profitPct}%)` : ""}</span></div>
         </div></div>
@@ -224,7 +261,7 @@ function StockBook() {
       )}
       {productId && !busy && !error && rows.length === 0 && <p className="text-muted">No stock changes in these dates.</p>}
       {truncated && <p className="small text-muted">Showing the latest 500 rows. Narrow the dates to see older ones.</p>}
-      {rows.length > 0 && <p className="small text-muted">Price and cost are shown for sales and stock-ins (per sack, or per kilo for loose rice). Profit uses the main store cost, frozen with each sale. Stock worth uses the current product cost.</p>}
+      {rows.length > 0 && <p className="small text-muted">Price and cost are shown for sales and stock-ins (per sack, or per kilo for loose rice). Profit uses the cost frozen with each sale. Stock worth uses the cost of the shelf at that location (or the product cost when the store counts one cost for all).</p>}
     </div>
   );
 }

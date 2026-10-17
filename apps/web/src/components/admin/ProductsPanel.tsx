@@ -82,6 +82,56 @@ const stockMeasureToBase = (packageSize: string, packageUnit: string) => {
   return { stockBaseUnit, stockBaseQuantity: Math.round(size * factor) };
 };
 
+type PriceHistoryRow = { id: string; field: string; oldMinor: number; newMinor: number; source: string; reason: string | null; who: string | null; at: string };
+const HISTORY_SOURCE: Record<string, string> = { MANUAL: "Edited by hand", PURCHASE: "New stock received", CONVERSION: "Resack", LOCATION: "Location price" };
+
+/** Every cost and price change for one product, newest first. Opens on tap. */
+const pesosText = (minor: number) => `₱${(minor / 100).toFixed(2)}`;
+
+function PriceHistoryList({ productId }: { productId: string }) {
+  const [rows, setRows] = useState<PriceHistoryRow[] | null>(null);
+  const [open, setOpen] = useState(false);
+  const [err, setErr] = useState("");
+  async function toggle() {
+    const next = !open;
+    setOpen(next);
+    if (next && rows === null) {
+      try {
+        const res = await fetch(`${API_URL}/admin/products/${productId}/price-history`, { headers: adminHeaders() });
+        const data = await res.json();
+        if (!res.ok) { setErr("Could not load the history."); return; }
+        setRows(data.rows ?? []);
+      } catch { setErr("Could not load the history."); }
+    }
+  }
+  return (
+    <div className="mb-2">
+      <button type="button" className="btn btn-link btn-sm px-0" onClick={toggle}>{open ? "Hide cost and price history" : "Show cost and price history"}</button>
+      {open && err && <div className="text-danger small">{err}</div>}
+      {open && !err && rows === null && <div className="text-muted small">Loading...</div>}
+      {open && rows !== null && rows.length === 0 && <div className="text-muted small">No changes yet.</div>}
+      {open && rows !== null && rows.length > 0 && (
+        <div className="table-responsive" style={{ maxHeight: 220, overflowY: "auto" }}>
+          <table className="table table-sm small mb-0">
+            <thead><tr><th>When</th><th>What</th><th className="text-end">Was</th><th className="text-end">Now</th><th>Who / why</th></tr></thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.id}>
+                  <td>{new Date(r.at).toLocaleDateString()}</td>
+                  <td>{r.field === "COST" ? "Cost" : "Price"}</td>
+                  <td className="text-end">{pesosText(r.oldMinor)}</td>
+                  <td className="text-end fw-semibold">{pesosText(r.newMinor)}</td>
+                  <td>{r.who ?? ""} <span className="text-muted">{HISTORY_SOURCE[r.source] ?? r.source}{r.reason ? ` (${r.reason})` : ""}</span></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function ProductsPanel() {
   const [products, setProducts] = useState<AdminProduct[]>([]);
   const [categories, setCategories] = useState<{ id: string; slug: string; name: string }[]>([]);
@@ -438,6 +488,7 @@ export default function ProductsPanel() {
                         <small className="text-muted">Purchases update this to the latest received cost.</small>
                       </div>
                     </div>
+                    {modal.editing && <PriceHistoryList productId={modal.editing.id} />}
                     <div className="row">
                       <div className="col-6 mb-2">
                         <label className="form-label small">Opening stock</label>

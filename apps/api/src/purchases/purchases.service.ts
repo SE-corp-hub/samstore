@@ -100,6 +100,10 @@ export class PurchasesService {
             balanceAfter,
           },
         });
+        const before = await tx.product.findUnique({ where: { id: it.productId }, select: { costMinor: true } });
+        if (before && before.costMinor !== it.costMinor) {
+          await tx.priceHistory.create({ data: { storeId, productId: it.productId, field: "COST", oldMinor: before.costMinor, newMinor: it.costMinor, source: "PURCHASE", changedById: actorId ?? null } });
+        }
         await tx.product.update({ where: { id: it.productId }, data: { costMinor: it.costMinor } });
       }
       return p;

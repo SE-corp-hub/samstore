@@ -13,6 +13,7 @@
 import type { ApiError } from "@sam-store/contracts";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../persistence/prisma-repositories.js";
+import { recordCostIn, shelfCostFor } from "../domain/shelf-cost.js";
 import { addForTrip, InsufficientStockError, releaseForTrip, reserveForTrip, unreserveForTrip } from "../domain/movements.js";
 import {
   checkArrival, checkRelease, checkReturnBack, deliveryOutcome, readBack, receiveOutcome, returnOutcome,
@@ -212,6 +213,8 @@ export class TransferFlowService {
         });
         await captureSignatures(tx, storeId, actor, { documentType: "TRANSFER", documentId: id, step: "RECEIVE", locationId: t.toWarehouseId }, input.signatures);
         await requireSignatures(tx, storeId, { documentType: "TRANSFER", documentId: id, step: "RECEIVE" }, { kargador: !!t.kargadorId });
+        // The stock brings the cost of the shelf it left (matters only when the store counts cost per location).
+        await recordCostIn(tx, { storeId, productId: t.productId, warehouseId: t.toWarehouseId }, received, await shelfCostFor(tx, storeId, t.productId, t.fromWarehouseId));
         await addForTrip(tx, {
           storeId, productId: t.productId, warehouseId: t.toWarehouseId, actorId: actor.userId,
           documentType: "TRANSFER", documentId: id, note: t.docNumber ?? null,

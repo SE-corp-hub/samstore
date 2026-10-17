@@ -2,6 +2,7 @@
 
 import { prisma } from "../persistence/prisma-repositories.js";
 import { recordMovement } from "../domain/movements.js";
+import { priceChanges } from "../domain/price-history.js";
 import { validateProductInput, slugify, type ProductInput } from "../domain/product-validation.js";
 import type { ApiError } from "@sam-store/contracts";
 
@@ -186,7 +187,7 @@ export class ProductAdminService {
   }
 
   /** Update a product (price, name, description, stock, category, active). */
-  async update(storeId: string, productId: string, input: Partial<ProductInput>): Promise<AdminResult<{ id: string }>> {
+  async update(storeId: string, productId: string, input: Partial<ProductInput>, actorId?: string): Promise<AdminResult<{ id: string }>> {
     const product = await prisma.product.findFirst({ where: { id: productId, storeId } });
     if (!product) return { ok: false, error: { type: "not_found", message: "Product not found" } };
 
@@ -239,6 +240,12 @@ export class ProductAdminService {
     }
 
     await prisma.$transaction(async (tx) => {
+      const changes = priceChanges(product, { costMinor: input.costMinor, priceMinor: input.priceMinor });
+      if (changes.length > 0) {
+        await tx.priceHistory.createMany({
+          data: changes.map((c) => ({ storeId, productId, field: c.field, oldMinor: c.oldMinor, newMinor: c.newMinor, source: "MANUAL", changedById: actorId ?? null })),
+        });
+      }
       await tx.product.update({
         where: { id: productId },
         data: {
@@ -533,5 +540,21 @@ export class ProductAdminService {
     if (!opt) return { ok: false, error: { type: "not_found", message: "Option not found" } };
     await prisma.productAddonOption.delete({ where: { id: optionId } });
     return { ok: true, value: { ok: true } };
+  }
+
+  /** Newest first. Each line: what changed, old and new value, who, when, and where it came from. */
+  async priceHistory(storeId: string, productId: string): Promise<AdminResult<{ rows: { id: string; field: string; oldMinor: number; newMinor: number; source: string; reason: string | null; who: string | null; at: string }[] }>> {
+    const product = await prisma.product.findFirst({ where: { id: productId, storeId }, select: { id: true } });
+    if (!product) return { ok: false, error: { type: "not_found", message: "Product not found" } };
+    const rows = await prisma.priceHistory.findMany({ where: { storeId, productId }, orderBy: { createdAt: "desc" }, take: 200 });
+    const ids = [...new Set(rows.map((r) => r.changedById).filter((x): x is string => !!x))];
+    const users = ids.length ? await prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true, name: true, email: true } }) : [];
+    const nameOf = new Map(users.map((u) => [u.id, u.name || u.email || "Staff"]));
+    return {
+      ok: true,
+      value: {
+        rows: rows.map((r) => ({ id: r.id, field: r.field, oldMinor: r.oldMinor, newMinor: r.newMinor, source: r.source, reason: r.reason, who: r.changedById ? nameOf.get(r.changedById) ?? "Staff" : null, at: r.createdAt.toISOString() })),
+      },
+    };
   }
 }

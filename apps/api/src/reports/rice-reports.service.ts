@@ -11,6 +11,7 @@
 //   Trace        a document number, customer, kargador, staff or product → the full trail.
 //   Alerts       what the owner must look at today.
 
+import { costModeOf, effectiveCost } from "../domain/shelf-cost.js";
 import type { ApiError } from "@sam-store/contracts";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../persistence/prisma-repositories.js";
@@ -532,6 +533,27 @@ export class RiceReportsService {
    * ledger says. Only the ones that disagree are listed, each with the exact ledger row where the
    * chain broke, so a case like "sold from Store 2 but Store 2 shows out of stock" can be traced.
    */
+  /** How this store counts cost: SHARED (one cost per product) or PER_LOCATION (each shelf its own). Owner only. */
+  async getCostMode(storeId: string, actor: Actor) {
+    return this.run(async () => {
+      this.owner(actor);
+      return { costMode: await costModeOf(prisma, storeId) };
+    });
+  }
+
+  async setCostMode(storeId: string, actor: Actor, mode: unknown) {
+    return this.run(async () => {
+      this.owner(actor);
+      if (mode !== "SHARED" && mode !== "PER_LOCATION") throw new StepError(invalid("Choose one cost for all locations, or a cost for each location"));
+      const before = await costModeOf(prisma, storeId);
+      if (before !== mode) {
+        await prisma.storeSettings.upsert({ where: { storeId }, create: { storeId, costMode: mode }, update: { costMode: mode } });
+        await prisma.auditLog.create({ data: { storeId, actorType: "USER", actorId: actor.userId, action: "settings.cost_mode", entityType: "StoreSettings", entityId: storeId, before: { costMode: before }, after: { costMode: mode } } });
+      }
+      return { costMode: mode as string };
+    });
+  }
+
   async stockBookCheck(storeId: string, actor: Actor, input: { locationId?: string }) {
     return this.run(async () => {
       this.owner(actor);
@@ -539,7 +561,7 @@ export class RiceReportsService {
       const [locations, products, levels, moves] = await Promise.all([
         this.locations(storeId),
         prisma.product.findMany({ where: { storeId }, select: productSelect }),
-        prisma.stockLevel.findMany({ where: { storeId, ...locFilter }, select: { productId: true, warehouseId: true, quantityOnHand: true } }),
+        prisma.stockLevel.findMany({ where: { storeId, ...locFilter }, select: { productId: true, warehouseId: true, quantityOnHand: true, costMinor: true } }),
         prisma.stockMovement.findMany({
           where: { storeId, ...locFilter, type: { notIn: RESERVED_ONLY } },
           orderBy: [{ createdAt: "asc" }, { id: "asc" }],
@@ -604,6 +626,7 @@ export class RiceReportsService {
         select: { id: true, warehouseId: true, type: true, delta: true, balanceAfter: true, documentType: true, documentId: true, createdAt: true, createdBy: true },
       });
       const locations = await this.locations(storeId);
+      const levels = await prisma.stockLevel.findMany({ where: { storeId, productId: product.id, warehouseId: { not: null } }, select: { productId: true, warehouseId: true, costMinor: true } });
       const locName = new Map(locations.map((l) => [l.id, l.name]));
       const byLoc = new Map<string, LedgerRow[]>();
       for (const m of moves) {
@@ -627,8 +650,10 @@ export class RiceReportsService {
         m.costOfSoldMinor += lineCost(l, product.costMinor ?? 0, isLooseP(product));
         money.set(id, m);
       }
-      const unitCost = product.costMinor ?? 0;
-      const worth = (q: number | null) => (q === null ? null : isLooseP(product) ? Math.round((q * unitCost) / 1000) : q * unitCost);
+      const costMode = await costModeOf(prisma, storeId);
+      // Each location's own cost when the store counts per location; otherwise the one product cost.
+      const unitCostAt = (locId: string) => effectiveCost(costMode, levels.find((lv) => lv.productId === product.id && lv.warehouseId === locId)?.costMinor, product.costMinor ?? 0);
+      const worth = (q: number | null, unitCost: number) => (q === null ? null : isLooseP(product) ? Math.round((q * unitCost) / 1000) : q * unitCost);
       const locIds = new Set<string>([...byLoc.keys(), ...money.keys()]);
       const totals = [...locIds].filter((id) => locName.has(id)).map((id) => {
         const t = periodTotals(byLoc.get(id) ?? [], from, to);
@@ -638,7 +663,7 @@ export class RiceReportsService {
         const soldFromOtherQty = Math.max(0, m.soldQty - t.byBucket.sale.outQty);
         return {
           locationId: id, location: locName.get(id) ?? "", ...t, soldQty: m.soldQty, soldFromOtherQty,
-          stockValueMinor: worth(t.closing), salesMinor: m.salesMinor, costOfSoldMinor: m.costOfSoldMinor, profitMinor,
+          unitCostMinor: unitCostAt(id), stockValueMinor: worth(t.closing, unitCostAt(id)), salesMinor: m.salesMinor, costOfSoldMinor: m.costOfSoldMinor, profitMinor,
           profitPct: m.salesMinor > 0 ? Math.round((profitMinor / m.salesMinor) * 1000) / 10 : null,
         };
       });
@@ -660,7 +685,7 @@ export class RiceReportsService {
       const sale = new Map(saleLines.map((l) => [l.orderId, l]));
       const stockIn = new Map(inLines.map((l) => [l.stockInId, l]));
       return {
-        product: { id: product.id, name: product.name, loose: isLooseP(product), currentCostMinor: product.costMinor ?? null },
+        product: { id: product.id, name: product.name, loose: isLooseP(product), currentCostMinor: product.costMinor ?? null, costMode },
         from, to, truncated: inRange.length > shown.length,
         totals,
         rows: shown.map((m) => {

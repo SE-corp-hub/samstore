@@ -16,6 +16,7 @@
 // Totals are server-computed. Stock leaves the selling location in the same
 // transaction as the order, its payment and its signatures.
 
+import { costModeOf, recordCostIn, shelfCostFor } from "../domain/shelf-cost.js";
 import type { ApiError } from "@sam-store/contracts";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../persistence/prisma-repositories.js";
@@ -322,11 +323,12 @@ export class BentaService {
       const plan = prepared?.ok ? prepared.value : null;
       const outcome = { approvalId: null as string | null, smsStatus: null as string | null };
 
-      const items = priced.map((l) => ({
+      const shelfCosts = await Promise.all(priced.map((l) => shelfCostFor(prisma, storeId, l.product.id, l.sourceLocationId ?? loc.id)));
+      const items = priced.map((l, idx) => ({
         productId: l.product.id, productName: l.product.name, sku: l.product.sku, unitPriceMinor: l.unitPriceMinor,
         quantity: l.stockQty, lineTotalMinor: l.lineTotalMinor, soldBy: l.soldBy, grams: l.grams, enteredAmountMinor: l.enteredAmountMinor,
         sourceLocationId: l.sourceLocationId, priceOverridden: l.overridden, priceOverrideReason: l.overrideReason, catalogUnitPriceMinor: l.catalogUnitPriceMinor,
-        unitCostMinor: l.product.costMinor,
+        unitCostMinor: shelfCosts[idx],
       }));
       const taxCols = await taxColumnsFor(storeId, items.map((i) => ({ productId: i.productId, lineTotalMinor: i.lineTotalMinor })), { discountMinor: 0, deliveryFeeMinor: 0 });
       const seq = await this.sequences.nextOrderSequence(storeId);
@@ -470,11 +472,21 @@ export class BentaService {
     const doc = await tx.stockIn.create({ data: { storeId, docNumber, locationId, supplierName: data.supplierName, note: data.note, createdById: actor.userId }, select: { id: true, docNumber: true } });
     await captureSignatures(tx, storeId, actor, { documentType: "STOCK_IN", documentId: doc.id, step: "RECEIVE", locationId }, signatures);
     await requireSignatures(tx, storeId, { documentType: "STOCK_IN", documentId: doc.id, step: "RECEIVE" });
+    const costMode = await costModeOf(tx, storeId);
     for (const l of data.lines) {
       await tx.stockInLine.create({ data: { storeId, stockInId: doc.id, productId: l.product.id, quantity: l.quantity, unitCostMinor: l.unitCostMinor } });
+      await recordCostIn(tx, { storeId, productId: l.product.id, warehouseId: locationId }, l.quantity, l.unitCostMinor);
       await addForTrip(tx, { storeId, productId: l.product.id, warehouseId: locationId, actorId: actor.userId, documentType: "STOCK_IN", documentId: doc.id, note: docNumber }, l.quantity, "STOCK_IN");
-      // Latest purchase cost (one cost per product, the same at every location).
-      if (l.unitCostMinor !== null && l.unitCostMinor > 0) await tx.product.update({ where: { id: l.product.id }, data: { costMinor: l.unitCostMinor } });
+      // Latest purchase cost. One cost per product, unless the store counts cost per location:
+      // then only the main location (the default one) moves the product cost; the others keep their own shelf cost.
+      const mainLoc = costMode === "PER_LOCATION" ? await tx.warehouse.findUnique({ where: { id: locationId }, select: { isDefault: true } }) : null;
+      if (l.unitCostMinor !== null && l.unitCostMinor > 0 && (costMode !== "PER_LOCATION" || mainLoc?.isDefault)) {
+        const before = await tx.product.findUnique({ where: { id: l.product.id }, select: { costMinor: true } });
+        if (before && before.costMinor !== l.unitCostMinor) {
+          await tx.priceHistory.create({ data: { storeId, productId: l.product.id, warehouseId: locationId, field: "COST", oldMinor: before.costMinor, newMinor: l.unitCostMinor, source: "PURCHASE", reason: docNumber, changedById: actor.userId } });
+        }
+        await tx.product.update({ where: { id: l.product.id }, data: { costMinor: l.unitCostMinor } });
+      }
     }
     return doc;
   }

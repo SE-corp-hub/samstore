@@ -266,6 +266,7 @@ model StoreSettings {
   deliveryFeeMinor          Int            @default(0)
   creditLimitMinor          Int            @default(0) // store-wide utang limit (0 = credit disabled)
   creditTermDays            Int            @default(30) // V1: default dueAt offset for credit purchases
+  costMode                  String         @default("SHARED") // SHARED = one cost per product; PER_LOCATION = each shelf has its own cost
   // Rice Ops M6: utang texts and reminders (the owner can switch them off).
   utangSmsEnabled           Boolean        @default(true)
   utangMonthlyReminder      Boolean        @default(true)
@@ -945,6 +946,7 @@ model StockLevel {
   quantityOnHand   Int        @default(0)
   quantityReserved Int        @default(0)
   reorderThreshold Int        @default(0)
+  costMinor        Int? // cost of the stock on THIS shelf; only used when the store counts cost per location (null = product cost)
   updatedAt        DateTime   @updatedAt
   products         Product[]
 
@@ -2181,4 +2183,21 @@ model IdempotencyRecord {
   completedAt    DateTime?
 
   @@index([createdAt])
+}
+
+// Cost and price history. Plain ids (no relations) so old data and deletes never block it.
+model PriceHistory {
+  id          String   @id @default(cuid())
+  storeId     String
+  productId   String
+  warehouseId String? // set when a per-location cost or price changed
+  field       String // COST or PRICE
+  oldMinor    Int
+  newMinor    Int
+  source      String   @default("MANUAL") // MANUAL, PURCHASE, CONVERSION, LOCATION
+  reason      String?
+  changedById String?
+  createdAt   DateTime @default(now())
+
+  @@index([storeId, productId, createdAt])
 }
