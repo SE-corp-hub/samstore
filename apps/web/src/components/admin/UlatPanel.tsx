@@ -40,13 +40,13 @@ function downloadCsv(name: string, rows: (string | number | null | undefined)[][
   setTimeout(() => URL.revokeObjectURL(a.href), 2_000);
 }
 
-type Tab = "live" | "daily" | "monthly" | "kulang" | "trace" | "alerts" | "check";
+type Tab = "live" | "daily" | "monthly" | "kulang" | "trace" | "alerts" | "check" | "book";
 
 export default function UlatPanel({ role }: { role?: string; onNavigate?: (tab: string) => void }) {
   const owner = !!role && (isOwnerRole(role) || role === "MANAGER");
   const [tab, setTab] = useState<Tab>(owner ? "live" : "daily");
   const tabs: [Tab, string][] = owner
-    ? [["live", "Stock Live"], ["daily", "Today"], ["monthly", "This month"], ["kulang", "Short"], ["trace", "Trace"], ["alerts", "Alerts"], ["check", "Stock check"]]
+    ? [["live", "Stock Live"], ["daily", "Today"], ["monthly", "This month"], ["kulang", "Short"], ["trace", "Trace"], ["alerts", "Alerts"], ["check", "Stock check"], ["book", "Stock book"]]
     : [["live", "Stock Live"], ["daily", "Closing"]];
   return (
     <div style={{ fontSize: 17 }}>
@@ -61,6 +61,7 @@ export default function UlatPanel({ role }: { role?: string; onNavigate?: (tab: 
       {tab === "trace" && owner && <Trace />}
       {tab === "alerts" && owner && <Alerts />}
       {tab === "check" && owner && <StockCheck />}
+      {tab === "book" && owner && <StockBook />}
     </div>
   );
 }
@@ -122,6 +123,105 @@ function StockCheck() {
           ))}
         </div></div>
       ))}
+    </div>
+  );
+}
+
+interface BookRow { id: string; at: string; location: string; type: string; docNumber: string | null; delta: number; balanceAfter: number | null; by: string | null; unitPriceMinor: number | null; unitCostMinor: number | null }
+interface BookTotal { locationId: string; location: string; opening: number | null; closing: number | null; inQty: number; outQty: number }
+
+const BOOK_LABEL: Record<string, string> = {
+  RECEIPT: "Stock in", STOCK_IN: "Stock in", TRANSFER_IN: "Trip received", TRANSFER_OUT: "Trip sent out", CONSUME: "Sold", ADJUST: "Adjusted",
+  VOID_RESTORE: "Sale voided, stock back", CONVERSION_IN: "Resack in", CONVERSION_OUT: "Resack out", MERGE_OUT: "Merged out",
+};
+
+function StockBook() {
+  const [locations, setLocations] = useState<Loc[]>([]);
+  const [products, setProducts] = useState<{ id: string; name: string }[]>([]);
+  const [productId, setProductId] = useState("");
+  const [locationId, setLocationId] = useState("");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState(today());
+  const [rows, setRows] = useState<BookRow[]>([]);
+  const [totals, setTotals] = useState<BookTotal[]>([]);
+  const [loose, setLoose] = useState(false);
+  const [truncated, setTruncated] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    void getJson("/admin/rice/stock-live").then((r) => {
+      if (!r.ok) return;
+      setLocations((r.data?.locations as Loc[]) ?? []);
+      setProducts(((r.data?.rows as LiveRow[]) ?? []).map((x) => ({ id: x.productId, name: x.name })));
+    });
+  }, []);
+
+  const load = useCallback(async () => {
+    if (!productId) { setRows([]); setTotals([]); return; }
+    setBusy(true);
+    setError("");
+    const q = new URLSearchParams({ productId });
+    if (locationId) q.set("locationId", locationId);
+    if (from) q.set("from", from);
+    if (to) q.set("to", to);
+    const r = await getJson(`/admin/rice/stock-book?${q.toString()}`);
+    setBusy(false);
+    if (!r.ok) { setError(errText(r.data, "Could not load the stock book")); return; }
+    setRows((r.data?.rows as BookRow[]) ?? []);
+    setTotals((r.data?.totals as BookTotal[]) ?? []);
+    setLoose(!!(r.data?.product as { loose?: boolean } | undefined)?.loose);
+    setTruncated(!!r.data?.truncated);
+  }, [productId, locationId, from, to]);
+  useEffect(() => { void load(); }, [load]);
+
+  const n = (v: number | null) => (v === null ? "?" : qty(loose, v));
+  return (
+    <div>
+      <div className="d-flex gap-2 align-items-center mb-2 flex-wrap">
+        <select className="form-select" style={{ maxWidth: 260 }} value={productId} onChange={(e) => setProductId(e.target.value)} aria-label="Product">
+          <option value="">Pick a product</option>
+          {products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+        <select className="form-select" style={{ maxWidth: 200 }} value={locationId} onChange={(e) => setLocationId(e.target.value)} aria-label="Location">
+          <option value="">All locations</option>
+          {locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+        </select>
+        <label className="small text-muted">From <input type="date" className="form-control" value={from} onChange={(e) => setFrom(e.target.value)} /></label>
+        <label className="small text-muted">To <input type="date" className="form-control" value={to} onChange={(e) => setTo(e.target.value)} /></label>
+      </div>
+      {error && <div className="alert alert-danger">{error}</div>}
+      {!productId && <p className="text-muted">Pick a product to see every stock-in, trip, sale, resack and count, with the balance after each one.</p>}
+      {busy && <p className="text-muted">Loading…</p>}
+      {totals.map((t) => (
+        <div key={t.locationId} className="card mb-2"><div className="card-body py-2">
+          <div className="fw-bold">{t.location}</div>
+          <div>Start {n(t.opening)} · In +{qty(loose, t.inQty)} · Out −{qty(loose, t.outQty)} · End {n(t.closing)}</div>
+        </div></div>
+      ))}
+      {rows.length > 0 && (
+        <div className="table-responsive">
+          <table className="table table-sm align-middle">
+            <thead><tr><th>When</th><th>Where</th><th>What</th><th className="text-end">Qty</th><th className="text-end">Balance</th><th className="text-end">Price</th><th className="text-end">Cost</th></tr></thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.id}>
+                  <td className="text-nowrap">{new Date(r.at).toLocaleString("en-PH", { dateStyle: "medium", timeStyle: "short" })}</td>
+                  <td>{r.location}</td>
+                  <td>{BOOK_LABEL[r.type] ?? r.type}{r.docNumber ? ` · ${r.docNumber}` : ""}{r.by ? <span className="text-muted"> · {r.by}</span> : null}</td>
+                  <td className={`text-end ${r.delta < 0 ? "text-danger" : "text-success"}`}>{r.delta > 0 ? "+" : "−"}{qty(loose, Math.abs(r.delta))}</td>
+                  <td className="text-end">{n(r.balanceAfter)}</td>
+                  <td className="text-end">{r.unitPriceMinor === null ? "" : peso(r.unitPriceMinor)}</td>
+                  <td className="text-end">{r.unitCostMinor === null ? "" : peso(r.unitCostMinor)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {productId && !busy && !error && rows.length === 0 && <p className="text-muted">No stock changes in these dates.</p>}
+      {truncated && <p className="small text-muted">Showing the latest 500 rows. Narrow the dates to see older ones.</p>}
+      {rows.length > 0 && <p className="small text-muted">Price and cost are shown for sales and stock-ins (per sack, or per kilo for loose rice).</p>}
     </div>
   );
 }

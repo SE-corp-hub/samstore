@@ -17,7 +17,7 @@ import { prisma } from "../persistence/prisma-repositories.js";
 import { aging, dayRange, lineCost, lineGrams, manilaDate, monthRange, pct, ReportError, stockFlag } from "../domain/reports.js";
 import { varietyOf } from "../domain/resack.js";
 import { costValue, isLooseP } from "../domain/counting.js";
-import { checkChain, type ChainCheck, type LedgerRow } from "../domain/stock-book.js";
+import { checkChain, periodTotals, type ChainCheck, type LedgerRow } from "../domain/stock-book.js";
 import { isDraftStale } from "../domain/people.js";
 import { captureSignatures, locationRefusal, requireSignatures, signatureErrorResult, type Actor, type SignatureInput } from "../people/people.service.js";
 
@@ -579,6 +579,63 @@ export class RiceReportsService {
             productId: f.productId, name: p.name, loose: isLooseP(p), locationId: f.locationId, location: locName.get(f.locationId) ?? "",
             status: f.check.status, onHand: f.check.onHand, ledgerBalance: f.check.ledgerBalance, difference: f.check.difference,
             breaks: f.check.breaks.slice(0, 3).map((b) => ({ type: b.type, docNumber: b.documentType && b.documentId ? docs.get(`${b.documentType}:${b.documentId}`) ?? null : null, at: b.at, expected: b.expected, actual: b.actual, gap: b.gap })),
+          };
+        }),
+      };
+    });
+  }
+
+  /**
+   * Read-only. The stock book for ONE product: every ledger row (newest first) with the running
+   * balance, the document number, who did it, and the price/cost where the document keeps one,
+   * plus opening / in / out / closing per location for the chosen dates.
+   */
+  async stockBookPage(storeId: string, actor: Actor, input: { productId?: string; locationId?: string; from?: string; to?: string }) {
+    return this.run(async () => {
+      this.owner(actor);
+      if (!input.productId) throw new StepError(invalid("Pick a product"));
+      const product = await prisma.product.findFirst({ where: { id: input.productId, storeId }, select: productSelect });
+      if (!product) throw new StepError(invalid("Product not found"));
+      const to = input.to ? dayRange(input.to).to : new Date(Date.now() + 1_000);
+      const from = input.from ? dayRange(input.from).from : new Date(to.getTime() - 31 * 86_400_000);
+      const moves = await prisma.stockMovement.findMany({
+        where: { storeId, productId: product.id, warehouseId: input.locationId ? input.locationId : { not: null }, type: { notIn: RESERVED_ONLY } },
+        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+        select: { id: true, warehouseId: true, type: true, delta: true, balanceAfter: true, documentType: true, documentId: true, createdAt: true, createdBy: true },
+      });
+      const locations = await this.locations(storeId);
+      const locName = new Map(locations.map((l) => [l.id, l.name]));
+      const byLoc = new Map<string, LedgerRow[]>();
+      for (const m of moves) {
+        const list = byLoc.get(m.warehouseId!) ?? [];
+        list.push({ id: m.id, type: m.type, delta: m.delta, balanceAfter: m.balanceAfter, documentType: m.documentType, documentId: m.documentId, createdAt: m.createdAt });
+        byLoc.set(m.warehouseId!, list);
+      }
+      const totals = [...byLoc.entries()].filter(([id]) => locName.has(id)).map(([id, rows]) => ({ locationId: id, location: locName.get(id) ?? "", ...periodTotals(rows, from, to) }));
+      const inRange = moves.filter((m) => m.createdAt >= from && m.createdAt < to && locName.has(m.warehouseId!));
+      const shown = inRange.slice(-500).reverse();
+      const withDoc = shown.filter((m) => m.documentType && m.documentId) as (typeof shown[number] & { documentType: string; documentId: string })[];
+      const [docs, people, saleLines, inLines] = await Promise.all([
+        this.docNumbers(storeId, withDoc.map((m) => ({ type: m.documentType, id: m.documentId }))),
+        prisma.user.findMany({ where: { id: { in: [...new Set(shown.map((m) => m.createdBy ?? ""))] } }, select: { id: true, name: true, email: true } }),
+        prisma.orderItem.findMany({ where: { storeId, productId: product.id, orderId: { in: [...new Set(withDoc.filter((m) => ["SALE", "ORDER", "PAPER_SLIP"].includes(m.documentType)).map((m) => m.documentId))] } }, select: { orderId: true, unitPriceMinor: true, unitCostMinor: true } }),
+        prisma.stockInLine.findMany({ where: { storeId, productId: product.id, stockInId: { in: [...new Set(withDoc.filter((m) => m.documentType === "STOCK_IN").map((m) => m.documentId))] } }, select: { stockInId: true, unitCostMinor: true } }),
+      ]);
+      const who = new Map(people.map((u) => [u.id, u.name || u.email]));
+      const sale = new Map(saleLines.map((l) => [l.orderId, l]));
+      const stockIn = new Map(inLines.map((l) => [l.stockInId, l]));
+      return {
+        product: { id: product.id, name: product.name, loose: isLooseP(product), currentCostMinor: product.costMinor ?? null },
+        from, to, truncated: inRange.length > shown.length,
+        totals,
+        rows: shown.map((m) => {
+          const sl = m.documentId ? sale.get(m.documentId) : undefined;
+          const il = m.documentId ? stockIn.get(m.documentId) : undefined;
+          return {
+            id: m.id, at: m.createdAt, locationId: m.warehouseId, location: locName.get(m.warehouseId!) ?? "", type: m.type, documentType: m.documentType,
+            docNumber: m.documentType && m.documentId ? docs.get(`${m.documentType}:${m.documentId}`) ?? null : null,
+            delta: m.delta, balanceAfter: m.balanceAfter, by: m.createdBy ? who.get(m.createdBy) ?? null : null,
+            unitPriceMinor: sl?.unitPriceMinor ?? null, unitCostMinor: sl?.unitCostMinor ?? il?.unitCostMinor ?? null,
           };
         }),
       };

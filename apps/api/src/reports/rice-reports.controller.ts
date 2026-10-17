@@ -112,6 +112,13 @@ export class RiceReportsController {
     return unwrap(await this.reports.balanceReport(storeId, actor, { from, to, locationId }));
   }
 
+  /** GET /admin/rice/stock-book?productId=&locationId=&from=&to= — every ledger row for one product (owner, read-only). */
+  @Get("stock-book")
+  async stockBook(@Req() req: Req_, @Query("productId") productId?: string, @Query("locationId") locationId?: string, @Query("from") from?: string, @Query("to") to?: string, @Headers("x-store-id") h?: string) {
+    const { storeId, actor } = await this.ctx(req, h);
+    return unwrap(await this.reports.stockBookPage(storeId, actor, { productId, locationId, from, to }));
+  }
+
   /** GET /admin/rice/stock-book/check?locationId= — where the shelf and the ledger disagree (owner, read-only). */
   @Get("stock-book/check")
   async stockBookCheck(@Req() req: Req_, @Query("locationId") locationId?: string, @Headers("x-store-id") h?: string) {

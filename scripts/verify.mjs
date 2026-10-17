@@ -29,6 +29,8 @@ const out = (line) => {
   log.write(line);
 };
 const stamp = () => new Date().toISOString().slice(11, 19);
+/** verify-quick.bat: typecheck + the tests that never touch the database (about 1 minute). Run the full verify before a push that changes stock, money or the database. */
+const QUICK = process.argv.includes("--quick");
 
 /** Rice Ops test files, in order. Missing files (later modules) are skipped. */
 const TEST_FILES = [
@@ -94,7 +96,8 @@ async function main() {
     return 1;
   };
 
-  const status = await run("migration status", "npx prisma migrate status");
+  if (QUICK) out("QUICK MODE: checks the types and the tests that do not use the database. The slow database tests are skipped.\n");
+  const status = QUICK ? { text: "Database schema is up to date" } : await run("migration status", "npx prisma migrate status");
   const pending = !/Database schema is up to date/i.test(status.text);
   results.push(`migrations pending: ${pending ? "yes" : "no"}`);
 
@@ -118,6 +121,7 @@ async function main() {
   let failed = 0;
   for (const f of TEST_FILES) {
     if (!existsSync(join(root, f))) continue;
+    if (QUICK && !(f.includes("/domain/") || f.startsWith("apps/web/"))) continue;
     let r = await run(`test ${f}`, `npx tsx --test ${f}`);
     // A dropped connection to the database is retried once; a real failure is not hidden.
     if (r.code !== 0 && /closed the connection|Can't reach database|ECONNRESET|EOF detected/i.test(r.text)) {
@@ -131,7 +135,7 @@ async function main() {
   }
 
   out(`\n──────── SUMMARY (${Math.round((Date.now() - started.getTime()) / 1000)} s) ────────\n${results.join("\n")}\n`);
-  out(failed ? `\nVERIFY RESULT: FAIL (${failed} test file(s))\n` : "\nVERIFY RESULT: PASS — ready to commit\n");
+  out(failed ? `\nVERIFY RESULT: FAIL (${failed} test file(s))\n` : QUICK ? "\nVERIFY RESULT: PASS (QUICK: types and database-free tests only; run verify.bat before pushing database or money changes)\n" : "\nVERIFY RESULT: PASS — ready to commit\n");
   return failed ? 1 : 0;
 }
 
