@@ -17,7 +17,7 @@ In the repo (after setting `.env`):
 
 ```bash
 npx prisma migrate deploy   # applies all migrations in prisma/migrations
-npx tsx prisma/seed.ts      # demo store + products + cart (optional)
+ALLOW_DEMO_SEED=true npx tsx prisma/seed.ts   # demo data — throwaway dev DB only, never production
 ```
 
 ## 2. API deployment (Render or Railway — any Node host)

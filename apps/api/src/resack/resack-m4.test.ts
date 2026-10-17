@@ -100,6 +100,13 @@ test("M4: Sinandomeng → Dinorado is Ibang klase and carries Sinandomeng's cost
   assert.equal(job.varietyChange, true);
   assert.equal(job.outputs[0]!.valueMinor, 110_000, "not Dinorado's ₱1,400 cost — profit stays honest");
   assert.equal(await onHand(fx, fx.din25.id), 1);
+
+  // The owner's report: 1 × Sinandomeng 25 kg → 1 × Dinorado 25 kg must work even when the
+  // two products carry different conversion-family labels (Products page vs import).
+  await prisma.product.update({ where: { id: fx.din25.id }, data: { stockConversionFamily: "dinorado" } });
+  const again = await svc.resack(fx.storeId, fx.staff1, { locationId: fx.s1, inputProductId: fx.sin25.id, inputQty: 1, outputs: [{ productId: fx.din25.id, quantity: 1 }], signatures: staffSig });
+  assert.equal(again.ok && again.value.varietyChange, true, msg(again));
+  assert.equal(await onHand(fx, fx.din25.id), 2);
 });
 
 test("M4: a 2% loss waits for the owner — and the stock still moves", async () => {
@@ -112,7 +119,7 @@ test("M4: a 2% loss waits for the owner — and the stock still moves", async ()
   assert.equal(approval.kind, "LOSS_OVER_TOLERANCE");
   assert.equal(approval.status, "PENDING");
   assert.deepEqual(approval.approverRoles, ["OWNER"]);
-  assert.match(approval.summary, /Kulang 0\.5 kg \(2\.00%\)/);
+  assert.match(approval.summary, /Short 0\.5 kg \(2\.00%\)/);
   assert.equal(await onHand(fx, fx.loose.id), 24_500, "24.5 kg loose on the shelf while the owner decides");
   const job = await prisma.resackJob.findUniqueOrThrow({ where: { id: r.value.id } });
   assert.equal(job.lossValueMinor, 2_200, "2% of ₱1,100 lost");
@@ -127,12 +134,12 @@ test("M4: no signature, no resack — nothing moves", async () => {
   const fx = await fixture();
   const r = await svc.resack(fx.storeId, fx.staff1, { locationId: fx.s1, inputProductId: fx.sin25.id, inputQty: 1, outputs: [{ productId: fx.sin5.id, quantity: 5 }], signatures: [] });
   assert.equal(r.ok, false);
-  assert.match(msg(r), /Kulang ang pirma: staff/);
+  assert.match(msg(r), /Missing signature: staff/);
   assert.equal(await onHand(fx, fx.sin25.id), 10);
   assert.equal(await onHand(fx, fx.sin5.id), null);
   assert.equal(await prisma.resackJob.count({ where: { storeId: fx.storeId } }), 0, "no half-written job");
   const withK = await svc.resack(fx.storeId, fx.staff1, { locationId: fx.s1, inputProductId: fx.sin25.id, inputQty: 1, outputs: [{ productId: fx.sin5.id, quantity: 5 }], kargadorId: fx.kargadorId, signatures: staffSig });
-  assert.match(msg(withK), /kargador/, "a kargador who did the work must sign");
+  assert.match(msg(withK), /porter/, "a kargador who did the work must sign");
 });
 
 test("M4: Simulan → nasa resack → Tapusin; Tapusin twice is refused; cancel puts the sack back", async () => {
@@ -177,9 +184,9 @@ test("M4: Buksan ang sako — one sack becomes loose kilos", async () => {
 test("M4: impossible or out-of-place resacks are refused", async () => {
   const fx = await fixture();
   const heavier = await svc.resack(fx.storeId, fx.staff1, { locationId: fx.s1, inputProductId: fx.sin25.id, inputQty: 1, outputs: [{ productId: fx.sin5.id, quantity: 6 }], signatures: staffSig });
-  assert.match(msg(heavier), /Mas mabigat/);
+  assert.match(msg(heavier), /weighs more/);
   const notRice = await svc.resack(fx.storeId, fx.staff1, { locationId: fx.s1, inputProductId: fx.kape.id, inputQty: 1, outputs: [{ productId: fx.sin5.id, quantity: 1 }], signatures: staffSig });
-  assert.match(msg(notRice), /timbang ng Kape/);
+  assert.match(msg(notRice), /weight of Kape/);
   const tooMany = await svc.resack(fx.storeId, fx.staff1, { locationId: fx.s1, inputProductId: fx.sin25.id, inputQty: 11, outputs: [{ productId: fx.sin5.id, quantity: 55 }], signatures: staffSig });
   assert.equal(!tooMany.ok && tooMany.error.type, "conflict", "only 10 sacks at Store 1");
   const wrongPlace = await svc.resack(fx.storeId, fx.staff2, { locationId: fx.s1, inputProductId: fx.sin25.id, inputQty: 1, outputs: [{ productId: fx.sin5.id, quantity: 5 }], signatures: staffSig });

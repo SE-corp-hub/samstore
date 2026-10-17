@@ -1,7 +1,7 @@
 "use client";
 
-// Rice Ops M5 — Manual na pasok (stock that arrived without a purchase order, signed by the
-// receiver) and Susuriin (Bagong items waiting for the owner: confirm in Para sa iyo, or
+// Rice Ops M5 — Manual stock in (stock that arrived without a purchase order, signed by the
+// receiver) and To review (new items waiting for the owner: confirm in For your approval, or
 // fold into an existing product here — the stock is converted by weight).
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -10,6 +10,7 @@ import { adminHeaders, isOwnerRole } from "../../lib/admin";
 import { toast } from "../../lib/toast";
 import { sendStep } from "../../lib/offlineQueue";
 import SignaturePad from "./SignaturePad";
+import { askConfirm } from "../../lib/ask";
 
 interface Loc { id: string; name: string; code: string | null; isActive: boolean }
 interface Product { id: string; name: string; stockBaseUnit: string | null; stockBaseQuantity: number | null; isActive?: boolean; reviewStatus?: string }
@@ -52,7 +53,7 @@ export default function PasokPanel({ role }: { role?: string; onNavigate?: (tab:
     setProducts(((ps?.products ?? []) as Product[]).filter((p) => p.isActive !== false));
     setReviews((rv?.products ?? []) as Review[]);
   }, []);
-  useEffect(() => { load().catch(() => setError("Hindi ma-load")); }, [load]);
+  useEffect(() => { load().catch(() => setError("Could not load")); }, [load]);
 
   const byId = useMemo(() => new Map(products.map((p) => [p.id, p])), [products]);
   const units = (r: Row) => { const p = byId.get(r.productId); const n = Number(r.amount); return !p || !(n > 0) ? 0 : isLoose(p) ? Math.round(n * 1000) : Number.isInteger(n) ? n : 0; };
@@ -66,12 +67,12 @@ export default function PasokPanel({ role }: { role?: string; onNavigate?: (tab:
       lines: rows.map((r) => ({ productId: r.productId, quantity: units(r), unitCostMinor: r.cost ? Math.round(Number(r.cost) * 100) : undefined })),
       signatures: [{ signerKind: "STAFF", imagePng: sig }],
     };
-    const sent = await sendStep("/admin/stock-in", body, `Pasok${supplier.trim() ? ` (${supplier.trim()})` : ""}`);
+    const sent = await sendStep("/admin/stock-in", body, `Stock in${supplier.trim() ? ` (${supplier.trim()})` : ""}`);
     setBusy(false);
-    if (sent.status === "queued") { toast("Walang signal — naka-save sa phone, ipapadala pagbalik ng signal"); setRows([{ productId: "", amount: "", cost: "" }]); setSupplier(""); setSig(null); setSigKey((k) => k + 1); return; }
+    if (sent.status === "queued") { toast("No signal — saved on this phone, it will be sent when the signal returns"); setRows([{ productId: "", amount: "", cost: "" }]); setSupplier(""); setSig(null); setSigKey((k) => k + 1); return; }
     const d = sent.data as ApiBody | null;
-    if (!sent.ok) { setError(errText(d, "Hindi natuloy")); return; }
-    toast(`Natanggap: ${String(d?.docNumber ?? "")}`);
+    if (!sent.ok) { setError(errText(d, "Did not go through")); return; }
+    toast(`Received: ${String(d?.docNumber ?? "")}`);
     setRows([{ productId: "", amount: "", cost: "" }]); setSupplier(""); setSig(null); setSigKey((k) => k + 1);
   };
 
@@ -79,82 +80,82 @@ export default function PasokPanel({ role }: { role?: string; onNavigate?: (tab:
     const into = mergeInto[r.id];
     if (!into) return;
     const target = byId.get(into)?.name ?? "";
-    if (!confirm(`Pagsamahin ang "${r.name}" sa "${target}"? Ililipat ang stock nito.`)) return;
+    if (!(await askConfirm(`Merge "${r.name}" into "${target}"? Its stock will be moved.`, { ok: "Merge" }))) return;
     const res = await fetch(`${API_URL}/admin/products/${r.id}/merge`, { method: "POST", headers: { "Content-Type": "application/json", ...adminHeaders() }, body: JSON.stringify({ intoProductId: into }) });
     const d = (await res.json().catch(() => null)) as ApiBody | null;
-    if (!res.ok) { setError(errText(d, "Hindi napagsama")); return; }
-    toast(`Pinagsama sa ${target}`);
+    if (!res.ok) { setError(errText(d, "Not merged")); return; }
+    toast(`Merged into ${target}`);
     await load();
   };
 
   return (
     <div style={{ fontSize: 18 }}>
       <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
-        <h1 className="h4 mb-0">Pasok at Susuriin</h1>
+        <h1 className="h4 mb-0">Stock in & review</h1>
         {homeLocationId ? <span className="badge text-bg-light border fs-6">{here?.name}</span> : (
-          <select className="form-select" style={{ maxWidth: 240 }} aria-label="Lokasyon" value={locationId} onChange={(e) => setLocationId(e.target.value)}>
+          <select className="form-select" style={{ maxWidth: 240 }} aria-label="Location" value={locationId} onChange={(e) => setLocationId(e.target.value)}>
             {locations.map((l) => <option key={l.id} value={l.id}>{l.code ? `${l.code} · ` : ""}{l.name}</option>)}
           </select>
         )}
       </div>
       <ul className="nav nav-tabs mb-3">
-        <li className="nav-item"><button className={`nav-link ${tab === "pasok" ? "active" : ""}`} onClick={() => setTab("pasok")}>Manual na pasok</button></li>
-        <li className="nav-item"><button className={`nav-link ${tab === "review" ? "active" : ""}`} onClick={() => setTab("review")}>Susuriin {reviews.length > 0 && <span className="badge text-bg-warning">{reviews.length}</span>}</button></li>
+        <li className="nav-item"><button className={`nav-link ${tab === "pasok" ? "active" : ""}`} onClick={() => setTab("pasok")}>Manual stock in</button></li>
+        <li className="nav-item"><button className={`nav-link ${tab === "review" ? "active" : ""}`} onClick={() => setTab("review")}>To review {reviews.length > 0 && <span className="badge text-bg-warning">{reviews.length}</span>}</button></li>
       </ul>
       {error && <div className="alert alert-danger py-2" role="alert">{error}</div>}
 
       {tab === "pasok" && (
         <div className="card" style={{ maxWidth: 620 }}>
           <div className="card-body">
-            <label className="form-label" htmlFor="pk-sup">Supplier (kung meron)</label>
+            <label className="form-label" htmlFor="pk-sup">Supplier (if any)</label>
             <input id="pk-sup" className="form-control form-control-lg mb-3" value={supplier} onChange={(e) => setSupplier(e.target.value.slice(0, 80))} />
             {rows.map((r, i) => {
               const p = byId.get(r.productId);
               return (
                 <div key={i} className="row g-2 mb-2 align-items-end">
                   <div className="col-12 col-sm-6">
-                    <select className="form-select form-select-lg" aria-label={`Produkto ${i + 1}`} value={r.productId} onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, productId: e.target.value } : x)))}>
-                      <option value="">Pumili…</option>
+                    <select className="form-select form-select-lg" aria-label={`Product ${i + 1}`} value={r.productId} onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, productId: e.target.value } : x)))}>
+                      <option value="">Choose…</option>
                       {products.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
                     </select>
                   </div>
                   <div className="col-5 col-sm-3">
-                    <input className="form-control form-control-lg text-center" aria-label={isLoose(p) ? "Ilang kilo" : "Ilan"} placeholder={isLoose(p) ? "kilo" : "ilan"} inputMode="decimal" value={r.amount} onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, amount: num(e.target.value) } : x)))} />
+                    <input className="form-control form-control-lg text-center" aria-label={isLoose(p) ? "How many kilos" : "How many"} placeholder={isLoose(p) ? "kilos" : "how many"} inputMode="decimal" value={r.amount} onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, amount: num(e.target.value) } : x)))} />
                   </div>
                   <div className="col-5 col-sm-2">
-                    <input className="form-control form-control-lg text-center" aria-label="Puhunan bawat isa" placeholder="₱ puhunan" inputMode="decimal" value={r.cost} onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, cost: num(e.target.value) } : x)))} />
+                    <input className="form-control form-control-lg text-center" aria-label="Cost each" placeholder="₱ cost" inputMode="decimal" value={r.cost} onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, cost: num(e.target.value) } : x)))} />
                   </div>
-                  <div className="col-2 col-sm-1">{rows.length > 1 && <button type="button" className="btn btn-link text-danger" aria-label="Alisin" onClick={() => setRows(rows.filter((_, j) => j !== i))}>×</button>}</div>
+                  <div className="col-2 col-sm-1">{rows.length > 1 && <button type="button" className="btn btn-link text-danger" aria-label="Remove" onClick={() => setRows(rows.filter((_, j) => j !== i))}>×</button>}</div>
                 </div>
               );
             })}
-            <button type="button" className="btn btn-outline-secondary mb-3" onClick={() => setRows([...rows, { productId: "", amount: "", cost: "" }])}>+ Isa pa</button>
-            <div className="fw-semibold">Pirma ng tumanggap</div>
+            <button type="button" className="btn btn-outline-secondary mb-3" onClick={() => setRows([...rows, { productId: "", amount: "", cost: "" }])}>+ One more</button>
+            <div className="fw-semibold">Signature of the receiver</div>
             <SignaturePad key={sigKey} onSignature={setSig} />
-            <button type="button" className="btn btn-success btn-lg w-100 mt-3" disabled={!ready} onClick={() => void saveIn()}>{busy ? "Sandali…" : "Tanggapin"}</button>
+            <button type="button" className="btn btn-success btn-lg w-100 mt-3" disabled={!ready} onClick={() => void saveIn()}>{busy ? "Please wait…" : "Receive"}</button>
           </div>
         </div>
       )}
 
       {tab === "review" && (
-        reviews.length === 0 ? <p className="text-muted">Walang bagong item na susuriin.</p> : (
+        reviews.length === 0 ? <p className="text-muted">No new items to review.</p> : (
           <div className="list-group" style={{ maxWidth: 720 }}>
             {reviews.map((r) => (
               <div key={r.id} className="list-group-item py-3">
-                <div className="fw-semibold">{r.name} <span className="badge text-bg-warning">Susuriin</span></div>
+                <div className="fw-semibold">{r.name} <span className="badge text-bg-warning">To review</span></div>
                 <div className="small text-muted">
-                  {peso(r.priceMinor)}{r.loose ? "/kg" : ""} · puhunan {peso(r.costMinor)} · naibenta {r.timesSold}× · idinagdag {new Date(r.createdAt).toLocaleString("en-PH")}
+                  {peso(r.priceMinor)}{r.loose ? "/kg" : ""} · cost {peso(r.costMinor)} · sold {r.timesSold}× · added {new Date(r.createdAt).toLocaleString("en-PH")}
                 </div>
                 {owner ? (
                   <div className="d-flex flex-wrap gap-2 mt-2">
-                    <span className="align-self-center small">Aprubahan sa <strong>Para sa iyo</strong>, o:</span>
-                    <select className="form-select" style={{ maxWidth: 260 }} aria-label="Pagsamahin sa" value={mergeInto[r.id] ?? ""} onChange={(e) => setMergeInto({ ...mergeInto, [r.id]: e.target.value })}>
-                      <option value="">Pagsamahin sa…</option>
+                    <span className="align-self-center small">Approve in <strong>For your approval</strong>, or:</span>
+                    <select className="form-select" style={{ maxWidth: 260 }} aria-label="Merge into" value={mergeInto[r.id] ?? ""} onChange={(e) => setMergeInto({ ...mergeInto, [r.id]: e.target.value })}>
+                      <option value="">Merge into…</option>
                       {products.filter((p) => p.id !== r.id && p.reviewStatus !== "FOR_REVIEW").map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
                     </select>
-                    <button type="button" className="btn btn-outline-dark" disabled={!mergeInto[r.id]} onClick={() => void merge(r)}>Pagsamahin</button>
+                    <button type="button" className="btn btn-outline-dark" disabled={!mergeInto[r.id]} onClick={() => void merge(r)}>Merge</button>
                   </div>
-                ) : <div className="small mt-1">Hinihintay ang may-ari.</div>}
+                ) : <div className="small mt-1">Waiting for the owner.</div>}
               </div>
             ))}
           </div>

@@ -73,7 +73,7 @@ registerApprovalHandler("REFUND", async (tx, a) => {
   if (order.source === "AGENT" && order.status !== "COMPLETED") return; // not paid yet — nothing to give back
   const value = refundValue(line, units);
   if (value <= 0) return;
-  const note = `Ibinalik (${order.orderNumber})`;
+  const note = `Returned (${order.orderNumber})`;
   if (order.paymentMethod === "credit" && order.storeCustomerId) {
     const sc = await tx.storeCustomer.findUniqueOrThrow({ where: { id: order.storeCustomerId }, select: { creditBalanceMinor: true } });
     const reduce = Math.min(value, Math.max(0, sc.creditBalanceMinor));
@@ -89,10 +89,10 @@ registerApprovalHandler("REFUND", async (tx, a) => {
     }
     // Anything already paid beyond the remaining balance is handed back as cash.
     if (value > reduce) {
-      await tx.payment.create({ data: { storeId: a.storeId, orderId: order.id, method: "cash", amountMinor: value - reduce, type: "refund", status: "pending", note: `${note} — sobra sa utang, ibalik sa customer`, createdBy: a.decidedById, locationId: approval?.locationId ?? null } });
+      await tx.payment.create({ data: { storeId: a.storeId, orderId: order.id, method: "cash", amountMinor: value - reduce, type: "refund", status: "pending", note: `${note} — more than the credit owed, give back to the customer`, createdBy: a.decidedById, locationId: approval?.locationId ?? null } });
     }
   } else {
-    await tx.payment.create({ data: { storeId: a.storeId, orderId: order.id, method: order.paymentMethod, amountMinor: value, type: "refund", status: "pending", note: `${note} — ibalik sa customer`, createdBy: a.decidedById, locationId: approval?.locationId ?? null } });
+    await tx.payment.create({ data: { storeId: a.storeId, orderId: order.id, method: order.paymentMethod, amountMinor: value, type: "refund", status: "pending", note: `${note} — give back to the customer`, createdBy: a.decidedById, locationId: approval?.locationId ?? null } });
   }
 });
 
@@ -114,7 +114,7 @@ export class UtangService {
   private async location(storeId: string, actor: Actor, locationId: string | undefined) {
     const id = locationId || actor.homeLocationId || (await prisma.warehouse.findFirst({ where: { storeId, isDefault: true }, select: { id: true } }))?.id;
     const loc = id ? await prisma.warehouse.findFirst({ where: { id, storeId, isActive: true }, select: { id: true, name: true } }) : null;
-    if (!loc) throw new StepError(invalid("Pumili ng lokasyon"));
+    if (!loc) throw new StepError(invalid("Choose a location"));
     const refusal = locationRefusal(actor, loc.id);
     if (refusal) throw new StepError(forbidden(refusal));
     return loc;
@@ -149,20 +149,20 @@ export class UtangService {
   async addCustomer(storeId: string, actor: Actor, input: { name?: string; phone?: string; limitMinor?: unknown }) {
     return this.run(async () => {
       const name = input.name?.trim().replace(/\s+/g, " ") ?? "";
-      if (name.length < 2 || name.length > 80) throw new UtangError("Ilagay ang pangalan");
+      if (name.length < 2 || name.length > 80) throw new UtangError("Enter the name");
       const phone = toE164(input.phone ?? "");
-      if (!phone) throw new UtangError("Ilagay ang tamang mobile number (09xx xxx xxxx)");
+      if (!phone) throw new UtangError("Enter a valid mobile number (09xx xxx xxxx)");
       const limit = input.limitMinor;
       if (limit !== undefined && limit !== null) {
-        if (!LIMIT_ROLES.includes(actor.role)) throw new StepError(forbidden("Ang may-ari lang ang nagtatakda ng limit"));
-        if (typeof limit !== "number" || !Number.isInteger(limit) || limit < 0 || limit > MAX_LIMIT_MINOR) throw new UtangError("Mali ang limit");
+        if (!LIMIT_ROLES.includes(actor.role)) throw new StepError(forbidden("Only the owner can set the limit"));
+        if (typeof limit !== "number" || !Number.isInteger(limit) || limit < 0 || limit > MAX_LIMIT_MINOR) throw new UtangError("Invalid limit");
       }
       const out = await prisma.$transaction(async (tx) => {
         // The same mobile is the same person (one Customer across stores; one StoreCustomer per store).
         const existing = await tx.customer.findFirst({ where: { phone }, select: { id: true } });
         const customer = existing ?? (await tx.customer.create({ data: { name, phone, email: null, passwordHash: null }, select: { id: true } }));
         const before = await tx.storeCustomer.findUnique({ where: { storeId_customerId: { storeId, customerId: customer.id } }, select: { id: true } });
-        if (before) throw new StepError(conflict("Nasa listahan na ang numerong ito"));
+        if (before) throw new StepError(conflict("This number is already on the list"));
         const sc = await tx.storeCustomer.create({
           data: { storeId, customerId: customer.id, ...(typeof limit === "number" ? { creditLimitMinor: limit, creditApproved: limit > 0 } : {}) },
           select: { id: true, creditApproved: true, creditLimitMinor: true },
@@ -177,10 +177,10 @@ export class UtangService {
 
   /** The owner/manager sets (or removes, with 0) a customer's utang limit. */
   async setLimit(storeId: string, actor: Actor, storeCustomerId: string, limitMinor: unknown) {
-    if (!LIMIT_ROLES.includes(actor.role)) return forbidden("Ang may-ari lang ang nagtatakda ng limit");
-    if (typeof limitMinor !== "number" || !Number.isInteger(limitMinor) || limitMinor < 0 || limitMinor > MAX_LIMIT_MINOR) return invalid("Mali ang limit");
+    if (!LIMIT_ROLES.includes(actor.role)) return forbidden("Only the owner can set the limit");
+    if (typeof limitMinor !== "number" || !Number.isInteger(limitMinor) || limitMinor < 0 || limitMinor > MAX_LIMIT_MINOR) return invalid("Invalid limit");
     const sc = await prisma.storeCustomer.findFirst({ where: { id: storeCustomerId, storeId }, select: { id: true, creditLimitMinor: true } });
-    if (!sc) return notFound("Hindi makita ang customer");
+    if (!sc) return notFound("Customer not found");
     const updated = await prisma.storeCustomer.update({ where: { id: sc.id }, data: { creditLimitMinor: limitMinor, creditApproved: limitMinor > 0 }, select: { id: true, creditApproved: true, creditLimitMinor: true } });
     await prisma.auditLog.create({ data: { storeId, actorType: "USER", actorId: actor.userId, action: "utang.limit", entityType: "StoreCustomer", entityId: sc.id, before: { limitMinor: sc.creditLimitMinor }, after: { limitMinor } } });
     await bustCredit(storeId);
@@ -196,9 +196,9 @@ export class UtangService {
     return this.run(async () => {
       const loc = await this.location(storeId, actor, input.locationId);
       const method = input.method === "gcash" ? "gcash" : input.method === "cash" || input.method === undefined ? "cash" : null;
-      if (!method) throw new UtangError("Cash o GCash?");
+      if (!method) throw new UtangError("Cash or GCash?");
       const sc = input.customerId ? await prisma.storeCustomer.findFirst({ where: { id: input.customerId, storeId }, select: { id: true, creditBalanceMinor: true } }) : null;
-      if (!sc) throw new StepError(notFound("Pumili ng customer"));
+      if (!sc) throw new StepError(notFound("Choose a customer"));
       const amount = checkPayment(sc.creditBalanceMinor, input.amountMinor);
       // Same tender rules as a sale (cash change, GCash reference) — validated, not written here.
       const prepared = await prepareTenders({
@@ -212,17 +212,17 @@ export class UtangService {
       const out = await prisma.$transaction(async (tx) => {
         // ONE guarded write: two payments racing can never take the balance below zero.
         const took = await tx.storeCustomer.updateMany({ where: { id: sc.id, storeId, creditBalanceMinor: { gte: amount } }, data: { creditBalanceMinor: { decrement: amount } } });
-        if (took.count === 0) throw new StepError(conflict("Nagbago ang utang habang nagbabayad — tingnan ulit ang balanse"));
+        if (took.count === 0) throw new StepError(conflict("The credit changed during payment — check the balance again"));
         const payment = await tx.payment.create({
           data: {
             storeId, method, amountMinor: amount, tenderedMinor: tender.tenderedMinor, changeMinor: tender.changeMinor, reference: tender.reference,
-            type: "payment", status: "paid", note: `Bayad sa utang (${loc.name})`, createdBy: actor.userId, registerSessionId, locationId: loc.id,
+            type: "payment", status: "paid", note: `Credit payment (${loc.name})`, createdBy: actor.userId, registerSessionId, locationId: loc.id,
           },
           select: { id: true },
         });
         await captureSignatures(tx, storeId, actor, { documentType: "UTANG", documentId: payment.id, step: "PAYMENT", locationId: loc.id }, input.signatures);
         await requireSignatures(tx, storeId, { documentType: "UTANG", documentId: payment.id, step: "PAYMENT" }, { customer: hasCustomerSig });
-        await tx.creditEntry.create({ data: { storeId, storeCustomerId: sc.id, type: "payment", amountMinor: -amount, note: `Bayad sa ${loc.name} (${method})`, createdBy: actor.userId, paymentId: payment.id } });
+        await tx.creditEntry.create({ data: { storeId, storeCustomerId: sc.id, type: "payment", amountMinor: -amount, note: `Payment at ${loc.name} (${method})`, createdBy: actor.userId, paymentId: payment.id } });
         const after = await tx.storeCustomer.findUniqueOrThrow({ where: { id: sc.id }, select: { creditBalanceMinor: true } });
         const sms = await queueSms(tx, {
           storeId, storeCustomerId: sc.id, template: "utang_payment", text: paymentText({ amountMinor: amount, balanceMinor: after.creditBalanceMinor }),
@@ -287,7 +287,7 @@ export class UtangService {
   }
 
   async updateSettings(storeId: string, actor: Actor, input: Record<string, unknown>) {
-    if (!LIMIT_ROLES.includes(actor.role)) return forbidden("Ang may-ari lang ang puwedeng magbago nito");
+    if (!LIMIT_ROLES.includes(actor.role)) return forbidden("Only the owner can change this");
     const patch: { utangSmsEnabled?: boolean; utangMonthlyReminder?: boolean; utangOverdueReminder?: boolean; utangOverdueDays?: number; smsSenderName?: string | null } = {};
     for (const k of ["utangSmsEnabled", "utangMonthlyReminder", "utangOverdueReminder"] as const) {
       const v = input[k];
@@ -295,12 +295,12 @@ export class UtangService {
     }
     if (input.utangOverdueDays !== undefined) {
       const d = input.utangOverdueDays;
-      if (typeof d !== "number" || !Number.isInteger(d) || d < 7 || d > 365) return invalid("Ilang araw bago paalalahanan? (7–365)");
+      if (typeof d !== "number" || !Number.isInteger(d) || d < 7 || d > 365) return invalid("How many days before a reminder? (7–365)");
       patch.utangOverdueDays = d;
     }
     if (input.smsSenderName !== undefined) {
       const n = typeof input.smsSenderName === "string" ? input.smsSenderName.trim() : "";
-      if (n && !/^[A-Za-z0-9 ]{1,11}$/.test(n)) return invalid("Sender name: hanggang 11 letra o numero");
+      if (n && !/^[A-Za-z0-9 ]{1,11}$/.test(n)) return invalid("Sender name: up to 11 letters or numbers");
       patch.smsSenderName = n || null;
     }
     const row = await prisma.storeSettings.upsert({ where: { storeId }, update: patch, create: { storeId, ...patch } });

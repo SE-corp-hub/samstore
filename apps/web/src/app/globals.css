@@ -257,3 +257,45 @@ body {
 .rice-ui .badge.text-bg-primary, .rice-ui .badge.text-bg-info { background: #E3F0FB !important; color: #0B4F8A !important; border: 1px solid #0B4F8A; }
 .rice-ui .badge.text-bg-danger { background: #FDE8E7 !important; color: #A3201B !important; border: 1px solid #A3201B; }
 .rice-ui .badge.text-bg-success { background: #E4F3EA !important; color: #1F6F3F !important; border: 1px solid #1F6F3F; }
+
+/* Mobile tap targets (SAM Store mobile UX plan, step 2): on a phone every button and field is at
+   least 44px tall, so a thumb can hit it. Desktop keeps Bootstrap's compact sizes.
+   The .rice-ui store screens already go further (see above). */
+@media (max-width: 767.98px) {
+  .btn, .btn-sm { min-height: 44px; }
+  .form-control, .form-control-sm, .form-select, .form-select-sm { min-height: 44px; }
+  .form-check-input { width: 1.4em; height: 1.4em; }
+  .btn-close { min-width: 44px; min-height: 44px; }
+  .btn-sm, .form-control-sm, .form-select-sm { font-size: 1rem; }
+}
+
+/* Staff bottom bar (phone only): the five daily jobs, one tap each, plus More for the full menu. */
+.staff-bar {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 1030;
+  display: flex; background: #fff; border-top: 2px solid #1f1d1a;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.staff-bar button {
+  flex: 1 1 0; min-width: 0; min-height: 64px; padding: 6px 2px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  background: transparent; border: 0; color: #1f1d1a; font-size: 0.8rem; font-weight: 600;
+}
+.staff-bar button i { font-size: 1.5rem; line-height: 1; }
+.staff-bar button.active { background: #1f1d1a; color: #fff; }
+.staff-bar button:focus-visible { outline: 3px solid #0b4f8a; outline-offset: -3px; }
+@media (max-width: 767.98px) {
+  /* Keep the last content row clear of the fixed bar. */
+  main.has-staff-bar { padding-bottom: calc(80px + env(safe-area-inset-bottom)) !important; }
+}
+
+/* Staff home: one big tile per screen. */
+.staff-tile {
+  min-height: 112px; padding: 12px 8px; border: 2px solid #1f1d1a; border-radius: 12px; background: #fff; color: #1f1d1a;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
+  font-size: 1.15rem; font-weight: 700; text-align: center; line-height: 1.2;
+}
+.staff-tile i { font-size: 2.2rem; line-height: 1; }
+.staff-tile:active, .staff-tile:hover { background: #1f1d1a; color: #fff; }
+.staff-tile:focus-visible { outline: 3px solid #0b4f8a; outline-offset: 2px; }
+.staff-other > summary { list-style: none; }
+.staff-other > summary::-webkit-details-marker { display: none; }

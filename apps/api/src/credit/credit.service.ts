@@ -93,7 +93,7 @@ export class CreditService {
     await tx.creditEntry.create({
       data: {
         storeId, storeCustomerId, orderId, type: "purchase", amountMinor, startAt: start, dueAt: due, createdBy: actorId,
-        note: opts.overLimitApprovedBy ? "Utang (aprubado ng may-ari, lampas sa limit)" : "POS credit sale",
+        note: opts.overLimitApprovedBy ? "Credit (approved by the owner, over the limit)" : "POS credit sale",
       },
     });
     const updated = await tx.storeCustomer.findUniqueOrThrow({ where: { id: sc.id }, select: { creditBalanceMinor: true } });
@@ -149,10 +149,10 @@ export class CreditService {
         // side of utang; the drawer's cash math counts only cash tenders.
         const registerSessionId = await this.registers.attachOpenSession(storeId);
         const p = await tx.payment.create({
-          data: { storeId, method: "credit", amountMinor: pay, note: note?.trim() ?? "Utang payment", type: "payment", createdBy: actorId, signatureData, registerSessionId },
+          data: { storeId, method: "credit", amountMinor: pay, note: note?.trim() ?? "Credit payment", type: "payment", createdBy: actorId, signatureData, registerSessionId },
         });
         await tx.creditEntry.create({
-          data: { storeId, storeCustomerId, type: "payment", amountMinor: -pay, note: note?.trim() ?? "Utang payment", createdBy: actorId },
+          data: { storeId, storeCustomerId, type: "payment", amountMinor: -pay, note: note?.trim() ?? "Credit payment", createdBy: actorId },
         });
         const updated = await tx.storeCustomer.update({
           where: { id: sc.id },

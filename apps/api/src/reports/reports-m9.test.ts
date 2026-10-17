@@ -179,7 +179,7 @@ test("M9: the daily totals equal the sum of the day's documents; Pagsasara locks
   assert.equal(y.ok && y.value.sections[0]!.sales.encodedLater, 1);
 
   // Pagsasara: count the cash, sign; the day locks.
-  assert.match(msg(await reports.close(fx.storeId, fx.staff1, { cashCountedMinor: 1 })), /Kulang ang pirma/);
+  assert.match(msg(await reports.close(fx.storeId, fx.staff1, { cashCountedMinor: 1 })), /Missing signature/);
   const closed = await reports.close(fx.storeId, fx.staff1, { cashCountedMinor: s.cash.expectedMinor - 2_000, signatures: staffSig });
   assert.equal(closed.ok, true, msg(closed));
   assert.equal(closed.ok && closed.value.cashVarianceMinor, -2_000, "₱20 short in the drawer");
@@ -189,6 +189,7 @@ test("M9: the daily totals equal the sum of the day's documents; Pagsasara locks
   const locked = await reports.daily(fx.storeId, fx.owner, { date: today, locationId: fx.s1 });
   assert.equal(locked.ok && locked.value.sections[0]!.locked, true);
   assert.equal(locked.ok && locked.value.sections[0]!.sales.totalMinor, s.sales.totalMinor, "the closed day does not move");
+  assert.deepEqual(locked.ok && locked.value.sections[0]!.afterClose, { count: 1, totalMinor: 130_000, cashMinor: 130_000 }, "a sale after Pagsasara is shown apart, not lost");
 });
 
 test("M9: monthly gross profit from frozen costs; the kargador pay sheet; Trace; alerts — owner only", async () => {

@@ -10,13 +10,13 @@ import { refundValue } from "./utang.js";
 export type AgentStatusCode = "NAGHIHINTAY" | "APRUBADO" | "NAILABAS" | "NAIHATID" | "BAYAD_NA" | "TINANGGIHAN" | "KINANSELA";
 
 export const AGENT_STATUS_LABEL: Record<AgentStatusCode, string> = {
-  NAGHIHINTAY: "Naghihintay",
-  APRUBADO: "Aprubado",
-  NAILABAS: "Nasa daan",
-  NAIHATID: "Naihatid — hinihintay ang bayad",
-  BAYAD_NA: "Bayad na",
-  TINANGGIHAN: "Tinanggihan",
-  KINANSELA: "Kinansela",
+  NAGHIHINTAY: "Waiting",
+  APRUBADO: "Approved",
+  NAILABAS: "On the way",
+  NAIHATID: "Delivered — waiting for payment",
+  BAYAD_NA: "Paid",
+  TINANGGIHAN: "Declined",
+  KINANSELA: "Cancelled",
 };
 
 interface TripView { status: string; deliveredQty: number | null }
@@ -48,6 +48,6 @@ export function amountDue(lines: { soldBy: string | null; unitPriceMinor: number
 /** A delivery address the kargador can find. */
 export function checkAddress(address: unknown): string {
   const a = typeof address === "string" ? address.trim().replace(/\s+/g, " ") : "";
-  if (a.length < 5 || a.length > 200) throw new Error("Ilagay ang address (barangay, kalye, palatandaan)");
+  if (a.length < 5 || a.length > 200) throw new Error("Enter the address (barangay, street, landmark)");
   return a;
 }

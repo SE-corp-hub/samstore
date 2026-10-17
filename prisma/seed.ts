@@ -9,6 +9,15 @@ import bcrypt from "bcryptjs";
 const prisma = new PrismaClient();
 
 async function main() {
+  // The demo accounts below have passwords written in this file. On a database that real
+  // people use (the shared Supabase is one), running this would hand out an owner and a
+  // platform-admin login to anyone who has read the repo. So it only runs when asked for
+  // explicitly, and never in production. (scripts/lock-demo-accounts.ts re-locks them.)
+  if (process.env.NODE_ENV === "production" || process.env.ALLOW_DEMO_SEED !== "true") {
+    console.error("Refusing to seed demo accounts with known passwords. On a throwaway dev database only: set ALLOW_DEMO_SEED=true and run again.");
+    process.exitCode = 1;
+    return;
+  }
   // Platform admin (demo) — public registration is restricted to STORE_OWNER, so this is seeded.
   const adminEmail = "platform@samstore.test";
   const existingAdmin = await prisma.user.findUnique({ where: { email: adminEmail } });

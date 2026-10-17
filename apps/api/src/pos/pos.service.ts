@@ -71,7 +71,7 @@ export class PosService {
     // Rice Ops M3: a line may be served from another location — immediate sales only.
     const remoteIds = [...new Set(items.map((i) => i.sourceLocationId).filter((x): x is string => typeof x === "string" && x.length > 0))];
     if (remoteIds.length > 0 && !opts.allowRemote) {
-      return { ok: false, error: { type: "validation", errors: ["Kunin sa ibang tindahan is for immediate sales only"] } };
+      return { ok: false, error: { type: "validation", errors: ["Take from another store is for immediate sales only"] } };
     }
     if (items.some((i) => i.sourceLocationId && i.variantId)) {
       return { ok: false, error: { type: "validation", errors: ["Variant lines cannot be served from another location"] } };

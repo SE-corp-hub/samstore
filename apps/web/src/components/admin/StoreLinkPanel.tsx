@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import QRCode from "qrcode";
 import { API_URL } from "../../config";
 import { adminHeaders } from "../../lib/admin";
+import { askConfirm } from "../../lib/ask";
 
 interface LinkData {
   id: string;
@@ -117,7 +118,7 @@ export default function StoreLinkPanel() {
   };
 
   const rotate = async () => {
-    if (!window.confirm("Rotate the store link? Everyone with the CURRENT link will need the new one.")) return;
+    if (!(await askConfirm("Rotate the store link? Everyone with the CURRENT link will need the new one.", { ok: "Rotate", cancel: "Cancel" }))) return;
     setError(null);
     try {
       const res = await fetch(`${API_URL}/admin/store-link/rotate`, {
@@ -132,7 +133,7 @@ export default function StoreLinkPanel() {
   };
 
   const revoke = async () => {
-    if (!window.confirm("Revoke the store link? The storefront will stop loading until you regenerate it.")) return;
+    if (!(await askConfirm("Revoke the store link? The storefront will stop loading until you regenerate it.", { ok: "Revoke", cancel: "Cancel", danger: true }))) return;
     setError(null);
     try {
       const res = await fetch(`${API_URL}/admin/store-link/revoke`, {

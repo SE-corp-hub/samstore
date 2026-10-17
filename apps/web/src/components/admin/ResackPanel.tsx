@@ -1,10 +1,10 @@
 "use client";
 
 // Rice Ops M4 — Resack: any rice into any rice, at this location.
-//   Resack ngayon   — weigh in, weigh out, sign (one step)
-//   Simulan / Tapusin — the kargador needs time: the input leaves the shelf now and
-//                     shows as "nasa resack" until someone finishes it
-//   Buksan ang sako — one sack becomes loose kilos for tingi
+//   Resack now      — weigh in, weigh out, sign (one step)
+//   Start / Finish  — the kargador needs time: the input leaves the shelf now and
+//                     shows as "in resack" until someone finishes it
+//   Open a sack     — one sack becomes loose kilos for tingi
 // The screen does the arithmetic: kilos in, kilos out, the loss and whether it is
 // within 1% — before anyone signs. Over 1% goes to the owner; the stock still moves.
 
@@ -14,6 +14,7 @@ import { adminHeaders } from "../../lib/admin";
 import { toast } from "../../lib/toast";
 import { sendStep } from "../../lib/offlineQueue";
 import SignCapture, { type KargadorOption, type SignatureOut } from "./SignCapture";
+import { askText } from "../../lib/ask";
 
 interface Product { id: string; name: string; stockBaseUnit: string | null; stockBaseQuantity: number | null; stockConversionFamily: string | null; isActive?: boolean }
 interface Location { id: string; name: string; code: string | null; isActive: boolean }
@@ -21,7 +22,7 @@ interface Job {
   id: string; docNumber: string; status: "STARTED" | "FINISHED" | "CANCELLED"; input: { id: string; name: string }; inputQty: number;
   inputGrams: number; outputGrams: number | null; lossGrams: number | null; lossBp: number | null; varietyChange: boolean; openSack: boolean;
   kargador: { id: string; name: string } | null; approvalId: string | null; startedAt: string;
-  outputs: { product: { name: string }; quantity: number }[];
+  outputs: { product: { name: string; soldByWeight?: boolean }; quantity: number }[];
 }
 type Mode = "now" | "start" | "open" | "finish";
 interface OutRow { productId: string; amount: string } // sacks, or kilos for loose rice
@@ -70,7 +71,7 @@ export default function ResackPanel() {
       setLocationId(me?.homeLocationId ?? active[0]?.id ?? "");
       setKargadors((ks?.kargadors ?? []) as KargadorOption[]);
       setProducts(((ps?.products ?? []) as Product[]).filter((p) => p.isActive !== false && weighed(p)));
-    })().catch(() => setError("Hindi ma-load"));
+    })().catch(() => setError("Could not load"));
   }, []);
 
   const loadJobs = useCallback(async () => {
@@ -103,9 +104,9 @@ export default function ResackPanel() {
   const sentence = () => {
     const outText = outs.map((o, i) => { const p = byId.get(o.productId); return p ? (isLoose(p) ? `${kg(outUnits[i] ?? 0)} kg ${p.name}` : `${outUnits[i]} × ${p.name}`) : ""; }).filter(Boolean).join(", ");
     const k = kargadors.find((x) => x.id === (finishing?.kargador?.id ?? kargadorId))?.name;
-    const dala = k ? `, ginawa ni ${k}` : "";
-    if (mode === "start") return `Sisimulan ang resack sa ${here?.name}: ${inQty} × ${inProduct?.name} (${kg(gramsIn)} kg) aalis sa estante${dala}.`;
-    return `Resack sa ${here?.name}: ${inQty} × ${inProduct?.name} (${kg(gramsIn)} kg) → ${outText} (${kg(gramsOut)} kg). ${loss > 0 ? `Kulang ${kg(loss)} kg (${lossPct.toFixed(1)}%)` : "Walang kulang"}${dala}.`;
+    const dala = k ? `, done by ${k}` : "";
+    if (mode === "start") return `Start resack at ${here?.name}: ${inQty} × ${inProduct?.name} (${kg(gramsIn)} kg) leaves the shelf${dala}.`;
+    return `Resack at ${here?.name}: ${inQty} × ${inProduct?.name} (${kg(gramsIn)} kg) → ${outText} (${kg(gramsOut)} kg). ${loss > 0 ? `Short ${kg(loss)} kg (${lossPct.toFixed(1)}%)` : "Nothing short"}${dala}.`;
   };
 
   const submit = async (signatures: SignatureOut[]) => {
@@ -121,21 +122,21 @@ export default function ResackPanel() {
     else body = { locationId, inputProductId: inputId, inputQty: inQty, outputs, kargadorId: k, signatures };
     const r = await sendStep(path, body, `Resack ${inProduct?.name ?? ""}`.trim());
     setBusy(false);
-    if (r.status === "queued") { toast("Walang signal — naka-save sa phone, ipapadala pagbalik ng signal"); reset(); return; }
+    if (r.status === "queued") { toast("No signal — saved on this phone, it will be sent when the signal returns"); reset(); return; }
     const data = r.data as ApiBody | null;
-    if (!r.ok) { setSigning(false); setError(errText(data, "Hindi natuloy")); return; }
-    toast(mode === "start" ? `Nasimulan: ${String(data?.docNumber ?? "")}` : data?.needsApproval ? "Tapos — lampas 1% ang kulang, ipinaalam sa may-ari" : "Tapos ang resack");
+    if (!r.ok) { setSigning(false); setError(errText(data, "Did not go through")); return; }
+    toast(mode === "start" ? `Started: ${String(data?.docNumber ?? "")}` : data?.needsApproval ? "Done — short by more than 1%, the owner was told" : "Resack done");
     reset();
     await loadJobs();
   };
 
   const cancelJob = async (j: Job) => {
-    const reason = prompt(`Bakit ikakansela ang ${j.docNumber}? (babalik sa estante ang ${j.inputQty} × ${j.input.name})`);
+    const reason = await askText(`Why cancel ${j.docNumber}? (${j.inputQty} × ${j.input.name} goes back to the shelf)`, { ok: "Yes, cancel", danger: true });
     if (!reason) return;
     const res = await fetch(`${API_URL}/admin/resacks/${j.id}/cancel`, { method: "POST", headers: { "Content-Type": "application/json", ...adminHeaders() }, body: JSON.stringify({ reason }) });
     const d = (await res.json().catch(() => null)) as ApiBody | null;
-    if (!res.ok) { setError(errText(d, "Hindi natuloy")); return; }
-    toast("Kinansela — naibalik sa estante");
+    if (!res.ok) { setError(errText(d, "Did not go through")); return; }
+    toast("Cancelled — returned to the shelf");
     await loadJobs();
   };
 
@@ -148,23 +149,23 @@ export default function ResackPanel() {
       <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
         <h1 className="h4 mb-0">Resack</h1>
         {homeLocationId ? <span className="badge text-bg-light border fs-6">{here?.name}</span> : (
-          <select className="form-select" style={{ maxWidth: 240 }} aria-label="Lokasyon" value={locationId} onChange={(e) => { setLocationId(e.target.value); reset(); }}>
+          <select className="form-select" style={{ maxWidth: 240 }} aria-label="Location" value={locationId} onChange={(e) => { setLocationId(e.target.value); reset(); }}>
             {locations.map((l) => <option key={l.id} value={l.id}>{l.code ? `${l.code} · ` : ""}{l.name}</option>)}
           </select>
         )}
       </div>
       {error && <div className="alert alert-danger py-2" role="alert">{error}</div>}
-      {products.length === 0 && <div className="alert alert-warning py-2">Walang bigas na may timbang. Sa Products, itakda ang laki ng bawat sako (hal. 25 kg) o 1 g para sa tingi.</div>}
+      {products.length === 0 && <div className="alert alert-warning py-2">No rice with a weight set. In Products, set the size of each sack (e.g. 25 kg), or 1 g for loose rice.</div>}
 
       {!mode && !finishing && (
         <>
           <div className="d-grid gap-2 mb-4" style={{ maxWidth: 420 }}>
-            <button className="btn btn-success btn-lg" onClick={() => setMode("now")}>Resack ngayon</button>
-            <button className="btn btn-outline-dark btn-lg" onClick={() => setMode("start")}>Simulan (tatapusin mamaya)</button>
-            <button className="btn btn-outline-dark btn-lg" onClick={() => { setMode("open"); setOuts([{ productId: loose[0]?.id ?? "", amount: "" }]); }}>Buksan ang sako (tingi)</button>
+            <button className="btn btn-success btn-lg" onClick={() => setMode("now")}>Resack now</button>
+            <button className="btn btn-outline-dark btn-lg" onClick={() => setMode("start")}>Start (finish later)</button>
+            <button className="btn btn-outline-dark btn-lg" onClick={() => { setMode("open"); setOuts([{ productId: loose[0]?.id ?? "", amount: "" }]); }}>Open a sack (loose)</button>
           </div>
-          <h2 className="h5">Nasa resack ({started.length})</h2>
-          {started.length === 0 ? <p className="text-muted">Wala.</p> : (
+          <h2 className="h5">In resack ({started.length})</h2>
+          {started.length === 0 ? <p className="text-muted">None.</p> : (
             <div className="list-group mb-4">
               {started.map((j) => (
                 <div key={j.id} className="list-group-item py-3 d-flex justify-content-between align-items-center gap-2">
@@ -173,27 +174,27 @@ export default function ResackPanel() {
                     <div className="small text-muted">{kg(j.inputGrams)} kg{j.kargador ? ` · ${j.kargador.name}` : ""} · {new Date(j.startedAt).toLocaleString("en-PH")}</div>
                   </div>
                   <div className="d-flex gap-2">
-                    <button className="btn btn-outline-secondary" onClick={() => void cancelJob(j)}>Kanselahin</button>
-                    <button className="btn btn-success" onClick={() => { setFinishing(j); setOuts([{ productId: "", amount: "" }]); }}>Tapusin</button>
+                    <button className="btn btn-outline-secondary" onClick={() => void cancelJob(j)}>Cancel</button>
+                    <button className="btn btn-success" onClick={() => { setFinishing(j); setOuts([{ productId: "", amount: "" }]); }}>Finish</button>
                   </div>
                 </div>
               ))}
             </div>
           )}
-          <h2 className="h5">Huling resack</h2>
-          {recent.length === 0 ? <p className="text-muted">Wala pa.</p> : (
+          <h2 className="h5">Recent resacks</h2>
+          {recent.length === 0 ? <p className="text-muted">None yet.</p> : (
             <div className="list-group">
               {recent.map((j) => (
                 <div key={j.id} className="list-group-item">
                   <div className="d-flex justify-content-between gap-2">
                     <div>
-                      <div className="fw-semibold">{j.docNumber} · {j.inputQty} × {j.input.name} → {j.outputs.map((o) => `${o.quantity} × ${o.product.name}`).join(", ") || "—"}</div>
-                      {j.status === "FINISHED" && <div className="small">{kg(j.inputGrams)} kg → {kg(j.outputGrams ?? 0)} kg · kulang {kg(j.lossGrams ?? 0)} kg ({((j.lossBp ?? 0) / 100).toFixed(2)}%)</div>}
+                      <div className="fw-semibold">{j.docNumber} · {j.inputQty} × {j.input.name} → {j.outputs.map((o) => (o.product.soldByWeight ? `${kg(o.quantity)} kg ${o.product.name}` : `${o.quantity} × ${o.product.name}`)).join(", ") || "—"}</div>
+                      {j.status === "FINISHED" && <div className="small">{kg(j.inputGrams)} kg → {kg(j.outputGrams ?? 0)} kg · short {kg(j.lossGrams ?? 0)} kg ({((j.lossBp ?? 0) / 100).toFixed(2)}%)</div>}
                     </div>
                     <div className="text-end">
-                      {j.status === "CANCELLED" && <span className="badge text-bg-secondary">Kinansela</span>}
-                      {j.varietyChange && <span className="badge text-bg-info ms-1">Ibang klase</span>}
-                      {j.approvalId && <span className="badge text-bg-warning ms-1">Sa may-ari</span>}
+                      {j.status === "CANCELLED" && <span className="badge text-bg-secondary">Cancelled</span>}
+                      {j.varietyChange && <span className="badge text-bg-info ms-1">Variety change</span>}
+                      {j.approvalId && <span className="badge text-bg-warning ms-1">To the owner</span>}
                     </div>
                   </div>
                 </div>
@@ -206,57 +207,57 @@ export default function ResackPanel() {
       {(mode || finishing) && !signing && (
         <div className="card border-success">
           <div className="card-body">
-            <h2 className="h5">{finishing ? `Tapusin ${finishing.docNumber}` : mode === "start" ? "Simulan ang resack" : mode === "open" ? "Buksan ang sako" : "Resack ngayon"}</h2>
+            <h2 className="h5">{finishing ? `Finish ${finishing.docNumber}` : mode === "start" ? "Start a resack" : mode === "open" ? "Open a sack" : "Resack now"}</h2>
 
-            <div className="fw-semibold mt-2">Papasok</div>
+            <div className="fw-semibold mt-2">Going in</div>
             {finishing ? <p className="mb-2">{finishing.inputQty} × {finishing.input.name} ({kg(finishing.inputGrams)} kg)</p> : (
               <div className="row g-2 mb-2">
                 <div className="col-8">
-                  <select className="form-select form-select-lg" aria-label="Papasok na bigas" value={inputId} onChange={(e) => setInputId(e.target.value)}>
-                    <option value="">Pumili…</option>
+                  <select className="form-select form-select-lg" aria-label="Rice going in" value={inputId} onChange={(e) => setInputId(e.target.value)}>
+                    <option value="">Choose…</option>
                     {(mode === "open" ? sacks : products).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
                   </select>
                 </div>
                 <div className="col-4">
-                  <input className="form-control form-control-lg text-center" aria-label="Ilang sako" inputMode="numeric" value={inputQty} onChange={(e) => setInputQty(e.target.value.replace(/\D/g, "").slice(0, 4))} />
+                  <input className="form-control form-control-lg text-center" aria-label="How many sacks" inputMode="numeric" value={inputQty} onChange={(e) => setInputQty(e.target.value.replace(/\D/g, "").slice(0, 4))} />
                 </div>
               </div>
             )}
 
             {mode !== "start" && (
               <>
-                <div className="fw-semibold mt-3">Lumabas</div>
+                <div className="fw-semibold mt-3">Coming out</div>
                 {outs.map((o, i) => {
                   const p = byId.get(o.productId);
                   return (
                     <div key={i} className="row g-2 mb-2 align-items-center">
                       <div className="col-7">
-                        <select className="form-select form-select-lg" aria-label={`Lumabas ${i + 1}`} value={o.productId} onChange={(e) => setOuts(outs.map((x, j) => (j === i ? { ...x, productId: e.target.value } : x)))}>
-                          <option value="">Pumili…</option>
+                        <select className="form-select form-select-lg" aria-label={`Coming out ${i + 1}`} value={o.productId} onChange={(e) => setOuts(outs.map((x, j) => (j === i ? { ...x, productId: e.target.value } : x)))}>
+                          <option value="">Choose…</option>
                           {(mode === "open" ? loose : products).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
                         </select>
                       </div>
                       <div className="col-4">
                         <div className="input-group input-group-lg">
-                          <input className="form-control text-center" aria-label={isLoose(p) ? "Ilang kilo" : "Ilang sako"} inputMode="decimal" value={o.amount}
+                          <input className="form-control text-center" aria-label={isLoose(p) ? "How many kilos" : "How many sacks"} inputMode="decimal" value={o.amount}
                             onChange={(e) => setOuts(outs.map((x, j) => (j === i ? { ...x, amount: e.target.value.replace(/[^\d.,]/g, "").slice(0, 8) } : x)))} />
-                          <span className="input-group-text">{isLoose(p) ? "kg" : "sako"}</span>
+                          <span className="input-group-text">{isLoose(p) ? "kg" : "sacks"}</span>
                         </div>
                       </div>
                       <div className="col-1">
-                        {outs.length > 1 && <button type="button" className="btn btn-link text-danger" aria-label="Alisin" onClick={() => setOuts(outs.filter((_, j) => j !== i))}>×</button>}
+                        {outs.length > 1 && <button type="button" className="btn btn-link text-danger" aria-label="Remove" onClick={() => setOuts(outs.filter((_, j) => j !== i))}>×</button>}
                       </div>
                     </div>
                   );
                 })}
-                {mode !== "open" && outs.length < 10 && <button type="button" className="btn btn-outline-secondary" onClick={() => setOuts([...outs, { productId: "", amount: "" }])}>+ Isa pang lumabas</button>}
+                {mode !== "open" && outs.length < 10 && <button type="button" className="btn btn-outline-secondary" onClick={() => setOuts([...outs, { productId: "", amount: "" }])}>+ Another output</button>}
 
                 {gramsIn > 0 && (
                   <div className={`alert mt-3 mb-0 ${gramsOut > gramsIn ? "alert-danger" : overTolerance ? "alert-warning" : "alert-success"}`} style={{ fontVariantNumeric: "tabular-nums" }}>
-                    <div>Pumasok: <strong>{kg(gramsIn)} kg</strong> · Lumabas: <strong>{kg(gramsOut)} kg</strong></div>
-                    {gramsOut > gramsIn ? <div><strong>Sobra</strong> ang lumabas — timbangin ulit.</div>
-                      : loss > 0 ? <div><strong>Kulang {kg(loss)} kg ({lossPct.toFixed(1)}%)</strong> — {overTolerance ? "lampas 1%: ipapaalam sa may-ari" : "OK, pasok sa 1%"}</div>
-                      : <div><strong>Tama</strong> — walang kulang</div>}
+                    <div>In: <strong>{kg(gramsIn)} kg</strong> · Out: <strong>{kg(gramsOut)} kg</strong></div>
+                    {gramsOut > gramsIn ? <div>More came out than went in (<strong>over</strong>) — weigh again.</div>
+                      : loss > 0 ? <div><strong>Short {kg(loss)} kg ({lossPct.toFixed(1)}%)</strong> — {overTolerance ? "over 1%: the owner will be told" : "OK, within 1%"}</div>
+                      : <div><strong>Correct</strong> — nothing short</div>}
                   </div>
                 )}
               </>
@@ -264,17 +265,17 @@ export default function ResackPanel() {
 
             {!finishing && (
               <div className="mt-3">
-                <label className="form-label" htmlFor="rs-kargador">Kargador na gumawa (kung meron)</label>
+                <label className="form-label" htmlFor="rs-kargador">Porter who did it (if any)</label>
                 <select id="rs-kargador" className="form-select form-select-lg" value={kargadorId} onChange={(e) => setKargadorId(e.target.value)}>
-                  <option value="">Wala / staff lang</option>
+                  <option value="">None / staff only</option>
                   {kargadors.map((k) => <option key={k.id} value={k.id}>{k.name}</option>)}
                 </select>
               </div>
             )}
 
             <div className="d-flex justify-content-between mt-3">
-              <button type="button" className="btn btn-outline-secondary btn-lg" onClick={reset}>Bumalik</button>
-              <button type="button" className="btn btn-success btn-lg" disabled={!readyToSign || (mode !== "start" && !finishing && !inputId)} onClick={() => setSigning(true)}>Susunod</button>
+              <button type="button" className="btn btn-outline-secondary btn-lg" onClick={reset}>Back</button>
+              <button type="button" className="btn btn-success btn-lg" disabled={!readyToSign || (mode !== "start" && !finishing && !inputId)} onClick={() => setSigning(true)}>Next</button>
             </div>
           </div>
         </div>
@@ -283,7 +284,7 @@ export default function ResackPanel() {
       {(mode || finishing) && signing && (
         <SignCapture
           sentence={sentence()}
-          staffName="ikaw (staff)"
+          staffName="you (staff)"
           needKargador={needKargador}
           kargadors={kargadors}
           presetKargadorId={finishing?.kargador?.id ?? (kargadorId || null)}

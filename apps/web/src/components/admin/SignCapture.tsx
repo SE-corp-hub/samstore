@@ -45,7 +45,7 @@ export default function SignCapture({
   onDone: (signatures: SignatureOut[]) => void;
   onCancel: () => void;
 }) {
-  const { t, lang } = useLang();
+  const { t } = useLang();
   const signers: Signer[] = ["STAFF", ...(needKargador ? (["KARGADOR"] as Signer[]) : []), ...(customer ? (["CUSTOMER"] as Signer[]) : [])];
   const [step, setStep] = useState(0); // 0 = read-back, then one screen per signer
   const [ink, setInk] = useState<string | null>(null);
@@ -54,7 +54,7 @@ export default function SignCapture({
   const [customerName, setCustomerName] = useState(customer?.name ?? "");
   const current = step > 0 ? signers[step - 1] : null;
   const total = signers.length + 1;
-  const kargadorName = kargadors.find((k) => k.id === kargadorId)?.name ?? "kargador";
+  const kargadorName = kargadors.find((k) => k.id === kargadorId)?.name ?? "porter";
   const who = current === "KARGADOR" ? kargadorName : current === "CUSTOMER" ? (customerName || "customer") : staffName;
 
   const advance = (all: SignatureOut[]) => {
@@ -78,32 +78,32 @@ export default function SignCapture({
     && !(current === "CUSTOMER" && customerName.trim().length < 2);
 
   return (
-    <div className="card border-success mb-3" role="dialog" aria-label="Pirmahan">
+    <div className="card border-success mb-3" role="dialog" aria-label="Sign">
       <div className="card-body" style={{ fontSize: 18 }}>
         <div className="small text-muted mb-2">{t("step.of", { n: step + 1, total })}</div>
         {step === 0 ? (
           <>
             <p className="fw-semibold mb-3" style={{ fontSize: 20 }}>{sentence}</p>
-            <p className="mb-3">{t("sign.readBack", { who: signers.map((s) => (s === "STAFF" ? "staff" : s === "KARGADOR" ? (lang === "en" ? "porter" : "kargador") : "customer")).join(", ") })}</p>
+            <p className="mb-3">{t("sign.readBack", { who: ((w) => w.charAt(0).toUpperCase() + w.slice(1))(signers.map((s) => (s === "STAFF" ? "staff" : s === "KARGADOR" ? "the porter" : "the customer")).join(", ")) })}</p>
           </>
         ) : (
           <>
             {current === "KARGADOR" && !presetKargadorId && (
               <div className="mb-3">
-                <label className="form-label" htmlFor="sc-kargador">Sinong kargador?</label>
+                <label className="form-label" htmlFor="sc-kargador">Which porter?</label>
                 <select id="sc-kargador" className="form-select form-select-lg" value={kargadorId} onChange={(e) => setKargadorId(e.target.value)}>
-                  <option value="">Pumili…</option>
+                  <option value="">Choose…</option>
                   {kargadors.map((k) => <option key={k.id} value={k.id}>{k.name}</option>)}
                 </select>
               </div>
             )}
             {current === "CUSTOMER" && (
               <div className="mb-3">
-                <label className="form-label" htmlFor="sc-customer">Pangalan ng customer</label>
+                <label className="form-label" htmlFor="sc-customer">Customer name</label>
                 <input id="sc-customer" className="form-control form-control-lg" value={customerName} onChange={(e) => setCustomerName(e.target.value)} />
               </div>
             )}
-            <h2 className="h5">{t("sign.of", { who })}</h2>
+            <h2 className="h5">{current === "STAFF" ? "Your signature (staff)" : t("sign.of", { who })}</h2>
             <SignaturePad key={step} onSignature={setInk} />
             {current === "CUSTOMER" && customer?.optional && (
               <button type="button" className="btn btn-link px-0 mt-2" disabled={busy} onClick={() => advance(done)}>

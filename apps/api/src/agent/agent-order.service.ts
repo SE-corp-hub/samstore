@@ -43,7 +43,7 @@ class StepError extends Error {
 const invalid = (m: string) => ({ ok: false as const, error: { type: "validation" as const, errors: [m] } });
 const conflict = (m: string) => ({ ok: false as const, error: { type: "conflict" as const, message: m } });
 const forbidden = (m: string) => ({ ok: false as const, error: { type: "forbidden" as const, message: m } });
-const notFound = (m = "Hindi makita ang order") => ({ ok: false as const, error: { type: "not_found" as const, message: m } });
+const notFound = (m = "Order not found") => ({ ok: false as const, error: { type: "not_found" as const, message: m } });
 
 const productSelect = { id: true, name: true, sku: true, priceMinor: true, costMinor: true, isActive: true, reviewStatus: true, stockBaseUnit: true, stockBaseQuantity: true } as const;
 const orderInclude = {
@@ -104,7 +104,7 @@ export class AgentOrderService {
 
     return this.run(async () => {
       const loc = input.locationId ? await prisma.warehouse.findFirst({ where: { id: input.locationId, storeId, isActive: true, type: "STORE" }, select: { id: true, name: true } }) : null;
-      if (!loc) throw new SellingError("Pumili ng tindahang magdedeliver");
+      if (!loc) throw new SellingError("Choose the store that will deliver");
       let address: string;
       try {
         address = checkAddress(input.address);
@@ -112,9 +112,9 @@ export class AgentOrderService {
         throw new SellingError((e as Error).message);
       }
       const lines = Array.isArray(input.lines) ? input.lines : [];
-      if (lines.length === 0 || lines.length > 20) throw new SellingError("Ilagay ang bigas na order (1–20)");
+      if (lines.length === 0 || lines.length > 20) throw new SellingError("Enter the rice to order (1–20)");
       const ids = lines.map((l) => l.productId ?? "");
-      if (new Set(ids).size !== ids.length) throw new SellingError("Isang linya lang bawat bigas");
+      if (new Set(ids).size !== ids.length) throw new SellingError("Only one line per rice");
 
       // The customer: from the list, or a new one by name + mobile (no utang limit — the owner sets that).
       let storeCustomerId: string;
@@ -122,15 +122,15 @@ export class AgentOrderService {
       let customerPhone: string;
       if (input.customerId) {
         const sc = await prisma.storeCustomer.findFirst({ where: { id: input.customerId, storeId }, include: { customer: { select: { name: true, phone: true } } } });
-        if (!sc) throw new SellingError("Hindi makita ang customer");
+        if (!sc) throw new SellingError("Customer not found");
         storeCustomerId = sc.id;
         customerName = sc.customer.name ?? "Customer";
         customerPhone = sc.customer.phone ?? "";
       } else {
         const name = input.customerName?.trim().replace(/\s+/g, " ") ?? "";
         const phone = toE164(input.customerPhone ?? "");
-        if (name.length < 2) throw new SellingError("Ilagay ang pangalan ng customer");
-        if (!phone) throw new SellingError("Ilagay ang mobile ng customer (09xx xxx xxxx)");
+        if (name.length < 2) throw new SellingError("Enter the customer's name");
+        if (!phone) throw new SellingError("Enter the customer's mobile number (09xx xxx xxxx)");
         const sc = await prisma.$transaction(async (tx) => {
           const c = (await tx.customer.findFirst({ where: { phone }, select: { id: true } })) ?? (await tx.customer.create({ data: { name, phone, email: null, passwordHash: null }, select: { id: true } }));
           return tx.storeCustomer.upsert({ where: { storeId_customerId: { storeId, customerId: c.id } }, update: {}, create: { storeId, customerId: c.id }, select: { id: true } });
@@ -144,7 +144,7 @@ export class AgentOrderService {
       const prices = new Map((await prisma.locationPrice.findMany({ where: { storeId, warehouseId: loc.id, productId: { in: ids } }, select: { productId: true, priceMinor: true } })).map((p) => [p.productId, p.priceMinor]));
       const priced = lines.map((l) => {
         const p = products.get(l.productId ?? "");
-        if (!p || !p.isActive || p.reviewStatus === "MERGED") throw new SellingError("Hindi mahanap ang bigas — i-refresh");
+        if (!p || !p.isActive || p.reviewStatus === "MERGED") throw new SellingError("Rice not found — refresh the page");
         return { product: p, ...priceLine(p, priceAt(p.priceMinor, prices.get(p.id)), l) };
       });
       const total = priced.reduce((s, l) => s + l.lineTotalMinor, 0);
@@ -172,7 +172,7 @@ export class AgentOrderService {
               unitCostMinor: l.product.costMinor,
             })),
           });
-          await tx.orderStatusHistory.create({ data: { orderId: id, storeId, toStatus: "RECEIVED", actorType: "sales_agent", actorId: actor.userId, reason: "Order ng agent — naghihintay" } });
+          await tx.orderStatusHistory.create({ data: { orderId: id, storeId, toStatus: "RECEIVED", actorType: "sales_agent", actorId: actor.userId, reason: "Agent order — waiting" } });
           await tx.auditLog.create({ data: { storeId, actorType: "USER", actorId: actor.userId, action: "agent_order.create", entityType: "Order", entityId: id, after: { orderNumber, totalMinor: total, locationId: loc.id } } });
         });
       } catch (e) {
@@ -210,7 +210,7 @@ export class AgentOrderService {
   }
 
   private async loadForStaff(storeId: string, actor: Actor, id: string) {
-    if (actor.role === "SALES_AGENT") throw new StepError(forbidden("Ang tindahan ang nag-aaprubahan, hindi ang agent"));
+    if (actor.role === "SALES_AGENT") throw new StepError(forbidden("The store approves orders, not the agent"));
     const o = await prisma.order.findFirst({ where: { id, storeId, source: "AGENT" }, include: orderInclude });
     if (!o || !o.sellingLocationId) throw new StepError(notFound());
     const refusal = locationRefusal(actor, o.sellingLocationId);
@@ -222,17 +222,17 @@ export class AgentOrderService {
   async approve(storeId: string, actor: Actor, id: string, input: { sources?: { itemId?: string; sourceLocationId?: string }[] }) {
     return this.run(async () => {
       const o = await this.loadForStaff(storeId, actor, id);
-      if (o.status !== "RECEIVED") throw new StepError(conflict("Napagpasyahan na ang order na ito"));
+      if (o.status !== "RECEIVED") throw new StepError(conflict("This order was already decided"));
       const chosen = new Map((input.sources ?? []).map((s) => [s.itemId ?? "", s.sourceLocationId ?? ""]));
       const sourceIds = [...new Set(o.items.map((i) => chosen.get(i.id) || o.sellingLocationId!))];
       const valid = new Map((await prisma.warehouse.findMany({ where: { storeId, id: { in: sourceIds }, isActive: true }, select: { id: true, name: true } })).map((w) => [w.id, w]));
-      if (valid.size !== sourceIds.length) throw new SellingError("Hindi kilalang lokasyon na pagkukunan");
+      if (valid.size !== sourceIds.length) throw new SellingError("Unknown location to take from");
       const releases: { id: string; docNumber: string }[] = [];
       const at = { failing: null as { productId: string; sourceId: string } | null };
       try {
         await prisma.$transaction(async (tx) => {
           const claimed = await tx.order.updateMany({ where: { id, storeId, status: "RECEIVED" }, data: { status: "CONFIRMED", approvedById: actor.userId, approvedAt: new Date() } });
-          if (claimed.count === 0) throw new StepError(conflict("Napagpasyahan na ang order na ito"));
+          if (claimed.count === 0) throw new StepError(conflict("This order was already decided"));
           for (const i of o.items) {
             if (!i.productId) continue;
             const src = chosen.get(i.id) || o.sellingLocationId!;
@@ -240,7 +240,7 @@ export class AgentOrderService {
             await tx.orderItem.update({ where: { id: i.id }, data: { sourceLocationId: src === o.sellingLocationId ? null : src } });
             releases.push(await this.flow.createOrderRelease(tx, { storeId, orderId: id, productId: i.productId, quantity: i.quantity, sourceLocationId: src, sellingLocationId: o.sellingLocationId!, customerName: o.customerName, actorId: actor.userId }));
           }
-          await tx.orderStatusHistory.create({ data: { orderId: id, storeId, fromStatus: "RECEIVED", toStatus: "CONFIRMED", actorType: "staff", actorId: actor.userId, reason: "Inaprubahan ang order ng agent" } });
+          await tx.orderStatusHistory.create({ data: { orderId: id, storeId, fromStatus: "RECEIVED", toStatus: "CONFIRMED", actorType: "staff", actorId: actor.userId, reason: "Agent order approved" } });
           await tx.auditLog.create({ data: { storeId, actorType: "USER", actorId: actor.userId, action: "agent_order.approve", entityType: "Order", entityId: id, after: { releases: releases.map((r) => r.docNumber) } } });
         }, txOptions());
       } catch (e) {
@@ -258,16 +258,16 @@ export class AgentOrderService {
   async decline(storeId: string, actor: Actor, id: string, reason: string | undefined) {
     return this.run(async () => {
       const why = reason?.trim() ?? "";
-      if (why.length < 3) throw new SellingError("Ilagay ang dahilan (makikita ito ng agent)");
+      if (why.length < 3) throw new SellingError("Enter the reason (the agent will see it)");
       await this.loadForStaff(storeId, actor, id);
       const claimed = await prisma.$transaction(async (tx) => {
         const c = await tx.order.updateMany({ where: { id, storeId, status: "RECEIVED" }, data: { status: "CANCELLED", declineReason: why.slice(0, 200), approvedById: actor.userId, approvedAt: new Date() } });
         if (c.count === 0) return 0;
-        await tx.orderStatusHistory.create({ data: { orderId: id, storeId, fromStatus: "RECEIVED", toStatus: "CANCELLED", actorType: "staff", actorId: actor.userId, reason: `Tinanggihan: ${why}` } });
+        await tx.orderStatusHistory.create({ data: { orderId: id, storeId, fromStatus: "RECEIVED", toStatus: "CANCELLED", actorType: "staff", actorId: actor.userId, reason: `Declined: ${why}` } });
         await tx.auditLog.create({ data: { storeId, actorType: "USER", actorId: actor.userId, action: "agent_order.decline", entityType: "Order", entityId: id, after: { reason: why } } });
         return 1;
       });
-      if (!claimed) throw new StepError(conflict("Napagpasyahan na ang order na ito"));
+      if (!claimed) throw new StepError(conflict("This order was already decided"));
       await cacheBust(cacheKey("orders", storeId));
       return this.view(await prisma.order.findFirstOrThrow({ where: { id, storeId }, include: orderInclude }));
     });
@@ -280,29 +280,29 @@ export class AgentOrderService {
   ) {
     return this.run(async () => {
       const o = await this.loadForStaff(storeId, actor, id);
-      if (o.status !== "CONFIRMED") throw new StepError(conflict(o.status === "COMPLETED" ? "Bayad na ang order na ito" : "Hindi pa aprubado ang order"));
-      if (!readyToPay(o.stockTransfers)) throw new StepError(conflict("Hindi pa naihahatid lahat — tapusin muna ang Naihatid"));
+      if (o.status !== "CONFIRMED") throw new StepError(conflict(o.status === "COMPLETED" ? "This order is already paid" : "The order is not approved yet"));
+      if (!readyToPay(o.stockTransfers)) throw new StepError(conflict("Not everything is delivered yet — finish Delivered first"));
       const delivered = new Map(o.stockTransfers.filter((t) => t.status !== "CANCELLED").map((t) => [t.productId, t.deliveredQty ?? 0]));
       const due = amountDue(o.items.map((i) => ({ soldBy: i.soldBy, unitPriceMinor: i.unitPriceMinor, quantity: i.quantity, lineTotalMinor: i.lineTotalMinor, delivered: delivered.get(i.productId ?? "") ?? 0 })));
       const method = input.method === "gcash" || input.method === "utang" || input.method === "cash" ? input.method : null;
-      if (due > 0 && !method) throw new SellingError("Bayad: Cash, GCash o Utang?");
+      if (due > 0 && !method) throw new SellingError("Payment: Cash, GCash or Credit?");
       const sellingLocationId = o.sellingLocationId!;
 
       if (due === 0) {
         // Nothing was delivered: close the order, nothing to collect.
         await prisma.$transaction(async (tx) => {
           const c = await tx.order.updateMany({ where: { id, storeId, status: "CONFIRMED" }, data: { status: "CANCELLED", paymentStatus: "CANCELLED_REFUND" } });
-          if (c.count === 0) throw new StepError(conflict("Nagbago ang order — i-refresh"));
-          await tx.orderStatusHistory.create({ data: { orderId: id, storeId, fromStatus: "CONFIRMED", toStatus: "CANCELLED", actorType: "staff", actorId: actor.userId, reason: "Walang naihatid" } });
+          if (c.count === 0) throw new StepError(conflict("The order changed — refresh the page"));
+          await tx.orderStatusHistory.create({ data: { orderId: id, storeId, fromStatus: "CONFIRMED", toStatus: "CANCELLED", actorType: "staff", actorId: actor.userId, reason: "Nothing was delivered" } });
         });
         return { ...this.view(await prisma.order.findFirstOrThrow({ where: { id, storeId }, include: orderInclude })), dueMinor: 0, changeMinor: 0 };
       }
 
       if (method === "utang") {
         const sc = o.storeCustomerId ? await prisma.storeCustomer.findFirst({ where: { id: o.storeCustomerId, storeId } }) : null;
-        if (!sc?.creditApproved) throw new SellingError(`Wala pang utang limit si ${o.customerName} — mag-cash/GCash, o ipa-set sa may-ari`);
+        if (!sc?.creditApproved) throw new SellingError(`${o.customerName} has no credit limit yet — use cash or GCash, or ask the owner to set one`);
         const limitMinor = await credit.effectiveLimit(storeId, sc);
-        if (!limitCheck(sc.creditBalanceMinor, due, limitMinor).ok) throw new StepError(conflict(`Lampas sa utang limit ni ${o.customerName} — mag-cash/GCash, o ipataas sa may-ari ang limit`));
+        if (!limitCheck(sc.creditBalanceMinor, due, limitMinor).ok) throw new StepError(conflict(`Over ${o.customerName}'s credit limit — use cash or GCash, or ask the owner to raise the limit`));
       }
       const code = method === "utang" ? "credit" : method!;
       const prepared = await prepareTenders({
@@ -315,17 +315,17 @@ export class AgentOrderService {
       const sent = { smsQueued: false };
       await prisma.$transaction(async (tx) => {
         const c = await tx.order.updateMany({ where: { id, storeId, status: "CONFIRMED" }, data: { status: "COMPLETED", paymentMethod: code, paymentStatus: method === "utang" ? "PENDING" : "COLLECTED", totalMinor: due, registerSessionId } });
-        if (c.count === 0) throw new StepError(conflict("Nagbago ang order — i-refresh"));
+        if (c.count === 0) throw new StepError(conflict("The order changed — refresh the page"));
         if (method === "utang") {
           await captureSignatures(tx, storeId, actor, { documentType: "SALE", documentId: id, step: "UTANG", locationId: sellingLocationId }, (input.signatures ?? []).filter((s) => s.signerKind === "CUSTOMER"));
           await requireSignatures(tx, storeId, { documentType: "SALE", documentId: id, step: "UTANG" });
         }
         try {
-          await writeTenders(tx, { storeId, orderId: id, actorId: actor.userId, plan, note: `Bayad sa order ng agent ${o.orderNumber}`, registerSessionId });
+          await writeTenders(tx, { storeId, orderId: id, actorId: actor.userId, plan, note: `Payment for agent order ${o.orderNumber}`, registerSessionId });
         } catch (e) {
-          throw new StepError(conflict(e instanceof Error ? e.message : "Hindi natuloy ang bayad"));
+          throw new StepError(conflict(e instanceof Error ? e.message : "The payment did not go through"));
         }
-        await tx.orderStatusHistory.create({ data: { orderId: id, storeId, fromStatus: "CONFIRMED", toStatus: "COMPLETED", actorType: "staff", actorId: actor.userId, reason: due < o.totalMinor ? `Binayaran ang naihatid lang (${(due / 100).toFixed(2)} ng ${(o.totalMinor / 100).toFixed(2)})` : null } });
+        await tx.orderStatusHistory.create({ data: { orderId: id, storeId, fromStatus: "CONFIRMED", toStatus: "COMPLETED", actorType: "staff", actorId: actor.userId, reason: due < o.totalMinor ? `Paid for what was delivered only (${(due / 100).toFixed(2)} of ${(o.totalMinor / 100).toFixed(2)})` : null } });
         if (method === "utang" && o.storeCustomerId) {
           const bal = await tx.storeCustomer.findUniqueOrThrow({ where: { id: o.storeCustomerId }, select: { creditBalanceMinor: true } });
           const sms = await queueSms(tx, {

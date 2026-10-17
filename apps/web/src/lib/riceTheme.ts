@@ -7,11 +7,11 @@ export const RICE_TOKENS = {
   paper: "#FFFFFF",
   action: "#1F6F3F", // every main button, nothing else
   actionHover: "#185A33",
-  waiting: "#8A5A00", // amber text "Naghihintay" (on a pale amber badge)
+  waiting: "#8A5A00", // amber text "Waiting" (on a pale amber badge)
   waitingBg: "#FFF3D6",
   onTheWay: "#0B4F8A", // blue "Nasa daan"
   onTheWayBg: "#E3F0FB",
-  short: "#A3201B", // red "Kulang"
+  short: "#A3201B", // red "Short"
   shortBg: "#FDE8E7",
   right: "#1F6F3F", // green "Tama"
   rightBg: "#E4F3EA",

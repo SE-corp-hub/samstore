@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { API_URL } from "../../../config";
+import { setAuthItem } from "../../../lib/admin";
 
 export default function AdminRegister() {
   const router = useRouter();
@@ -41,7 +42,7 @@ export default function AdminRegister() {
         setError(data?.errors?.join(", ") ?? data?.message ?? "Registration failed");
         return;
       }
-      sessionStorage.setItem("samstore.admin.token", data.token);
+      setAuthItem("samstore.admin.token", data.token);
       router.push("/admin/dashboard");
     } catch {
       setError("Network error");

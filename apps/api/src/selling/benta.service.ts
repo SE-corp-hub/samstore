@@ -131,7 +131,7 @@ registerApprovalHandler("UTANG_OVER_LIMIT", async (tx, a) => {
   if (a.status === "DECLINED") {
     for (const i of order.items) if (i.productId) await unreserveForTrip(tx, leg(i.productId, i.sourceLocationId ?? order.sellingLocationId), i.quantity);
     await tx.order.update({ where: { id: order.id }, data: { status: "CANCELLED", paymentStatus: "CANCELLED_REFUND" } });
-    await tx.orderStatusHistory.create({ data: { orderId: order.id, storeId: a.storeId, fromStatus: "ON_HOLD", toStatus: "CANCELLED", reason: "Utang lampas sa limit — hindi inaprubahan", actorType: "owner", actorId: a.decidedById } });
+    await tx.orderStatusHistory.create({ data: { orderId: order.id, storeId: a.storeId, fromStatus: "ON_HOLD", toStatus: "CANCELLED", reason: "Credit over the limit — declined", actorType: "owner", actorId: a.decidedById } });
     return;
   }
   for (const i of order.items) {
@@ -144,11 +144,11 @@ registerApprovalHandler("UTANG_OVER_LIMIT", async (tx, a) => {
       await flowSvc.createOrderRelease(tx, { storeId: a.storeId, orderId: order.id, productId: i.productId, quantity: i.quantity, sourceLocationId: i.sourceLocationId, sellingLocationId: order.sellingLocationId, customerName: order.customerName, actorId: a.decidedById });
     }
   }
-  await tx.payment.create({ data: { orderId: order.id, storeId: a.storeId, method: "credit", amountMinor: order.totalMinor, type: "payment", note: "Utang (aprubado ng may-ari)", createdBy: a.decidedById } });
+  await tx.payment.create({ data: { orderId: order.id, storeId: a.storeId, method: "credit", amountMinor: order.totalMinor, type: "payment", note: "Credit (approved by the owner)", createdBy: a.decidedById } });
   const posted = await credit.sellOnCredit(tx, a.storeId, order.storeCustomerId, order.id, order.totalMinor, a.decidedById, { overLimitApprovedBy: a.decidedById });
-  if (!posted.ok) throw new Error("message" in posted.error ? posted.error.message : "Hindi ma-post ang utang");
+  if (!posted.ok) throw new Error("message" in posted.error ? posted.error.message : "Could not post the credit");
   await tx.order.update({ where: { id: order.id }, data: { status: "COMPLETED", source: "pos" } });
-  await tx.orderStatusHistory.create({ data: { orderId: order.id, storeId: a.storeId, fromStatus: "ON_HOLD", toStatus: "COMPLETED", reason: "Utang lampas sa limit — inaprubahan ng may-ari", actorType: "owner", actorId: a.decidedById } });
+  await tx.orderStatusHistory.create({ data: { orderId: order.id, storeId: a.storeId, fromStatus: "ON_HOLD", toStatus: "COMPLETED", reason: "Credit over the limit — approved by the owner", actorType: "owner", actorId: a.decidedById } });
   await queueSms(tx, {
     storeId: a.storeId, storeCustomerId: order.storeCustomerId, template: "utang_sale", documentType: "SALE", documentId: order.id, createdById: a.decidedById,
     text: saleText({ customerName: order.customerName, amountMinor: order.totalMinor, items: order.items.map((i) => i.productName), locationName: order.sellingLocation?.name ?? "", at: order.occurredAt ?? order.createdAt, balanceMinor: posted.value.balanceMinor }),
@@ -175,7 +175,7 @@ export class BentaService {
   private async location(storeId: string, actor: Actor, locationId: string | undefined) {
     const id = locationId || actor.homeLocationId || (await prisma.warehouse.findFirst({ where: { storeId, isDefault: true }, select: { id: true } }))?.id;
     const loc = id ? await prisma.warehouse.findFirst({ where: { id, storeId, isActive: true }, select: { id: true, name: true } }) : null;
-    if (!loc) throw new StepError(invalid("Pumili ng lokasyon"));
+    if (!loc) throw new StepError(invalid("Choose a location"));
     const refusal = locationRefusal(actor, loc.id);
     if (refusal) throw new StepError(forbidden(refusal));
     return loc;
@@ -244,7 +244,7 @@ export class BentaService {
     const exact = sessions.find((s) => s.register.locationId === locationId) ?? sessions[0];
     if (exact) return exact.id;
     const settings = await prisma.storeSettings.findUnique({ where: { storeId }, select: { requireOpenShift: true } });
-    if (settings?.requireOpenShift) throw new StepError(conflict("Walang bukas na kaha dito — buksan muna ang kaha bago tumanggap ng cash"));
+    if (settings?.requireOpenShift) throw new StepError(conflict("No cash drawer is open here — open the drawer before taking cash"));
     return null;
   }
 
@@ -261,10 +261,10 @@ export class BentaService {
     const out = await this.run(async () => {
       const loc = await this.location(storeId, actor, input.locationId);
       const lines = Array.isArray(input.lines) ? input.lines : [];
-      if (lines.length === 0) throw new SellingError("Walang laman ang benta");
-      if (lines.length > 50) throw new SellingError("Hanggang 50 linya bawat benta");
+      if (lines.length === 0) throw new SellingError("The sale is empty");
+      if (lines.length > 50) throw new SellingError("Up to 50 lines per sale");
       const method = input.payment?.method as PayMethod | undefined;
-      if (method !== "cash" && method !== "gcash" && method !== "utang") throw new SellingError("Bayad: Cash, GCash o Utang?");
+      if (method !== "cash" && method !== "gcash" && method !== "utang") throw new SellingError("Payment: Cash, GCash or Credit?");
 
       // Products, this location's prices, and any other locations the lines come from.
       const ids = [...new Set(lines.map((l) => l.productId ?? ""))];
@@ -272,16 +272,16 @@ export class BentaService {
       const prices = new Map((await prisma.locationPrice.findMany({ where: { storeId, warehouseId: loc.id, productId: { in: ids } }, select: { productId: true, priceMinor: true } })).map((p) => [p.productId, p.priceMinor]));
       const remoteIds = [...new Set(lines.map((l) => l.sourceLocationId).filter((x): x is string => !!x && x !== loc.id))];
       const remotes = new Map((await prisma.warehouse.findMany({ where: { storeId, id: { in: remoteIds }, isActive: true }, select: { id: true, name: true } })).map((w) => [w.id, w]));
-      if (remotes.size !== remoteIds.length) throw new SellingError("Hindi kilalang lokasyon na pagkukunan");
+      if (remotes.size !== remoteIds.length) throw new SellingError("Unknown location to take from");
 
       const priced: (PricedLine & { product: P; catalogUnitPriceMinor: number; overridden: boolean; overrideReason: string | null; sourceLocationId: string | null })[] = [];
       for (const l of lines) {
         const p = products.get(l.productId ?? "");
-        if (!p || !p.isActive || p.reviewStatus === "MERGED") throw new SellingError("Hindi mahanap ang produkto — i-refresh");
+        if (!p || !p.isActive || p.reviewStatus === "MERGED") throw new SellingError("Product not found — refresh the page");
         const catalog = priceAt(p.priceMinor, prices.get(p.id));
         let override: number | null = null;
         if (l.unitPriceMinorOverride !== undefined && l.unitPriceMinorOverride !== null) {
-          if (typeof l.unitPriceMinorOverride !== "number") throw new SellingError("Mali ang presyo");
+          if (typeof l.unitPriceMinorOverride !== "number") throw new SellingError("Wrong price");
           override = l.unitPriceMinorOverride;
         }
         const price = resolveLinePrice({ catalogUnitPriceMinor: catalog, override, reason: l.priceOverrideReason });
@@ -292,7 +292,7 @@ export class BentaService {
         });
       }
       const subtotal = priced.reduce((s, l) => s + l.lineTotalMinor, 0);
-      if (subtotal <= 0) throw new SellingError("Walang halaga ang benta");
+      if (subtotal <= 0) throw new SellingError("The sale has no amount");
 
       // Utang needs a customer on the list and their signature; cash/GCash take the drawer of this location.
       let storeCustomerId: string | null = null;
@@ -300,10 +300,10 @@ export class BentaService {
       let waitOwner: { balanceMinor: number; limitMinor: number } | null = null;
       if (method === "utang") {
         const sc = input.customerId ? await prisma.storeCustomer.findFirst({ where: { storeId, id: input.customerId }, include: { customer: { select: { name: true } } } }) : null;
-        if (!sc) throw new SellingError("Pumili ng customer para sa utang");
+        if (!sc) throw new SellingError("Choose a customer for credit");
         storeCustomerId = sc.id;
         customerName = sc.customer.name ?? "Customer";
-        if (!sc.creditApproved) throw new SellingError(`Wala pang utang limit si ${customerName} — ipa-set muna sa may-ari`);
+        if (!sc.creditApproved) throw new SellingError(`${customerName} has no credit limit yet — ask the owner to set one`);
         // Over the limit → the sale waits for the owner (Para sa iyo); the rice is held meanwhile.
         const limitMinor = await credit.effectiveLimit(storeId, sc);
         if (!limitCheck(sc.creditBalanceMinor, subtotal, limitMinor).ok) waitOwner = { balanceMinor: sc.creditBalanceMinor, limitMinor };
@@ -315,7 +315,7 @@ export class BentaService {
       if (!store) throw new StepError(notFound("Store not found"));
       const orderId = randomId();
       const tender = { methodCode: PAY_CODE[method], amountMinor: subtotal, ...(method === "cash" && input.payment?.tenderedMinor !== undefined ? { tenderedMinor: input.payment.tenderedMinor as number } : {}), ...(input.payment?.reference ? { reference: input.payment.reference } : {}) };
-      if (method === "cash" && tender.tenderedMinor !== undefined && !Number.isInteger(tender.tenderedMinor)) throw new SellingError("Ilagay ang perang tinanggap");
+      if (method === "cash" && tender.tenderedMinor !== undefined && !Number.isInteger(tender.tenderedMinor)) throw new SellingError("Enter the cash received");
       // A sale waiting for the owner takes no money yet (the utang is posted on approval).
       const prepared = waitOwner ? null : await prepareTenders({ storeId, orderId, targetMinor: subtotal, storeCustomerId, tenders: [tender], requireFullCoverage: true });
       if (prepared && !prepared.ok) throw new StepError(prepared);
@@ -356,7 +356,7 @@ export class BentaService {
               catalogUnitPriceMinor: i.priceOverridden ? i.catalogUnitPriceMinor : null, unitCostMinor: i.unitCostMinor,
             })),
           });
-          await tx.orderStatusHistory.create({ data: { orderId, storeId, toStatus: waitOwner ? "ON_HOLD" : "COMPLETED", actorType: "pos", actorId: actor.userId, reason: waitOwner ? "Utang lampas sa limit — hinihintay ang may-ari" : paper ? `Galing sa papel #${paper.slipNo}` : null } });
+          await tx.orderStatusHistory.create({ data: { orderId, storeId, toStatus: waitOwner ? "ON_HOLD" : "COMPLETED", actorType: "pos", actorId: actor.userId, reason: waitOwner ? "Credit over the limit — waiting for the owner" : paper ? `From a paper slip #${paper.slipNo}` : null } });
 
           // Signatures: utang → the customer signs; a paper slip → staff + the slip photo.
           if (method === "utang") {
@@ -378,7 +378,7 @@ export class BentaService {
             const after = waitOwner.balanceMinor + subtotal;
             outcome.approvalId = (await requestApproval(tx, {
               storeId, kind: "UTANG_OVER_LIMIT", documentType: "SALE", documentId: orderId, locationId: loc.id,
-              summary: `Utang lampas sa limit: ${customerName} — ${pesoText(subtotal)} (${priced.map((l) => (l.soldBy === "PIECE" ? `${l.stockQty} × ${l.product.name}` : `${formatKilos(l.grams ?? l.stockQty)} ${l.product.name}`)).join(", ")}) sa ${loc.name}. Utang ngayon ${pesoText(waitOwner.balanceMinor)}, limit ${pesoText(waitOwner.limitMinor)} → magiging ${pesoText(after)} (lampas ${pesoText(after - waitOwner.limitMinor)}).`,
+              summary: `Credit over the limit: ${customerName} — ${pesoText(subtotal)} (${priced.map((l) => (l.soldBy === "PIECE" ? `${l.stockQty} × ${l.product.name}` : `${formatKilos(l.grams ?? l.stockQty)} ${l.product.name}`)).join(", ")}) at ${loc.name}. Owes ${pesoText(waitOwner.balanceMinor)} now, limit ${pesoText(waitOwner.limitMinor)} → will owe ${pesoText(after)} (over by ${pesoText(after - waitOwner.limitMinor)}).`,
               detail: { orderNumber, totalMinor: subtotal, balanceMinor: waitOwner.balanceMinor, limitMinor: waitOwner.limitMinor, storeCustomerId },
               requestedById: actor.userId,
             })).id;
@@ -410,7 +410,7 @@ export class BentaService {
         if (e instanceof InsufficientStockError) throw new StepError(conflict(await this.shortText(storeId, e.productId, loc, priced.find((l) => l.product.id === e.productId)?.sourceLocationId ?? null)));
         if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
           const target = JSON.stringify(e.meta?.target ?? "");
-          if (target.includes("paperSlipNo")) throw new StepError(conflict(`Na-encode na ang papel #${paper?.slipNo}`));
+          if (target.includes("paperSlipNo")) throw new StepError(conflict(`Paper slip #${paper?.slipNo} is already entered`));
           if (target.includes("idempotencyKey")) throw new Replayed();
         }
         if (e instanceof Error && /Credit|limit|approved/i.test(e.message) && method === "utang") throw new StepError(conflict(e.message));
@@ -486,16 +486,16 @@ export class BentaService {
     return this.run(async () => {
       const loc = await this.location(storeId, actor, input.locationId);
       const lines = Array.isArray(input.lines) ? input.lines : [];
-      if (lines.length === 0 || lines.length > 50) throw new SellingError("Ilagay ang mga dumating (1–50)");
+      if (lines.length === 0 || lines.length > 50) throw new SellingError("Enter what arrived (1–50)");
       const ids = lines.map((l) => l.productId ?? "");
-      if (new Set(ids).size !== ids.length) throw new SellingError("Isang beses lang bawat produkto");
+      if (new Set(ids).size !== ids.length) throw new SellingError("Each product only once");
       const products = new Map((await prisma.product.findMany({ where: { storeId, id: { in: ids }, isActive: true }, select: productSelect })).map((p) => [p.id, p]));
       const checked = lines.map((l) => {
         const p = products.get(l.productId ?? "");
-        if (!p) throw new SellingError("Hindi mahanap ang produkto");
-        if (typeof l.quantity !== "number" || !Number.isInteger(l.quantity) || l.quantity <= 0 || l.quantity > 100_000_000) throw new SellingError(`Ilang ${p.name} ang dumating?`);
+        if (!p) throw new SellingError("Product not found");
+        if (typeof l.quantity !== "number" || !Number.isInteger(l.quantity) || l.quantity <= 0 || l.quantity > 100_000_000) throw new SellingError(`How many ${p.name} arrived?`);
         const cost = l.unitCostMinor === undefined || l.unitCostMinor === null ? null : l.unitCostMinor;
-        if (cost !== null && (typeof cost !== "number" || !Number.isInteger(cost) || cost < 0 || cost > 100_000_000)) throw new SellingError("Mali ang puhunan");
+        if (cost !== null && (typeof cost !== "number" || !Number.isInteger(cost) || cost < 0 || cost > 100_000_000)) throw new SellingError("Wrong cost");
         return { product: p, quantity: l.quantity, unitCostMinor: cost as number | null };
       });
       const doc = await prisma.$transaction((tx) => this.writeStockIn(tx, storeId, actor, loc.id, {
@@ -516,7 +516,7 @@ export class BentaService {
       const loc = await this.location(storeId, actor, input.locationId);
       const plan = planManualItem(input);
       const dupe = await prisma.product.findFirst({ where: { storeId, name: { equals: plan.name, mode: "insensitive" }, isActive: true }, select: { name: true } });
-      if (dupe) throw new SellingError(`May "${dupe.name}" na — piliin iyon sa listahan`);
+      if (dupe) throw new SellingError(`"${dupe.name}" already exists — pick it from the list`);
       const result = await prisma.$transaction(async (tx) => {
         const product = await tx.product.create({
           data: {
@@ -527,11 +527,11 @@ export class BentaService {
           },
           select: productSelect,
         });
-        const doc = await this.writeStockIn(tx, storeId, actor, loc.id, { supplierName: null, note: `Bagong item: ${plan.name}`, lines: [{ product, quantity: plan.openingQty, unitCostMinor: null }] }, input.signatures);
-        const hawak = plan.soldAs === "KILO" ? formatKilos(plan.openingQty) : `${plan.openingQty} ${plan.soldAs === "SACK" ? "sako" : "piraso"}`;
+        const doc = await this.writeStockIn(tx, storeId, actor, loc.id, { supplierName: null, note: `New item: ${plan.name}`, lines: [{ product, quantity: plan.openingQty, unitCostMinor: null }] }, input.signatures);
+        const hawak = plan.soldAs === "KILO" ? formatKilos(plan.openingQty) : `${plan.openingQty} ${plan.soldAs === "SACK" ? "sack(s)" : "piece(s)"}`;
         const approval = await requestApproval(tx, {
           storeId, kind: "MANUAL_ITEM", documentType: "PRODUCT", documentId: product.id, locationId: loc.id,
-          summary: `Bagong item sa ${loc.name}: ${plan.name} — ₱${(plan.priceMinor / 100).toFixed(2)}${plan.soldAs === "KILO" ? "/kg" : ""}, puhunan ₱${(plan.costMinor / 100).toFixed(2)}, hawak ${hawak}. Aprubahan, o pagsamahin sa ibang produkto.`,
+          summary: `New item at ${loc.name}: ${plan.name} — ₱${(plan.priceMinor / 100).toFixed(2)}${plan.soldAs === "KILO" ? "/kg" : ""}, cost ₱${(plan.costMinor / 100).toFixed(2)}, on hand ${hawak}. Approve it, or merge it into another product.`,
           detail: { soldAs: plan.soldAs, gramsPerUnit: plan.stockBaseQuantity, priceMinor: plan.priceMinor, costMinor: plan.costMinor, openingQty: plan.openingQty, stockInId: doc.id },
           requestedById: actor.userId,
         });
@@ -558,34 +558,34 @@ export class BentaService {
 
   /** Pagsamahin: fold a manual item into an existing product. Stock is converted by weight through the ledger. */
   async merge(storeId: string, actor: Actor, productId: string, intoProductId: string | undefined): Promise<BentaResult<{ id: string; mergedIntoId: string; moved: { locationId: string; from: number; to: number }[] }>> {
-    if (!["OWNER", "MANAGER", "STORE_OWNER"].includes(actor.role)) return forbidden("Ang may-ari o manager lang ang puwedeng magsama ng produkto");
-    if (!intoProductId || intoProductId === productId) return invalid("Pumili ng produktong pagsasamahan");
+    if (!["OWNER", "MANAGER", "STORE_OWNER"].includes(actor.role)) return forbidden("Only the owner or a manager can merge products");
+    if (!intoProductId || intoProductId === productId) return invalid("Choose the product to merge into");
     return this.run(async () => {
       const [from, into] = await Promise.all([
         prisma.product.findFirst({ where: { id: productId, storeId }, select: productSelect }),
         prisma.product.findFirst({ where: { id: intoProductId, storeId, isActive: true, reviewStatus: "ACTIVE" }, select: productSelect }),
       ]);
-      if (!from || from.reviewStatus !== "FOR_REVIEW") throw new StepError(notFound("Wala na ito sa Susuriin"));
-      if (!into) throw new StepError(invalid("Pumili ng aktibong produkto"));
+      if (!from || from.reviewStatus !== "FOR_REVIEW") throw new StepError(notFound("This is no longer in To review"));
+      if (!into) throw new StepError(invalid("Choose an active product"));
       const moved: { locationId: string; from: number; to: number }[] = [];
       await prisma.$transaction(async (tx) => {
         const claimed = await tx.product.updateMany({ where: { id: from.id, storeId, reviewStatus: "FOR_REVIEW" }, data: { reviewStatus: "MERGED", isActive: false, mergedIntoId: into.id } });
-        if (claimed.count === 0) throw new StepError(conflict("Napagpasyahan na ito"));
+        if (claimed.count === 0) throw new StepError(conflict("This was already decided"));
         const levels = await tx.stockLevel.findMany({ where: { storeId, productId: from.id }, select: { id: true, warehouseId: true, quantityOnHand: true, quantityReserved: true } });
         for (const l of levels) {
-          if (l.quantityReserved > 0) throw new StepError(conflict(`May nakareserbang ${from.name} — tapusin muna ang lipat/benta`));
+          if (l.quantityReserved > 0) throw new StepError(conflict(`Some ${from.name} is on hold — finish the transfer or sale first`));
           if (l.quantityOnHand === 0 || !l.warehouseId) continue;
-          if (l.quantityOnHand < 0) throw new StepError(conflict(`Negatibo ang stock ng ${from.name} — bilangin muna`));
+          if (l.quantityOnHand < 0) throw new StepError(conflict(`${from.name} stock is below zero — count it first`));
           const toQty = mergeQuantity(from, into, l.quantityOnHand);
           const taken = await tx.stockLevel.updateMany({ where: { id: l.id, quantityOnHand: l.quantityOnHand, quantityReserved: 0 }, data: { quantityOnHand: 0 } });
-          if (taken.count === 0) throw new StepError(conflict("Nagbago ang stock habang pinagsasama — subukan ulit"));
+          if (taken.count === 0) throw new StepError(conflict("Stock changed while merging — try again"));
           await recordMovement(tx, { storeId, productId: from.id, warehouseId: l.warehouseId, delta: -l.quantityOnHand, type: "MERGE_OUT", createdBy: actor.userId, balanceAfter: 0, documentType: "PRODUCT_MERGE", documentId: from.id, note: `→ ${into.name}` });
           await addForTrip(tx, { storeId, productId: into.id, warehouseId: l.warehouseId, actorId: actor.userId, documentType: "PRODUCT_MERGE", documentId: from.id, note: `← ${from.name}` }, toQty, "MERGE_IN");
           moved.push({ locationId: l.warehouseId, from: l.quantityOnHand, to: toQty });
         }
         await tx.approvalRequest.updateMany({
           where: { storeId, kind: "MANUAL_ITEM", documentType: "PRODUCT", documentId: from.id, status: "PENDING" },
-          data: { status: "APPROVED", decidedById: actor.userId, decidedAt: new Date(), decisionNote: `Pinagsama sa ${into.name}` },
+          data: { status: "APPROVED", decidedById: actor.userId, decidedAt: new Date(), decisionNote: `Merged into ${into.name}` },
         });
         await tx.auditLog.create({ data: { storeId, actorType: "USER", actorId: actor.userId, action: "product.merge", entityType: "Product", entityId: from.id, after: { into: into.id, moved } } });
       }, txOptions());

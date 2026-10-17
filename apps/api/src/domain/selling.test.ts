@@ -12,13 +12,13 @@ test("M5: a sack sells by piece; its grams are known", () => {
   assert.equal(priceLine(kape, 1_000, { quantity: 3 }).grams, null);
   assert.throws(() => priceLine(sack, 130_000, { quantity: 0 }), SellingError);
   assert.throws(() => priceLine(sack, 130_000, { quantity: 1.5 }), SellingError);
-  assert.throws(() => priceLine(sack, 130_000, { kilos: "2" }), /kada piraso/);
+  assert.throws(() => priceLine(sack, 130_000, { kilos: "2" }), /by the piece/);
 });
 
 test("M5: ₱100 at ₱52/kg = 1.923 kg, and the customer pays exactly ₱100", () => {
   const l = priceLine(loose, 5_200, { amountMinor: 10_000 });
   assert.deepEqual([l.soldBy, l.stockQty, l.grams, l.lineTotalMinor, l.enteredAmountMinor], ["PESO", 1_923, 1_923, 10_000, 10_000]);
-  assert.throws(() => priceLine(loose, 5_200, { amountMinor: 1 }), /Kulang/, "1 centavo buys no rice");
+  assert.throws(() => priceLine(loose, 5_200, { amountMinor: 1 }), /not enough/, "1 centavo buys no rice");
 });
 
 test("M5: loose by kilo — line from grams, rounded once", () => {
@@ -27,8 +27,8 @@ test("M5: loose by kilo — line from grams, rounded once", () => {
   assert.equal(priceLine(loose, 5_201, { grams: 1 }).lineTotalMinor, 5, "5.201 → 5 centavos, half-up");
   assert.equal(priceLine(loose, 5_200, { kilos: "0,5" }).stockQty, 500, "a comma works too");
   assert.throws(() => priceLine(loose, 5_200, { kilos: "1.2345" }), SellingError);
-  assert.throws(() => priceLine(loose, 5_200, {}), /kilo o piso/);
-  assert.throws(() => priceLine(loose, 5_200, { kilos: "1", amountMinor: 100 }), /isa lang/);
+  assert.throws(() => priceLine(loose, 5_200, {}), /kilos or pesos/);
+  assert.throws(() => priceLine(loose, 5_200, { kilos: "1", amountMinor: 100 }), /Enter only one/);
 });
 
 test("M5: isLoose only for gram-stocked products of 1 g", () => {
@@ -57,10 +57,10 @@ test("M5: a paper slip keeps its real time — not in the future, not older than
   const ok = checkPaperSlip({ slipNo: " 0123 ", occurredAt: "2026-10-15T15:30:00+08:00" }, now);
   assert.equal(ok.slipNo, "0123");
   assert.equal(ok.occurredAt.toISOString(), "2026-10-15T07:30:00.000Z");
-  assert.throws(() => checkPaperSlip({ slipNo: "0123", occurredAt: "2026-10-17T10:00:00+08:00" }, now), /hinaharap/);
-  assert.throws(() => checkPaperSlip({ slipNo: "0123", occurredAt: "2026-09-01T10:00:00+08:00" }, now), /31 araw/);
-  assert.throws(() => checkPaperSlip({ slipNo: "", occurredAt: "2026-10-15T10:00:00+08:00" }, now), /numero/);
-  assert.throws(() => checkPaperSlip({ slipNo: "12", occurredAt: "kahapon" }, now), /petsa/);
+  assert.throws(() => checkPaperSlip({ slipNo: "0123", occurredAt: "2026-10-17T10:00:00+08:00" }, now), /in the future/);
+  assert.throws(() => checkPaperSlip({ slipNo: "0123", occurredAt: "2026-09-01T10:00:00+08:00" }, now), /31 days/);
+  assert.throws(() => checkPaperSlip({ slipNo: "", occurredAt: "2026-10-15T10:00:00+08:00" }, now), /paper slip number/);
+  assert.throws(() => checkPaperSlip({ slipNo: "12", occurredAt: "kahapon" }, now), /date and time/);
 });
 
 test("M5: Bagong item — rice joins Bigas; it needs what is on hand to be sellable", () => {
@@ -70,9 +70,9 @@ test("M5: Bagong item — rice joins Bigas; it needs what is on hand to be sella
   assert.deepEqual([k.stockBaseQuantity, k.soldByWeight], [1, true]);
   const p = planManualItem({ name: "Asin", soldAs: "PIECE", priceMinor: 2_000, costMinor: 1_500, openingQty: 12 });
   assert.equal(p.stockConversionFamily, null);
-  assert.throws(() => planManualItem({ name: "X", soldAs: "SACK", gramsPerSack: 25_000, priceMinor: 1, costMinor: 0, openingQty: 1 }), /pangalan/);
-  assert.throws(() => planManualItem({ name: "Jasmine", soldAs: "SACK", priceMinor: 1, costMinor: 0, openingQty: 1 }), /kilo ang isang sako/);
-  assert.throws(() => planManualItem({ name: "Jasmine", soldAs: "KILO", priceMinor: 1, costMinor: 0, openingQty: 0 }), /hawak/);
+  assert.throws(() => planManualItem({ name: "X", soldAs: "SACK", gramsPerSack: 25_000, priceMinor: 1, costMinor: 0, openingQty: 1 }), /Enter the name/);
+  assert.throws(() => planManualItem({ name: "Jasmine", soldAs: "SACK", priceMinor: 1, costMinor: 0, openingQty: 1 }), /kilos in one sack/);
+  assert.throws(() => planManualItem({ name: "Jasmine", soldAs: "KILO", priceMinor: 1, costMinor: 0, openingQty: 0 }), /on hand/);
 });
 
 test("M5: merging converts stock by weight and refuses broken sacks", () => {
@@ -84,17 +84,17 @@ test("M5: merging converts stock by weight and refuses broken sacks", () => {
   assert.equal(mergeQuantity(manual25, jas5, 3), 15);
   assert.equal(mergeQuantity(manual25, jasKilo, 1), 25_000);
   assert.throws(() => mergeQuantity(jasKilo, jas25, 1_000), /resack/);
-  assert.throws(() => mergeQuantity({ name: "Asin", stockBaseUnit: null, stockBaseQuantity: null }, jas25, 1), /sukat/);
+  assert.throws(() => mergeQuantity({ name: "Asin", stockBaseUnit: null, stockBaseQuantity: null }, jas25, 1), /same measure/);
   assert.equal(mergeQuantity({ name: "A", stockBaseUnit: null, stockBaseQuantity: null }, { name: "B", stockBaseUnit: null, stockBaseQuantity: null }, 4), 4);
 });
 
 test("M5: a short sale says what to do and where stock remains", () => {
   assert.equal(
     shortMessage({ productName: "Sinandomeng 25 kg", loose: false, available: 1, here: "Store 2", elsewhere: [{ name: "Store 3", available: 2 }, { name: "WH", available: 40 }] }),
-    "1 na lang na Sinandomeng 25 kg sa Store 2. Bawasan, o kunin sa WH (may 40).",
+    "Only 1 Sinandomeng 25 kg left at Store 2. Lower the amount, or take from WH (has 40).",
   );
   assert.equal(
     shortMessage({ productName: "Tingi", loose: true, available: 0, here: "Store 1", elsewhere: [] }),
-    "Wala nang Tingi sa Store 1. Bawasan, o bilangin ulit.",
+    "No Tingi left at Store 1. Lower the amount, or count again.",
   );
 });

@@ -37,7 +37,7 @@ test("M8: a write-off over 1% of what the location holds waits for the owner", (
   assert.deepEqual(writeOffCheck(200, 2, "BASA", null), { qty: 2, reason: "BASA", lossBp: 100, needsApproval: false }, "exactly 1% is fine");
   assert.equal(writeOffCheck(200, 3, "BUKBOK", null).needsApproval, true);
   assert.equal(writeOffCheck(10, 1, "TAPON", null).needsApproval, true, "1 of 10 sacks = 10%");
-  assert.throws(() => writeOffCheck(5, 6, "TAPON", null), /bilangin muna/);
-  assert.throws(() => writeOffCheck(5, 1, "IBA", ""), /dahilan/);
-  assert.throws(() => writeOffCheck(5, 1, "NAWALA", null), /dahilan/);
+  assert.throws(() => writeOffCheck(5, 6, "TAPON", null), /count it first/);
+  assert.throws(() => writeOffCheck(5, 1, "IBA", ""), /reason/);
+  assert.throws(() => writeOffCheck(5, 1, "NAWALA", null), /reason/);
 });

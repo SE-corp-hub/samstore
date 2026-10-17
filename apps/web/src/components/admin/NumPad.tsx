@@ -41,7 +41,7 @@ export default function NumPad({
       <div className="d-grid gap-2" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
         {keys.map((k) => (
           <button key={k} type="button" className="btn btn-light border" style={{ fontSize: 26, minHeight: 64, fontVariantNumeric: "tabular-nums" }}
-            aria-label={k === "⌫" ? "Burahin ang huli" : k === "C" ? "Burahin lahat" : k} onClick={() => press(k)}>
+            aria-label={k === "⌫" ? "Delete last digit" : k === "C" ? "Clear all" : k} onClick={() => press(k)}>
             {k}
           </button>
         ))}

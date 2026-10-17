@@ -118,7 +118,7 @@ test("M8: the balance formula matches the ledger for every item in a test count 
   assert.equal(sale.ok, true, msg(sale));
   assert.equal((await svc.record(fx.storeId, fx.staff1, started.value.id, [{ productId: fx.din25.id, counted: 4 }, { productId: fx.loose.id, counted: "50.4" }])).ok, true);
 
-  assert.match(msg(await svc.submit(fx.storeId, fx.staff1, started.value.id, [])), /Kulang ang pirma/);
+  assert.match(msg(await svc.submit(fx.storeId, fx.staff1, started.value.id, [])), /Missing signature/);
   const sub = await svc.submit(fx.storeId, fx.staff1, started.value.id, staffSig);
   assert.equal(sub.ok, true, msg(sub));
   if (!sub.ok) return;
@@ -162,7 +162,7 @@ test("M8: a declined count posts nothing; staff count only at their location; ev
   assert.equal((await svc.start(fx.storeId, fx.owner, { locationId: fx.s1 })).ok, false, "one open count per location");
   assert.equal((await svc.record(fx.storeId, fx.staff2, c.value.id, [{ productId: fx.sin25.id, counted: 1 }])).ok, false, "Store 2 staff cannot count Store 1");
   assert.equal((await svc.record(fx.storeId, fx.staff1, c.value.id, [{ productId: fx.sin25.id, counted: 5 }])).ok, true);
-  assert.match(msg(await svc.submit(fx.storeId, fx.staff1, c.value.id, staffSig)), /Hindi pa nabibilang: Dinorado/);
+  assert.match(msg(await svc.submit(fx.storeId, fx.staff1, c.value.id, staffSig)), /Not counted yet: Dinorado/);
   assert.equal((await svc.record(fx.storeId, fx.staff1, c.value.id, [{ productId: fx.din25.id, counted: 4 }])).ok, true);
   const sub = await svc.submit(fx.storeId, fx.staff1, c.value.id, staffSig);
   assert.equal(sub.ok, true, msg(sub));
@@ -180,7 +180,7 @@ test("M8: the zero check — a sale that empties the shelf asks; a quick count p
   const blocked = await benta.sell(fx.storeId, fx.staff1, { idempotencyKey: key(), lines: [{ productId: fx.din25.id, quantity: 1 }], payment: { method: "cash" } });
   assert.equal(blocked.ok, false);
   // There are actually 2 sacks behind the counter.
-  assert.match(msg(await svc.quick(fx.storeId, fx.staff1, { productId: fx.din25.id, counted: 2 })), /Kulang ang pirma/);
+  assert.match(msg(await svc.quick(fx.storeId, fx.staff1, { productId: fx.din25.id, counted: 2 })), /Missing signature/);
   const q = await svc.quick(fx.storeId, fx.staff1, { productId: fx.din25.id, counted: 2, signatures: staffSig });
   assert.equal(q.ok, true, msg(q));
   assert.deepEqual(q.ok ? [q.value.expectedQty, q.value.countedQty, q.value.verdict] : [], [0, 2, "SOBRA"]);
@@ -208,7 +208,7 @@ test("M8: the closing top-5 count posts on submit (no waiting)", async () => {
 
 test("M8: Manual na bawas — reason and signature; the stock moves; over 1% goes to the owner; never more than is free", async () => {
   const fx = await fixture();
-  assert.match(msg(await svc.writeOff(fx.storeId, fx.staff1, { productId: fx.loose.id, kilos: "0.4", reason: "TAPON" })), /Kulang ang pirma/);
+  assert.match(msg(await svc.writeOff(fx.storeId, fx.staff1, { productId: fx.loose.id, kilos: "0.4", reason: "TAPON" })), /Missing signature/);
   const small = await svc.writeOff(fx.storeId, fx.staff1, { productId: fx.loose.id, kilos: "0.4", reason: "TAPON", signatures: staffSig });
   assert.equal(small.ok, true, msg(small));
   assert.deepEqual(small.ok ? [small.value.quantity, small.value.lossBp, small.value.needsApproval, small.value.valueMinor] : [], [400, 80, false, 1_840], "0.8% of 50 kg — no owner needed");
@@ -222,14 +222,14 @@ test("M8: Manual na bawas — reason and signature; the stock moves; over 1% goe
   assert.equal(await onHand(fx, fx.sin25.id), 8, "the stock moves; the owner's approval clears the flag");
   const appr = await prisma.approvalRequest.findUniqueOrThrow({ where: { id: big.value.approvalId! } });
   assert.deepEqual([appr.kind, appr.approverRoles], ["WRITE_OFF", ["OWNER"]]);
-  assert.match(appr.summary, /May bukbok/);
-  assert.match(msg(await svc.writeOff(fx.storeId, fx.staff1, { productId: fx.sin25.id, quantity: 9, reason: "BASA", signatures: staffSig })), /8 lang ang nasa sistema/);
-  assert.match(msg(await svc.writeOff(fx.storeId, fx.staff1, { productId: fx.sin25.id, quantity: 1, reason: "IBA", signatures: staffSig })), /dahilan/);
+  assert.match(appr.summary, /Weevils/);
+  assert.match(msg(await svc.writeOff(fx.storeId, fx.staff1, { productId: fx.sin25.id, quantity: 9, reason: "BASA", signatures: staffSig })), /The system shows only 8 here/);
+  assert.match(msg(await svc.writeOff(fx.storeId, fx.staff1, { productId: fx.sin25.id, quantity: 1, reason: "IBA", signatures: staffSig })), /Enter the reason/);
   assert.equal((await svc.writeOff(fx.storeId, fx.staff2, { locationId: fx.s1, productId: fx.sin25.id, quantity: 1, reason: "BASA", signatures: staffSig })).ok, false, "Store 2 staff cannot write off Store 1 stock");
   // Held stock (sold from Store 2 out of Store 1, waiting for Ilabas) cannot be written off.
   const held = await benta.sell(fx.storeId, fx.staff2, { idempotencyKey: key(), lines: [{ productId: fx.sin25.id, quantity: 7, sourceLocationId: fx.s1 }], payment: { method: "cash" } });
   assert.equal(held.ok, true, msg(held));
-  assert.match(msg(await svc.writeOff(fx.storeId, fx.staff1, { productId: fx.sin25.id, quantity: 2, reason: "BASA", signatures: staffSig })), /nakareserba/);
+  assert.match(msg(await svc.writeOff(fx.storeId, fx.staff1, { productId: fx.sin25.id, quantity: 2, reason: "BASA", signatures: staffSig })), /held for a release/);
   const bal = await svc.balance(fx.storeId, fx.owner, { locationId: fx.s1 });
   assert.equal(bal.ok && bal.value.items.every((i) => i.matches), true, "write-offs are in the balance (bawas)");
 });

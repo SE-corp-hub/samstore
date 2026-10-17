@@ -97,7 +97,7 @@ export class RiceReportsService {
   }
 
   private owner(actor: Actor) {
-    if (!OWNERS.includes(actor.role)) throw new StepError(forbidden("Para sa may-ari ang ulat na ito"));
+    if (!OWNERS.includes(actor.role)) throw new StepError(forbidden("This report is for the owner only"));
   }
 
   private async locations(storeId: string) {
@@ -229,6 +229,28 @@ export class RiceReportsService {
     };
   }
 
+  /** Sales and cash that came in at a closed location after its Pagsasara, same day. The closed
+   *  report is frozen on purpose, so these would otherwise be invisible to the owner. */
+  private async afterClose(storeId: string, locationId: string, date: string, closedAt: Date) {
+    const { from, to } = dayRange(date);
+    const orders = await prisma.order.findMany({
+      where: {
+        storeId, sellingLocationId: locationId, status: "COMPLETED", createdAt: { gt: closedAt },
+        OR: [{ occurredAt: { gte: from, lt: to } }, { occurredAt: null, createdAt: { gte: from, lt: to } }],
+      },
+      select: { totalMinor: true, paymentMethod: true },
+    });
+    const cash = await prisma.payment.findMany({
+      where: { storeId, type: "payment", method: "cash", receivedAt: { gt: closedAt, lt: to }, OR: [{ locationId }, { locationId: null, order: { sellingLocationId: locationId } }] },
+      select: { amountMinor: true },
+    });
+    return {
+      count: orders.length,
+      totalMinor: orders.reduce((a, o) => a + o.totalMinor, 0),
+      cashMinor: cash.reduce((a, p) => a + p.amountMinor, 0),
+    };
+  }
+
   /** Releases not delivered and resacks not finished at a location — right now. */
   private async openHandOffs(storeId: string, locationId: string) {
     const [trips, resacks] = await Promise.all([
@@ -250,7 +272,7 @@ export class RiceReportsService {
       dayRange(date);
       const all = await this.locations(storeId);
       const locs = input.locationId ? all.filter((l) => l.id === input.locationId) : OWNERS.includes(actor.role) ? all : all.filter((l) => l.id === actor.homeLocationId);
-      if (locs.length === 0) throw new StepError(invalid("Pumili ng lokasyon"));
+      if (locs.length === 0) throw new StepError(invalid("Choose a location"));
       for (const l of locs) {
         const refusal = locationRefusal(actor, l.id);
         if (refusal) throw new StepError(forbidden(refusal));
@@ -260,6 +282,7 @@ export class RiceReportsService {
       type Section = DayTotals & {
         location: (typeof locs)[number]; locked: boolean; closedAt: Date | null; cashCountedMinor: number | null; cashVarianceMinor: number | null;
         openHandOffs: Awaited<ReturnType<RiceReportsService["openHandOffs"]>>;
+        afterClose: Awaited<ReturnType<RiceReportsService["afterClose"]>> | null;
       };
       const sections: Section[] = [];
       for (const l of locs) {
@@ -269,6 +292,7 @@ export class RiceReportsService {
           location: l, locked: !!closed, closedAt: closed?.closedAt ?? null,
           cashCountedMinor: closed?.cashCountedMinor ?? null, cashVarianceMinor: closed?.cashVarianceMinor ?? null,
           ...totals, openHandOffs: await this.openHandOffs(storeId, l.id),
+          afterClose: closed ? await this.afterClose(storeId, l.id, date, closed.closedAt) : null,
         });
       }
       const sum = (f: (s: Section) => number) => sections.reduce((a, s) => a + f(s), 0);
@@ -288,13 +312,13 @@ export class RiceReportsService {
     return this.run(async () => {
       const locationId = input.locationId || actor.homeLocationId;
       const loc = locationId ? await prisma.warehouse.findFirst({ where: { id: locationId, storeId, isActive: true }, select: { id: true, name: true } }) : null;
-      if (!loc) throw new StepError(invalid("Pumili ng lokasyon"));
+      if (!loc) throw new StepError(invalid("Choose a location"));
       const refusal = locationRefusal(actor, loc.id);
       if (refusal) throw new StepError(forbidden(refusal));
       const date = input.date || manilaDate(new Date());
-      if (date > manilaDate(new Date())) throw new StepError(invalid("Hindi pa dumarating ang araw na iyan"));
+      if (date > manilaDate(new Date())) throw new StepError(invalid("That day has not come yet"));
       const counted = input.cashCountedMinor;
-      if (typeof counted !== "number" || !Number.isInteger(counted) || counted < 0) throw new StepError(invalid("Ilagay ang nabilang na cash"));
+      if (typeof counted !== "number" || !Number.isInteger(counted) || counted < 0) throw new StepError(invalid("Enter the cash you counted"));
       const totals = await this.dayTotals(storeId, loc.id, date);
       const handOffs = await this.openHandOffs(storeId, loc.id);
       try {
@@ -313,7 +337,7 @@ export class RiceReportsService {
           return { id: row.id, date, location: loc, cashExpectedMinor: totals.cash.expectedMinor, cashCountedMinor: counted, cashVarianceMinor: counted - totals.cash.expectedMinor, openHandOffs: handOffs };
         });
       } catch (e) {
-        if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") throw new StepError(conflict(`Sarado na ang ${loc.name} para sa ${date}`));
+        if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") throw new StepError(conflict(`${loc.name} is already closed for ${date}`));
         throw e;
       }
     });
@@ -506,7 +530,7 @@ export class RiceReportsService {
     return this.run(async () => {
       this.owner(actor);
       const text = (q ?? "").trim();
-      if (text.length < 2) throw new StepError(invalid("Ilagay ang hahanapin (2+ letra)"));
+      if (text.length < 2) throw new StepError(invalid("Enter what to search for (2+ letters)"));
       const doc = text.toUpperCase();
       const [trips, resacks, counts, wos, rets, ins, orders] = await Promise.all([
         prisma.stockTransfer.findMany({ where: { storeId, docNumber: doc }, select: { id: true, docNumber: true } }),

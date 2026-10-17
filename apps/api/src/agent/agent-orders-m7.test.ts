@@ -124,7 +124,7 @@ test("M7: the agent sees each status change — Naghihintay → Aprubado → Nas
   assert.equal(rel.ok, true, msg(rel));
   assert.equal(await statusOf(fx, o.id), "NAILABAS");
   const early = await svc.pay(fx.storeId, fx.staff1, o.id, { method: "cash" });
-  assert.match(msg(early), /Hindi pa naihahatid/);
+  assert.match(msg(early), /Not everything is delivered yet/);
 
   const del = await flow.deliver(fx.storeId, fx.staff1, tripId, { quantity: 2, signatures: [...sigs(fx.kargadorId), { signerKind: "CUSTOMER", signerName: "Rosa", imagePng: PNG }] });
   assert.equal(del.ok, true, msg(del));
@@ -157,7 +157,7 @@ test("M7: Tanggihan — the agent sees why; only staff at the preferred store de
   const o = await order(fx);
   const away = await svc.approve(fx.storeId, fx.staff2, o.id, {});
   assert.equal(away.ok, false, "Store 2 staff cannot decide Store 1's orders");
-  assert.match(msg(await svc.decline(fx.storeId, fx.staff1, o.id, "")), /dahilan/);
+  assert.match(msg(await svc.decline(fx.storeId, fx.staff1, o.id, "")), /Enter the reason/);
   const no = await svc.decline(fx.storeId, fx.staff1, o.id, "Wala nang stock ngayong araw");
   assert.equal(no.ok, true, msg(no));
   const mine = (await svc.mine(fx.storeId, fx.agent)).find((x) => x.id === o.id)!;
@@ -170,7 +170,7 @@ test("M7: approval can take the rice from the warehouse; short stock says where 
   const big = await order(fx, 6); // Store 1 has 2
   const short = await svc.approve(fx.storeId, fx.staff1, big.id, {});
   assert.equal(short.ok, false);
-  assert.match(msg(short), /2 na lang .* sa Store 1\. Bawasan, o kunin sa Warehouse \(may 20\)/);
+  assert.match(msg(short), /Only 2 .* left at Store 1\. Lower the amount, or take from Warehouse \(has 20\)/);
   assert.equal((await svc.mine(fx.storeId, fx.agent)).find((x) => x.id === big.id)?.status, "NAGHIHINTAY", "a failed approval changes nothing");
   const item = big.lines[0]!;
   const fromWh = await svc.approve(fx.storeId, fx.staff1, big.id, { sources: [{ itemId: item.id, sourceLocationId: fx.wh }] });
@@ -192,7 +192,7 @@ test("M7: the customer pays for what was delivered — a partial delivery raises
   assert.equal(await prisma.approvalRequest.count({ where: { storeId: fx.storeId, kind: "REFUND" } }), 0, "nothing was paid, so nothing to refund");
   // Utang needs a limit first.
   const noLimit = await svc.pay(fx.storeId, fx.staff1, o.id, { method: "utang", signatures: [{ signerKind: "CUSTOMER", signerName: "Rosa", imagePng: PNG }] });
-  assert.match(msg(noLimit), /Wala pang utang limit/);
+  assert.match(msg(noLimit), /has no credit limit yet/);
   await prisma.storeCustomer.update({ where: { id: o.storeCustomerId }, data: { creditApproved: true, creditLimitMinor: 500_000 } });
   const paid = await svc.pay(fx.storeId, fx.staff1, o.id, { method: "utang", signatures: [{ signerKind: "CUSTOMER", signerName: "Rosa", imagePng: PNG }] });
   assert.equal(paid.ok, true, msg(paid));
@@ -212,5 +212,5 @@ test("M7: one order per key — a double-tap by the agent makes one order", asyn
   assert.equal(a.ok && b.ok && a.value.id === b.value.id, true, `${msg(a)} ${msg(b)}`);
   assert.equal(await prisma.order.count({ where: { storeId: fx.storeId, source: "AGENT" } }), 1);
   const bad = await svc.create(fx.storeId, fx.agent, { ...body, idempotencyKey: key(), locationId: fx.wh });
-  assert.match(msg(bad), /tindahan/, "the preferred place must be a store, not the warehouse");
+  assert.match(msg(bad), /store that will deliver/, "the preferred place must be a store, not the warehouse");
 });

@@ -212,7 +212,7 @@ export function CustomerAccount({ storeId }: { storeId?: string }) {
             </div>
             <div className="col-6">
               <div className="card"><div className="card-body text-center py-2">
-                <div className="small text-muted">Utang balance</div>
+                <div className="small text-muted">Credit balance</div>
                 <div className={`h4 mb-0 ${me.profile.creditBalanceMinor > 0 ? "text-danger" : "text-success"}`}>{toPesos(me.profile.creditBalanceMinor)}</div>
                 {me.profile.creditApproved ? (
                   <small className="text-muted">credit approved · limit {toPesos(me.profile.creditLimitMinor)}</small>
@@ -300,7 +300,7 @@ export function CustomerAccount({ storeId }: { storeId?: string }) {
         <button className="btn btn-primary btn-sm w-100" type="submit" disabled={loading}>
           {loading ? "…" : mode === "login" ? "Log in" : "Create account"}
         </button>
-        <p className="text-muted mb-0 mt-2">Accounts earn loyalty points on delivered orders and can pay on credit (utang) once approved.</p>
+        <p className="text-muted mb-0 mt-2">Accounts earn loyalty points on delivered orders and can pay on credit once approved.</p>
       </form>
     </div>
   );

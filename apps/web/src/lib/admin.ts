@@ -1,14 +1,44 @@
 // Admin helpers — calls the protected admin API.
 import { API_URL } from "../config";
 
-/** Active store id from the session (set by the store switcher). */
-export function getAdminStoreId(): string | null {
+/**
+ * The sign-in lives in the phone's own storage (localStorage), not the tab's (sessionStorage):
+ * phone browsers drop background tabs often, and staff must not be asked to sign in again each time.
+ * It ends when the person logs out, the token expires (the server answers 401) or the owner
+ * deactivates them. A sign-in saved by an older version in sessionStorage is still read, so nobody
+ * is logged out by this change.
+ */
+export function getAuthItem(key: string): string | null {
   if (typeof window === "undefined") return null;
-  return sessionStorage.getItem("samstore.admin.storeId");
+  try { const v = localStorage.getItem(key); if (v !== null) return v; } catch { /* storage blocked: fall through */ }
+  try { return sessionStorage.getItem(key); } catch { return null; }
+}
+
+export function setAuthItem(key: string, value: string) {
+  let kept = false;
+  try { localStorage.setItem(key, value); kept = true; } catch { /* storage blocked: use the tab */ }
+  // Keep one copy only, so a stale tab copy can never shadow a newer sign-in.
+  try { if (kept) sessionStorage.removeItem(key); else sessionStorage.setItem(key, value); } catch { /* ignore */ }
+}
+
+export function removeAuthItem(key: string) {
+  try { localStorage.removeItem(key); } catch { /* ignore */ }
+  try { sessionStorage.removeItem(key); } catch { /* ignore */ }
+}
+
+/** Forget the sign-in and the chosen store on this phone. */
+export function clearAdminSession() {
+  removeAuthItem("samstore.admin.token");
+  removeAuthItem("samstore.admin.storeId");
+}
+
+/** Active store id (set by the store switcher). */
+export function getAdminStoreId(): string | null {
+  return getAuthItem("samstore.admin.storeId");
 }
 
 export function setAdminStoreId(storeId: string) {
-  try { sessionStorage.setItem("samstore.admin.storeId", storeId); } catch { /* ignore */ }
+  setAuthItem("samstore.admin.storeId", storeId);
 }
 
 /** Auth + tenant headers for admin API calls. */
@@ -28,10 +58,7 @@ export function adminHeaders(): Record<string, string> {
  */
 export function handleUnauthorized(res: { status: number } | null | undefined): boolean {
   if (!res || res.status !== 401) return false;
-  try {
-    sessionStorage.removeItem("samstore.admin.token");
-    sessionStorage.removeItem("samstore.admin.storeId");
-  } catch { /* ignore */ }
+  clearAdminSession();
   if (typeof window !== "undefined" && !window.location.pathname.startsWith("/admin/login")) {
     window.location.assign("/admin/login");
   }
@@ -66,10 +93,10 @@ export interface AdminOrder {
   claimTokens?: { token: string; usedAt: string | null }[];
 }
 
-/** Loads the admin token from session storage (client-side only). */
+/** Loads the admin token from the phone's storage (client-side only). */
 export function getAdminToken(): string | null {
   if (typeof window === "undefined") return null;
-  return sessionStorage.getItem("samstore.admin.token");
+  return getAuthItem("samstore.admin.token");
 }
 
 /** Decodes the role claim from the stored admin JWT (best-effort). */
@@ -121,20 +148,20 @@ export const NAV_GROUPS: NavGroup[] = [
   },
   {
     group: "rice",
-    label: "Bigas",
+    label: "Rice",
     items: [
-      { id: "benta", label: "Benta", icon: "bi-basket" },
-      { id: "utangrice", label: "Utang", icon: "bi-journal-richtext" },
-      { id: "agentorders", label: "Order ng agent", icon: "bi-person-lines-fill" },
-      { id: "agent", label: "Bagong order (agent)", icon: "bi-phone" },
-      { id: "approvals", label: "Para sa iyo", icon: "bi-inbox" },
-      { id: "trips", label: "Lipat at Ilabas", icon: "bi-truck" },
+      { id: "benta", label: "Sell", icon: "bi-basket" },
+      { id: "utangrice", label: "Credit", icon: "bi-journal-richtext" },
+      { id: "agentorders", label: "Agent orders", icon: "bi-person-lines-fill" },
+      { id: "agent", label: "New order (agent)", icon: "bi-phone" },
+      { id: "approvals", label: "For your approval", icon: "bi-inbox" },
+      { id: "trips", label: "Transfers & releases", icon: "bi-truck" },
       { id: "resack", label: "Resack", icon: "bi-arrow-repeat" },
-      { id: "pasok", label: "Pasok at Susuriin", icon: "bi-box-arrow-in-down" },
-      { id: "bilangin", label: "Bilangin", icon: "bi-clipboard-check" },
-      { id: "ulat", label: "Ulat at Pagsasara", icon: "bi-bar-chart-line" },
-      { id: "drafts", label: "Tapusin", icon: "bi-hourglass-split" },
-      { id: "kargadors", label: "Kargadors", icon: "bi-person-walking" },
+      { id: "pasok", label: "Stock in & review", icon: "bi-box-arrow-in-down" },
+      { id: "bilangin", label: "Count", icon: "bi-clipboard-check" },
+      { id: "ulat", label: "Reports & closing", icon: "bi-bar-chart-line" },
+      { id: "drafts", label: "To finish", icon: "bi-hourglass-split" },
+      { id: "kargadors", label: "Porters", icon: "bi-person-walking" },
     ],
   },
   {
@@ -176,6 +203,15 @@ export const NAV_GROUPS: NavGroup[] = [
   },
 ];
 
+/** The nav entry for a tab id (label + icon), for the top bar title. */
+export function navItemFor(id: string): NavItem | undefined {
+  for (const g of NAV_GROUPS) {
+    const hit = g.items.find((i) => i.id === id);
+    if (hit) return hit;
+  }
+  return undefined;
+}
+
 /** Tab visibility per staff role (GET-level permissions from live API probes). */
 export const TABS_BY_ROLE: Record<string, string[]> = {
   // M7: OWNER is the tenant (store membership) role; STORE_OWNER is the legacy global
@@ -211,6 +247,7 @@ export function defaultTabFor(role: string): string {
   const tabs = TABS_BY_ROLE[role] ?? [];
   if (tabs.length === 0) return "orders";
   if (role === "SALES_AGENT") return "agent"; // Rice Ops M7: the agent's three-button screen
+  if (role === "STAFF" && tabs.includes("benta")) return "benta"; // counter staff start where they sell
   if (tabs.includes("overview")) return "overview";
   return tabs[0] ?? "orders";
 }

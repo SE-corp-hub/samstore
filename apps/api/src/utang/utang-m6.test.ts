@@ -191,7 +191,7 @@ test("M6: utang over the limit waits for the owner — the rice is held; approve
   assert.deepEqual(await level(fx, fx.s1), { quantityOnHand: 9, quantityReserved: 1 }, "held, not sold");
   assert.equal(await balance(fx.customerId), 130_000, "no utang posted yet");
   const appr = await prisma.approvalRequest.findUniqueOrThrow({ where: { id: over.value.approvalId! } });
-  assert.match(appr.summary, /lampas ₱600/);
+  assert.match(appr.summary, /over by ₱600/);
   // The held sack cannot be sold to someone else meanwhile.
   const cash = await benta.sell(fx.storeId, fx.staff1, { idempotencyKey: key(), lines: [{ productId: fx.sin25.id, quantity: 9 }], payment: { method: "cash" } });
   assert.equal(cash.ok, false, "only 8 are free");
@@ -219,7 +219,7 @@ test("M6: utang over the limit waits for the owner — the rice is held; approve
   const noLimit = await fixture({ limit: 0 });
   const refused = await sellUtang(noLimit, 1);
   assert.equal(refused.ok, false);
-  assert.match(msg(refused), /Wala pang utang limit/);
+  assert.match(msg(refused), /has no credit limit yet/);
 });
 
 test("M6: Bayad sa utang — no overpaying, racing payments never go below zero, staff only at their store", async () => {
@@ -227,9 +227,9 @@ test("M6: Bayad sa utang — no overpaying, racing payments never go below zero,
   setSmsProviderForTests(new MockSmsProvider());
   assert.equal((await sellUtang(fx, 1)).ok, true);
   const over = await utang.collect(fx.storeId, fx.staff1, { customerId: fx.customerId, amountMinor: 130_001, method: "cash", signatures: staffSig });
-  assert.match(msg(over), /Sobra — ₱1,300 lang/);
+  assert.match(msg(over), /Too much — the customer only owes ₱1,300/);
   const noSig = await utang.collect(fx.storeId, fx.staff1, { customerId: fx.customerId, amountMinor: 10_000, method: "cash" });
-  assert.match(msg(noSig), /Kulang ang pirma/);
+  assert.match(msg(noSig), /Missing signature/);
   const away = await utang.collect(fx.storeId, fx.staff2, { customerId: fx.customerId, amountMinor: 10_000, method: "cash", locationId: fx.s1, signatures: staffSig });
   assert.equal(away.ok, false, "Store 2 staff cannot take money at Store 1");
 
@@ -301,7 +301,7 @@ test("M6: the customer list — staff add, only the owner sets limits, another s
   const staffLimit = await utang.addCustomer(fx.storeId, fx.staff1, { name: "Pedro", phone: phoneFor(), limitMinor: 100_000 });
   assert.equal(staffLimit.ok, false, "staff cannot set a limit");
   const dupe = await utang.addCustomer(fx.storeId, fx.staff1, { name: "Maria S.", phone: `+63 918 ${digits.slice(0, 3)} ${digits.slice(3)}` });
-  assert.match(msg(dupe), /Nasa listahan na/);
+  assert.match(msg(dupe), /already on the list/);
   const bad = await utang.addCustomer(fx.storeId, fx.staff1, { name: "Ana", phone: "12345" });
   assert.equal(bad.ok, false);
   assert.equal((await utang.setLimit(fx.storeId, fx.staff1, added.value.id, 100_000)).ok, false);

@@ -1,5 +1,35 @@
 # PINDIAN — Progress Log
 
+## All screens in English (2026-10-16)
+
+The owner asked for every app screen in English. Every rice screen, the menu, dialogs, toasts and the API messages staff see are now plain English, and the Taglish/English switch is removed (English only; the old Taglish words stay in `lib/lang.ts` for reference). Wording: Sell, Credit, Agent orders, For your approval, Transfers & releases, Resack, Stock in & review, Count, Reports & closing, To finish, Porters; "kaha" → cash drawer. Tests that check messages now expect the English text.
+
+Not changed: the text messages sent to customers (still Taglish), the chatbot's Tagalog keyword matching, the printed guides in `docs/rice-ops/gabay/`, and stored values (e.g. the unit "sako", route names).
+
+**Gate:** `verify.bat` on the operator PC — **VERIFY RESULT: PASS — ready to commit** (typecheck exit 0; 30 test files, all `fail 0`). An earlier run that same hour failed M4/M5 only on "Can't reach database server" (connection drop) and one M8 regex still in Taglish — fixed and re-run.
+
+## Hands-on test in the TEST store + fixes (2026-10-16)
+
+Claude walked every Rice Ops flow in a separate store, "TEST Bigasan" (`test-setup.bat`), in the browser on the operator PC, then fixed what it found.
+
+| Found | Fix |
+|---|---|
+| Demo accounts (`…@samstore.test`, passwords in `prisma/seed.ts`) logged in on the live DB — incl. OWNER of sam-store and PLATFORM_ADMIN | Login page no longer lists them; `lock-demo-accounts.bat` gave all 7 new random passwords + signed them out (new passwords only in `go-live/demo-logins.txt`, git-ignored); `admin-pass-123` now answers 401. The seed refuses to run without `ALLOW_DEMO_SEED=true` and never in production. |
+| Benta → Utang crashed the screen | Customer shape fixed |
+| Browser `confirm()`/`prompt()` froze the page (Bilangin, Resack, agent decline, Pasok merge, Team, Drafts, Expenses, Settings, Store link) | In-app Bootstrap dialogs (`lib/ask.tsx`) |
+| Cash sale refused with "Walang bukas na kaha" and no way to open it from Benta | "Buksan ang kaha" right in the cash step |
+| Benta cart lost when switching tabs | Cart (and its sale key) kept on the phone for the session |
+| Ilabas count typed on the keyboard, no message when over | − / + stepper and a clear limit message |
+| Top bar always said "Dashboard"; staff landed on Overview | Shows the current page; STAFF land on Benta |
+| Pagsasara step 2 only said "go to Bilangin" | The top-5 count opens inside Pagsasara and shows when done |
+| A sale after Pagsasara vanished from the frozen day report | `afterClose` shown in red on Ulat; M9 test extended |
+| Owner without a PIN could not approve | "Gumawa / palitan ang PIN ko" in Para sa iyo |
+| Resack loose output showed "4800 ×" | Shows kilos |
+
+**Gate:** `verify.bat` on the operator PC — **VERIFY RESULT: PASS — ready to commit** (typecheck exit 0; 33 steps exit 0; every test file `fail 0`; M9 now 3/3 incl. the after-close check).
+
+Not changed (outside the app): a shortcut in the PC's Windows Startup folder runs `npm` there at login and prints an ENOENT error; the operator can delete it.
+
 ## M5–M12 — Rice Ops, built back to back (2026-10-15)
 
 The operator asked to go straight from M5 to M12, with Claude running the tests on the operator machine and the operator committing and pushing at the end. Each module was committed locally, checked by `verify.bat` on the operator PC against the live Supabase DB, and fixed until it passed.

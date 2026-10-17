@@ -358,7 +358,7 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
       });
       const d = await res.json();
       if (!res.ok) { setFinalizeError(d?.errors?.join(", ") ?? d?.message ?? "Finalize failed"); return; }
-      toast(`Finalized — charged to utang · ${d.orderNumber ?? finalizeTarget.orderNumber}`);
+      toast(`Finalized — charged to credit · ${d.orderNumber ?? finalizeTarget.orderNumber}`);
       setFinalizeTarget(null);
       setLastFinalizedOrderId(d.orderId ?? finalizeTarget.id);
       await loadPreorders();

@@ -69,9 +69,9 @@ test("M4: several outputs share the value by weight and always add up", () => {
 
 test("M4: impossible resacks are refused", () => {
   const input = { productId: "s25", name: "S 25kg", grams: 25_000, valueMinor: 1 };
-  assert.throws(() => planResack({ input, outputs: [] }), /lumabas/);
-  assert.throws(() => planResack({ input, outputs: [{ productId: "x", name: "X", grams: 25_001 }] }), /Mas mabigat/);
-  assert.throws(() => planResack({ input, outputs: [{ productId: "s25", name: "S 25kg", grams: 25_000 }] }), /Pareho/);
+  assert.throws(() => planResack({ input, outputs: [] }), /came out/);
+  assert.throws(() => planResack({ input, outputs: [{ productId: "x", name: "X", grams: 25_001 }] }), /weighs more/);
+  assert.throws(() => planResack({ input, outputs: [{ productId: "s25", name: "S 25kg", grams: 25_000 }] }), /are the same/);
 });
 
 test("M4: a sack is valued per sack; loose rice per kilo", () => {

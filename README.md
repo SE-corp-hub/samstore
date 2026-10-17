@@ -34,7 +34,7 @@ cp .env.example .env   # fill DATABASE_URL (Supabase), REDIS_URL, CLAIM_SIGNING_
 
 # 3. database
 npx prisma migrate deploy
-npx tsx prisma/seed.ts   # demo store + products + cart
+ALLOW_DEMO_SEED=true npx tsx prisma/seed.ts   # demo store + products + cart (throwaway dev DB only)
 
 # 4. run (two terminals)
 cd apps/api && PORT=4100 npx tsx src/main.ts

@@ -33,7 +33,7 @@ class StepError extends Error {
 }
 const conflict = (message: string) => ({ ok: false as const, error: { type: "conflict" as const, message } });
 const invalid = (message: string) => ({ ok: false as const, error: { type: "validation" as const, errors: [message] } });
-const notFound = (message = "Hindi makita ang lipat na ito") => ({ ok: false as const, error: { type: "not_found" as const, message } });
+const notFound = (message = "This transfer was not found") => ({ ok: false as const, error: { type: "not_found" as const, message } });
 const forbidden = (message: string) => ({ ok: false as const, error: { type: "forbidden" as const, message } });
 
 const tripInclude = {
@@ -67,7 +67,7 @@ export class TransferFlowService {
       const sig = signatureErrorResult(e);
       if (sig) return sig;
       if (e instanceof InsufficientStockError) {
-        return conflict(`Kulang ang ${productName} sa ${sourceName} (kulang ng ${e.shortfall}). Bilangin ulit o bawasan.`);
+        return conflict(`Not enough ${productName} at ${sourceName} (short by ${e.shortfall}). Count again or lower the number.`);
       }
       throw e;
     }
@@ -78,7 +78,7 @@ export class TransferFlowService {
     const r = await tx.stockTransfer.updateMany({ where: { id, storeId, status: { in: from as never[] } }, data });
     if (r.count === 0) {
       const now = await tx.stockTransfer.findUnique({ where: { id }, select: { status: true } });
-      throw new StepError(conflict(`Hindi na puwede: ang lipat ay ${now?.status ?? "wala na"}`));
+      throw new StepError(conflict(`Not allowed anymore: the transfer is ${now?.status ?? "gone"}`));
     }
   }
 
@@ -133,7 +133,7 @@ export class TransferFlowService {
         fromWarehouseId: input.sourceLocationId, toWarehouseId: input.sellingLocationId,
         productId: input.productId, quantity: input.quantity, status: "APPROVED",
         requestedById: input.actorId, approvedById: input.actorId, reservedQty: input.quantity,
-        customerName: input.customerName.slice(0, 80) || null, reason: "Benta mula sa ibang lokasyon",
+        customerName: input.customerName.slice(0, 80) || null, reason: "Sale from another location",
       },
       select: { id: true },
     });
@@ -160,7 +160,7 @@ export class TransferFlowService {
     const kargador = input.kargadorId
       ? await prisma.kargador.findFirst({ where: { id: input.kargadorId, storeId, isActive: true }, select: { id: true } })
       : null;
-    if (!kargador) return invalid("Pumili ng kargador na magdadala");
+    if (!kargador) return invalid("Choose the porter who will carry it");
     const released = qty as number;
     const docType = t.kind === "ORDER_RELEASE" ? "RELEASE" : "TRANSFER";
 
@@ -174,7 +174,7 @@ export class TransferFlowService {
         await requireSignatures(tx, storeId, { documentType: docType, documentId: id, step: "RELEASE" }, { kargador: true });
         // Signatures must name THIS trip's kargador.
         const k = await tx.signature.count({ where: { storeId, documentType: docType, documentId: id, step: "RELEASE", signerKind: "KARGADOR", kargadorId: kargador.id } });
-        if (k === 0) throw new StepError(invalid("Ang pumirmang kargador ay dapat ang magdadala"));
+        if (k === 0) throw new StepError(invalid("The porter who signs must be the one carrying it"));
         await releaseForTrip(tx, {
           storeId, productId: t.productId, warehouseId: t.fromWarehouseId, actorId: actor.userId,
           documentType: docType, documentId: id, note: t.docNumber ?? null,
@@ -195,7 +195,7 @@ export class TransferFlowService {
   ): Promise<FlowResult<{ id: string; status: string; receivedQty: number; shortQty: number; approvalId: string | null }>> {
     const t = await this.load(storeId, id);
     if (!t) return notFound();
-    if (t.kind !== "RESTOCK") return conflict("Ang benta ay tinatapos sa Naihatid, hindi sa Tanggapin");
+    if (t.kind !== "RESTOCK") return conflict("A sale is finished with Delivered, not Receive");
     const refusal = locationRefusal(actor, t.toWarehouseId);
     if (refusal) return forbidden(refusal);
     const released = t.releasedQty ?? 0;
@@ -219,7 +219,7 @@ export class TransferFlowService {
         if (short > 0) {
           approvalId = (await requestApproval(tx, {
             storeId, kind: "TRANSIT_SHORT", documentType: "TRANSFER", documentId: id, locationId: t.toWarehouseId,
-            summary: `Kulang sa lipat ${t.docNumber ?? ""}: ${short} × ${t.product.name} (${released} inilabas sa ${t.fromWarehouse.name}, ${received} dumating sa ${t.toWarehouse.name}${t.kargador ? `, dala ni ${t.kargador.name}` : ""}).`,
+            summary: `Short on transfer ${t.docNumber ?? ""}: ${short} × ${t.product.name} (${released} released at ${t.fromWarehouse.name}, ${received} arrived at ${t.toWarehouse.name}${t.kargador ? `, carried by ${t.kargador.name}` : ""}).`,
             detail: { released, received, short, kargadorId: t.kargadorId },
             requestedById: actor.userId,
           })).id;
@@ -240,7 +240,7 @@ export class TransferFlowService {
   ): Promise<FlowResult<{ id: string; status: string; deliveredQty: number; pendingReturn: number; approvalId: string | null }>> {
     const t = await this.load(storeId, id);
     if (!t) return notFound();
-    if (t.kind !== "ORDER_RELEASE") return conflict("Ang lipat ay tinatapos sa Tanggapin");
+    if (t.kind !== "ORDER_RELEASE") return conflict("A transfer is finished with Receive");
     const refusal = locationRefusal(actor, t.toWarehouseId);
     if (refusal) return forbidden(refusal);
     const released = t.releasedQty ?? 0;
@@ -249,7 +249,7 @@ export class TransferFlowService {
     const delivered = input.quantity as number;
     const { pendingReturn, nextStatus } = deliveryOutcome(released, delivered);
     const note = input.note?.trim() ?? "";
-    if (pendingReturn > 0 && note.length < 3) return invalid("Bakit hindi lahat naihatid? Ilagay ang dahilan.");
+    if (pendingReturn > 0 && note.length < 3) return invalid("Why was not everything delivered? Enter the reason.");
     const customerSigned = (input.signatures ?? []).some((s) => s.signerKind === "CUSTOMER");
 
     return this.step(async () => {
@@ -265,7 +265,7 @@ export class TransferFlowService {
           // The money side of a refused/partial delivery is the owner's call (refund or utang reversal).
           approvalId = (await requestApproval(tx, {
             storeId, kind: "REFUND", documentType: "RELEASE", documentId: id, locationId: t.toWarehouseId,
-            summary: `${t.docNumber ?? "Benta"}${t.order ? ` (order ${t.order.orderNumber})` : ""}: ${pendingReturn} × ${t.product.name} hindi tinanggap — ${note}. Ibalik ang bayad o bawasan ang utang.`,
+            summary: `${t.docNumber ?? "Sale"}${t.order ? ` (order ${t.order.orderNumber})` : ""}: ${pendingReturn} × ${t.product.name} not accepted — ${note}. Refund the payment or lower the credit.`,
             detail: { released, delivered, pendingReturn, orderId: t.orderId },
             requestedById: actor.userId,
           })).id;
@@ -302,12 +302,12 @@ export class TransferFlowService {
         await requireSignatures(tx, storeId, { documentType: "RELEASE", documentId: id, step: "RETURN" }, { kargador: true });
         await addForTrip(tx, {
           storeId, productId: t.productId, warehouseId: t.fromWarehouseId, actorId: actor.userId,
-          documentType: "RELEASE", documentId: id, note: `pabalik ${t.docNumber ?? ""}`.trim(),
+          documentType: "RELEASE", documentId: id, note: `return ${t.docNumber ?? ""}`.trim(),
         }, returned, "RETURN_IN");
         if (short > 0) {
           approvalId = (await requestApproval(tx, {
             storeId, kind: "TRANSIT_SHORT", documentType: "RELEASE", documentId: id, locationId: t.fromWarehouseId,
-            summary: `Kulang sa pagbalik ${t.docNumber ?? ""}: ${short} × ${t.product.name} (${pending} dapat bumalik, ${returned} dumating${t.kargador ? `, dala ni ${t.kargador.name}` : ""}).`,
+            summary: `Short on return ${t.docNumber ?? ""}: ${short} × ${t.product.name} (${pending} should come back, ${returned} arrived${t.kargador ? `, carried by ${t.kargador.name}` : ""}).`,
             detail: { pending, returned, short, kargadorId: t.kargadorId },
             requestedById: actor.userId,
           })).id;
@@ -325,7 +325,7 @@ export class TransferFlowService {
     const t = await this.load(storeId, id);
     if (!t) return notFound();
     const why = reason?.trim() ?? "";
-    if (why.length < 3) return invalid("Ilagay ang dahilan ng pagkansela");
+    if (why.length < 3) return invalid("Enter the reason for cancelling");
     return this.step(async () => {
       await prisma.$transaction(async (tx) => {
         await this.claim(tx, storeId, id, ["REQUESTED", "APPROVED"], { status: "CANCELLED", reservedQty: 0 });
@@ -336,7 +336,7 @@ export class TransferFlowService {
         if (t.kind === "ORDER_RELEASE" && !unpaidAgentOrder(t)) {
           await requestApproval(tx, {
             storeId, kind: "REFUND", documentType: "RELEASE", documentId: id, locationId: t.toWarehouseId,
-            summary: `${t.docNumber ?? "Benta"}${t.order ? ` (order ${t.order.orderNumber})` : ""} kinansela bago mailabas: ${t.quantity} × ${t.product.name} — ${why}. Ibalik ang bayad o bawasan ang utang.`,
+            summary: `${t.docNumber ?? "Sale"}${t.order ? ` (order ${t.order.orderNumber})` : ""} cancelled before release: ${t.quantity} × ${t.product.name} — ${why}. Refund the payment or lower the credit.`,
             detail: { quantity: t.quantity, orderId: t.orderId }, requestedById: actor.userId,
           });
         }
@@ -353,26 +353,26 @@ export class TransferFlowService {
     input: { locationId?: string; productId?: string; quantity?: unknown; condition?: string; reason?: string; orderId?: string; kargadorId?: string; signatures?: SignatureInput[] },
   ): Promise<FlowResult<{ id: string; docNumber: string; approvalId: string }>> {
     const qty = input.quantity;
-    if (typeof qty !== "number" || !Number.isInteger(qty) || qty < 1) return invalid("Ilagay kung ilan ang ibinalik (1 pataas)");
-    if (input.condition !== "GOOD" && input.condition !== "DAMAGED") return invalid("Piliin: maayos (ibalik sa stock) o sira");
+    if (typeof qty !== "number" || !Number.isInteger(qty) || qty < 1) return invalid("Enter how many came back (1 or more)");
+    if (input.condition !== "GOOD" && input.condition !== "DAMAGED") return invalid("Choose: good (back to stock) or damaged");
     const reason = input.reason?.trim() ?? "";
-    if (reason.length < 3) return invalid("Ilagay ang dahilan ng pagbalik");
+    if (reason.length < 3) return invalid("Enter the reason for the return");
     const location = input.locationId ? await prisma.warehouse.findFirst({ where: { id: input.locationId, storeId, isActive: true } }) : null;
-    if (!location) return invalid("Pumili ng lokasyon kung saan ibinalik");
+    if (!location) return invalid("Choose the location it was returned to");
     const refusal = locationRefusal(actor, location.id);
     if (refusal) return forbidden(refusal);
     const product = input.productId ? await prisma.product.findFirst({ where: { id: input.productId, storeId }, select: { id: true, name: true } }) : null;
-    if (!product) return invalid("Hindi kilalang produkto");
+    if (!product) return invalid("Unknown product");
     let order: { id: string; orderNumber: string } | null = null;
     if (input.orderId) {
       order = await prisma.order.findFirst({ where: { id: input.orderId, storeId }, select: { id: true, orderNumber: true } });
-      if (!order) return invalid("Hindi makita ang order sa tindahang ito");
+      if (!order) return invalid("Order not found in this store");
       const sold = await prisma.orderItem.aggregate({ where: { orderId: order.id, productId: product.id }, _sum: { quantity: true } });
       const already = await prisma.stockReturn.aggregate({ where: { storeId, orderId: order.id, productId: product.id }, _sum: { quantity: true } });
-      if ((already._sum.quantity ?? 0) + qty > (sold._sum.quantity ?? 0)) return invalid(`Hindi puwedeng magbalik nang higit sa nabili (${sold._sum.quantity ?? 0})`);
+      if ((already._sum.quantity ?? 0) + qty > (sold._sum.quantity ?? 0)) return invalid(`Cannot return more than was bought (${sold._sum.quantity ?? 0})`);
     }
     const kargador = input.kargadorId ? await prisma.kargador.findFirst({ where: { id: input.kargadorId, storeId, isActive: true }, select: { id: true } }) : null;
-    if (input.kargadorId && !kargador) return invalid("Hindi kilalang kargador");
+    if (input.kargadorId && !kargador) return invalid("Unknown porter");
 
     return this.step(async () => {
       let out = { id: "", docNumber: "", approvalId: "" };
@@ -389,7 +389,7 @@ export class TransferFlowService {
         }
         const approval = await requestApproval(tx, {
           storeId, kind: "REFUND", documentType: "RETURN", documentId: r.id, locationId: location.id,
-          summary: `Ibinalik ${docNumber}: ${qty} × ${product.name} (${input.condition === "GOOD" ? "maayos, balik sa stock" : "sira, hindi maibebenta"})${order ? ` mula order ${order.orderNumber}` : ""} — ${reason}. Ibalik ang bayad o bawasan ang utang.`,
+          summary: `Returned ${docNumber}: ${qty} × ${product.name} (${input.condition === "GOOD" ? "good, back in stock" : "damaged, cannot be sold"})${order ? ` from order ${order.orderNumber}` : ""} — ${reason}. Refund the payment or lower the credit.`,
           detail: { quantity: qty, condition: input.condition, orderId: order?.id ?? null },
           requestedById: actor.userId,
         });

@@ -165,7 +165,7 @@ export default function CrmPanel() {
             <div className="col-auto">
               <div className="form-check form-switch">
                 <input className="form-check-input" type="checkbox" id="crmCredit" checked={rule.hasCredit} onChange={(e) => setRule({ ...rule, hasCredit: e.target.checked })} />
-                <label className="form-check-label small" htmlFor="crmCredit">Has utang</label>
+                <label className="form-check-label small" htmlFor="crmCredit">Has credit</label>
               </div>
             </div>
             <div className="col-auto">

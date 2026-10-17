@@ -89,7 +89,7 @@ test("M2: receiving a transfer without the receiver's signature is refused and n
   const t = await approvedTransfer(fx, fx.s1);
   const r = await svc.completeTransfer(fx.storeId, t.id, fx.ownerA, []);
   assert.equal(r.ok, false);
-  assert.match(msg(r), /Kulang ang pirma: staff/);
+  assert.match(msg(r), /Missing signature: staff/);
   assert.equal((await prisma.stockTransfer.findUnique({ where: { id: t.id } }))?.status, "APPROVED", "status rolled back");
   assert.equal(await level(fx, fx.wh), 20, "source untouched");
 
@@ -191,7 +191,7 @@ test("M2: 5 wrong PINs lock PIN login for 15 minutes; the owner can unlock", asy
   for (let i = 1; i <= 4; i++) {
     const r = await auth.pinLogin({ phone, pin: "0000" });
     assert.equal(!r.ok && r.error.type, "unauthorized", `try ${i}`);
-    assert.match(msg(r), new RegExp(`${5 - i} subok na lang`));
+    assert.match(msg(r), new RegExp(`${5 - i} tries left`));
   }
   const fifth = await auth.pinLogin({ phone, pin: "0000" });
   assert.equal(!fifth.ok && fifth.error.type, "rate_limited", "5th wrong PIN locks");

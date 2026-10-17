@@ -10,12 +10,12 @@ export const PIN_LOCK_MINUTES = 15;
 
 /** A PIN is exactly 4 digits and not trivially guessable (1111, 1234, 4321). */
 export function pinProblem(pin: unknown): string | null {
-  if (typeof pin !== "string" || !/^\d{4}$/.test(pin)) return "Ang PIN ay 4 na numero";
-  if (/^(\d)\1{3}$/.test(pin)) return "Huwag gumamit ng iisang numero (hal. 1111)";
+  if (typeof pin !== "string" || !/^\d{4}$/.test(pin)) return "The PIN must be 4 numbers";
+  if (/^(\d)\1{3}$/.test(pin)) return "Do not use the same number 4 times (e.g. 1111)";
   const d = [...pin].map(Number);
   const up = d.every((v, i) => i === 0 || v === d[i - 1]! + 1);
   const down = d.every((v, i) => i === 0 || v === d[i - 1]! - 1);
-  if (up || down) return "Huwag gumamit ng sunod-sunod na numero (hal. 1234)";
+  if (up || down) return "Do not use numbers in a row (e.g. 1234)";
   return null;
 }
 
@@ -109,13 +109,13 @@ export function missingSigners(
 
 const SIGNER_LABEL: Record<SignerKindName, string> = {
   STAFF: "staff",
-  KARGADOR: "kargador",
+  KARGADOR: "porter",
   CUSTOMER: "customer",
-  SLIP_PHOTO: "litrato ng papel",
+  SLIP_PHOTO: "photo of the paper slip",
 };
 
 export function missingMessage(missing: SignerKindName[]): string {
-  return `Kulang ang pirma: ${missing.map((m) => SIGNER_LABEL[m]).join(", ")}`;
+  return `Missing signature: ${missing.map((m) => SIGNER_LABEL[m]).join(", ")}`;
 }
 
 export const MAX_SIGNATURE_BYTES = 150_000;
@@ -124,12 +124,12 @@ const PREFIX = "data:image/png;base64,";
 
 /** Validates a finger-drawn PNG data URL. Returns its sha256 or an error message. */
 export function checkSignatureImage(dataUrl: unknown): { ok: true; sha256: string } | { ok: false; error: string } {
-  if (typeof dataUrl !== "string" || !dataUrl.startsWith(PREFIX)) return { ok: false, error: "Ang pirma ay dapat PNG na larawan" };
+  if (typeof dataUrl !== "string" || !dataUrl.startsWith(PREFIX)) return { ok: false, error: "The signature must be a PNG image" };
   const b64 = dataUrl.slice(PREFIX.length);
-  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(b64)) return { ok: false, error: "Sira ang larawan ng pirma" };
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(b64)) return { ok: false, error: "The signature image is broken" };
   const bytes = Buffer.from(b64, "base64");
-  if (bytes.length > MAX_SIGNATURE_BYTES) return { ok: false, error: "Masyadong malaki ang larawan ng pirma" };
-  if (bytes.length < 67 || !bytes.subarray(0, 8).equals(PNG_MAGIC)) return { ok: false, error: "Sira ang larawan ng pirma" };
+  if (bytes.length > MAX_SIGNATURE_BYTES) return { ok: false, error: "The signature image is too big" };
+  if (bytes.length < 67 || !bytes.subarray(0, 8).equals(PNG_MAGIC)) return { ok: false, error: "The signature image is broken" };
   return { ok: true, sha256: createHash("sha256").update(bytes).digest("hex") };
 }
 
@@ -137,14 +137,14 @@ export function checkSignatureImage(dataUrl: unknown): { ok: true; sha256: strin
 export const MAX_PHOTO_BYTES = 400_000;
 const JPEG_PREFIX = "data:image/jpeg;base64,";
 export function checkPhotoImage(dataUrl: unknown): { ok: true; sha256: string } | { ok: false; error: string } {
-  if (typeof dataUrl !== "string" || !(dataUrl.startsWith(JPEG_PREFIX) || dataUrl.startsWith(PREFIX))) return { ok: false, error: "Ang litrato ay dapat JPEG o PNG" };
+  if (typeof dataUrl !== "string" || !(dataUrl.startsWith(JPEG_PREFIX) || dataUrl.startsWith(PREFIX))) return { ok: false, error: "The photo must be a JPEG or PNG" };
   const isJpeg = dataUrl.startsWith(JPEG_PREFIX);
   const b64 = dataUrl.slice(isJpeg ? JPEG_PREFIX.length : PREFIX.length);
-  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(b64)) return { ok: false, error: "Sira ang litrato" };
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(b64)) return { ok: false, error: "The photo is broken" };
   const bytes = Buffer.from(b64, "base64");
-  if (bytes.length > MAX_PHOTO_BYTES) return { ok: false, error: "Masyadong malaki ang litrato — kumuha ulit" };
+  if (bytes.length > MAX_PHOTO_BYTES) return { ok: false, error: "The photo is too big — take it again" };
   const magicOk = isJpeg ? bytes.length > 100 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff : bytes.length >= 67 && bytes.subarray(0, 8).equals(PNG_MAGIC);
-  if (!magicOk) return { ok: false, error: "Sira ang litrato" };
+  if (!magicOk) return { ok: false, error: "The photo is broken" };
   return { ok: true, sha256: createHash("sha256").update(bytes).digest("hex") };
 }
 
@@ -184,9 +184,9 @@ export const DEFAULT_APPROVERS: Record<ApprovalKind, string[]> = {
 
 /** May `role` decide an approval that lists `approverRoles`? Platform admin never decides store business. */
 export function canDecide(role: string, approverRoles: readonly string[], isRequester: boolean): { ok: true } | { ok: false; reason: string } {
-  if (!approverRoles.includes(role)) return { ok: false, reason: "Ang may-ari lang ang puwedeng magpasya dito" };
+  if (!approverRoles.includes(role)) return { ok: false, reason: "Only the owner can decide this" };
   // A manager cannot approve their own request; the owner can (they are the last word).
-  if (isRequester && role !== "OWNER") return { ok: false, reason: "Hindi puwedeng aprubahan ang sariling hiling" };
+  if (isRequester && role !== "OWNER") return { ok: false, reason: "You cannot approve your own request" };
   return { ok: true };
 }
 

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { API_URL } from "../../config";
 import { adminHeaders } from "../../lib/admin";
 import { toast } from "../../lib/toast";
+import { askConfirm } from "../../lib/ask";
 
 interface ExpenseRow {
   id: string;
@@ -63,7 +64,7 @@ export default function ExpensesPanel() {
   };
 
   const remove = async (id: string) => {
-    if (!window.confirm("Delete this expense?")) return;
+    if (!(await askConfirm("Delete this expense?", { ok: "Delete", cancel: "Keep", danger: true }))) return;
     const res = await fetch(`${API_URL}/admin/expenses/${id}`, { method: "DELETE", headers: adminHeaders() });
     if (res.ok) { toast("Expense deleted"); await load(); }
   };

@@ -63,7 +63,7 @@ export class IdempotencyInterceptor implements NestInterceptor {
         if (prior.responseStatus && typeof res.status === "function") res.status(prior.responseStatus);
         return prior.responseBody;
       }
-      throw new HttpException({ type: "conflict", message: "Pinoproseso pa ang hakbang na ito — sandali lang" }, HttpStatus.CONFLICT);
+      throw new HttpException({ type: "conflict", message: "This step is still being processed — please wait a moment" }, HttpStatus.CONFLICT);
     }
     try {
       const body = await handle();

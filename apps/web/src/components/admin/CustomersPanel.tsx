@@ -269,7 +269,7 @@ export default function CustomersPanel() {
         <div className="col-md-2">
           <div className="form-check form-switch">
             <input className="form-check-input" type="checkbox" id="onlyUtang" checked={onlyUtang} onChange={(e) => setOnlyUtang(e.target.checked)} />
-            <label className="form-check-label small" htmlFor="onlyUtang">Has utang</label>
+            <label className="form-check-label small" htmlFor="onlyUtang">Has credit</label>
           </div>
         </div>
       </div>

@@ -3,13 +3,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  getAdminToken, getAdminStoreId, setAdminStoreId, getAdminRole,
-  NAV_GROUPS, allowedTabs, defaultTabFor, isOwnerRole, handleUnauthorized,
+  getAdminToken, getAdminStoreId, setAdminStoreId, getAdminRole, clearAdminSession,
+  NAV_GROUPS, allowedTabs, defaultTabFor, isOwnerRole, handleUnauthorized, navItemFor,
 } from "../../../lib/admin";
 import dynamic from "next/dynamic";
 import { API_URL } from "../../../config";
 import { useLang, LANG_WORDS } from "../../../lib/lang";
 import QueueBadge from "../../../components/admin/QueueBadge";
+import StaffHome from "../../../components/admin/StaffHome";
 
 /** Rice Ops M10: the store screens get the large, high-contrast look (globals.css .rice-ui). */
 const RICE_TABS = new Set(["benta", "utangrice", "agentorders", "agent", "approvals", "trips", "resack", "pasok", "bilangin", "ulat", "drafts", "kargadors"]);
@@ -63,10 +64,23 @@ const AgentOrdersPanel = panel(() => import("../../../components/admin/AgentOrde
 const BilanginPanel = panel(() => import("../../../components/admin/BilanginPanel"));
 const UlatPanel = panel(() => import("../../../components/admin/UlatPanel"));
 
+/**
+ * Mobile bottom bar for counter staff: the five jobs they do all day, one tap each, plus
+ * "More" for the full menu. Phone only (hidden from md up). It only changes what is easy to
+ * reach: the server still decides what each role may do.
+ */
+const STAFF_BAR: { id: string; label: string; icon: string }[] = [
+  { id: "benta", label: "Sell", icon: "bi-basket" },
+  { id: "trips", label: "Receive", icon: "bi-truck" },
+  { id: "resack", label: "Resack", icon: "bi-arrow-repeat" },
+  { id: "bilangin", label: "Count", icon: "bi-clipboard-check" },
+  { id: "agentorders", label: "Agents", icon: "bi-person-lines-fill" },
+];
+
 interface MyStore { id: string; name: string; slug: string; role: string; }
 
 export default function AdminDashboard() {
-  const { t, toggle: toggleLang } = useLang();
+  const { t } = useLang();
   const navLabel = (id: string, label: string) => (LANG_WORDS[`nav.${id}`] ? t(`nav.${id}`) : label);
   const router = useRouter();
   const [authed, setAuthed] = useState(false);
@@ -169,15 +183,13 @@ export default function AdminDashboard() {
   };
 
   const logout = () => {
-    sessionStorage.removeItem("samstore.admin.token");
-    sessionStorage.removeItem("samstore.admin.storeId");
+    clearAdminSession();
     router.push("/admin/login");
   };
 
   // Rice Ops M2: hand the phone to the next person — they log in with their own PIN.
   const switchUser = () => {
-    sessionStorage.removeItem("samstore.admin.token");
-    sessionStorage.removeItem("samstore.admin.storeId");
+    clearAdminSession();
     router.push("/admin/login?pin=1");
   };
 
@@ -234,6 +246,7 @@ export default function AdminDashboard() {
 
   const renderTab = () => {
     switch (tab) {
+      case "home": return <StaffHome role={role} onNavigate={(id) => { userNavigated.current = true; setTab(id); }} labelFor={navLabel} />;
       case "overview": return <OverviewPanel onNavigate={setTab} storeSlug={active?.slug} storeName={active?.name} />;
       case "pos": return <PosPanel onNavigate={setTab} />;
       case "preorders": return <PreOrdersPanel onNavigate={setTab} />;
@@ -305,7 +318,7 @@ case "erp": return <ErpPanel />;
         <div className="small fw-semibold">{email || "Admin"}</div>
         <div className="small mb-2">{role} · {active?.name}</div>
         <button className="btn btn-outline-secondary btn-sm w-100 mb-2" onClick={switchUser}>
-          <i className="bi bi-arrow-left-right me-1"></i>Palit user (PIN)
+          <i className="bi bi-arrow-left-right me-1"></i>Switch user (PIN)
         </button>
         <button className="btn btn-outline-danger btn-sm w-100" onClick={logout}>
           <i className="bi bi-box-arrow-right me-1"></i>Log out
@@ -344,8 +357,8 @@ case "erp": return <ErpPanel />;
               <i className="bi bi-list"></i>
             </button>
             <span className="navbar-brand fw-semibold fs-6 mb-0 d-flex align-items-center gap-2">
-              {role === "DELIVERY" ? <i className="bi bi-truck"></i> : <i className="bi bi-speedometer2"></i>}
-              {role === "DELIVERY" ? "Courier" : "Dashboard"}
+              {role === "DELIVERY" ? <i className="bi bi-truck"></i> : <i className={`bi ${navItemFor(tab)?.icon ?? "bi-speedometer2"}`}></i>}
+              {role === "DELIVERY" ? "Courier" : tab === "home" ? "Home" : (() => { const n = navItemFor(tab); return n ? navLabel(n.id, n.label) : "Dashboard"; })()}
             </span>
             <div className="ms-auto d-flex align-items-center gap-2">
               {(stores.length > 1 || (role === "PLATFORM_ADMIN" && stores.length > 0)) && (
@@ -361,7 +374,6 @@ case "erp": return <ErpPanel />;
                 </select>
               )}
               <QueueBadge />
-              <button type="button" className="btn btn-sm btn-outline-dark" onClick={toggleLang} title="Taglish / English">{t("lang.switch")}</button>
               <span className="badge text-bg-primary text-uppercase">{role}</span>
               {active && (
                 <a className="btn btn-sm btn-outline-primary" href={`/${active.slug}`} target="_blank" rel="noreferrer" title="Open storefront">
@@ -375,9 +387,35 @@ case "erp": return <ErpPanel />;
           </div>
         </nav>
 
-        <main className="container-fluid py-4 flex-grow-1" style={{ background: "#faf7f2" }}>
+        <main className={`container-fluid py-4 flex-grow-1${role === "STAFF" ? " has-staff-bar" : ""}`} style={{ background: "#faf7f2" }}>
           {RICE_TABS.has(tab) ? <div className="rice-ui p-2 rounded">{renderTab()}</div> : renderTab()}
         </main>
+
+        {role === "STAFF" && (
+          <nav className="staff-bar d-md-none" aria-label="Main actions">
+            {STAFF_BAR.filter((b) => allowed.includes(b.id)).map((b) => (
+              <button
+                key={b.id}
+                type="button"
+                className={tab === b.id ? "active" : ""}
+                aria-current={tab === b.id ? "page" : undefined}
+                onClick={() => { userNavigated.current = true; setTab(b.id); setMobileNav(false); }}
+              >
+                <i className={`bi ${b.icon}`}></i>
+                <span>{b.label}</span>
+              </button>
+            ))}
+            <button
+              type="button"
+              className={tab === "home" ? "active" : ""}
+              aria-current={tab === "home" ? "page" : undefined}
+              onClick={() => { userNavigated.current = true; setTab("home"); setMobileNav(false); }}
+            >
+              <i className="bi bi-grid-3x3-gap"></i>
+              <span>More</span>
+            </button>
+          </nav>
+        )}
       </div>
     </div>
   );

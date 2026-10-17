@@ -6,7 +6,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { API_URL } from "../config";
-import { getAdminToken } from "../lib/admin";
+import { getAdminToken, clearAdminSession } from "../lib/admin";
 
 interface DeliveryOrder {
   id: string;
@@ -80,8 +80,7 @@ export default function DeliveryPanel() {
   }, [load]);
 
   const logout = () => {
-    sessionStorage.removeItem("samstore.admin.token");
-    sessionStorage.removeItem("samstore.admin.storeId");
+    clearAdminSession();
     router.push("/admin/login");
   };
 

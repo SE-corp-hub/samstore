@@ -1,6 +1,6 @@
 "use client";
 
-// Rice Ops M8 — the zero check: "May natira pa ba?" Count one item now; the difference
+// Rice Ops M8 — the zero check: "Is there any left?" Count one item now; the difference
 // posts at once (signed), so the counter can keep selling what is really there.
 
 import { useState } from "react";
@@ -22,22 +22,22 @@ export default function QuickCount({ productId, name, loose, locationId, onDone,
   const [error, setError] = useState<string | null>(null);
   const save = async () => {
     setBusy(true); setError(null);
-    const r = await sendStep("/admin/counts/quick", { productId, locationId: locationId ?? undefined, counted: loose ? (value || "0") : Number(value || "0"), signatures: [{ signerKind: "STAFF", imagePng: sig }] }, `Bilang: ${name}`);
+    const r = await sendStep("/admin/counts/quick", { productId, locationId: locationId ?? undefined, counted: loose ? (value || "0") : Number(value || "0"), signatures: [{ signerKind: "STAFF", imagePng: sig }] }, `Count: ${name}`);
     setBusy(false);
     if (r.status === "queued") { toast(t("queue.queuedToast")); await onDone(); return; }
     const d = r.data as ApiBody | null;
-    if (!r.ok) { setError(d?.errors?.join(", ") ?? d?.message ?? "Hindi na-save"); return; }
-    toast(d?.verdict === "TAMA" ? "Tama ang bilang" : d?.verdict === "SOBRA" ? "Naitala: may sobra" : "Naitala: may kulang");
+    if (!r.ok) { setError(d?.errors?.join(", ") ?? d?.message ?? "Could not save"); return; }
+    toast(d?.verdict === "TAMA" ? "The count is correct" : d?.verdict === "SOBRA" ? "Recorded: over" : "Recorded: short");
     await onDone();
   };
   return (
     <div className="card border-warning mb-3" style={{ maxWidth: 520, fontSize: 18 }}>
       <div className="card-body">
         <h2 className="h5">{t("count.question")} — {name}</h2>
-        <p className="mb-2">Bilangin ang nasa estante ngayon{loose ? " (sa kilo)" : ""}.</p>
+        <p className="mb-2">Count what is on the shelf now{loose ? " (in kilos)" : ""}.</p>
         {error && <div className="alert alert-danger py-2">{error}</div>}
-        <NumPad value={value} onChange={setValue} decimals={loose ? 3 : 0} label="Nabilang" unit={loose ? "kg" : "sako"} />
-        <div className="fw-semibold mt-2">Pirma mo (staff)</div>
+        <NumPad value={value} onChange={setValue} decimals={loose ? 3 : 0} label="Counted" unit={loose ? "kg" : "sacks"} />
+        <div className="fw-semibold mt-2">Your signature (staff)</div>
         <SignaturePad onSignature={setSig} />
         <div className="d-flex justify-content-between mt-3">
           <button type="button" className="btn btn-outline-secondary btn-lg" disabled={busy} onClick={onCancel}>{t("count.none")}</button>

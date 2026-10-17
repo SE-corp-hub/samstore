@@ -169,7 +169,7 @@ test("M5: a manual item sells at once, waits in Susuriin, and the owner confirms
   const fx = await fixture();
   const noSig = await svc.manualItem(fx.storeId, fx.staff1, { name: "Jasmine 25 kg", soldAs: "SACK", gramsPerSack: 25_000, priceMinor: 150_000, costMinor: 120_000, openingQty: 3 });
   assert.equal(noSig.ok, false);
-  assert.match(msg(noSig), /Kulang ang pirma/);
+  assert.match(msg(noSig), /Missing signature/);
   assert.equal(await prisma.product.count({ where: { storeId: fx.storeId, name: "Jasmine 25 kg" } }), 0, "nothing half-made");
 
   const m = await svc.manualItem(fx.storeId, fx.staff1, { name: "Jasmine 25 kg", soldAs: "SACK", gramsPerSack: 25_000, priceMinor: 150_000, costMinor: 120_000, openingQty: 3, signatures: staffSig });
@@ -220,7 +220,7 @@ test("M5: an encoded paper slip keeps its real time and number, once", async () 
   const slip = { slipNo: "0123", occurredAt: when.toISOString() };
   const noPhoto = await svc.sell(fx.storeId, fx.staff1, { idempotencyKey: key(), lines: [{ productId: fx.sin25.id, quantity: 1 }], payment: { method: "cash" }, paperSlip: slip, signatures: staffSig });
   assert.equal(noPhoto.ok, false);
-  assert.match(msg(noPhoto), /litrato ng papel/);
+  assert.match(msg(noPhoto), /photo of the paper slip/);
   assert.equal(await onHand(fx, fx.sin25.id, fx.s1), 10, "nothing moved");
 
   const sigs: SignatureInput[] = [...staffSig, { signerKind: "SLIP_PHOTO", imagePng: JPEG }];
@@ -236,7 +236,7 @@ test("M5: an encoded paper slip keeps its real time and number, once", async () 
 
   const twice = await svc.sell(fx.storeId, fx.staff1, { idempotencyKey: key(), lines: [{ productId: fx.sin25.id, quantity: 1 }], payment: { method: "cash" }, paperSlip: slip, signatures: sigs });
   assert.equal(twice.ok, false);
-  assert.match(msg(twice), /Na-encode na ang papel #0123/);
+  assert.match(msg(twice), /Paper slip #0123 is already entered/);
   assert.equal(await onHand(fx, fx.sin25.id, fx.s1), 9, "the second encode moved nothing");
   const future = await svc.sell(fx.storeId, fx.staff1, { idempotencyKey: key(), lines: [{ productId: fx.sin25.id, quantity: 1 }], payment: { method: "cash" }, paperSlip: { slipNo: "0124", occurredAt: new Date(Date.now() + 86_400_000).toISOString() }, signatures: sigs });
   assert.equal(future.ok, false);
@@ -248,7 +248,7 @@ test("M5: utang needs a customer on the list and their signature; GCash needs a 
   assert.match(msg(noCust), /customer/);
   const noSig = await svc.sell(fx.storeId, fx.staff1, { idempotencyKey: key(), lines: [{ productId: fx.sin25.id, quantity: 1 }], payment: { method: "utang" }, customerId: fx.customerId });
   assert.equal(noSig.ok, false);
-  assert.match(msg(noSig), /Kulang ang pirma: customer/);
+  assert.match(msg(noSig), /Missing signature: customer/);
   assert.equal(await onHand(fx, fx.sin25.id, fx.s1), 10);
   const ok = await svc.sell(fx.storeId, fx.staff1, {
     idempotencyKey: key(), lines: [{ productId: fx.sin25.id, quantity: 1 }], payment: { method: "utang" }, customerId: fx.customerId,
@@ -270,7 +270,7 @@ test("M5: 'kulang' says where the stock is; Kunin sa ibang tindahan holds it the
   const fx = await fixture();
   const short = await svc.sell(fx.storeId, fx.staff1, { idempotencyKey: key(), lines: [{ productId: fx.sin25.id, quantity: 11 }], payment: { method: "cash" } });
   assert.equal(short.ok, false);
-  assert.match(msg(short), /10 na lang na Sinandomeng 25 kg sa Store 1\. Bawasan, o kunin sa Store 2 \(may 5\)/);
+  assert.match(msg(short), /Only 10 Sinandomeng 25 kg left at Store 1\. Lower the amount, or take from Store 2 \(has 5\)/);
   assert.equal(await prisma.order.count({ where: { storeId: fx.storeId } }), 0, "nothing half-sold");
 
   const r = await svc.sell(fx.storeId, fx.staff1, { idempotencyKey: key(), lines: [{ productId: fx.sin25.id, quantity: 2, sourceLocationId: fx.s2 }], payment: { method: "cash" } });

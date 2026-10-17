@@ -387,8 +387,8 @@ export default function OrdersPanel() {
           return false;
         }
         const hasCreditRow = rows.some((r) => payMethods.find((m) => m.code === r.methodCode)?.kind === "CREDIT");
-        if (hasCreditRow && !payCustomerId) { setError("Select a customer for the utang tender"); return false; }
-        if (hasCreditRow && !paySig) { setPaySigError(true); setError("Customer signature is required for the utang tender — please sign"); return false; }
+        if (hasCreditRow && !payCustomerId) { setError("Select a customer for the credit tender"); return false; }
+        if (hasCreditRow && !paySig) { setPaySigError(true); setError("Customer signature is required for the credit tender — please sign"); return false; }
         const missingRef = rows.find((r) => {
           const m = payMethods.find((x) => x.code === r.methodCode);
           return m?.requiresReference && !r.reference.trim();
@@ -398,8 +398,8 @@ export default function OrdersPanel() {
       }
       const tenderedMinor = Math.round(parseFloat(tendered || "0") * 100);
       if (payMethod === "cash" && tenderedMinor < payHold.totalMinor) { setError("Tendered amount must cover the total"); return false; }
-      if (payMethod === "credit" && !payCustomerId) { setError("Select a customer for utang"); return false; }
-      if (payMethod === "credit" && !paySig) { setPaySigError(true); setError("Customer signature is required for utang — please sign"); return false; }
+      if (payMethod === "credit" && !payCustomerId) { setError("Select a customer for credit"); return false; }
+      if (payMethod === "credit" && !paySig) { setPaySigError(true); setError("Customer signature is required for credit — please sign"); return false; }
       return true;
     };
 
@@ -475,7 +475,7 @@ export default function OrdersPanel() {
             <>
               <button className="btn btn-sm btn-outline-warning" onClick={() => openEdit(o)}><i className="bi bi-pencil me-1"></i>Edit</button>
               <button className="btn btn-sm btn-success" onClick={() => { setPayHold({ id: o.id, orderNumber: o.orderNumber, totalMinor: o.totalMinor, isDelivery: Boolean(o.deliveryAddressLine1?.trim()) }); setPayMethod("cash"); setPaySig(null); setPaySigError(false); setTendered(""); }}><i className="bi bi-cash me-1"></i>Pay</button>
-                                                        <button className="btn btn-sm btn-outline-success" onClick={() => { setPayHold({ id: o.id, orderNumber: o.orderNumber, totalMinor: o.totalMinor, isDelivery: Boolean(o.deliveryAddressLine1?.trim()) }); setPayMethod("credit"); setPaySig(null); setPaySigError(false); }}><i className="bi bi-journal me-1"></i>Utang</button>
+                                                        <button className="btn btn-sm btn-outline-success" onClick={() => { setPayHold({ id: o.id, orderNumber: o.orderNumber, totalMinor: o.totalMinor, isDelivery: Boolean(o.deliveryAddressLine1?.trim()) }); setPayMethod("credit"); setPaySig(null); setPaySigError(false); }}><i className="bi bi-journal me-1"></i>Credit</button>
               {canVoidRefund && <button className="btn btn-sm btn-outline-danger" onClick={() => setConfirmAction({ orderId: o.id, kind: "voidHold" })}><i className="bi bi-pause-btn me-1"></i>Void</button>}
             </>
           )}
@@ -573,7 +573,7 @@ export default function OrdersPanel() {
                                         {isDelivHint(o) && <span className="badge text-bg-primary ms-1" title="Delivery order — send for delivery, courier delivers"><i className="bi bi-truck me-1"></i>delivery</span>}
                                         {!isDelivHint(o) && <span className="badge text-bg-success ms-1" title="Pickup order — ready-for-pickup + complete at counter"><i className="bi bi-shop me-1"></i>pickup</span>}
                       {age && <span className={`badge ${age.tone} ms-1`} title={`Placed ${age.mins} min ago`}>{age.label}</span>}
-                      {utang && <span className="badge text-bg-warning ms-1" title="Charged to utang"><i className="bi bi-journal-text me-1"></i>utang</span>}
+                      {utang && <span className="badge text-bg-warning ms-1" title="Charged to credit"><i className="bi bi-journal-text me-1"></i>credit</span>}
                     </>
                   );
                 };
@@ -690,7 +690,7 @@ export default function OrdersPanel() {
           <select className="form-select form-select-sm" style={{ width: 105 }} value={paymentFilter} onChange={(e) => setPaymentFilter(e.target.value)} title="Payment">
             <option value="">All payment</option>
             <option value="cod">COD</option>
-            <option value="credit">Utang</option>
+            <option value="credit">Credit</option>
           </select>
           <select className="form-select form-select-sm" style={{ width: 115 }} value={fulfillmentFilter} onChange={(e) => setFulfillmentFilter(e.target.value)} title="Fulfillment">
             <option value="">Delivery + pickup</option>
@@ -891,7 +891,7 @@ export default function OrdersPanel() {
                 <div className="modal-body">
                   <div className="d-flex gap-2 mb-2">
                     <button type="button" className={`btn btn-sm ${payMethod === "cash" ? "btn-success" : "btn-outline-success"} flex-fill`} onClick={() => setPayMethod("cash")}>Cash</button>
-                    <button type="button" className={`btn btn-sm ${payMethod === "credit" ? "btn-warning" : "btn-outline-warning"} flex-fill`} onClick={() => setPayMethod("credit")}>Utang</button>
+                    <button type="button" className={`btn btn-sm ${payMethod === "credit" ? "btn-warning" : "btn-outline-warning"} flex-fill`} onClick={() => setPayMethod("credit")}>Credit</button>
                   </div>
                   {payMethod === "cash" ? (
                     <>
@@ -916,7 +916,7 @@ export default function OrdersPanel() {
                                               </div>
                                             </div>
                                             <div className="mb-1">
-                                              <div className="small text-muted mb-1">Customer signature required for utang</div>
+                                              <div className="small text-muted mb-1">Customer signature required for credit</div>
                                               <SignaturePad onSignature={(d) => { setPaySig(d); if (d) setPaySigError(false); }} />
                                               {paySigError && <div className="text-danger small">Customer signature required — please sign above.</div>}
                                             </div>
@@ -934,7 +934,7 @@ export default function OrdersPanel() {
                             setTenderRows([{ methodCode: "cash", amount: (payHold.totalMinor / 100).toFixed(2), tendered: "", reference: "" }]);
                           }
                         }} />
-                      <label className="form-check-label small" htmlFor="splitPayToggle">Split payment (cash + gcash + utang)</label>
+                      <label className="form-check-label small" htmlFor="splitPayToggle">Split payment (cash + gcash + credit)</label>
                     </div>
                     {splitMode && (
                       <button type="button" className="btn btn-sm btn-outline-primary"
@@ -1015,7 +1015,7 @@ export default function OrdersPanel() {
                                   </div>
                       <div className="modal-body">
                         <p className="small">
-                          Payment collected: <strong>{deliveryConfirm.method === "cash" ? "Cash" : "Utang (credit)"}</strong> · {toPesos(deliveryConfirm.totalMinor)}
+                          Payment collected: <strong>{deliveryConfirm.method === "cash" ? "Cash" : "Credit"}</strong> · {toPesos(deliveryConfirm.totalMinor)}
                         </p>
                         <p className="small text-muted mb-1">This order is tagged <span className="badge text-bg-primary">delivery</span>. Send it out for delivery?</p>
                       </div>
@@ -1064,7 +1064,7 @@ export default function OrdersPanel() {
                                     <dt className="col-5">Total</dt><dd className="col-7 fw-semibold">{toPesos(orderDetail.totalMinor)}</dd>
                                     {orderDetail.paymentStatus && <><dt className="col-5">Payment</dt><dd className="col-7">{orderDetail.paymentStatus}</dd></>}
                                     {orderDetail.paymentMethod && (
-                                      <><dt className="col-5">Method</dt><dd className="col-7">{orderDetail.paymentMethod === "credit" ? <><i className="bi bi-journal-text me-1 text-warning"></i>Utang (credit)</> : orderDetail.paymentMethod}</dd></>
+                                      <><dt className="col-5">Method</dt><dd className="col-7">{orderDetail.paymentMethod === "credit" ? <><i className="bi bi-journal-text me-1 text-warning"></i>Credit</> : orderDetail.paymentMethod}</dd></>
                                     )}
                                     {orderDetail.source && <><dt className="col-5">Source</dt><dd className="col-7">{orderDetail.source === "PRE_ORDER" ? "Pre-order" : orderDetail.source === "pos" ? "POS" : "Online"}</dd></>}
                                                                         {(orderDetail.deliveryType ?? "delivery") === "delivery" ? (

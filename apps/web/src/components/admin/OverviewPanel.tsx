@@ -225,7 +225,7 @@ export default function OverviewPanel({ onNavigate, storeSlug, storeName }: Over
         <div className="col-md-4">
           <div className="card h-100">
             <div className="card-body">
-              <h6 className="card-title small fw-bold"><i className="bi bi-cone-striped me-1"></i>Utang — at risk</h6>
+              <h6 className="card-title small fw-bold"><i className="bi bi-cone-striped me-1"></i>Credit — at risk</h6>
               {utangMinor === null ? (
                 <p className="text-muted small mb-0">Not available for this role.</p>
               ) : utangMinor === 0 ? (
@@ -239,7 +239,7 @@ export default function OverviewPanel({ onNavigate, storeSlug, storeName }: Over
                 </>
               )}
               <button className="btn btn-sm btn-outline-warning mt-2" onClick={() => onNavigate("utang")}>
-                <i className="bi bi-journal-text me-1"></i>Utang list
+                <i className="bi bi-journal-text me-1"></i>Credit list
               </button>
             </div>
           </div>

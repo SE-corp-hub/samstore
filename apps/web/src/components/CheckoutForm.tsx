@@ -441,7 +441,7 @@ export default function CheckoutForm({ cartToken, store, subtotalMinor, delivery
               <label className={`border rounded p-3 d-flex align-items-center gap-2 ${paymentMethod === "credit" ? "border-primary bg-light-subtle" : ""}`} style={{ cursor: "pointer" }}>
                 <input type="radio" name="pay" checked={paymentMethod === "credit"} onChange={() => setPaymentMethod("credit")} />
                 <span className="flex-grow-1">
-                  <span className="fw-semibold d-block"><i className="bi bi-journal-text me-1"></i>Pay on credit (utang)</span>
+                  <span className="fw-semibold d-block"><i className="bi bi-journal-text me-1"></i>Pay on credit</span>
                   <small className="text-muted">Available to approved customers within their limit.</small>
                 </span>
               </label>
@@ -480,7 +480,7 @@ export default function CheckoutForm({ cartToken, store, subtotalMinor, delivery
               {statutory.type && <div className="d-flex justify-content-between text-success"><span>Statutory discount ({statutory.type === "senior" ? "Senior" : "PWD"})</span><span>20% applies at checkout</span></div>}
               <hr className="my-2" />
               <div className="d-flex justify-content-between fw-bold"><span>Total</span><span>{toPesos(total)}</span></div>
-              <div className="text-muted mt-1"><i className="bi bi-cash me-1"></i>{paymentMethod === "cod" ? "Cash on delivery" : "Pay on credit (utang)"}</div>
+              <div className="text-muted mt-1"><i className="bi bi-cash me-1"></i>{paymentMethod === "cod" ? "Cash on delivery" : "Pay on credit"}</div>
             </div>
           </div>
 

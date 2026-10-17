@@ -1,6 +1,6 @@
 "use client";
 
-// Rice Ops M10 — "Naghihintay ipadala (2)": steps waiting on this phone for signal, and
+// Rice Ops M10 — "Waiting to send (2)": steps waiting on this phone for signal, and
 // any the server refused later (with the reason), so nothing silently disappears.
 
 import { useEffect, useState } from "react";

@@ -42,8 +42,8 @@ test("M6: the limit — at the limit is fine, one centavo over goes to the owner
 test("M6: Bayad sa utang — partial is fine, more than owed is refused", () => {
   assert.equal(checkPayment(240_000, 100_000), 100_000);
   assert.equal(checkPayment(240_000, 240_000), 240_000);
-  assert.throws(() => checkPayment(240_000, 240_001), /Sobra — ₱2,400 lang/);
-  assert.throws(() => checkPayment(0, 100), /Wala nang utang/);
+  assert.throws(() => checkPayment(240_000, 240_001), /Too much — the customer only owes ₱2,400/);
+  assert.throws(() => checkPayment(0, 100), /owes nothing/);
   assert.throws(() => checkPayment(100, 1.5), UtangError);
 });
 

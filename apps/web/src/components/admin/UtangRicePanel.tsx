@@ -1,10 +1,10 @@
 "use client";
 
-// Rice Ops M6 — Utang: the customer list, Bayad sa utang at this location, and the texts.
+// Rice Ops M6 — Credit: the customer list, Credit payment at this location, and the texts.
 //   * Customers: name + mobile. The owner/manager sets each limit (no limit = no utang).
-//   * Bayad sa utang: cash or GCash, partial is fine; the money goes to this location's
+//   * Credit payment: cash or GCash, partial is fine; the money goes to this location's
 //     drawer; a text goes out with what is left.
-//   * Texts: each one shows Naipadala / Hindi naipadala (with Ipadala ulit) / Walang numero.
+//   * Texts: each one shows Sent / Failed (with Send again) / No number.
 //   * Settings (owner): texts on/off, monthly balance text, overdue reminder.
 
 import { useCallback, useEffect, useState } from "react";
@@ -29,10 +29,10 @@ const toMinor = (s: string) => Math.round(Number(s || "0") * 100);
 const days = (iso: string | null) => (iso ? Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000) : 0);
 
 function SmsBadge({ s }: { s: Sms["status"] }) {
-  if (s === "SENT") return <span className="badge text-bg-success">Naipadala</span>;
-  if (s === "QUEUED") return <span className="badge text-bg-info">Ipinapadala</span>;
-  if (s === "FAILED") return <span className="badge text-bg-danger">Hindi naipadala</span>;
-  return <span className="badge text-bg-secondary">Hindi ipinadala</span>;
+  if (s === "SENT") return <span className="badge text-bg-success">Sent</span>;
+  if (s === "QUEUED") return <span className="badge text-bg-info">Sending</span>;
+  if (s === "FAILED") return <span className="badge text-bg-danger">Failed</span>;
+  return <span className="badge text-bg-secondary">Not sent</span>;
 }
 
 async function post(path: string, body: unknown): Promise<{ ok: boolean; data: ApiBody | null }> {
@@ -57,7 +57,7 @@ export default function UtangRicePanel({ role }: { role?: string; onNavigate?: (
     const q = search.trim() ? `?search=${encodeURIComponent(search.trim())}` : "";
     const res = await fetch(`${API_URL}/admin/utang/customers${q}`, { headers: adminHeaders() });
     const d = await res.json().catch(() => null);
-    if (!res.ok) { setError(errText(d, "Hindi ma-load")); return; }
+    if (!res.ok) { setError(errText(d, "Could not load")); return; }
     setCustomers(d.customers as Cust[]);
   }, [search]);
   const loadTexts = useCallback(async (customerId?: string) => {
@@ -74,16 +74,16 @@ export default function UtangRicePanel({ role }: { role?: string; onNavigate?: (
 
   const resend = async (id: string) => {
     const r = await post(`/admin/sms/${id}/resend`, {});
-    if (!r.ok) { setError(errText(r.data, "Hindi naipadala")); return; }
-    toast(r.data?.sent ? "Naipadala" : "Hindi pa rin naipadala");
+    if (!r.ok) { setError(errText(r.data, "Could not send")); return; }
+    toast(r.data?.sent ? "Sent" : "Still not sent");
     await loadTexts(selected?.id);
   };
 
   const saveSettings = async (patch: Partial<Settings>) => {
     const r = await post("/admin/utang/settings", patch);
-    if (!r.ok) { setError(errText(r.data, "Hindi na-save")); return; }
+    if (!r.ok) { setError(errText(r.data, "Could not save")); return; }
     setSettings(r.data?.settings as Settings);
-    toast("Na-save");
+    toast("Saved");
   };
 
   const owing = customers.filter((c) => c.balanceMinor > 0);
@@ -92,12 +92,12 @@ export default function UtangRicePanel({ role }: { role?: string; onNavigate?: (
   return (
     <div style={{ fontSize: 18 }}>
       <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
-        <h1 className="h4 mb-0">Utang</h1>
-        <span className="fs-5" style={{ fontVariantNumeric: "tabular-nums" }}>Kabuuan: <strong>{peso(totalOwed)}</strong> · {owing.length} customer</span>
+        <h1 className="h4 mb-0">Credit</h1>
+        <span className="fs-5" style={{ fontVariantNumeric: "tabular-nums" }}>Total: <strong>{peso(totalOwed)}</strong> · {owing.length} customers</span>
       </div>
       <ul className="nav nav-tabs mb-3">
-        <li className="nav-item"><button className={`nav-link ${tab === "list" ? "active" : ""}`} onClick={() => { setTab("list"); setSelected(null); }}>Mga customer</button></li>
-        <li className="nav-item"><button className={`nav-link ${tab === "texts" ? "active" : ""}`} onClick={() => { setTab("texts"); setSelected(null); }}>Mga text</button></li>
+        <li className="nav-item"><button className={`nav-link ${tab === "list" ? "active" : ""}`} onClick={() => { setTab("list"); setSelected(null); }}>Customers</button></li>
+        <li className="nav-item"><button className={`nav-link ${tab === "texts" ? "active" : ""}`} onClick={() => { setTab("texts"); setSelected(null); }}>Texts</button></li>
         {owner && <li className="nav-item"><button className={`nav-link ${tab === "settings" ? "active" : ""}`} onClick={() => { setTab("settings"); setSelected(null); }}>Settings</button></li>}
       </ul>
       {error && <div className="alert alert-danger py-2" role="alert">{error}</div>}
@@ -105,7 +105,7 @@ export default function UtangRicePanel({ role }: { role?: string; onNavigate?: (
       {tab === "list" && !selected && !adding && (
         <>
           <div className="d-flex gap-2 mb-3">
-            <input className="form-control form-control-lg" placeholder="Hanapin (pangalan o numero)" aria-label="Hanapin" value={search} onChange={(e) => setSearch(e.target.value)} />
+            <input className="form-control form-control-lg" placeholder="Search (name or number)" aria-label="Search" value={search} onChange={(e) => setSearch(e.target.value)} />
             <button type="button" className="btn btn-success btn-lg text-nowrap" onClick={() => setAdding(true)}>+ Customer</button>
           </div>
           <div className="list-group">
@@ -113,15 +113,15 @@ export default function UtangRicePanel({ role }: { role?: string; onNavigate?: (
               <button key={c.id} type="button" className="list-group-item list-group-item-action py-3 d-flex justify-content-between align-items-center" onClick={() => setSelected(c)}>
                 <span>
                   <span className="fw-semibold">{c.name}</span>
-                  <span className="d-block small text-muted">{c.phone ?? "walang numero"} · limit {c.creditApproved ? peso(c.limitMinor) : "wala pa"}{c.balanceMinor > 0 && c.oldestUtangAt ? ` · ${days(c.oldestUtangAt)} araw` : ""}</span>
+                  <span className="d-block small text-muted">{c.phone ?? "no number"} · limit {c.creditApproved ? peso(c.limitMinor) : "none yet"}{c.balanceMinor > 0 && c.oldestUtangAt ? ` · ${days(c.oldestUtangAt)} days` : ""}</span>
                 </span>
                 <span className="text-end" style={{ fontVariantNumeric: "tabular-nums" }}>
                   <span className={`fs-5 ${c.balanceMinor > c.limitMinor && c.limitMinor > 0 ? "text-danger" : ""}`}>{peso(c.balanceMinor)}</span>
-                  {c.lastText?.status === "FAILED" && <span className="d-block"><span className="badge text-bg-danger">Hindi naipadala</span></span>}
+                  {c.lastText?.status === "FAILED" && <span className="d-block"><span className="badge text-bg-danger">Failed</span></span>}
                 </span>
               </button>
             ))}
-            {customers.length === 0 && <p className="text-muted">Wala pang customer.</p>}
+            {customers.length === 0 && <p className="text-muted">No customers yet.</p>}
           </div>
         </>
       )}
@@ -130,18 +130,18 @@ export default function UtangRicePanel({ role }: { role?: string; onNavigate?: (
 
       {tab === "list" && selected && !paying && (
         <div style={{ maxWidth: 620 }}>
-          <button type="button" className="btn btn-link px-0 mb-2" onClick={() => setSelected(null)}>← Mga customer</button>
+          <button type="button" className="btn btn-link px-0 mb-2" onClick={() => setSelected(null)}>← Customers</button>
           <div className="card mb-3">
             <div className="card-body">
               <div className="h5 mb-1">{selected.name}</div>
-              <div className="text-muted mb-2">{selected.phone ?? "walang numero"}</div>
-              <div className="fs-3" style={{ fontVariantNumeric: "tabular-nums" }}>Utang: <strong>{peso(selected.balanceMinor)}</strong></div>
-              <div>Limit: {selected.creditApproved ? peso(selected.limitMinor) : "wala pa — hindi pa puwedeng mag-utang"}</div>
+              <div className="text-muted mb-2">{selected.phone ?? "no number"}</div>
+              <div className="fs-3" style={{ fontVariantNumeric: "tabular-nums" }}>Owes: <strong>{peso(selected.balanceMinor)}</strong></div>
+              <div>Limit: {selected.creditApproved ? peso(selected.limitMinor) : "none yet — cannot buy on credit yet"}</div>
               {owner && <LimitEditor customer={selected} onSaved={async (limitMinor) => { setSelected({ ...selected, limitMinor, creditApproved: limitMinor > 0 }); await load(); }} />}
-              <button type="button" className="btn btn-success btn-lg w-100 mt-3" disabled={selected.balanceMinor <= 0} onClick={() => setPaying(true)}>Bayad sa utang</button>
+              <button type="button" className="btn btn-success btn-lg w-100 mt-3" disabled={selected.balanceMinor <= 0} onClick={() => setPaying(true)}>Credit payment</button>
             </div>
           </div>
-          <h2 className="h6">Mga text</h2>
+          <h2 className="h6">Texts</h2>
           <TextList texts={texts} onResend={resend} />
         </div>
       )}
@@ -157,16 +157,16 @@ export default function UtangRicePanel({ role }: { role?: string; onNavigate?: (
         <div className="card" style={{ maxWidth: 520 }}>
           <div className="card-body">
             {([
-              ["utangSmsEnabled", "Mag-text sa bawat utang at bayad"],
-              ["utangMonthlyReminder", "Buwanang text ng balanse (unang araw ng buwan)"],
-              ["utangOverdueReminder", `Paalala kapag lampas ${settings.utangOverdueDays} araw (isang beses kada linggo)`],
+              ["utangSmsEnabled", "Send a text for every credit sale and payment"],
+              ["utangMonthlyReminder", "Monthly balance text (first day of the month)"],
+              ["utangOverdueReminder", `Reminder when over ${settings.utangOverdueDays} days (once a week)`],
             ] as const).map(([k, label]) => (
               <div key={k} className="form-check form-switch mb-3">
                 <input className="form-check-input" type="checkbox" id={`us-${k}`} checked={settings[k]} onChange={(e) => { const patch: Partial<Settings> = {}; patch[k] = e.target.checked; void saveSettings(patch); }} />
                 <label className="form-check-label" htmlFor={`us-${k}`}>{label}</label>
               </div>
             ))}
-            <p className="small text-muted mb-0">Habang wala pang SMS account, naitatala ang mga text pero hindi pa talaga naipapadala (test mode).</p>
+            <p className="small text-muted mb-0">Until there is an SMS account, texts are recorded but not really sent (test mode).</p>
           </div>
         </div>
       )}
@@ -175,18 +175,18 @@ export default function UtangRicePanel({ role }: { role?: string; onNavigate?: (
 }
 
 function TextList({ texts, onResend, showName = false }: { texts: Sms[]; onResend: (id: string) => void; showName?: boolean }) {
-  if (texts.length === 0) return <p className="text-muted">Wala pang text.</p>;
+  if (texts.length === 0) return <p className="text-muted">No texts yet.</p>;
   return (
     <div className="list-group">
       {texts.map((t) => (
         <div key={t.id} className="list-group-item">
           <div className="d-flex justify-content-between gap-2">
             <span className="small text-muted">{showName && t.storeCustomer?.customer.name ? `${t.storeCustomer.customer.name} · ` : ""}{new Date(t.createdAt).toLocaleString("en-PH")}</span>
-            <span><SmsBadge s={t.status} />{t.provider === "mock" && t.status === "SENT" && <span className="badge text-bg-light border ms-1">test</span>}</span>
+            <span><SmsBadge s={t.status} />{t.provider === "mock" && t.status === "SENT" && <span className="badge text-bg-warning border ms-1" title="No SMS provider yet — not really sent">test only · no real text sent</span>}</span>
           </div>
           <div>{t.text}</div>
           {t.lastError && t.status !== "SENT" && <div className="small text-danger">{t.lastError}</div>}
-          {(t.status === "FAILED" || t.status === "SKIPPED") && <button type="button" className="btn btn-outline-dark btn-sm mt-1" onClick={() => onResend(t.id)}>Ipadala ulit</button>}
+          {(t.status === "FAILED" || t.status === "SKIPPED") && <button type="button" className="btn btn-outline-dark btn-sm mt-1" onClick={() => onResend(t.id)}>Send again</button>}
         </div>
       ))}
     </div>
@@ -201,15 +201,15 @@ function LimitEditor({ customer, onSaved }: { customer: Cust; onSaved: (limitMin
     const limitMinor = toMinor(value);
     const r = await post(`/admin/utang/customers/${customer.id}/limit`, { limitMinor });
     setBusy(false);
-    if (!r.ok) { toast(errText(r.data, "Hindi na-save")); return; }
-    toast(limitMinor > 0 ? `Limit: ${peso(limitMinor)}` : "Tinanggal ang utang");
+    if (!r.ok) { toast(errText(r.data, "Could not save")); return; }
+    toast(limitMinor > 0 ? `Limit: ${peso(limitMinor)}` : "Credit removed");
     await onSaved(limitMinor);
   };
   return (
     <div className="input-group mt-2">
       <span className="input-group-text">Limit ₱</span>
       <input className="form-control" inputMode="decimal" aria-label="Limit" value={value} onChange={(e) => setValue(e.target.value.replace(/[^\d.]/g, "").slice(0, 10))} />
-      <button type="button" className="btn btn-outline-dark" disabled={busy} onClick={() => void save()}>I-save</button>
+      <button type="button" className="btn btn-outline-dark" disabled={busy} onClick={() => void save()}>Save</button>
     </div>
   );
 }
@@ -224,26 +224,26 @@ function AddCustomer({ owner, onCancel, onDone }: { owner: boolean; onCancel: ()
     setBusy(true); setError(null);
     const r = await post("/admin/utang/customers", { name: name.trim(), phone: phone.trim(), ...(owner && limit ? { limitMinor: toMinor(limit) } : {}) });
     setBusy(false);
-    if (!r.ok) { setError(errText(r.data, "Hindi naidagdag")); return; }
-    toast(`Naidagdag: ${name.trim()}`);
+    if (!r.ok) { setError(errText(r.data, "Could not add")); return; }
+    toast(`Added: ${name.trim()}`);
     await onDone();
   };
   return (
     <div className="card" style={{ maxWidth: 520 }}>
       <div className="card-body">
-        <h2 className="h5">Bagong customer</h2>
+        <h2 className="h5">New customer</h2>
         {error && <div className="alert alert-danger py-2">{error}</div>}
-        <label className="form-label" htmlFor="ac-name">Pangalan</label>
+        <label className="form-label" htmlFor="ac-name">Name</label>
         <input id="ac-name" className="form-control form-control-lg mb-2" value={name} onChange={(e) => setName(e.target.value.slice(0, 80))} />
         <label className="form-label" htmlFor="ac-phone">Mobile number</label>
         <input id="ac-phone" className="form-control form-control-lg mb-2" inputMode="tel" placeholder="09xx xxx xxxx" value={phone} onChange={(e) => setPhone(e.target.value.slice(0, 16))} />
         {owner ? (
-          <><label className="form-label" htmlFor="ac-limit">Utang limit (₱)</label>
+          <><label className="form-label" htmlFor="ac-limit">Credit limit (₱)</label>
             <input id="ac-limit" className="form-control form-control-lg mb-2" inputMode="decimal" value={limit} onChange={(e) => setLimit(e.target.value.replace(/[^\d.]/g, "").slice(0, 10))} /></>
-        ) : <p className="small text-muted">Ang may-ari ang magtatakda ng utang limit.</p>}
+        ) : <p className="small text-muted">The owner sets the credit limit.</p>}
         <div className="d-flex justify-content-between mt-3">
-          <button type="button" className="btn btn-outline-secondary btn-lg" disabled={busy} onClick={onCancel}>Bumalik</button>
-          <button type="button" className="btn btn-success btn-lg" disabled={busy || name.trim().length < 2 || phone.trim().length < 10} onClick={() => void save()}>Idagdag</button>
+          <button type="button" className="btn btn-outline-secondary btn-lg" disabled={busy} onClick={onCancel}>Back</button>
+          <button type="button" className="btn btn-success btn-lg" disabled={busy || name.trim().length < 2 || phone.trim().length < 10} onClick={() => void save()}>Add</button>
         </div>
       </div>
     </div>
@@ -263,40 +263,40 @@ function PayForm({ customer, locationId, onCancel, onDone }: { customer: Cust; l
   const save = async () => {
     setBusy(true); setError(null);
     const signatures = [{ signerKind: "STAFF", imagePng: staffSig }, ...(custSig ? [{ signerKind: "CUSTOMER", signerName: customer.name, imagePng: custSig }] : [])];
-    const sent = await sendStep("/admin/utang/payments", { customerId: customer.id, amountMinor: amt, method, reference: method === "gcash" ? reference.trim() : undefined, locationId: locationId ?? undefined, signatures }, `Bayad ni ${customer.name}`);
+    const sent = await sendStep("/admin/utang/payments", { customerId: customer.id, amountMinor: amt, method, reference: method === "gcash" ? reference.trim() : undefined, locationId: locationId ?? undefined, signatures }, `Payment from ${customer.name}`);
     setBusy(false);
-    if (sent.status === "queued") { toast("Walang signal — naka-save sa phone, ipapadala pagbalik ng signal"); await onDone(customer.balanceMinor - amt); return; }
+    if (sent.status === "queued") { toast("No signal — saved on this phone, will be sent when the signal is back"); await onDone(customer.balanceMinor - amt); return; }
     const r = { ok: sent.ok, data: sent.data as ApiBody | null };
-    if (!r.ok) { setError(errText(r.data, "Hindi natuloy")); return; }
+    if (!r.ok) { setError(errText(r.data, "Did not go through")); return; }
     const bal = Number(r.data?.balanceMinor ?? 0);
-    toast(`Natanggap ${peso(amt)} — natitira ${peso(bal)}${r.data?.smsStatus === "SKIPPED" ? " (walang numero, walang text)" : ""}`);
+    toast(`Received ${peso(amt)} — ${peso(bal)} left${r.data?.smsStatus === "SKIPPED" ? " (no number, no text sent)" : ""}`);
     await onDone(bal);
   };
   return (
     <div className="card border-success" style={{ maxWidth: 520 }}>
       <div className="card-body">
-        <h2 className="h5">Bayad sa utang — {customer.name}</h2>
-        <div className="mb-2">Utang: <strong>{peso(customer.balanceMinor)}</strong></div>
+        <h2 className="h5">Credit payment — {customer.name}</h2>
+        <div className="mb-2">Owes: <strong>{peso(customer.balanceMinor)}</strong></div>
         {error && <div className="alert alert-danger py-2">{error}</div>}
-        <div className="btn-group w-100 mb-2" role="group" aria-label="Paraan">
+        <div className="btn-group w-100 mb-2" role="group" aria-label="Method">
           <button type="button" className={`btn btn-lg ${method === "cash" ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setMethod("cash")}>Cash</button>
           <button type="button" className={`btn btn-lg ${method === "gcash" ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setMethod("gcash")}>GCash</button>
         </div>
-        <NumPad value={amount} onChange={setAmount} decimals={2} label="Halagang ibinayad" unit="₱" />
-        <button type="button" className="btn btn-link px-0" onClick={() => setAmount(String(customer.balanceMinor / 100))}>Bayaran lahat ({peso(customer.balanceMinor)})</button>
-        {amt > customer.balanceMinor && <div className="text-danger">Sobra — {peso(customer.balanceMinor)} lang ang utang.</div>}
-        {amt > 0 && amt <= customer.balanceMinor && <div className="fs-5">Matitira: <strong>{peso(customer.balanceMinor - amt)}</strong></div>}
+        <NumPad value={amount} onChange={setAmount} decimals={2} label="Amount paid" unit="₱" />
+        <button type="button" className="btn btn-link px-0" onClick={() => setAmount(String(customer.balanceMinor / 100))}>Pay all ({peso(customer.balanceMinor)})</button>
+        {amt > customer.balanceMinor && <div className="text-danger">Too much — they only owe {peso(customer.balanceMinor)}.</div>}
+        {amt > 0 && amt <= customer.balanceMinor && <div className="fs-5">Left after: <strong>{peso(customer.balanceMinor - amt)}</strong></div>}
         {method === "gcash" && (
           <><label className="form-label mt-2" htmlFor="pf-ref">GCash reference no.</label>
             <input id="pf-ref" className="form-control form-control-lg" inputMode="numeric" value={reference} onChange={(e) => setReference(e.target.value.replace(/\s/g, "").slice(0, 40))} /></>
         )}
-        <div className="fw-semibold mt-3">Pirma mo (staff)</div>
+        <div className="fw-semibold mt-3">Your signature (staff)</div>
         <SignaturePad onSignature={setStaffSig} />
-        <div className="fw-semibold mt-2">Pirma ni {customer.name} (kung nandito)</div>
+        <div className="fw-semibold mt-2">Signature of {customer.name} (if here)</div>
         <SignaturePad onSignature={setCustSig} />
         <div className="d-flex justify-content-between mt-3">
-          <button type="button" className="btn btn-outline-secondary btn-lg" disabled={busy} onClick={onCancel}>Bumalik</button>
-          <button type="button" className="btn btn-success btn-lg" disabled={!ready} onClick={() => void save()}>{busy ? "Sandali…" : "Tanggapin"}</button>
+          <button type="button" className="btn btn-outline-secondary btn-lg" disabled={busy} onClick={onCancel}>Back</button>
+          <button type="button" className="btn btn-success btn-lg" disabled={!ready} onClick={() => void save()}>{busy ? "Please wait…" : "Receive"}</button>
         </div>
       </div>
     </div>

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { API_URL } from "../../../config";
+import { getAuthItem, setAuthItem } from "../../../lib/admin";
 
 export default function AdminLogin() {
   const router = useRouter();
@@ -29,6 +30,14 @@ export default function AdminLogin() {
     } catch { /* storage may be blocked: start empty */ }
   }, []);
 
+  // A phone that is still signed in goes straight to its screen. A rejected (expired) token is
+  // cleared by handleUnauthorized on the next call, so this cannot loop back here forever.
+  useEffect(() => {
+    const saved = getAuthItem("samstore.admin.token");
+    if (saved) goAfterAuth(saved);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const pinLogin = async (digits: string) => {
     setLoading(true);
     setError(null);
@@ -40,16 +49,16 @@ export default function AdminLogin() {
       });
       const data = await res.json().catch(() => null);
       if (!res.ok) {
-        setError(data?.message ?? "Hindi naka-login");
+        setError(data?.message ?? "Could not log in");
         setPin("");
         return;
       }
       try { localStorage.setItem("samstore.pin.phone", pinPhone); } catch { /* convenience only */ }
-      sessionStorage.setItem("samstore.admin.token", data.token);
-      sessionStorage.setItem("samstore.admin.email", data.user?.name ?? data.user?.phone ?? pinPhone);
+      setAuthItem("samstore.admin.token", data.token);
+      setAuthItem("samstore.admin.email", data.user?.name ?? data.user?.phone ?? pinPhone);
       goAfterAuth(data.token);
     } catch {
-      setError("Walang internet. Subukan ulit.");
+      setError("No internet. Try again.");
       setPin("");
     } finally {
       setLoading(false);
@@ -102,9 +111,9 @@ export default function AdminLogin() {
         setError(data?.message ?? "Login failed");
         return;
       }
-      // Store token for subsequent API calls (demo: sessionStorage).
-      sessionStorage.setItem("samstore.admin.token", data.token);
-      sessionStorage.setItem("samstore.admin.email", data.user?.email ?? identifier);
+      // Keep the sign-in on this phone for later visits (see lib/admin.ts).
+      setAuthItem("samstore.admin.token", data.token);
+      setAuthItem("samstore.admin.email", data.user?.email ?? identifier);
       goAfterAuth(data.token);
     } catch {
       setError("Network error");
@@ -137,7 +146,7 @@ export default function AdminLogin() {
         return;
       }
       // Password changed — the new token is now valid; continue to the app.
-      sessionStorage.setItem("samstore.admin.token", data.token);
+      setAuthItem("samstore.admin.token", data.token);
       goAfterAuth(data.token);
     } catch {
       setChangeError("Network error");
@@ -206,7 +215,7 @@ export default function AdminLogin() {
           <div className="card shadow-sm p-4" style={{ width: "100%", maxWidth: 420, fontSize: 18 }}>
             <div className="text-center mb-3">
               <i className="bi bi-person-badge fs-1 text-success"></i>
-              <h1 className="h4 mt-2 mb-0">Mag-login gamit ang PIN</h1>
+              <h1 className="h4 mt-2 mb-0">Log in with your PIN</h1>
             </div>
             {error && <div className="alert alert-danger py-2" role="alert">{error}</div>}
             <label className="form-label" htmlFor="pin-phone">Mobile number</label>
@@ -214,7 +223,7 @@ export default function AdminLogin() {
               id="pin-phone" className="form-control form-control-lg mb-3" inputMode="tel" autoComplete="tel"
               value={pinPhone} onChange={(e) => setPinPhone(e.target.value)} placeholder="0917 123 4567"
             />
-            <div className="text-center mb-2" aria-live="polite" aria-label={`${pin.length} sa 4 na numero`}>
+            <div className="text-center mb-2" aria-live="polite" aria-label={`${pin.length} of 4 digits`}>
               {[0, 1, 2, 3].map((i) => (
                 <span key={i} className={`d-inline-block rounded-circle mx-2 ${i < pin.length ? "bg-dark" : "border border-2 border-dark"}`} style={{ width: 18, height: 18 }} />
               ))}
@@ -226,7 +235,7 @@ export default function AdminLogin() {
                 </div>
               ))}
               <div className="col-4">
-                <button type="button" className="btn btn-outline-secondary w-100 py-3" disabled={loading || pin.length === 0} onClick={() => setPin(pin.slice(0, -1))} aria-label="Burahin ang huling numero">
+                <button type="button" className="btn btn-outline-secondary w-100 py-3" disabled={loading || pin.length === 0} onClick={() => setPin(pin.slice(0, -1))} aria-label="Erase the last digit">
                   <i className="bi bi-backspace fs-4"></i>
                 </button>
               </div>
@@ -234,12 +243,12 @@ export default function AdminLogin() {
                 <button type="button" className="btn btn-outline-dark w-100 py-3 fs-3" disabled={loading || !pinPhone.trim()} onClick={() => pressDigit("0")}>0</button>
               </div>
               <div className="col-4">
-                <button type="button" className="btn btn-outline-secondary w-100 py-3" disabled={loading} onClick={() => setPin("")}>Burahin</button>
+                <button type="button" className="btn btn-outline-secondary w-100 py-3" disabled={loading} onClick={() => setPin("")}>Clear</button>
               </div>
             </div>
-            {loading && <p className="text-center text-muted mt-3 mb-0">Sandali…</p>}
+            {loading && <p className="text-center text-muted mt-3 mb-0">Please wait…</p>}
             <button className="btn btn-link w-100 mt-3" type="button" onClick={() => { setPinMode(false); setError(null); setPin(""); }}>
-              Gamitin ang password
+              Use password instead
             </button>
           </div>
         ) : (
@@ -251,6 +260,9 @@ export default function AdminLogin() {
             </div>
             {error && <div className="alert alert-danger py-2 small">{error}</div>}
 
+            {/* Security: demo logins (with passwords) only when a developer turns them on —
+                never on a real deployment. */}
+            {process.env.NEXT_PUBLIC_SHOW_DEMO_LOGINS === "true" && (
             <div className="alert alert-light border small mb-3">
               <div className="fw-semibold small mb-1"><i className="bi bi-info-circle me-1"></i>Demo accounts — tap to fill</div>
               <div className="d-flex flex-wrap gap-1">
@@ -275,6 +287,7 @@ export default function AdminLogin() {
               </div>
               <div className="text-muted small mt-1">Passwords shown for local demo only. Delivery opens the courier app; Customer is the storefront account.</div>
             </div>
+            )}
 
             <form onSubmit={login}>
               <div className="mb-3">
@@ -302,11 +315,11 @@ export default function AdminLogin() {
               </button>
             </form>
             <button className="btn btn-outline-success w-100 mt-2" type="button" onClick={() => { setPinMode(true); setError(null); }}>
-              <i className="bi bi-123 me-1"></i>Staff: mag-login gamit ang PIN
+              <i className="bi bi-123 me-1"></i>Staff: log in with PIN
             </button>
             <hr className="my-4" />
             <p className="text-muted small mb-0 text-center">
-              Walang account? Ang may-ari ng tindahan ang magdadagdag sa iyo.
+              No account? The store owner will add you.
             </p>
           </div>
         )}

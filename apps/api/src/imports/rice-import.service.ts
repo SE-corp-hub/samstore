@@ -121,11 +121,11 @@ export class RiceImportService {
         const openingSum = opening.reduce((a, c) => a + c.amountMinor, 0);
         if (row.utangMinor > 0 || opening.length) {
           if (opening.length && openingSum !== row.utangMinor) {
-            errors.push({ file: "customers.csv", row: row.row, message: `${row.name}: opening utang was already imported as ${openingSum / 100} — change it in the app (Utang), not by file` });
+            errors.push({ file: "customers.csv", row: row.row, message: `${row.name}: opening credit was already imported as ${openingSum / 100} — change it in the app (Credit), not by file` });
             continue;
           }
           if (!opening.length && cur.credit.length) {
-            errors.push({ file: "customers.csv", row: row.row, message: `${row.name}: already has utang activity in the system — leave utang blank for this customer` });
+            errors.push({ file: "customers.csv", row: row.row, message: `${row.name}: already has credit activity in the system — leave utang blank for this customer` });
             continue;
           }
           if (!opening.length) out.openingUtangMinor += row.utangMinor;
@@ -218,11 +218,11 @@ export class RiceImportService {
           if (row.utangMinor > 0 && sc.credit.length === 0) {
             const at = manilaDay(row.utangSince!);
             await tx.creditEntry.create({
-              data: { storeId, storeCustomerId: sc.id, type: "purchase", amountMinor: row.utangMinor, startAt: at, createdAt: at, note: `${OPENING_NOTE} utang bago mag-live${row.note ? ` — ${row.note}` : ""}`, createdBy: actorUserId },
+              data: { storeId, storeCustomerId: sc.id, type: "purchase", amountMinor: row.utangMinor, startAt: at, createdAt: at, note: `${OPENING_NOTE} opening credit before going live${row.note ? ` — ${row.note}` : ""}`, createdBy: actorUserId },
             });
             // Guarded: only a customer with no utang yet gets the opening balance.
             const set = await tx.storeCustomer.updateMany({ where: { id: sc.id, creditBalanceMinor: 0 }, data: { creditBalanceMinor: row.utangMinor } });
-            if (set.count !== 1) throw new Error(`${row.name}: utang changed while importing — run the import again`);
+            if (set.count !== 1) throw new Error(`${row.name}: credit changed while importing — run the import again`);
           }
           await tx.auditLog.create({ data: { storeId, actorType: "USER", actorId: actorUserId, action: "import.customer", entityType: "StoreCustomer", entityId: sc.id, after: { name: row.name, limitMinor: row.limitMinor, openingUtangMinor: row.utangMinor } } });
         }

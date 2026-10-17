@@ -1,8 +1,8 @@
 "use client";
 
-// Rice Ops M10 — the Taglish / English switch. Taglish is the default (the staff's own
-// words); English is one tap away. One name per action everywhere (plan "Words used").
-// The choice is remembered on this phone only.
+// Rice Ops M10 — the app's words. The owner asked for plain English on every screen, so
+// English is the only language now; the Taglish column is kept for reference only.
+// One name per action everywhere (plan "Words used").
 
 import { useCallback, useEffect, useState } from "react";
 
@@ -44,15 +44,11 @@ const WORDS: Record<string, [tl: string, en: string]> = {
   "queue.sendNow": ["Ipadala ngayon", "Send now"],
   "queue.clear": ["Alisin sa listahan", "Clear the list"],
   "queue.queuedToast": ["Walang signal — naka-save sa phone, ipapadala pagbalik ng signal", "No signal — saved on this phone, it will be sent when the signal returns"],
-  "lang.switch": ["English", "Taglish"],
+  "lang.switch": ["English", "English"],
 };
 
 function current(): Lang {
-  try {
-    return window.localStorage.getItem(KEY) === "en" ? "en" : "tl";
-  } catch {
-    return "tl";
-  }
+  return "en";
 }
 
 /** The word for a key in a language, with {placeholders} filled. Unknown keys show the key. */
@@ -64,7 +60,7 @@ export function word(lang: Lang, key: string, vars: Record<string, string | numb
 }
 
 export function useLang() {
-  const [lang, setLang] = useState<Lang>("tl");
+  const [lang, setLang] = useState<Lang>("en");
   useEffect(() => {
     setLang(current());
     const on = () => setLang(current());
@@ -72,6 +68,7 @@ export function useLang() {
     window.addEventListener("storage", on);
     return () => { window.removeEventListener(EVENT, on); window.removeEventListener("storage", on); };
   }, []);
+  // Kept so older callers still compile; with English only it has no visible effect.
   const toggle = useCallback(() => {
     const next: Lang = current() === "en" ? "tl" : "en";
     try { window.localStorage.setItem(KEY, next); } catch { /* per-phone convenience only */ }
@@ -82,3 +79,5 @@ export function useLang() {
 }
 
 export const LANG_WORDS = WORDS;
+/** The language chosen on this phone, for code outside React components. */
+export const currentLang = (): Lang => current();

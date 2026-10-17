@@ -104,7 +104,7 @@ export class UtangController {
   @Post("utang/reminders/run")
   async reminders(@Req() req: Req_, @Headers("x-store-id") h?: string) {
     const { storeId, actor } = await this.ctx(req, h);
-    if (!["OWNER", "MANAGER", "STORE_OWNER"].includes(actor.role)) throw new HttpException({ type: "forbidden", message: "Ang may-ari lang" }, HttpStatus.FORBIDDEN);
+    if (!["OWNER", "MANAGER", "STORE_OWNER"].includes(actor.role)) throw new HttpException({ type: "forbidden", message: "Owner only" }, HttpStatus.FORBIDDEN);
     return { storeId, ...(await this.utang.runReminders(storeId)) };
   }
 }

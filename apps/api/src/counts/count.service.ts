@@ -32,7 +32,7 @@ class StepError extends Error {
 const invalid = (m: string) => ({ ok: false as const, error: { type: "validation" as const, errors: [m] } });
 const conflict = (m: string) => ({ ok: false as const, error: { type: "conflict" as const, message: m } });
 const forbidden = (m: string) => ({ ok: false as const, error: { type: "forbidden" as const, message: m } });
-const notFound = (m = "Hindi makita ang bilangan") => ({ ok: false as const, error: { type: "not_found" as const, message: m } });
+const notFound = (m = "Count not found") => ({ ok: false as const, error: { type: "not_found" as const, message: m } });
 
 const OWNERS = ["OWNER", "MANAGER", "STORE_OWNER", "PLATFORM_ADMIN"];
 const productSelect = { id: true, name: true, stockBaseUnit: true, stockBaseQuantity: true, costMinor: true } as const;
@@ -51,7 +51,7 @@ async function postCount(tx: Tx, storeId: string, countId: string, decidedById: 
       try {
         await adjustForCount(tx, leg, delta);
       } catch (e) {
-        if (e instanceof InsufficientStockError) throw new StepError(conflict(`Hindi mai-post ang kulang ng ${l.product.name}: may nakareserbang hindi pa nailalabas. Tapusin muna ang lipat/benta, o bilangin ulit.`));
+        if (e instanceof InsufficientStockError) throw new StepError(conflict(`Cannot post the short for ${l.product.name}: some is held for a release that has not gone out yet. Finish the transfer/sale first, or count again.`));
         throw e;
       }
     }
@@ -85,7 +85,7 @@ export class CountService {
   private async location(storeId: string, actor: Actor, locationId: string | undefined) {
     const id = locationId || actor.homeLocationId;
     const loc = id ? await prisma.warehouse.findFirst({ where: { id, storeId, isActive: true }, select: { id: true, name: true } }) : null;
-    if (!loc) throw new StepError(invalid("Pumili ng lokasyon"));
+    if (!loc) throw new StepError(invalid("Choose a location"));
     const refusal = locationRefusal(actor, loc.id);
     if (refusal) throw new StepError(forbidden(refusal));
     return loc;
@@ -102,16 +102,16 @@ export class CountService {
 
   async start(storeId: string, actor: Actor, input: { locationId?: string; productIds?: string[]; note?: string }) {
     return this.run(async () => {
-      if (!OWNERS.includes(actor.role)) throw new StepError(forbidden("Ang may-ari ang nagsisimula ng bilangan"));
+      if (!OWNERS.includes(actor.role)) throw new StepError(forbidden("Only the owner can start a count"));
       const loc = await this.location(storeId, actor, input.locationId);
       const open = await prisma.stockCount.findFirst({ where: { storeId, locationId: loc.id, status: { in: ["OPEN", "SUBMITTED"] }, kind: { in: ["FULL", "PARTIAL"] } }, select: { docNumber: true } });
-      if (open) throw new StepError(conflict(`May bukas pang bilangan dito (${open.docNumber}) — tapusin muna`));
+      if (open) throw new StepError(conflict(`There is still an open count here (${open.docNumber}) — finish it first`));
       const chosen = (input.productIds ?? []).filter(Boolean);
       const products = chosen.length
         ? await prisma.product.findMany({ where: { storeId, id: { in: chosen }, isActive: true }, select: { id: true } })
         : await prisma.product.findMany({ where: { storeId, isActive: true, stockLevels: { some: { warehouseId: loc.id } } }, select: { id: true } });
-      if (chosen.length && products.length !== new Set(chosen).size) throw new CountError("Hindi kilalang produkto");
-      if (products.length === 0) throw new CountError("Walang produktong bibilangin dito");
+      if (chosen.length && products.length !== new Set(chosen).size) throw new CountError("Unknown product");
+      if (products.length === 0) throw new CountError("No products to count here");
       return prisma.$transaction(async (tx) => {
         const docNumber = await nextDocNumber(tx, storeId, "CNT");
         const c = await tx.stockCount.create({ data: { storeId, docNumber, locationId: loc.id, kind: chosen.length ? "PARTIAL" : "FULL", note: input.note?.trim().slice(0, 200) || null, startedById: actor.userId }, select: { id: true, docNumber: true } });
@@ -163,12 +163,12 @@ export class CountService {
       if (!c) throw new StepError(notFound());
       const refusal = locationRefusal(actor, c.locationId);
       if (refusal) throw new StepError(forbidden(refusal));
-      if (c.status !== "OPEN") throw new StepError(conflict("Sarado na ang bilangang ito"));
-      if (!Array.isArray(lines) || lines.length === 0) throw new CountError("Ilagay ang mga nabilang");
+      if (c.status !== "OPEN") throw new StepError(conflict("This count is already closed"));
+      if (!Array.isArray(lines) || lines.length === 0) throw new CountError("Enter what you counted");
       const byProduct = new Map(c.lines.map((l) => [l.productId, l]));
       const parsed = lines.map((l) => {
         const line = byProduct.get(l.productId ?? "");
-        if (!line) throw new CountError("Wala sa bilangang ito ang produktong iyan");
+        if (!line) throw new CountError("That product is not in this count");
         return { line, counted: countedUnits(line.product, l.counted) };
       });
       await prisma.$transaction(async (tx) => {
@@ -190,14 +190,14 @@ export class CountService {
       const refusal = locationRefusal(actor, c.locationId);
       if (refusal) throw new StepError(forbidden(refusal));
       const missing = c.lines.filter((l) => l.countedQty === null);
-      if (missing.length) throw new CountError(`Hindi pa nabibilang: ${missing.slice(0, 3).map((l) => l.product.name).join(", ")}${missing.length > 3 ? ` +${missing.length - 3} pa` : ""}`);
+      if (missing.length) throw new CountError(`Not counted yet: ${missing.slice(0, 3).map((l) => l.product.name).join(", ")}${missing.length > 3 ? ` +${missing.length - 3} more` : ""}`);
       const results = c.lines.map((l) => ({ l, r: lineResult(l.product, l.expectedQty!, l.countedQty!) }));
       const kulang = -results.filter((x) => x.r.varianceValueMinor < 0).reduce((s, x) => s + x.r.varianceValueMinor, 0);
       const sobra = results.filter((x) => x.r.varianceValueMinor > 0).reduce((s, x) => s + x.r.varianceValueMinor, 0);
       const postNow = c.kind === "QUICK" || c.kind === "CLOSING";
       return prisma.$transaction(async (tx) => {
         const claimed = await tx.stockCount.updateMany({ where: { id, storeId, status: "OPEN" }, data: { status: "SUBMITTED", submittedById: actor.userId, submittedAt: new Date(), kulangValueMinor: kulang, sobraValueMinor: sobra } });
-        if (claimed.count === 0) throw new StepError(conflict("Naipasa na ang bilangang ito"));
+        if (claimed.count === 0) throw new StepError(conflict("This count was already submitted"));
         for (const { l, r } of results) await tx.stockCountLine.update({ where: { id: l.id }, data: { varianceQty: r.varianceQty, varianceValueMinor: r.varianceValueMinor } });
         await captureSignatures(tx, storeId, actor, { documentType: "COUNT", documentId: id, step: "SUBMIT", locationId: c.locationId }, signatures);
         await requireSignatures(tx, storeId, { documentType: "COUNT", documentId: id, step: "SUBMIT" });
@@ -208,7 +208,7 @@ export class CountService {
           const off = results.filter((x) => x.r.varianceQty !== 0);
           approvalId = (await requestApproval(tx, {
             storeId, kind: "COUNT", documentType: "COUNT", documentId: id, locationId: c.locationId,
-            summary: `Bilang ${c.docNumber} sa ${c.location.name}: ${c.lines.length} item, ${off.length} may kulang/sobra. Kulang ₱${(kulang / 100).toFixed(2)}, sobra ₱${(sobra / 100).toFixed(2)}.${off.length ? ` Hal.: ${off.slice(0, 3).map((x) => `${x.l.product.name} ${x.r.varianceQty > 0 ? "+" : ""}${qtyText(x.l.product, x.r.varianceQty)}`).join(", ")}.` : ""} Aprubahan para mai-post.`,
+            summary: `Count ${c.docNumber} at ${c.location.name}: ${c.lines.length} items, ${off.length} short/over. Short ₱${(kulang / 100).toFixed(2)}, over ₱${(sobra / 100).toFixed(2)}.${off.length ? ` E.g.: ${off.slice(0, 3).map((x) => `${x.l.product.name} ${x.r.varianceQty > 0 ? "+" : ""}${qtyText(x.l.product, x.r.varianceQty)}`).join(", ")}.` : ""} Approve to post it.`,
             detail: { kulangValueMinor: kulang, sobraValueMinor: sobra, lines: c.lines.length },
             requestedById: actor.userId,
           })).id;
@@ -221,9 +221,9 @@ export class CountService {
   }
 
   async cancel(storeId: string, actor: Actor, id: string) {
-    if (!OWNERS.includes(actor.role)) return forbidden("Ang may-ari lang ang puwedeng magkansela");
+    if (!OWNERS.includes(actor.role)) return forbidden("Only the owner can cancel");
     const r = await prisma.stockCount.updateMany({ where: { id, storeId, status: "OPEN" }, data: { status: "CANCELLED", decidedById: actor.userId, decidedAt: new Date() } });
-    return r.count ? { ok: true as const, value: { id, status: "CANCELLED" } } : conflict("Hindi na bukas ang bilangang ito");
+    return r.count ? { ok: true as const, value: { id, status: "CANCELLED" } } : conflict("This count is no longer open");
   }
 
   // ─────────────────────────── quick counts ───────────────────────────
@@ -233,7 +233,7 @@ export class CountService {
     return this.run(async () => {
       const loc = await this.location(storeId, actor, input.locationId);
       const p = input.productId ? await prisma.product.findFirst({ where: { id: input.productId, storeId, isActive: true }, select: productSelect }) : null;
-      if (!p) throw new CountError("Pumili ng produkto");
+      if (!p) throw new CountError("Choose a product");
       const counted = countedUnits(p, input.counted);
       const out = await prisma.$transaction(async (tx) => {
         const docNumber = await nextDocNumber(tx, storeId, "CNT");
@@ -272,10 +272,10 @@ export class CountService {
         const more = await prisma.stockLevel.findMany({ where: { storeId, warehouseId: loc.id, productId: { notIn: ids }, product: { isActive: true } }, orderBy: { quantityOnHand: "desc" }, take: 5 - ids.length, select: { productId: true } });
         ids = [...ids, ...more.map((m) => m.productId)];
       }
-      if (ids.length === 0) throw new CountError("Walang produktong bibilangin dito");
+      if (ids.length === 0) throw new CountError("No products to count here");
       return prisma.$transaction(async (tx) => {
         const docNumber = await nextDocNumber(tx, storeId, "CNT");
-        const c = await tx.stockCount.create({ data: { storeId, docNumber, locationId: loc.id, kind: "CLOSING", startedById: actor.userId, note: "Bilang sa pagsasara (top 5)" }, select: { id: true, docNumber: true } });
+        const c = await tx.stockCount.create({ data: { storeId, docNumber, locationId: loc.id, kind: "CLOSING", startedById: actor.userId, note: "Closing count (top 5)" }, select: { id: true, docNumber: true } });
         await tx.stockCountLine.createMany({ data: ids.map((productId) => ({ storeId, countId: c.id, productId })) });
         return { id: c.id, docNumber: c.docNumber, lines: ids.length };
       });
@@ -330,7 +330,7 @@ export class CountService {
     return this.run(async () => {
       const loc = await this.location(storeId, actor, input.locationId);
       const p = input.productId ? await prisma.product.findFirst({ where: { id: input.productId, storeId, isActive: true }, select: productSelect }) : null;
-      if (!p) throw new CountError("Pumili ng produkto");
+      if (!p) throw new CountError("Choose a product");
       const qty = isLooseP(p) && input.kilos !== undefined ? countedUnits(p, input.kilos) : input.quantity;
       const out = await prisma.$transaction(async (tx) => {
         const before = await this.shelfNow(tx, storeId, p.id, loc.id);
@@ -346,14 +346,14 @@ export class CountService {
         try {
           await releaseForTrip(tx, { storeId, productId: p.id, warehouseId: loc.id, actorId: actor.userId, documentType: "WRITE_OFF", documentId: wo.id, note: `${docNumber} ${WRITE_OFF_LABEL[chk.reason]}` }, 0, chk.qty, "WRITE_OFF");
         } catch (e) {
-          if (e instanceof InsufficientStockError) throw new StepError(conflict(`May nakareserbang ${p.name} dito — ${qtyText(p, Math.max(0, chk.qty - e.shortfall))} lang ang puwedeng ibawas`));
+          if (e instanceof InsufficientStockError) throw new StepError(conflict(`Some ${p.name} here is held for a release — only ${qtyText(p, Math.max(0, chk.qty - e.shortfall))} can be written off`));
           throw e;
         }
         let approvalId: string | null = null;
         if (chk.needsApproval) {
           approvalId = (await requestApproval(tx, {
             storeId, kind: "WRITE_OFF", documentType: "WRITE_OFF", documentId: wo.id, locationId: loc.id,
-            summary: `Bawas ${docNumber} sa ${loc.name}: ${qtyText(p, chk.qty)}${isLooseP(p) ? "" : " ×"} ${p.name} — ${WRITE_OFF_LABEL[chk.reason]}${input.note?.trim() ? ` (${input.note.trim().slice(0, 80)})` : ""}. ₱${(value / 100).toFixed(2)}, ${(chk.lossBp / 100).toFixed(2)}% ng hawak.`,
+            summary: `Write-off ${docNumber} at ${loc.name}: ${qtyText(p, chk.qty)}${isLooseP(p) ? "" : " ×"} ${p.name} — ${WRITE_OFF_LABEL[chk.reason]}${input.note?.trim() ? ` (${input.note.trim().slice(0, 80)})` : ""}. ₱${(value / 100).toFixed(2)}, ${(chk.lossBp / 100).toFixed(2)}% of stock on hand.`,
             detail: { quantity: chk.qty, valueMinor: value, lossBp: chk.lossBp, reason: chk.reason },
             requestedById: actor.userId,
           })).id;

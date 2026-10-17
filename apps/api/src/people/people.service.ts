@@ -78,7 +78,7 @@ export async function loadActor(storeId: string, userId: string, role: string): 
 }
 
 export function locationRefusal(actor: Actor, locationId: string | null | undefined): string | null {
-  return canActAtLocation(actor.role, actor.homeLocationId, locationId) ? null : "Hindi ka naka-assign sa lokasyong ito";
+  return canActAtLocation(actor.role, actor.homeLocationId, locationId) ? null : "You are not assigned to this location";
 }
 
 async function locationInStore(db: Tx | typeof prisma, storeId: string, locationId: string) {
@@ -101,9 +101,9 @@ export async function captureSignatures(
   doc: { documentType: string; documentId: string; step: string; locationId: string | null },
   inputs: SignatureInput[] | undefined,
 ): Promise<number> {
-  if (!ruleFor(doc.documentType, doc.step)) throw new SignatureInputError(`Walang pirmahan para sa ${doc.documentType}:${doc.step}`);
+  if (!ruleFor(doc.documentType, doc.step)) throw new SignatureInputError(`No signing step for ${doc.documentType}:${doc.step}`);
   if (!inputs || inputs.length === 0) return 0;
-  if (!Array.isArray(inputs) || inputs.length > 6) throw new SignatureInputError("Hanggang 6 na pirma lang bawat hakbang");
+  if (!Array.isArray(inputs) || inputs.length > 6) throw new SignatureInputError("Up to 6 signatures per step only");
   let n = 0;
   for (const s of inputs) {
     const img = s?.signerKind === "SLIP_PHOTO" ? checkPhotoImage(s?.imagePng) : checkSignatureImage(s?.imagePng);
@@ -122,14 +122,14 @@ export async function captureSignatures(
       }
       case "KARGADOR": {
         const k = s.kargadorId ? await tx.kargador.findFirst({ where: { id: s.kargadorId, storeId, isActive: true }, select: { id: true, name: true } }) : null;
-        if (!k) throw new SignatureInputError("Pumili ng kargador mula sa listahan");
+        if (!k) throw new SignatureInputError("Choose a porter from the list");
         signerName = k.name;
         kargadorId = k.id;
         break;
       }
       case "CUSTOMER": {
         const name = s.signerName?.trim() ?? "";
-        if (name.length < 2 || name.length > 80) throw new SignatureInputError("Ilagay ang pangalan ng customer");
+        if (name.length < 2 || name.length > 80) throw new SignatureInputError("Enter the customer's name");
         signerName = name;
         break;
       }
@@ -138,7 +138,7 @@ export async function captureSignatures(
         break;
       }
       default:
-        throw new SignatureInputError("Hindi kilalang uri ng pirma");
+        throw new SignatureInputError("Unknown signature type");
     }
     await tx.signature.create({
       data: {
@@ -256,14 +256,14 @@ export class PeopleService {
     actorId: string,
   ): Promise<PeopleResult<{ userId: string; homeLocationId: string | null; hasPin: boolean }>> {
     const m = await prisma.userStore.findUnique({ where: { userId_storeId: { userId, storeId } }, select: { homeLocationId: true, status: true } });
-    if (!m || m.status !== "ACTIVE") return notFound("Wala sa tindahang ito ang taong iyan");
+    if (!m || m.status !== "ACTIVE") return notFound("That person is not in this store");
     const data: Prisma.UserStoreUpdateInput = {};
     if (input.homeLocationId !== undefined) {
       if (input.homeLocationId === null || input.homeLocationId === "") data.homeLocation = { disconnect: true };
       else {
         const loc = await locationInStore(prisma, storeId, input.homeLocationId);
-        if (!loc) return fail("validation", "Hindi kilalang lokasyon");
-        if (!loc.isActive) return fail("validation", "Sarado ang lokasyong iyan");
+        if (!loc) return fail("validation", "Unknown location");
+        if (!loc.isActive) return fail("validation", "That location is closed");
         data.homeLocation = { connect: { id: loc.id } };
       }
     }
@@ -273,7 +273,7 @@ export class PeopleService {
       if (problem) return fail("validation", problem);
       // M11: a PIN opens the whole account — only set it for someone who works at this store alone.
       if (!(await accountBelongsToStore(prisma, userId, storeId))) {
-        return forbidden("May iba pang tindahan ang taong ito — siya mismo ang magpapalit ng PIN niya.");
+        return forbidden("This person also works in another store — they must change their own PIN.");
       }
       pinHash = await bcrypt.hash(input.pin, 10);
     }
@@ -310,7 +310,7 @@ export class PeopleService {
     const u = await prisma.user.findUnique({ where: { id: userId }, select: { pinHash: true, passwordHash: true } });
     if (!u) return notFound("User not found");
     const valid = await bcrypt.compare(current ?? "", u.pinHash ?? u.passwordHash);
-    if (!valid) return forbidden(u.pinHash ? "Mali ang kasalukuyang PIN" : "Mali ang password");
+    if (!valid) return forbidden(u.pinHash ? "The current PIN is wrong" : "The password is wrong");
     await prisma.user.update({ where: { id: userId }, data: { pinHash: await bcrypt.hash(newPin, 10), pinFailedCount: 0, pinLockedUntil: null } });
     return { ok: true, value: { ok: true } };
   }
@@ -335,25 +335,25 @@ export class PeopleService {
     const data: Prisma.KargadorUncheckedUpdateInput = {};
     if (id === null || input.name !== undefined) {
       const name = input.name?.trim().replace(/\s+/g, " ") ?? "";
-      if (name.length < 2 || name.length > 60) errors.push("Pangalan: 2–60 letra");
+      if (name.length < 2 || name.length > 60) errors.push("Name: 2–60 letters");
       data.name = name;
     }
     if (input.phone !== undefined) {
       if (input.phone === null || input.phone === "") data.phone = null;
       else {
         const e164 = toE164(input.phone);
-        if (!e164) errors.push("Mali ang numero ng telepono");
+        if (!e164) errors.push("The phone number is wrong");
         data.phone = e164 ?? null;
       }
     }
     if (input.photoUrl !== undefined) {
-      if (input.photoUrl && !/^https:\/\/\S{1,500}$/.test(input.photoUrl)) errors.push("Ang litrato ay dapat https na link");
+      if (input.photoUrl && !/^https:\/\/\S{1,500}$/.test(input.photoUrl)) errors.push("The photo must be an https link");
       data.photoUrl = input.photoUrl || null;
     }
     if (input.homeLocationId !== undefined) {
       if (input.homeLocationId) {
         const loc = await locationInStore(prisma, storeId, input.homeLocationId);
-        if (!loc) errors.push("Hindi kilalang lokasyon");
+        if (!loc) errors.push("Unknown location");
       }
       data.homeLocationId = input.homeLocationId || null;
     }
@@ -366,11 +366,11 @@ export class PeopleService {
         return { ok: true, value: { id: row.id } };
       }
       const updated = await prisma.kargador.updateMany({ where: { id, storeId }, data });
-      if (updated.count === 0) return notFound("Kargador not found");
+      if (updated.count === 0) return notFound("Porter not found");
       await prisma.auditLog.create({ data: { storeId, actorType: "USER", actorId, action: "kargador.update", entityType: "Kargador", entityId: id, after: data as unknown as Prisma.InputJsonValue } });
       return { ok: true, value: { id } };
     } catch (e) {
-      if ((e as { code?: string }).code === "P2002") return conflict("May kargador na may ganyang pangalan");
+      if ((e as { code?: string }).code === "P2002") return conflict("A porter with that name already exists");
       throw e;
     }
   }
@@ -383,8 +383,8 @@ export class PeopleService {
     doc: { documentType: string; documentId: string; step: string; locationId: string | null },
     inputs: SignatureInput[],
   ): Promise<PeopleResult<{ saved: number }>> {
-    if (!inputs?.length) return fail("validation", "Walang pirma");
-    if (doc.locationId && !(await locationInStore(prisma, storeId, doc.locationId))) return fail("validation", "Hindi kilalang lokasyon");
+    if (!inputs?.length) return fail("validation", "No signature");
+    if (doc.locationId && !(await locationInStore(prisma, storeId, doc.locationId))) return fail("validation", "Unknown location");
     try {
       const saved = await prisma.$transaction((tx) => captureSignatures(tx, storeId, actor, doc, inputs));
       return { ok: true, value: { saved } };
@@ -438,15 +438,15 @@ export class PeopleService {
     const decision = input.decision === "APPROVE" ? "APPROVED" : input.decision === "DECLINE" ? "DECLINED" : null;
     if (!decision) return fail("validation", "decision must be APPROVE or DECLINE");
     const note = input.note?.trim() ?? "";
-    if (decision === "DECLINED" && note.length < 3) return fail("validation", "Ilagay ang dahilan ng pagtanggi");
+    if (decision === "DECLINED" && note.length < 3) return fail("validation", "Enter the reason for declining");
     const approval = await prisma.approvalRequest.findFirst({ where: { id, storeId } });
     if (!approval) return notFound("Approval not found");
     const may = canDecide(actor.role, approval.approverRoles, approval.requestedById === actor.userId);
     if (!may.ok) return forbidden(may.reason);
 
     const u = await prisma.user.findUnique({ where: { id: actor.userId }, select: { pinHash: true } });
-    if (!u?.pinHash) return fail("validation", "Mag-set muna ng PIN bago magpasya");
-    if (!(await bcrypt.compare(input.pin ?? "", u.pinHash))) return forbidden("Mali ang PIN");
+    if (!u?.pinHash) return fail("validation", "Set a PIN first before deciding");
+    if (!(await bcrypt.compare(input.pin ?? "", u.pinHash))) return forbidden("Wrong PIN");
 
     try {
       await prisma.$transaction(async (tx) => {
@@ -464,7 +464,7 @@ export class PeopleService {
         });
       });
     } catch (e) {
-      if (e instanceof DecidedAlready) return conflict("Napagpasyahan na ito");
+      if (e instanceof DecidedAlready) return conflict("This was already decided");
       throw e;
     }
     return { ok: true, value: { id, status: decision } };
@@ -501,13 +501,13 @@ export class PeopleService {
     input: { flow?: string; locationId?: string | null; step?: number; data?: unknown; version?: number },
   ): Promise<PeopleResult<{ id: string; version: number }>> {
     const json = JSON.stringify(input.data ?? {});
-    if (json.length > MAX_DRAFT_BYTES) return fail("validation", "Masyadong malaki ang draft");
+    if (json.length > MAX_DRAFT_BYTES) return fail("validation", "The draft is too big");
     const step = input.step ?? 1;
     if (!Number.isInteger(step) || step < 1 || step > 20) return fail("validation", "step must be 1–20");
     if (id === null) {
-      if (!(DRAFT_FLOWS as readonly string[]).includes(input.flow ?? "")) return fail("validation", "Hindi kilalang flow");
+      if (!(DRAFT_FLOWS as readonly string[]).includes(input.flow ?? "")) return fail("validation", "Unknown flow");
       const locationId = input.locationId || null;
-      if (locationId && !(await locationInStore(prisma, storeId, locationId))) return fail("validation", "Hindi kilalang lokasyon");
+      if (locationId && !(await locationInStore(prisma, storeId, locationId))) return fail("validation", "Unknown location");
       const refusal = locationId ? locationRefusal(actor, locationId) : null;
       if (refusal) return forbidden(refusal);
       const row = await prisma.flowDraft.create({
@@ -525,7 +525,7 @@ export class PeopleService {
       where: { id, storeId, status: "OPEN", version: input.version },
       data: { step, data: JSON.parse(json), updatedById: actor.userId, version: { increment: 1 } },
     });
-    if (updated.count === 0) return conflict(existing.status !== "OPEN" ? "Tapos na o kanselado ang draft na ito" : "May ibang nag-edit nito. Buksan ulit.");
+    if (updated.count === 0) return conflict(existing.status !== "OPEN" ? "This draft is already finished or cancelled" : "Someone else edited this. Open it again.");
     return { ok: true, value: { id, version: input.version! + 1 } };
   }
 
@@ -538,7 +538,7 @@ export class PeopleService {
       if (refusal) return forbidden(refusal);
     }
     const r = await prisma.flowDraft.updateMany({ where: { id, storeId, status: "OPEN" }, data: { status, updatedById: actor.userId } });
-    if (r.count === 0) return conflict("Sarado na ang draft na ito");
+    if (r.count === 0) return conflict("This draft is already closed");
     return { ok: true, value: { id, status } };
   }
 }

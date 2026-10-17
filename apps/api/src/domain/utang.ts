@@ -74,7 +74,7 @@ export function overdueText(x: { customerName: string; balanceMinor: number; day
 
 /** A credit limit decision: within, or over (→ the owner's Para sa iyo). */
 export function limitCheck(balanceMinor: number, amountMinor: number, limitMinor: number): { ok: true } | { ok: false; overByMinor: number } {
-  if (!Number.isInteger(amountMinor) || amountMinor <= 0) throw new UtangError("Mali ang halaga");
+  if (!Number.isInteger(amountMinor) || amountMinor <= 0) throw new UtangError("Invalid amount");
   if (limitMinor <= 0) return { ok: false, overByMinor: balanceMinor + amountMinor };
   const after = balanceMinor + amountMinor;
   return after <= limitMinor ? { ok: true } : { ok: false, overByMinor: after - limitMinor };
@@ -82,9 +82,9 @@ export function limitCheck(balanceMinor: number, amountMinor: number, limitMinor
 
 /** Bayad sa utang: partial is fine; more than owed is refused. */
 export function checkPayment(balanceMinor: number, amountMinor: unknown): number {
-  if (typeof amountMinor !== "number" || !Number.isInteger(amountMinor) || amountMinor <= 0) throw new UtangError("Ilagay ang halagang ibinayad");
-  if (balanceMinor <= 0) throw new UtangError("Wala nang utang ang customer na ito");
-  if (amountMinor > balanceMinor) throw new UtangError(`Sobra — ${pesoText(balanceMinor)} lang ang utang`);
+  if (typeof amountMinor !== "number" || !Number.isInteger(amountMinor) || amountMinor <= 0) throw new UtangError("Enter the amount paid");
+  if (balanceMinor <= 0) throw new UtangError("This customer owes nothing");
+  if (amountMinor > balanceMinor) throw new UtangError(`Too much — the customer only owes ${pesoText(balanceMinor)}`);
   return amountMinor;
 }
 

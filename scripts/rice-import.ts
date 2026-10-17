@@ -34,7 +34,7 @@ function show(plan: ImportPlan) {
   c("products", plan.products);
   console.log(`  ${"".padEnd(10)} ${plan.locationPrices} per-location price(s)`);
   c("customers", plan.customers);
-  console.log(`  ${"".padEnd(10)} opening utang to add: ${peso(plan.openingUtangMinor)}`);
+  console.log(`  ${"".padEnd(10)} opening credit to add: ${peso(plan.openingUtangMinor)}`);
   c("staff", plan.staff);
   c("kargadors", plan.kargadors);
   for (const n of plan.notes) console.log(`  note: ${n}`);

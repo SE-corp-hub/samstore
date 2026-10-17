@@ -381,7 +381,7 @@ export default function UtangPanel() {
                                             <tr key={e.id}>
                                               <td className="small text-muted">{fmt(e.createdAt)}</td>
                                               <td>
-                                                <span className={`badge ${e.type === "purchase" ? "text-bg-warning" : "text-bg-success"}`}>{e.type === "purchase" ? "utang" : "payment"}</span>
+                                                <span className={`badge ${e.type === "purchase" ? "text-bg-warning" : "text-bg-success"}`}>{e.type === "purchase" ? "credit" : "payment"}</span>
                                               </td>
                                               <td className={`text-end fw-semibold ${e.amountMinor > 0 ? "text-danger" : "text-success"}`}>{e.amountMinor > 0 ? "+" : "−"}{toPesos(Math.abs(e.amountMinor))}</td>
                                               <td className="small text-muted">{e.dueAt ? fmt(e.dueAt) : "—"}</td>

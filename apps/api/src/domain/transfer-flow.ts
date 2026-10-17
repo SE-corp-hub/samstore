@@ -25,22 +25,22 @@ export function autoApproves(fromLocationType: string): boolean {
 
 /** Ilabas: count out between 1 and what was asked for. */
 export function checkRelease(requested: number, released: unknown): QtyCheck {
-  if (!whole(released) || released < 1) return { ok: false, error: "Ilagay kung ilan ang ilalabas (1 pataas)" };
-  if (released > requested) return { ok: false, error: `Hanggang ${requested} lang ang hiningi` };
+  if (!whole(released) || released < 1) return { ok: false, error: "Enter how many to release (1 or more)" };
+  if (released > requested) return { ok: false, error: `Only ${requested} were requested` };
   return { ok: true };
 }
 
 /** Tanggapin (restock) or Naihatid (sale): between 0 and what left the source. */
 export function checkArrival(released: number, counted: unknown): QtyCheck {
-  if (!whole(counted) || counted < 0) return { ok: false, error: "Ilagay kung ilan ang dumating (0 pataas)" };
-  if (counted > released) return { ok: false, error: `${released} lang ang inilabas — hindi puwedeng sumobra` };
+  if (!whole(counted) || counted < 0) return { ok: false, error: "Enter how many arrived (0 or more)" };
+  if (counted > released) return { ok: false, error: `Only ${released} were released — it cannot be more than that` };
   return { ok: true };
 }
 
 /** Tanggapin pabalik: between 0 and what did not reach the customer. */
 export function checkReturnBack(pending: number, counted: unknown): QtyCheck {
-  if (!whole(counted) || counted < 0) return { ok: false, error: "Ilagay kung ilan ang naibalik (0 pataas)" };
-  if (counted > pending) return { ok: false, error: `${pending} lang ang dapat bumalik` };
+  if (!whole(counted) || counted < 0) return { ok: false, error: "Enter how many came back (0 or more)" };
+  if (counted > pending) return { ok: false, error: `Only ${pending} should come back` };
   return { ok: true };
 }
 
@@ -60,20 +60,20 @@ export function returnOutcome(pending: number, returned: number): { short: numbe
   return { short: pending - returned };
 }
 
-/** The sentence read back before signing (Taglish, one line). */
+/** The sentence read back before signing (plain English, one line). */
 export function readBack(
   step: "RELEASE" | "RECEIVE" | "DELIVERED" | "RETURN",
   t: { qty: number; product: string; from: string; to: string; kargador?: string | null; customer?: string | null },
 ): string {
-  const dala = t.kargador ? `, dala ni ${t.kargador}` : "";
+  const dala = t.kargador ? `, carried by ${t.kargador}` : "";
   switch (step) {
     case "RELEASE":
-      return `Ilalabas: ${t.qty} × ${t.product} mula ${t.from}${dala}, para sa ${t.customer ? `customer (${t.customer})` : t.to}.`;
+      return `Release: ${t.qty} × ${t.product} from ${t.from}${dala}, for ${t.customer ? `customer (${t.customer})` : t.to}.`;
     case "RECEIVE":
-      return `Tatanggapin sa ${t.to}: ${t.qty} × ${t.product} galing ${t.from}${dala}.`;
+      return `Receive at ${t.to}: ${t.qty} × ${t.product} from ${t.from}${dala}.`;
     case "DELIVERED":
-      return `Naihatid kay ${t.customer ?? "customer"}: ${t.qty} × ${t.product}${dala}.`;
+      return `Delivered to ${t.customer ?? "customer"}: ${t.qty} × ${t.product}${dala}.`;
     case "RETURN":
-      return `Ibinalik sa ${t.from}: ${t.qty} × ${t.product}${dala}.`;
+      return `Returned to ${t.from}: ${t.qty} × ${t.product}${dala}.`;
   }
 }

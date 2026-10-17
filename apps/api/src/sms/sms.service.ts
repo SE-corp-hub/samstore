@@ -32,7 +32,7 @@ export async function queueSms(
   const row = await tx.smsMessage.create({
     data: {
       storeId: input.storeId, storeCustomerId: input.storeCustomerId, phone: phone || null, template: input.template, text: input.text,
-      status, lastError: off ? "Naka-off ang text sa settings" : !phone ? "Walang mobile number" : null,
+      status, lastError: off ? "Texts are turned off in settings" : !phone ? "No mobile number" : null,
       documentType: input.documentType ?? null, documentId: input.documentId ?? null, periodKey: input.periodKey ?? null, createdById: input.createdById ?? null,
     },
     select: { id: true },
@@ -51,7 +51,7 @@ export async function deliverSms(id: string, provider: SmsProvider = smsProvider
   const row = await prisma.smsMessage.findUnique({ where: { id }, include: { store: { select: { settings: { select: { smsSenderName: true } } } } } });
   if (!row || row.status === "SENT" || row.status === "SKIPPED") return { status: "NOOP", attempts: row?.attempts ?? 0 };
   if (!row.phone) {
-    await prisma.smsMessage.update({ where: { id }, data: { status: "SKIPPED", lastError: "Walang mobile number" } });
+    await prisma.smsMessage.update({ where: { id }, data: { status: "SKIPPED", lastError: "No mobile number" } });
     return { status: "SKIPPED", attempts: row.attempts };
   }
   const claimed = await prisma.smsMessage.updateMany({ where: { id, status: row.status, attempts: row.attempts }, data: { attempts: { increment: 1 } } });
@@ -71,10 +71,10 @@ export async function deliverSms(id: string, provider: SmsProvider = smsProvider
 /** Ipadala ulit: re-read the customer's number (it may have been fixed) and send now. */
 export async function resendSms(storeId: string, id: string, provider: SmsProvider = smsProvider()) {
   const row = await prisma.smsMessage.findFirst({ where: { id, storeId }, include: { storeCustomer: { select: { customer: { select: { phone: true } } } } } });
-  if (!row) return { ok: false as const, error: { type: "not_found" as const, message: "Hindi makita ang text" } };
-  if (row.status === "SENT") return { ok: false as const, error: { type: "conflict" as const, message: "Naipadala na ito" } };
+  if (!row) return { ok: false as const, error: { type: "not_found" as const, message: "Text not found" } };
+  if (row.status === "SENT") return { ok: false as const, error: { type: "conflict" as const, message: "Already sent" } };
   const phone = toE164(row.storeCustomer?.customer.phone ?? row.phone ?? "");
-  if (!phone) return { ok: false as const, error: { type: "validation" as const, errors: ["Walang tamang mobile number ang customer — ayusin muna"] } };
+  if (!phone) return { ok: false as const, error: { type: "validation" as const, errors: ["The customer has no valid mobile number — fix it first"] } };
   await prisma.smsMessage.update({ where: { id }, data: { phone, status: "FAILED", lastError: null } });
   const r = await deliverSms(id, provider);
   const after = await prisma.smsMessage.findUniqueOrThrow({ where: { id }, select: { id: true, status: true, lastError: true, attempts: true } });

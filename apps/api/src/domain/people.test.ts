@@ -41,7 +41,7 @@ test("M2 signatures: a step without its signatures is refused", () => {
   assert.deepEqual(missingSigners("TRANSFER", "RECEIVE", [{ signerKind: "STAFF" }], { kargador: true }), ["KARGADOR"]);
   assert.deepEqual(missingSigners("RELEASE", "DELIVERED", [{ signerKind: "STAFF" }], { customer: true }), ["KARGADOR", "CUSTOMER"]);
   assert.deepEqual(missingSigners("PAPER_SLIP", "ENCODE", [{ signerKind: "STAFF" }]), ["SLIP_PHOTO"]);
-  assert.equal(missingMessage(["STAFF", "KARGADOR"]), "Kulang ang pirma: staff, kargador");
+  assert.equal(missingMessage(["STAFF", "KARGADOR"]), "Missing signature: staff, porter");
 });
 
 test("M2 signatures: an unknown step fails closed", () => {

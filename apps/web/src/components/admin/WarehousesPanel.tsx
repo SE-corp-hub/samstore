@@ -176,8 +176,8 @@ export default function WarehousesPanel() {
     const { ok, data } = await call(`${API_URL}/admin/transfers/${t.id}/complete`, "PATCH", { signatures });
     setSigningBusy(false);
     setReceiving(null);
-    if (!ok) { setError(errorText(data, "Hindi natanggap")); return; }
-    toast("Natanggap na");
+    if (!ok) { setError(errorText(data, "Not received")); return; }
+    toast("Received");
     await load();
   };
 
@@ -224,7 +224,7 @@ export default function WarehousesPanel() {
                   </select>
                 </div>
                 <div className="col-12">
-                  <label className="form-label small mb-1" htmlFor="loc-address">Address (for the kargador)</label>
+                  <label className="form-label small mb-1" htmlFor="loc-address">Address (for the porter)</label>
                   <input id="loc-address" className="form-control form-control-sm" placeholder="Street, barangay" value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} maxLength={300} />
                 </div>
               </div>
@@ -325,7 +325,7 @@ export default function WarehousesPanel() {
             {receiving && (
               <SignCapture
                 sentence={`Tatanggapin: ${receiving.quantity} × ${receiving.product.name}, mula ${label(receiving.fromWarehouse)} papuntang ${label(receiving.toWarehouse)}.`}
-                staffName="ikaw (staff)"
+                staffName="you (staff)"
                 busy={signingBusy}
                 onCancel={() => setReceiving(null)}
                 onDone={(sigs) => void receive(receiving, sigs)}
@@ -340,7 +340,7 @@ export default function WarehousesPanel() {
                   <tbody>
                     {transfers.map((t) => (
                       <tr key={t.id}>
-                        <td className="small">{t.docNumber && <div className="text-muted">{t.docNumber}</div>}{t.product.name}{t.reason && <div className="text-muted">{t.reason}</div>}{!!t.shortQty && <div><span className="badge text-bg-danger">Kulang {t.shortQty}</span></div>}</td>
+                        <td className="small">{t.docNumber && <div className="text-muted">{t.docNumber}</div>}{t.product.name}{t.reason && <div className="text-muted">{t.reason}</div>}{!!t.shortQty && <div><span className="badge text-bg-danger">Short {t.shortQty}</span></div>}</td>
                         <td className="small text-muted">{label(t.fromWarehouse)} → {label(t.toWarehouse)}</td>
                         <td className="text-end">{t.quantity}</td>
                         <td><span className={`badge ${STATUS_BADGE[t.status] ?? "text-bg-secondary"}`}>{t.status}</span></td>
@@ -349,7 +349,7 @@ export default function WarehousesPanel() {
                             <button type="button" className="btn btn-sm btn-outline-success me-1" onClick={() => void act(t, "approve", "Transfer approved")}>Approve</button>
                           )}
                           {t.status === "APPROVED" && t.kind !== "ORDER_RELEASE" && (
-                            <button type="button" className="btn btn-sm btn-outline-primary me-1" title="Owner: move it in one step (both ends at once). Staff use Lipat at Ilabas." onClick={() => setReceiving(t)}>Ilipat agad</button>
+                            <button type="button" className="btn btn-sm btn-outline-primary me-1" title="Owner: move it in one step (both ends at once). Staff use Transfers & releases." onClick={() => setReceiving(t)}>Move now</button>
                           )}
                           {(t.status === "REQUESTED" || t.status === "APPROVED") && t.kind !== "ORDER_RELEASE" && (
                             <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => void act(t, "cancel", "Transfer cancelled")}>Cancel</button>

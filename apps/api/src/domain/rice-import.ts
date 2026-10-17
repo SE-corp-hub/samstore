@@ -186,7 +186,7 @@ export function parseCustomers(text: string, today: string): Parsed<CustomerRow>
     const utang = pesoToMinor(r.get("utang")) ?? 0;
     if (utang > MAX_LIMIT_MINOR) throw new Error("utang is above ₱1,000,000 — check the number");
     const utangSince = pastDate(r.get("utang_since"), today);
-    if (utang > 0 && !utangSince) throw new Error("utang_since: when did this utang start? (YYYY-MM-DD; for the reminder texts)");
+    if (utang > 0 && !utangSince) throw new Error("utang_since: when did this credit start? (YYYY-MM-DD; for the reminder texts)");
     const note = cleanName(r.get("note")).slice(0, 200) || null;
     return { row: r.row, name, phone, limitMinor: limit, utangMinor: utang, utangSince: utang > 0 ? utangSince : null, note };
   });
@@ -257,8 +257,8 @@ export function signoffHtml(x: SignoffInput): string {
   const priceCells = (p: SignoffInput["products"][number]) =>
     x.locations.map((l) => `<td class="n">${p.locationPrices[l.code] !== undefined ? esc(peso(p.locationPrices[l.code]!)) : "—"}</td>`).join("");
   return `<!doctype html>
-<html lang="tl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Pirmahan bago mag-live</title>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign before going live</title>
 <style>
 body{font-family:system-ui,sans-serif;margin:24px;color:#111;background:#fff}
 h1{font-size:22px}h2{font-size:18px;margin-top:28px}
@@ -267,20 +267,20 @@ th,td{border:1px solid #999;padding:4px 6px;text-align:left}td.n,th.n{text-align
 .sign{margin-top:40px;display:flex;gap:48px}.sign div{flex:1;border-top:1px solid #000;padding-top:4px}
 @media print{body{margin:10mm}}
 </style></head><body>
-<h1>${esc(x.storeName)} — Pirmahan bago mag-live</h1>
-<p>Ginawa: ${esc(x.generatedAt)}. Tingnan ang bawat linya. Kapag may mali, itama sa CSV at i-import ulit.</p>
-<h2>Mga produkto at presyo (${x.products.length})</h2>
-<table><thead><tr><th>SKU</th><th>Pangalan</th><th>Benta bilang</th><th class="n">Puhunan</th><th class="n">Presyo</th>${x.locations.map((l) => `<th class="n">${esc(l.code)}</th>`).join("")}<th>Tama?</th></tr></thead><tbody>
+<h1>${esc(x.storeName)} — Sign before going live</h1>
+<p>Made: ${esc(x.generatedAt)}. Check every line. If something is wrong, fix it in the CSV and import again.</p>
+<h2>Products and prices (${x.products.length})</h2>
+<table><thead><tr><th>SKU</th><th>Name</th><th>Sold as</th><th class="n">Cost</th><th class="n">Price</th>${x.locations.map((l) => `<th class="n">${esc(l.code)}</th>`).join("")}<th>Correct?</th></tr></thead><tbody>
 ${x.products.map((p) => `<tr><td>${esc(p.sku)}</td><td>${esc(p.name)}</td><td>${esc(p.soldAs)}</td><td class="n">${esc(peso(p.costMinor))}</td><td class="n">${esc(peso(p.priceMinor))}</td>${priceCells(p)}<td></td></tr>`).join("\n")}
 </tbody></table>
-<p>"—" = ginagamit ang pangunahing presyo sa lokasyong iyan.</p>
-<h2>Utang ng mga customer (${x.customers.filter((c) => c.utangMinor > 0).length} may utang · kabuuan ${esc(peso(totalUtang))})</h2>
-<table><thead><tr><th>Pangalan</th><th>Mobile</th><th class="n">Limit</th><th class="n">Utang ngayon</th><th>Mula kailan</th><th>Tama?</th></tr></thead><tbody>
+<p>"—" = the main price is used at that location.</p>
+<h2>Customer credit (${x.customers.filter((c) => c.utangMinor > 0).length} owe money · total ${esc(peso(totalUtang))})</h2>
+<table><thead><tr><th>Name</th><th>Mobile</th><th class="n">Limit</th><th class="n">Owes now</th><th>Since</th><th>Correct?</th></tr></thead><tbody>
 ${x.customers.map((c) => `<tr><td>${esc(c.name)}</td><td>${esc(c.phone)}</td><td class="n">${c.limitMinor ? esc(peso(c.limitMinor)) : "—"}</td><td class="n">${esc(peso(c.utangMinor))}</td><td>${esc(c.utangSince ?? "")}</td><td></td></tr>`).join("\n")}
-<tr><th colspan="3">Kabuuan</th><th class="n">${esc(peso(totalUtang))}</th><th colspan="2"></th></tr>
+<tr><th colspan="3">Total</th><th class="n">${esc(peso(totalUtang))}</th><th colspan="2"></th></tr>
 </tbody></table>
-<p>Staff: ${x.staffCount} · Kargador: ${x.kargadorCount}</p>
-<div class="sign"><div>Pirma ng may-ari at petsa</div><div>Pirma ng nag-encode at petsa</div></div>
+<p>Staff: ${x.staffCount} · Porters: ${x.kargadorCount}</p>
+<div class="sign"><div>Owner signature and date</div><div>Signature of the person who typed it in, and date</div></div>
 </body></html>
 `;
 }

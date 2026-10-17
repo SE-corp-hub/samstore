@@ -23,12 +23,12 @@ export interface WeighedProduct {
 
 /** Grams in `qty` stock units of a product. Only products weighed in grams can be resacked. */
 export function gramsOf(p: WeighedProduct, qty: number): number {
-  if (!Number.isInteger(qty) || qty < 1) throw new ResackError(`Ilagay ang bilang ng ${p.name} (1 pataas)`);
+  if (!Number.isInteger(qty) || qty < 1) throw new ResackError(`Enter how many ${p.name} (1 or more)`);
   if ((p.stockBaseUnit ?? "").toLowerCase() !== "g" || !p.stockBaseQuantity || p.stockBaseQuantity < 1) {
-    throw new ResackError(`Itakda muna ang timbang ng ${p.name} (gramo bawat sako/kilo) sa Products`);
+    throw new ResackError(`Set the weight of ${p.name} first (grams per sack/kilo) in Products`);
   }
   const grams = qty * p.stockBaseQuantity;
-  if (!Number.isSafeInteger(grams) || grams > 2_147_483_647) throw new ResackError("Masyadong malaki ang timbang");
+  if (!Number.isSafeInteger(grams) || grams > 2_147_483_647) throw new ResackError("The weight is too big");
   return grams;
 }
 
@@ -39,7 +39,7 @@ export function gramsOf(p: WeighedProduct, qty: number): number {
 export function valueOf(p: WeighedProduct & { costMinor: number }, qty: number): number {
   const loose = (p.stockBaseUnit ?? "").toLowerCase() === "g" && p.stockBaseQuantity === 1;
   const v = loose ? Number((BigInt(qty) * BigInt(p.costMinor) + 500n) / 1000n) : qty * p.costMinor;
-  if (!Number.isSafeInteger(v) || v > 2_147_483_647) throw new ResackError("Masyadong malaki ang halaga");
+  if (!Number.isSafeInteger(v) || v > 2_147_483_647) throw new ResackError("The amount is too big");
   return v;
 }
 
@@ -77,20 +77,20 @@ export interface ResackPlan {
 }
 
 export function planResack(p: ResackPlanInput): ResackPlan {
-  if (p.outputs.length === 0) throw new ResackError("Ilagay kung ano ang lumabas");
-  if (p.outputs.length > 10) throw new ResackError("Hanggang 10 uri lang ng lalabas");
+  if (p.outputs.length === 0) throw new ResackError("Enter what came out");
+  if (p.outputs.length > 10) throw new ResackError("Up to 10 kinds of output only");
   const gramsIn = p.input.grams;
-  if (!Number.isInteger(gramsIn) || gramsIn < 1) throw new ResackError("Walang pumasok na bigas");
+  if (!Number.isInteger(gramsIn) || gramsIn < 1) throw new ResackError("No rice went in");
   if (!Number.isInteger(p.input.valueMinor) || p.input.valueMinor < 0) throw new ResackError("invalid input value");
   const gramsOut = p.outputs.reduce((s, o) => {
-    if (!Number.isInteger(o.grams) || o.grams < 1) throw new ResackError(`Ilagay ang dami ng ${o.name}`);
+    if (!Number.isInteger(o.grams) || o.grams < 1) throw new ResackError(`Enter the amount of ${o.name}`);
     return s + o.grams;
   }, 0);
   if (gramsOut > gramsIn) {
-    throw new ResackError(`Mas mabigat ang lumabas (${gramsOut} g) kaysa pumasok (${gramsIn} g). Timbangin ulit.`);
+    throw new ResackError(`What came out (${gramsOut} g) weighs more than what went in (${gramsIn} g). Weigh it again.`);
   }
   if (p.outputs.length === 1 && p.outputs[0]!.productId === p.input.productId) {
-    throw new ResackError("Pareho ang pumasok at lumabas — walang resack na nangyari");
+    throw new ResackError("What went in and what came out are the same — nothing was resacked");
   }
   const lossGrams = gramsIn - gramsOut;
   const tolerance = p.toleranceBp ?? DEFAULT_LOSS_TOLERANCE_BP;

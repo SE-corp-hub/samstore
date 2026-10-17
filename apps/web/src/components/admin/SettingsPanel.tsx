@@ -2,10 +2,11 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { API_URL } from "../../config";
-import { adminHeaders, getAdminStoreId } from "../../lib/admin";
+import { adminHeaders, getAdminStoreId, getAuthItem, setAuthItem } from "../../lib/admin";
 import { toast } from "../../lib/toast";
 import DeliveryZonesCard from "./DeliveryZonesCard";
 import NoStoreScope from "./NoStoreScope";
+import { askConfirm } from "../../lib/ask";
 
 interface StoreSettings {
   id: string;
@@ -275,7 +276,7 @@ export default function SettingsPanel() {
   };
 
   const privacyPurge = async () => {
-    if (!window.confirm("Purge old Messenger conversations and messages? Consent records are retained.")) return;
+    if (!(await askConfirm("Purge old Messenger conversations and messages? Consent records are retained.", { ok: "Purge", cancel: "Cancel", danger: true }))) return;
     const res = await fetch(`${API_URL}/admin/privacy/retention/purge`, { method: "POST", headers: adminHeaders() });
     const d = await res.json();
     if (res.ok) toast(`Purged ${d.deletedConversations} conversation(s) and ${d.deletedMessages} message(s)`);
@@ -472,7 +473,7 @@ export default function SettingsPanel() {
                     </div>
                     <div className="col-md-8">
                       <label className="form-label small">Receipt header text</label>
-                      <input className="form-control" value={receiptHeader} onChange={(e) => setReceiptHeader(e.target.value)} placeholder="e.g. Salamat po! / Store address & phone" />
+                      <input className="form-control" value={receiptHeader} onChange={(e) => setReceiptHeader(e.target.value)} placeholder="e.g. Thank you! / Store address & phone" />
                     </div>
                     <div className="col-md-8">
                       <label className="form-label small">Receipt footer text</label>
@@ -537,7 +538,7 @@ export default function SettingsPanel() {
                       <input className="form-control" type="number" min="1" value={maxOpenOrders} onChange={(e) => setMaxOpenOrders(e.target.value)} />
                     </div>
                     <div className="col-md-4">
-                      <label className="form-label small">Default utang credit limit (₱)</label>
+                      <label className="form-label small">Default credit limit (₱)</label>
                       <input className="form-control" type="number" step="0.01" min="0" value={creditLimitPesos} onChange={(e) => setCreditLimitPesos(e.target.value)} placeholder="0 = credit disabled" />
                     </div>
                     <div className="col-md-4">
@@ -643,7 +644,7 @@ function AccountSection() {
   const [pwMsg, setPwMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [pwBusy, setPwBusy] = useState(false);
   const [profName, setProfName] = useState("");
-  const [profEmail, setProfEmail] = useState(typeof sessionStorage !== "undefined" ? (sessionStorage.getItem("samstore.admin.email") ?? "") : "");
+  const [profEmail, setProfEmail] = useState(getAuthItem("samstore.admin.email") ?? "");
   const [profMsg, setProfMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [profBusy, setProfBusy] = useState(false);
 
@@ -659,7 +660,7 @@ function AccountSection() {
       if (!res.ok) { setPwMsg({ ok: false, text: d?.message ?? "Change failed" }); return; }
       setPwMsg({ ok: true, text: "Password changed successfully." });
       setCurPw(""); setNewPw("");
-      if (typeof d?.token === "string") sessionStorage.setItem("samstore.admin.token", d.token);
+      if (typeof d?.token === "string") setAuthItem("samstore.admin.token", d.token);
     } catch {
       setPwMsg({ ok: false, text: "Network error — could not change password." });
     } finally { setPwBusy(false); }
@@ -676,7 +677,7 @@ function AccountSection() {
       const d = await res.json();
       if (!res.ok) { setProfMsg({ ok: false, text: d?.message ?? d?.errors?.join(", ") ?? "Save failed" }); return; }
       setProfMsg({ ok: true, text: "Profile updated." });
-      sessionStorage.setItem("samstore.admin.email", d.email);
+      setAuthItem("samstore.admin.email", d.email);
     } catch {
       setProfMsg({ ok: false, text: "Network error — could not save profile." });
     } finally { setProfBusy(false); }

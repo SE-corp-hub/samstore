@@ -33,7 +33,7 @@ class StepError extends Error {
 const invalid = (m: string) => ({ ok: false as const, error: { type: "validation" as const, errors: [m] } });
 const conflict = (m: string) => ({ ok: false as const, error: { type: "conflict" as const, message: m } });
 const forbidden = (m: string) => ({ ok: false as const, error: { type: "forbidden" as const, message: m } });
-const notFound = (m = "Hindi makita ang resack na ito") => ({ ok: false as const, error: { type: "not_found" as const, message: m } });
+const notFound = (m = "This resack was not found") => ({ ok: false as const, error: { type: "not_found" as const, message: m } });
 
 export interface OutputInput {
   productId?: string;
@@ -53,14 +53,14 @@ export class ResackService {
       if (e instanceof ResackError) return invalid(e.message);
       const sig = signatureErrorResult(e);
       if (sig) return sig;
-      if (e instanceof InsufficientStockError) return conflict(`Kulang ang stock dito (kulang ng ${e.shortfall}). Bilangin ulit o bawasan.`);
+      if (e instanceof InsufficientStockError) return conflict(`Not enough stock here (short by ${e.shortfall}). Count again or lower the number.`);
       throw e;
     }
   }
 
   private async location(storeId: string, actor: Actor, locationId: string | undefined) {
     const loc = locationId ? await prisma.warehouse.findFirst({ where: { id: locationId, storeId, isActive: true }, select: { id: true, name: true } }) : null;
-    if (!loc) throw new StepError(invalid("Pumili ng lokasyon"));
+    if (!loc) throw new StepError(invalid("Choose a location"));
     const refusal = locationRefusal(actor, loc.id);
     if (refusal) throw new StepError(forbidden(refusal));
     return loc;
@@ -74,25 +74,28 @@ export class ResackService {
   private async kargador(storeId: string, kargadorId: string | undefined) {
     if (!kargadorId) return null;
     const k = await prisma.kargador.findFirst({ where: { id: kargadorId, storeId, isActive: true }, select: { id: true, name: true } });
-    if (!k) throw new StepError(invalid("Hindi kilalang kargador"));
+    if (!k) throw new StepError(invalid("Unknown porter"));
     return k;
   }
 
   /** Validate outputs against the input (same rice family, weighed in grams) and plan the numbers. */
   private plan(input: P, inputQty: number, outputs: OutputInput[], byId: Map<string, P>, inputValueMinor?: number) {
-    if (!Array.isArray(outputs) || outputs.length === 0) throw new ResackError("Ilagay kung ano ang lumabas");
+    if (!Array.isArray(outputs) || outputs.length === 0) throw new ResackError("Enter what came out");
     const outs = outputs.map((o) => {
       const p = o.productId ? byId.get(o.productId) : undefined;
-      if (!p || !p.isActive) throw new ResackError("Hindi kilalang produktong lumabas");
-      if (input.stockConversionFamily && p.stockConversionFamily && input.stockConversionFamily !== p.stockConversionFamily) {
-        throw new ResackError(`${p.name} ay hindi bigas na puwedeng i-resack mula sa ${input.name}`);
-      }
+      if (!p || !p.isActive) throw new ResackError("Unknown output product");
+      // Any rice into any rice (1 × Sinandomeng 25 kg → 1 × Dinorado 25 kg is a normal
+      // resack, marked "Variety change"). The product's conversion-family label is not
+      // checked here: it is set in different places with different spellings ("Bigas" by
+      // the import, "bigas" or a variety name from the Products page), and a mismatch
+      // blocked real resacks. What makes a product resackable is being weighed in grams
+      // (gramsOf below).
       const qty = o.quantity;
-      if (typeof qty !== "number") throw new ResackError(`Ilagay ang dami ng ${p.name}`);
+      if (typeof qty !== "number") throw new ResackError(`Enter the amount of ${p.name}`);
       return { product: p, quantity: qty, grams: gramsOf(p, qty) };
     });
     const ids = outs.map((o) => o.product.id);
-    if (new Set(ids).size !== ids.length) throw new ResackError("Isang beses lang bawat produkto ang lalabas");
+    if (new Set(ids).size !== ids.length) throw new ResackError("Each output product can be listed only once");
     const inputGrams = gramsOf(input, inputQty);
     const plan = planResack({
       input: { productId: input.id, name: input.name, variety: input.variety, grams: inputGrams, valueMinor: inputValueMinor ?? valueOf(input, inputQty) },
@@ -119,7 +122,7 @@ export class ResackService {
         varietyChange: plan.varietyChange, finishedById: actor.userId, finishedAt: new Date(),
       },
     });
-    if (claimed.count === 0) throw new StepError(conflict("Tapos o kanselado na ang resack na ito"));
+    if (claimed.count === 0) throw new StepError(conflict("This resack is already finished or cancelled"));
     await captureSignatures(tx, storeId, actor, { documentType: "RESACK", documentId: job.id, step: "FINISH", locationId: job.locationId }, signatures);
     await requireSignatures(tx, storeId, { documentType: "RESACK", documentId: job.id, step: "FINISH" }, { kargador: !!job.kargadorId });
     for (const [i, o] of outs.entries()) {
@@ -131,7 +134,7 @@ export class ResackService {
       approvalId = (await requestApproval(tx, {
         storeId, kind: "LOSS_OVER_TOLERANCE", documentType: "RESACK", documentId: job.id, locationId: job.locationId,
         // formatKilos already ends in "kg"; loose rice reads as its weight, sacks as a count.
-        summary: `Resack ${job.docNumber} sa ${locationName}: ${job.inputQty} × ${input.name} (${formatKilos(plan.gramsIn)}) → ${outs.map((o) => (o.product.stockBaseQuantity === 1 ? `${formatKilos(o.grams)} ${o.product.name}` : `${o.quantity} × ${o.product.name}`)).join(", ")} (${formatKilos(plan.gramsOut)}). Kulang ${formatKilos(plan.lossGrams)} (${(plan.lossBp / 100).toFixed(2)}%).`,
+        summary: `Resack ${job.docNumber} at ${locationName}: ${job.inputQty} × ${input.name} (${formatKilos(plan.gramsIn)}) → ${outs.map((o) => (o.product.stockBaseQuantity === 1 ? `${formatKilos(o.grams)} ${o.product.name}` : `${o.quantity} × ${o.product.name}`)).join(", ")} (${formatKilos(plan.gramsOut)}). Short ${formatKilos(plan.lossGrams)} (${(plan.lossBp / 100).toFixed(2)}%).`,
         detail: { gramsIn: plan.gramsIn, gramsOut: plan.gramsOut, lossGrams: plan.lossGrams, lossBp: plan.lossBp, lossValueMinor: plan.lossValueMinor, kargadorId: job.kargadorId },
         requestedById: actor.userId,
       })).id;
@@ -162,7 +165,7 @@ export class ResackService {
       await requireSignatures(tx, storeId, { documentType: "RESACK", documentId: job.id, step: "START" }, { kargador: !!data.kargadorId });
     }
     const level = await tx.stockLevel.findFirst({ where: { storeId, productId: data.input.id, warehouseId: data.locationId }, select: { id: true } });
-    if (!level) throw new StepError(conflict(`Walang ${data.input.name} na naitala sa lokasyong ito`));
+    if (!level) throw new StepError(conflict(`No ${data.input.name} is recorded at this location`));
     await releaseForTrip(tx, this.leg(storeId, data.input.id, data.locationId, actor, job.id, docNumber), 0, data.inputQty, "RESACK_OUT");
     await tx.auditLog.create({
       data: { storeId, actorType: "USER", actorId: actor.userId, action: "resack.start", entityType: "ResackJob", entityId: job.id, after: { inputQty: data.inputQty, inputGrams: data.inputGrams } },
@@ -181,13 +184,13 @@ export class ResackService {
       const loc = await this.location(storeId, actor, input.locationId);
       const kargador = await this.kargador(storeId, input.kargadorId);
       const qty = input.inputQty;
-      if (typeof qty !== "number") throw new ResackError("Ilagay ang bilang ng papasok");
+      if (typeof qty !== "number") throw new ResackError("Enter how many go in");
       const byId = await this.products(storeId, [input.inputProductId ?? "", ...(input.outputs ?? []).map((o) => o.productId ?? "")]);
       const inP = byId.get(input.inputProductId ?? "");
-      if (!inP || !inP.isActive) throw new ResackError("Hindi kilalang produktong papasok");
+      if (!inP || !inP.isActive) throw new ResackError("Unknown input product");
       const { outs, plan, inputGrams } = this.plan(inP, qty, input.outputs ?? [], byId);
       if (input.openSack && (outs.length !== 1 || outs[0]!.product.stockBaseQuantity !== 1)) {
-        throw new ResackError("Buksan ang sako: isang tingi (per kilo) na produkto lang ang lalabas");
+        throw new ResackError("Open a sack: only one loose (per kilo) product can come out");
       }
       let out = { id: "", docNumber: "", approvalId: null as string | null };
       await prisma.$transaction(async (tx) => {
@@ -208,10 +211,10 @@ export class ResackService {
       const loc = await this.location(storeId, actor, input.locationId);
       const kargador = await this.kargador(storeId, input.kargadorId);
       const qty = input.inputQty;
-      if (typeof qty !== "number") throw new ResackError("Ilagay ang bilang ng papasok");
+      if (typeof qty !== "number") throw new ResackError("Enter how many go in");
       const byId = await this.products(storeId, [input.inputProductId ?? ""]);
       const inP = byId.get(input.inputProductId ?? "");
-      if (!inP || !inP.isActive) throw new ResackError("Hindi kilalang produktong papasok");
+      if (!inP || !inP.isActive) throw new ResackError("Unknown input product");
       const inputGrams = gramsOf(inP, qty);
       let out = { id: "", docNumber: "" };
       await prisma.$transaction(async (tx) => {
@@ -229,7 +232,7 @@ export class ResackService {
       if (!job) throw new StepError(notFound());
       const refusal = locationRefusal(actor, job.locationId);
       if (refusal) throw new StepError(forbidden(refusal));
-      if (job.status !== "STARTED") throw new StepError(conflict("Tapos o kanselado na ang resack na ito"));
+      if (job.status !== "STARTED") throw new StepError(conflict("This resack is already finished or cancelled"));
       const byId = await this.products(storeId, [job.inputProductId, ...(input.outputs ?? []).map((o) => o.productId ?? "")]);
       const inP = byId.get(job.inputProductId)!;
       // The value is the one recorded at Simulan, so a cost change in between does not move it.
@@ -246,14 +249,14 @@ export class ResackService {
   async cancel(storeId: string, actor: Actor, id: string, reason?: string) {
     return this.run(async () => {
       const why = reason?.trim() ?? "";
-      if (why.length < 3) throw new ResackError("Ilagay ang dahilan ng pagkansela");
+      if (why.length < 3) throw new ResackError("Enter the reason for cancelling");
       const job = await prisma.resackJob.findFirst({ where: { id, storeId } });
       if (!job) throw new StepError(notFound());
       const refusal = locationRefusal(actor, job.locationId);
       if (refusal) throw new StepError(forbidden(refusal));
       await prisma.$transaction(async (tx) => {
         const claimed = await tx.resackJob.updateMany({ where: { id, storeId, status: "STARTED" }, data: { status: "CANCELLED", cancelReason: why, finishedById: actor.userId } });
-        if (claimed.count === 0) throw new StepError(conflict("Tapos o kanselado na ang resack na ito"));
+        if (claimed.count === 0) throw new StepError(conflict("This resack is already finished or cancelled"));
         await addForTrip(tx, this.leg(storeId, job.inputProductId, job.locationId, actor, id, `cancel ${job.docNumber}: ${why}`), job.inputQty, "RESACK_RETURN");
         await tx.auditLog.create({ data: { storeId, actorType: "USER", actorId: actor.userId, action: "resack.cancel", entityType: "ResackJob", entityId: id, after: { reason: why } } });
       });
@@ -277,7 +280,7 @@ export class ResackService {
         inputProduct: { select: { id: true, name: true } },
         location: { select: { id: true, name: true, code: true } },
         kargador: { select: { id: true, name: true } },
-        outputs: { include: { product: { select: { id: true, name: true } } } },
+        outputs: { include: { product: { select: { id: true, name: true, soldByWeight: true } } } },
       },
     });
     return rows.map((j) => ({

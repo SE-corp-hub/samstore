@@ -43,10 +43,10 @@ test("M3 tanggapin pabalik: the return is counted; anything missing is short", (
 test("M3 read-back sentences name the rice, the places and the kargador", () => {
   assert.equal(
     readBack("RELEASE", { qty: 2, product: "Sinandomeng 25 kg", from: "Store 2", to: "Store 1", kargador: "Mang Boy", customer: "Juan" }),
-    "Ilalabas: 2 × Sinandomeng 25 kg mula Store 2, dala ni Mang Boy, para sa customer (Juan).",
+    "Release: 2 × Sinandomeng 25 kg from Store 2, carried by Mang Boy, for customer (Juan).",
   );
   assert.equal(
     readBack("RECEIVE", { qty: 19, product: "Dinorado 25 kg", from: "Warehouse", to: "Store 1", kargador: "Mang Boy" }),
-    "Tatanggapin sa Store 1: 19 × Dinorado 25 kg galing Warehouse, dala ni Mang Boy.",
+    "Receive at Store 1: 19 × Dinorado 25 kg from Warehouse, carried by Mang Boy.",
   );
 });

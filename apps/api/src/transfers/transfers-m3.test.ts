@@ -114,7 +114,7 @@ test("M3 E2E: S1 sells 2 sacks from S2 — held, released with signatures, deliv
   // Ilabas at S2 needs the staff AND the kargador.
   const noKargadorSig = await flow.release(fx.storeId, fx.staff2, tripId, { quantity: 2, kargadorId: fx.kargadorId, signatures: [{ signerKind: "STAFF", imagePng: PNG }] });
   assert.equal(noKargadorSig.ok, false);
-  assert.match(msg(noKargadorSig), /Kulang ang pirma: kargador/);
+  assert.match(msg(noKargadorSig), /Missing signature: porter/);
   assert.deepEqual(await level(fx, fx.s2), { quantityOnHand: 10, quantityReserved: 2 }, "nothing moved");
   const rel = await flow.release(fx.storeId, fx.staff2, tripId, { quantity: 2, kargadorId: fx.kargadorId, signatures: sigs(fx.kargadorId) });
   assert.equal(rel.ok, true, msg(rel));
@@ -189,7 +189,7 @@ test("M3: 19 of 20 received flags 1 short with both signatures and goes to the o
   const approval = await prisma.approvalRequest.findUniqueOrThrow({ where: { id: got.value.approvalId! } });
   assert.equal(approval.kind, "TRANSIT_SHORT");
   assert.deepEqual(approval.approverRoles, ["OWNER"]);
-  assert.match(approval.summary, /Kulang sa lipat TR-\d{6}: 1 × Sinandomeng 25 kg .*dala ni Mang Boy/);
+  assert.match(approval.summary, /Short on transfer TR-\d{6}: 1 × Sinandomeng 25 kg .*carried by Mang Boy/);
   const receiveSigs = await prisma.signature.findMany({ where: { storeId: fx.storeId, documentId: req.value.id, step: "RECEIVE" }, select: { signerKind: true } });
   assert.deepEqual(receiveSigs.map((s) => s.signerKind).sort(), ["KARGADOR", "STAFF"], "both signatures on the trip");
   const t = await prisma.stockTransfer.findUniqueOrThrow({ where: { id: req.value.id } });

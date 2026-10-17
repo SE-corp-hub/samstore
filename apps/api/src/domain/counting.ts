@@ -44,10 +44,10 @@ export function countedUnits(p: Pick<Costed, "stockBaseUnit" | "stockBaseQuantit
   if (isLooseP(p)) {
     const text = typeof raw === "number" ? String(raw) : typeof raw === "string" ? raw.trim().replace(",", ".") : "";
     const m = /^(\d{1,7})(?:\.(\d{1,3}))?$/.exec(text);
-    if (!m) throw new CountError("Ilagay ang timbang sa kilo (hal. 12.5) — 0 kung wala");
+    if (!m) throw new CountError("Enter the weight in kilos (e.g. 12.5) — 0 if none");
     return Number(m[1]) * 1000 + Number((m[2] ?? "").padEnd(3, "0") || 0);
   }
-  if (typeof raw !== "number" || !Number.isInteger(raw) || raw < 0 || raw > 1_000_000) throw new CountError("Ilagay ang bilang (0 kung wala)");
+  if (typeof raw !== "number" || !Number.isInteger(raw) || raw < 0 || raw > 1_000_000) throw new CountError("Enter the count (0 if none)");
   return raw;
 }
 
@@ -91,14 +91,14 @@ export function balanceOf(base: number, movements: { type: string; delta: number
 
 export const WRITE_OFF_REASONS = ["TAPON", "BASA", "BUKBOK", "SAMPLE", "BIGAY", "IBA"] as const;
 export type WriteOffReason = (typeof WRITE_OFF_REASONS)[number];
-export const WRITE_OFF_LABEL: Record<WriteOffReason, string> = { TAPON: "Natapon", BASA: "Nabasa", BUKBOK: "May bukbok", SAMPLE: "Sample", BIGAY: "Ibinigay", IBA: "Iba pa" };
+export const WRITE_OFF_LABEL: Record<WriteOffReason, string> = { TAPON: "Spilled", BASA: "Got wet", BUKBOK: "Weevils", SAMPLE: "Sample", BIGAY: "Given away", IBA: "Other" };
 
 /** A write-off: how big it is against what the location holds. Over 1% → the owner. */
 export function writeOffCheck(onHandBefore: number, qty: unknown, reason: unknown, note: unknown): { qty: number; reason: WriteOffReason; lossBp: number; needsApproval: boolean } {
-  if (typeof qty !== "number" || !Number.isInteger(qty) || qty <= 0) throw new CountError("Ilagay kung ilan ang ibabawas");
-  if (!WRITE_OFF_REASONS.includes(reason as WriteOffReason)) throw new CountError("Pumili ng dahilan");
-  if (reason === "IBA" && (typeof note !== "string" || note.trim().length < 3)) throw new CountError("Ilagay ang dahilan");
-  if (qty > onHandBefore) throw new CountError(`${onHandBefore} lang ang nasa sistema dito — bilangin muna`);
+  if (typeof qty !== "number" || !Number.isInteger(qty) || qty <= 0) throw new CountError("Enter how many to write off");
+  if (!WRITE_OFF_REASONS.includes(reason as WriteOffReason)) throw new CountError("Choose a reason");
+  if (reason === "IBA" && (typeof note !== "string" || note.trim().length < 3)) throw new CountError("Enter the reason");
+  if (qty > onHandBefore) throw new CountError(`The system shows only ${onHandBefore} here — count it first`);
   const lossBp = lossBasisPoints(onHandBefore, onHandBefore - qty);
   return { qty, reason: reason as WriteOffReason, lossBp, needsApproval: lossBp > 100 };
 }

@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { API_URL } from "../../config";
 import { adminHeaders, getAdminRole, roleCan } from "../../lib/admin";
+import { askConfirm } from "../../lib/ask";
 
 interface Member {
   userId: string;
@@ -62,7 +63,7 @@ export default function TeamPanel() {
   useEffect(() => { load(); }, [load]);
 
   const locLabel = (id: string | null | undefined) => {
-    if (!id) return "Lahat ng lokasyon";
+    if (!id) return "All locations";
     const l = locations.find((x) => x.id === id);
     return l ? `${l.code ? `${l.code} · ` : ""}${l.name}` : "—";
   };
@@ -92,7 +93,7 @@ export default function TeamPanel() {
       }
       if (data?.tempPassword) setTempPassword(data.tempPassword);
       setForm({ phone: "", email: "", name: "", role: "STAFF", homeLocationId: "" });
-      setNotice("Naidagdag na. Mag-set ng PIN para makapag-login sila sa sariling phone.");
+      setNotice("Added. Set a PIN so they can log in on their own phone.");
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Invite failed");
@@ -111,7 +112,7 @@ export default function TeamPanel() {
     });
     const d = await res.json().catch(() => null);
     if (!res.ok) {
-      setError(errText(d, "Hindi na-save"));
+      setError(errText(d, "Not saved"));
       return false;
     }
     setNotice(done);
@@ -122,7 +123,7 @@ export default function TeamPanel() {
   const savePin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!pinFor) return;
-    if (await patchPerson(pinFor, { pin: pinValue }, "Na-set ang PIN. Na-sign out siya sa lahat ng phone; mag-login ulit gamit ang bagong PIN.")) {
+    if (await patchPerson(pinFor, { pin: pinValue }, "PIN set. They were signed out on every phone; log in again with the new PIN.")) {
       setPinFor(null);
       setPinValue("");
     }
@@ -138,7 +139,7 @@ export default function TeamPanel() {
   };
 
   const deactivate = async (userId: string) => {
-    if (!confirm("Alisin ang taong ito sa tindahan? Mala-logout siya sa lahat ng phone.")) return;
+    if (!(await askConfirm("Remove this person from the store? They will be logged out on every phone.", { ok: "Remove", danger: true }))) return;
     await fetch(`${API_URL}/admin/team/${userId}`, { method: "DELETE", headers: adminHeaders() });
     await load();
   };
@@ -158,7 +159,7 @@ export default function TeamPanel() {
       {canManage && (
         <form onSubmit={invite} className="card mb-4">
           <div className="card-body">
-            <h2 className="h6 card-title">Magdagdag ng tao</h2>
+            <h2 className="h6 card-title">Add a person</h2>
             <div className="row g-2">
               <div className="col-md-3">
                 <label className="form-label small mb-1" htmlFor="tm-phone">Mobile number</label>
@@ -169,7 +170,7 @@ export default function TeamPanel() {
                 <input id="tm-email" className="form-control" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
               </div>
               <div className="col-md-2">
-                <label className="form-label small mb-1" htmlFor="tm-name">Pangalan</label>
+                <label className="form-label small mb-1" htmlFor="tm-name">Name</label>
                 <input id="tm-name" className="form-control" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
               </div>
               <div className="col-md-2">
@@ -179,15 +180,15 @@ export default function TeamPanel() {
                 </select>
               </div>
               <div className="col-md-2">
-                <label className="form-label small mb-1" htmlFor="tm-home">Lokasyon</label>
+                <label className="form-label small mb-1" htmlFor="tm-home">Location</label>
                 <select id="tm-home" className="form-select" value={form.homeLocationId} onChange={(e) => setForm({ ...form, homeLocationId: e.target.value })}>
-                  <option value="">Lahat</option>
+                  <option value="">All</option>
                   {locations.map((l) => <option key={l.id} value={l.id}>{locLabel(l.id)}</option>)}
                 </select>
               </div>
             </div>
             <button className="btn btn-success mt-3" type="submit" disabled={inviting || (!form.phone.trim() && !form.email.trim())}>
-              {inviting ? "Idinadagdag…" : "Idagdag"}
+              {inviting ? "Adding…" : "Add"}
             </button>
             <p className="text-muted small mt-2 mb-0">
               <strong>MANAGER</strong> runs the store · <strong>STAFF</strong> sells, releases and receives at their location · <strong>SALES_AGENT</strong> takes orders · <strong>DELIVERY</strong> courier app only.
@@ -200,18 +201,18 @@ export default function TeamPanel() {
       {pinFor && (
         <form onSubmit={savePin} className="card mb-4 border-success">
           <div className="card-body">
-            <h2 className="h6">PIN para kay {members.find((m) => m.userId === pinFor)?.name ?? "staff"}</h2>
-            <label className="form-label small" htmlFor="tm-pin">4 na numero (huwag 1111 o 1234)</label>
+            <h2 className="h6">PIN for {members.find((m) => m.userId === pinFor)?.name ?? "staff"}</h2>
+            <label className="form-label small" htmlFor="tm-pin">4 digits (not 1111 or 1234)</label>
             <div className="d-flex gap-2" style={{ maxWidth: 320 }}>
               <input
                 id="tm-pin" className="form-control form-control-lg text-center" inputMode="numeric" autoComplete="off"
                 maxLength={4} pattern="\d{4}" value={pinValue} onChange={(e) => setPinValue(e.target.value.replace(/\D/g, "").slice(0, 4))}
                 style={{ letterSpacing: "0.5em", fontVariantNumeric: "tabular-nums" }}
               />
-              <button className="btn btn-success" type="submit" disabled={pinValue.length !== 4}>I-save</button>
-              <button className="btn btn-outline-secondary" type="button" onClick={() => { setPinFor(null); setPinValue(""); }}>Bumalik</button>
+              <button className="btn btn-success" type="submit" disabled={pinValue.length !== 4}>Save</button>
+              <button className="btn btn-outline-secondary" type="button" onClick={() => { setPinFor(null); setPinValue(""); }}>Back</button>
             </div>
-            <div className="form-text">Sabihin ang PIN nang personal. Mapapalitan nila ito sa sarili nilang phone.</div>
+            <div className="form-text">Tell them the PIN in person. They can change it on their own phone.</div>
           </div>
         </form>
       )}
@@ -221,10 +222,10 @@ export default function TeamPanel() {
           <table className="table table-hover align-middle">
             <thead>
               <tr>
-                <th>Tao</th>
+                <th>Person</th>
                 <th>Mobile / email</th>
                 <th>Role</th>
-                <th>Lokasyon</th>
+                <th>Location</th>
                 <th>PIN</th>
                 <th className="text-end">Actions</th>
               </tr>
@@ -248,28 +249,28 @@ export default function TeamPanel() {
                       <select
                         className="form-select form-select-sm" style={{ width: 170 }} aria-label={`Home location of ${m.name ?? m.userId}`}
                         value={m.homeLocationId ?? ""}
-                        onChange={(e) => patchPerson(m.userId, { homeLocationId: e.target.value || null }, "Na-save ang lokasyon.")}
+                        onChange={(e) => patchPerson(m.userId, { homeLocationId: e.target.value || null }, "Location saved.")}
                       >
-                        <option value="">Lahat ng lokasyon</option>
+                        <option value="">All locations</option>
                         {locations.map((l) => <option key={l.id} value={l.id}>{locLabel(l.id)}</option>)}
                       </select>
                     ) : (
-                      <span className="small">{m.role === "OWNER" || m.role === "MANAGER" ? "Lahat ng lokasyon" : locLabel(m.homeLocationId)}</span>
+                      <span className="small">{m.role === "OWNER" || m.role === "MANAGER" ? "All locations" : locLabel(m.homeLocationId)}</span>
                     )}
                   </td>
                   <td>
-                    {m.pinLocked ? <span className="badge text-bg-danger">Naka-lock</span>
-                      : m.hasPin ? <span className="badge text-bg-success">May PIN</span>
-                      : <span className="badge text-bg-secondary">Wala pa</span>}
+                    {m.pinLocked ? <span className="badge text-bg-danger">Locked</span>
+                      : m.hasPin ? <span className="badge text-bg-success">Has PIN</span>
+                      : <span className="badge text-bg-secondary">None yet</span>}
                   </td>
                   <td className="text-end">
                     {canManage && (
                       <div className="d-flex flex-wrap gap-1 justify-content-end">
                         <button className="btn btn-sm btn-outline-success" onClick={() => { setPinFor(m.userId); setPinValue(""); }}>
-                          <i className="bi bi-123 me-1"></i>{m.hasPin ? "Palitan ang PIN" : "Mag-set ng PIN"}
+                          <i className="bi bi-123 me-1"></i>{m.hasPin ? "Change PIN" : "Set PIN"}
                         </button>
                         {m.pinLocked && (
-                          <button className="btn btn-sm btn-outline-warning" onClick={() => patchPerson(m.userId, { unlock: true }, "Na-unlock ang PIN.")}>
+                          <button className="btn btn-sm btn-outline-warning" onClick={() => patchPerson(m.userId, { unlock: true }, "PIN unlocked.")}>
                             <i className="bi bi-unlock me-1"></i>Unlock
                           </button>
                         )}

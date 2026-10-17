@@ -1,13 +1,14 @@
 // Rice Ops M10 — weak signal. A signed step is sent with its own Idempotency-Key. If the
-// phone has no signal, the step waits on the phone ("Naghihintay ipadala") and is sent
+// phone has no signal, the step waits on the phone ("Waiting to send") and is sent
 // when the signal returns (and every 20 s). The server answers the same key once, so a
 // step that already reached it before the signal dropped never happens twice.
-// Kept in this browser only (localStorage); a step that the server refuses later is
-// listed under "Hindi naipadala" with the reason.
+// Kept in this browser only (localStorage). A step stays queued while the login has expired or
+// the server is down (lib/retryable.ts); only a clear refusal is listed under "Not sent".
 
 import { API_URL } from "../config";
 import { adminHeaders } from "./admin";
 import { newSaleKey } from "./saleKey";
+import { keepInQueue } from "./retryable";
 
 const QUEUE = "rice-offline-queue-v1";
 const FAILED = "rice-offline-failed-v1";
@@ -65,7 +66,7 @@ export async function sendStep(path: string, body: unknown, label: string): Prom
   }
   const items = queuedSteps();
   items.push({ id, path, body, label, createdAt: Date.now(), attempts: 0 });
-  if (!write(QUEUE, items)) return { status: "sent", ok: false, data: { message: "Walang signal at puno ang phone — subukan ulit mamaya" } };
+  if (!write(QUEUE, items)) return { status: "sent", ok: false, data: { message: "No signal and the phone is full — try again later" } };
   return { status: "queued" };
 }
 
@@ -88,7 +89,12 @@ export async function flushQueue(): Promise<{ sent: number; failed: number }> {
         write(QUEUE, queuedSteps().map((s) => (s.id === next.id ? { ...s, attempts: s.attempts + 1 } : s)));
         break;
       }
-      if (r.status === 409 && /Pinoproseso/.test(String(r.data?.message ?? ""))) break; // still running server-side — try again later
+      if (r.status === 409 && /Pinoproseso|process/i.test(String(r.data?.message ?? ""))) break; // still running server-side — try again later
+      if (!r.ok && keepInQueue(r.status, next.attempts)) {
+        // The login ran out or the server was busy: the sale stays on the phone and goes later.
+        write(QUEUE, queuedSteps().map((s) => (s.id === next.id ? { ...s, attempts: s.attempts + 1 } : s)));
+        break;
+      }
       write(QUEUE, queuedSteps().filter((s) => s.id !== next.id));
       if (r.ok) sent++;
       else {

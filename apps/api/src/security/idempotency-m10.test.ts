@@ -76,7 +76,7 @@ test("M10: two sends at once — the step runs once; the other is told to wait o
   // done): either "Pinoproseso pa" (409) or the first one's stored answer — never a second run.
   for (const r of results) {
     if (r.status === "fulfilled") assert.deepEqual(r.value, { ok: true });
-    else assert.match(JSON.stringify((r.reason as HttpException).getResponse()), /Pinoproseso pa/);
+    else assert.match(JSON.stringify((r.reason as HttpException).getResponse()), /still being processed/);
   }
   assert.deepEqual(await lastValueFrom(i.intercept(ctx(u, k), slow)), { ok: true }, "afterwards the stored answer comes back");
   assert.equal(runs, 1);

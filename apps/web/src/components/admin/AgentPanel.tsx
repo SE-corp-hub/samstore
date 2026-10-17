@@ -1,8 +1,8 @@
 "use client";
 
 // Rice Ops M7 — the sales agent's phone: three buttons.
-//   Bagong order — customer, rice, amount, address, preferred store → Naghihintay
-//   Mga order ko — every order and where it stands (Aprubado, Nasa daan, Naihatid, Bayad na…)
+//   New order    — customer, rice, amount, address, preferred store → Waiting
+//   My orders    — every order and where it stands (Approved, On the way, Delivered, Paid…)
 //   Status       — only the ones still moving
 // One key per order, kept until it is saved: a double-tap is one order.
 
@@ -47,9 +47,9 @@ export default function AgentPanel() {
     const list = screen === "mine" ? orders : moving;
     return (
       <div style={{ fontSize: 18, maxWidth: 620 }}>
-        <button type="button" className="btn btn-link px-0 mb-2" onClick={() => setScreen("home")}>← Bumalik</button>
-        <h1 className="h4">{screen === "mine" ? "Mga order ko" : "Status"}</h1>
-        {list.length === 0 ? <p className="text-muted">Wala.</p> : (
+        <button type="button" className="btn btn-link px-0 mb-2" onClick={() => setScreen("home")}>← Back</button>
+        <h1 className="h4">{screen === "mine" ? "My orders" : "Status"}</h1>
+        {list.length === 0 ? <p className="text-muted">None.</p> : (
           <div className="list-group">
             {list.map((o) => (
               <div key={o.id} className="list-group-item py-3">
@@ -59,7 +59,7 @@ export default function AgentPanel() {
                 </div>
                 <div className="small text-muted">{o.orderNumber} · {o.location?.name} · {new Date(o.createdAt).toLocaleString("en-PH")}</div>
                 <div>{o.lines.map((l) => (l.soldBy === "PIECE" || !l.grams ? `${l.quantity} × ${l.name}` : `${kg(l.grams)} ${l.name}`)).join(", ")} — <strong>{peso(o.totalMinor)}</strong></div>
-                {o.declineReason && <div className="text-danger">Dahilan: {o.declineReason}</div>}
+                {o.declineReason && <div className="text-danger">Reason: {o.declineReason}</div>}
               </div>
             ))}
           </div>
@@ -69,10 +69,10 @@ export default function AgentPanel() {
   }
   return (
     <div style={{ fontSize: 18, maxWidth: 420 }}>
-      <h1 className="h4 mb-3">Order ng agent</h1>
+      <h1 className="h4 mb-3">Agent orders</h1>
       <div className="d-grid gap-3">
-        <button type="button" className="btn btn-success btn-lg py-4 fs-4" onClick={() => setScreen("new")}>Bagong order</button>
-        <button type="button" className="btn btn-outline-dark btn-lg py-4 fs-4" onClick={() => setScreen("mine")}>Mga order ko</button>
+        <button type="button" className="btn btn-success btn-lg py-4 fs-4" onClick={() => setScreen("new")}>New order</button>
+        <button type="button" className="btn btn-outline-dark btn-lg py-4 fs-4" onClick={() => setScreen("mine")}>My orders</button>
         <button type="button" className="btn btn-outline-dark btn-lg py-4 fs-4" onClick={() => setScreen("status")}>Status {moving.length > 0 && <span className="badge text-bg-warning">{moving.length}</span>}</button>
       </div>
     </div>
@@ -97,7 +97,7 @@ function NewOrder({ onDone, onCancel }: { onDone: () => void; onCancel: () => vo
   const load = useCallback(async (loc?: string) => {
     const res = await fetch(`${API_URL}/admin/agent-orders/catalog${loc ? `?locationId=${encodeURIComponent(loc)}` : ""}`, { headers: adminHeaders() });
     const d = (await res.json().catch(() => null)) as ApiBody | null;
-    if (!res.ok || !d) { setError(errText(d, "Hindi ma-load")); return; }
+    if (!res.ok || !d) { setError(errText(d, "Could not load")); return; }
     const stores = (d.locations as Loc[]).filter((l) => l.type === "STORE");
     setLocations(stores);
     setItems(d.products as Item[]);
@@ -127,12 +127,12 @@ function NewOrder({ onDone, onCancel }: { onDone: () => void; onCancel: () => vo
     try {
       const res = await fetch(`${API_URL}/admin/agent-orders`, { method: "POST", headers: { "Content-Type": "application/json", ...adminHeaders() }, body: JSON.stringify(body) });
       const d = (await res.json().catch(() => null)) as ApiBody | null;
-      if (!res.ok) { setError(errText(d, "Hindi naipadala ang order")); return; }
+      if (!res.ok) { setError(errText(d, "The order was not sent")); return; }
       keyRef.current = null;
-      toast(`Naipadala: ${String(d?.orderNumber ?? "")} — naghihintay sa tindahan`);
+      toast(`Sent: ${String(d?.orderNumber ?? "")} — waiting for the store`);
       onDone();
     } catch {
-      setError("Walang signal — subukan ulit. Hindi madodoble ang order.");
+      setError("No signal — try again. The order will not be doubled.");
     } finally {
       setBusy(false);
     }
@@ -145,17 +145,17 @@ function NewOrder({ onDone, onCancel }: { onDone: () => void; onCancel: () => vo
         <div className="card-body">
           <h2 className="h5">{it?.name} · {peso(it?.priceMinor ?? 0)}{it?.loose ? "/kg" : ""}</h2>
           {it?.loose && (
-            <div className="btn-group w-100 mb-3" role="group" aria-label="Kilo o piso?">
-              <button type="button" className={`btn btn-lg ${editing.mode === "KILO" ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setEditing({ ...editing, mode: "KILO", value: "" })}>Kilo</button>
-              <button type="button" className={`btn btn-lg ${editing.mode === "PESO" ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setEditing({ ...editing, mode: "PESO", value: "" })}>Piso</button>
+            <div className="btn-group w-100 mb-3" role="group" aria-label="Kilos or pesos?">
+              <button type="button" className={`btn btn-lg ${editing.mode === "KILO" ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setEditing({ ...editing, mode: "KILO", value: "" })}>Kilos</button>
+              <button type="button" className={`btn btn-lg ${editing.mode === "PESO" ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setEditing({ ...editing, mode: "PESO", value: "" })}>Pesos</button>
             </div>
           )}
           <NumPad value={editing.value} onChange={(v) => setEditing({ ...editing, value: v })} decimals={editing.mode === "KILO" ? 3 : editing.mode === "PESO" ? 2 : 0}
-            label="Dami" unit={editing.mode === "PESO" ? "₱" : editing.mode === "KILO" ? "kg" : "sako"} />
+            label="Amount" unit={editing.mode === "PESO" ? "₱" : editing.mode === "KILO" ? "kg" : "sacks"} />
           <div className="fs-5 mt-2">= <strong>{peso(amount(editing))}</strong></div>
           <div className="d-flex justify-content-between mt-3">
-            <button type="button" className="btn btn-outline-secondary btn-lg" onClick={() => setEditing(null)}>Bumalik</button>
-            <button type="button" className="btn btn-success btn-lg" disabled={amount(editing) <= 0} onClick={() => { setLines([...lines.filter((l) => l.productId !== editing.productId), editing]); setEditing(null); }}>Idagdag</button>
+            <button type="button" className="btn btn-outline-secondary btn-lg" onClick={() => setEditing(null)}>Back</button>
+            <button type="button" className="btn btn-success btn-lg" disabled={amount(editing) <= 0} onClick={() => { setLines([...lines.filter((l) => l.productId !== editing.productId), editing]); setEditing(null); }}>Add</button>
           </div>
         </div>
       </div>
@@ -164,10 +164,10 @@ function NewOrder({ onDone, onCancel }: { onDone: () => void; onCancel: () => vo
 
   return (
     <div style={{ fontSize: 18, maxWidth: 620 }}>
-      <button type="button" className="btn btn-link px-0 mb-2" onClick={onCancel}>← Bumalik</button>
-      <h1 className="h4">Bagong order</h1>
+      <button type="button" className="btn btn-link px-0 mb-2" onClick={onCancel}>← Back</button>
+      <h1 className="h4">New order</h1>
       {error && <div className="alert alert-danger py-2" role="alert">{error}</div>}
-      <label className="form-label" htmlFor="ag-store">Tindahang magdedeliver</label>
+      <label className="form-label" htmlFor="ag-store">Store that delivers</label>
       <select id="ag-store" className="form-select form-select-lg mb-3" value={locationId} onChange={(e) => { setLocationId(e.target.value); setLines([]); }}>
         {locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
       </select>
@@ -185,24 +185,24 @@ function NewOrder({ onDone, onCancel }: { onDone: () => void; onCancel: () => vo
         <ul className="list-group mb-3" style={{ fontVariantNumeric: "tabular-nums" }}>
           {lines.map((l) => (
             <li key={l.productId} className="list-group-item d-flex justify-content-between">
-              <span>{l.mode === "PIECE" ? `${l.value} × ` : l.mode === "KILO" ? `${l.value} kg ` : `₱${l.value} na `}{byId.get(l.productId)?.name}</span>
-              <span>{peso(amount(l))} <button type="button" className="btn btn-link text-danger p-0 ms-2" aria-label="Alisin" onClick={() => setLines(lines.filter((x) => x !== l))}>×</button></span>
+              <span>{l.mode === "PIECE" ? `${l.value} × ` : l.mode === "KILO" ? `${l.value} kg ` : `₱${l.value} of `}{byId.get(l.productId)?.name}</span>
+              <span>{peso(amount(l))} <button type="button" className="btn btn-link text-danger p-0 ms-2" aria-label="Remove" onClick={() => setLines(lines.filter((x) => x !== l))}>×</button></span>
             </li>
           ))}
-          <li className="list-group-item d-flex justify-content-between fw-bold"><span>Kabuuan</span><span>{peso(total)}</span></li>
+          <li className="list-group-item d-flex justify-content-between fw-bold"><span>Total</span><span>{peso(total)}</span></li>
         </ul>
       )}
-      <label className="form-label" htmlFor="ag-name">Pangalan ng customer</label>
+      <label className="form-label" htmlFor="ag-name">Customer name</label>
       <input id="ag-name" className="form-control form-control-lg mb-2" value={name} onChange={(e) => setName(e.target.value.slice(0, 80))} />
-      <label className="form-label" htmlFor="ag-phone">Mobile ng customer</label>
+      <label className="form-label" htmlFor="ag-phone">Customer mobile</label>
       <input id="ag-phone" className="form-control form-control-lg mb-2" inputMode="tel" placeholder="09xx xxx xxxx" value={phone} onChange={(e) => setPhone(e.target.value.slice(0, 16))} />
       <label className="form-label" htmlFor="ag-addr">Address</label>
       <input id="ag-addr" className="form-control form-control-lg mb-2" value={address} onChange={(e) => setAddress(e.target.value.slice(0, 200))} />
-      <label className="form-label" htmlFor="ag-mark">Palatandaan (kung meron)</label>
+      <label className="form-label" htmlFor="ag-mark">Landmark (if any)</label>
       <input id="ag-mark" className="form-control form-control-lg mb-2" value={landmark} onChange={(e) => setLandmark(e.target.value.slice(0, 120))} />
-      <label className="form-label" htmlFor="ag-note">Paalala sa tindahan (kung meron)</label>
+      <label className="form-label" htmlFor="ag-note">Note for the store (if any)</label>
       <input id="ag-note" className="form-control form-control-lg mb-3" value={note} onChange={(e) => setNote(e.target.value.slice(0, 300))} />
-      <button type="button" className="btn btn-success btn-lg w-100" disabled={!ready} onClick={() => void save()}>{busy ? "Sandali…" : `Ipadala ang order (${peso(total)})`}</button>
+      <button type="button" className="btn btn-success btn-lg w-100" disabled={!ready} onClick={() => void save()}>{busy ? "Please wait…" : `Send the order (${peso(total)})`}</button>
     </div>
   );
 }

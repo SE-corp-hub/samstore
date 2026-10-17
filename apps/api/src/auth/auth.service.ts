@@ -212,7 +212,7 @@ export class AuthService {
    * for 15 minutes (the password login still works, and the owner can unlock).
    */
   async pinLogin(input: { phone?: string; pin?: string }): Promise<AuthResult<{ token: string; user: AuthUserSummary }>> {
-    const generic = { ok: false as const, error: { type: "unauthorized" as const, message: "Mali ang numero o PIN" } };
+    const generic = { ok: false as const, error: { type: "unauthorized" as const, message: "Wrong number or PIN" } };
     const phone = toE164(input.phone);
     const pin = typeof input.pin === "string" ? input.pin : "";
     const user = phone
@@ -235,14 +235,14 @@ export class AuthService {
     if (reserved.length === 0) {
       const locked = await prisma.user.findUnique({ where: { id: user.id }, select: { pinLockedUntil: true } });
       const mins = Math.max(1, Math.ceil(pinLockSecondsLeft(locked?.pinLockedUntil, new Date()) / 60));
-      return { ok: false, error: { type: "rate_limited", message: `Naka-lock ang PIN. Subukan ulit sa loob ng ${mins} minuto, o magpa-unlock sa may-ari.` } };
+      return { ok: false, error: { type: "rate_limited", message: `The PIN is locked. Try again in ${mins} minutes, or ask the owner to unlock it.` } };
     }
     if (!(await verifyPassword(pin, user.pinHash))) {
       const used = reserved[0]!.pinFailedCount;
       if (used === 0) {
-        return { ok: false, error: { type: "rate_limited", message: `Naka-lock ang PIN nang ${PIN_LOCK_MINUTES} minuto (${PIN_MAX_FAILS} maling subok).` } };
+        return { ok: false, error: { type: "rate_limited", message: `The PIN is locked for ${PIN_LOCK_MINUTES} minutes (${PIN_MAX_FAILS} wrong tries).` } };
       }
-      return { ok: false, error: { type: "unauthorized", message: `Mali ang numero o PIN. ${PIN_MAX_FAILS - used} subok na lang.` } };
+      return { ok: false, error: { type: "unauthorized", message: `Wrong number or PIN. ${PIN_MAX_FAILS - used} tries left.` } };
     }
     await prisma.user.update({ where: { id: user.id }, data: { pinFailedCount: 0, pinLockedUntil: null } });
 
@@ -254,7 +254,7 @@ export class AuthService {
     });
     const usable = memberships.find((m) => m.store.status === "ACTIVE");
     if (!usable && user.role !== "PLATFORM_ADMIN") {
-      return { ok: false, error: { type: "forbidden", message: "Walang aktibong tindahan ang account na ito" } };
+      return { ok: false, error: { type: "forbidden", message: "This account has no active store" } };
     }
     const token = signToken(
       { sub: user.id, role: user.role, email: user.email ?? "", phone: user.phone ?? undefined, storeId: usable?.storeId, tv: user.tokenVersion },

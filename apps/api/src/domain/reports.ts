@@ -22,16 +22,16 @@ export function manilaDate(d: Date): string {
 
 /** [from, to) of a Manila day, as UTC instants. */
 export function dayRange(date: string): { from: Date; to: Date } {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new ReportError("Petsa: YYYY-MM-DD");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new ReportError("Date: YYYY-MM-DD");
   const from = new Date(`${date}T00:00:00+08:00`);
-  if (Number.isNaN(from.getTime()) || manilaDate(from) !== date) throw new ReportError("Mali ang petsa");
+  if (Number.isNaN(from.getTime()) || manilaDate(from) !== date) throw new ReportError("Wrong date");
   return { from, to: new Date(from.getTime() + 86_400_000) };
 }
 
 /** [from, to) of a Manila month "2026-10". */
 export function monthRange(month: string): { from: Date; to: Date } {
   const m = /^(\d{4})-(\d{2})$/.exec(month);
-  if (!m || Number(m[2]) < 1 || Number(m[2]) > 12) throw new ReportError("Buwan: YYYY-MM");
+  if (!m || Number(m[2]) < 1 || Number(m[2]) > 12) throw new ReportError("Month: YYYY-MM");
   const y = Number(m[1]);
   const mo = Number(m[2]);
   const from = new Date(`${month}-01T00:00:00+08:00`);

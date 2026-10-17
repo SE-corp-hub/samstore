@@ -16,7 +16,7 @@ export const DEFAULT_METHODS: {
   code: string; label: string; kind: "CASH" | "CREDIT" | "EWALLET" | "TRANSFER"; requiresReference: boolean; sortOrder: number;
 }[] = [
   { code: "cash", label: "Cash", kind: "CASH", requiresReference: false, sortOrder: 0 },
-  { code: "credit", label: "Utang (credit)", kind: "CREDIT", requiresReference: false, sortOrder: 1 },
+  { code: "credit", label: "Credit", kind: "CREDIT", requiresReference: false, sortOrder: 1 },
   { code: "gcash", label: "GCash", kind: "EWALLET", requiresReference: true, sortOrder: 2 },
   { code: "maya", label: "Maya", kind: "EWALLET", requiresReference: true, sortOrder: 3 },
   { code: "bank_transfer", label: "Bank transfer", kind: "TRANSFER", requiresReference: true, sortOrder: 4 },
@@ -125,7 +125,7 @@ export async function prepareTenders(input: PrepareInput): Promise<TenderResult<
     }
     if (method.kind === "CREDIT") {
       if (!input.storeCustomerId) {
-        return { ok: false, error: { type: "validation", errors: ["Utang requires a customer linked to the order"] } };
+        return { ok: false, error: { type: "validation", errors: ["Credit requires a customer linked to the order"] } };
       }
       // Fast-fail on the customer's remaining limit BEFORE anything is written.
       const check = await credit.checkCredit(storeId, input.storeCustomerId, t.amountMinor);

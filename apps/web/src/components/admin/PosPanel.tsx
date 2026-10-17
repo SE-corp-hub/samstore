@@ -334,11 +334,11 @@ export default function PosPanel({ onNavigate }: { onNavigate?: (tab: string) =>
   };
 
   const complete = async () => {
-    if (!canPay) { setError(payment === "cash" ? "Tendered amount must cover the total" : "Select a customer and sign for utang"); return; }
+    if (!canPay) { setError(payment === "cash" ? "Tendered amount must cover the total" : "Select a customer and sign for credit"); return; }
     setBusy(true); setError(null);
     try {
       const customer = await ensureCustomer();
-      if (payment === "credit" && !customer) { setError("Add or select a customer for utang"); setBusy(false); return; }
+      if (payment === "credit" && !customer) { setError("Add or select a customer for credit"); setBusy(false); return; }
       // Rice Ops M5: one key per sale — a double-tap or a retry after a dropped signal
       // returns the same sale instead of making a second one. Cleared when the sale is done.
       if (!saleKeyRef.current) saleKeyRef.current = newSaleKey();
@@ -360,7 +360,7 @@ export default function PosPanel({ onNavigate }: { onNavigate?: (tab: string) =>
       const data = await res.json();
       if (!res.ok) { setError(data?.errors?.join(", ") ?? data?.message ?? "Sale failed"); return; }
       setLastSale({ orderId: data.orderId, orderNumber: data.orderNumber, totalMinor: data.totalMinor, changeMinor: data.changeMinor ?? 0, paymentMethod: data.paymentMethod });
-      toast(`${payment === "cash" ? "Sale" : "Utang sale"} ${data.orderNumber} completed`);
+      toast(`${payment === "cash" ? "Sale" : "Credit sale"} ${data.orderNumber} completed`);
       setStep("done");
       resetSale();
       await load();
@@ -431,7 +431,7 @@ export default function PosPanel({ onNavigate }: { onNavigate?: (tab: string) =>
                 </div>
                 <div className="modal-body">
                   <p className="small text-muted mb-2">
-                    Payment: <strong>{deliverTarget.paymentMethod === "cash" ? "Paid (cash)" : "Utang (credit)"}</strong> — order joins For Delivery.
+                    Payment: <strong>{deliverTarget.paymentMethod === "cash" ? "Paid (cash)" : "Credit"}</strong> — order joins For Delivery.
                   </p>
 
                   {/* Customer selector */}
@@ -494,7 +494,7 @@ export default function PosPanel({ onNavigate }: { onNavigate?: (tab: string) =>
                 {lastSale.paymentMethod === "cash" && (
                   <p className={`h5 mb-2 ${lastSale.changeMinor >= 0 ? "text-success" : ""}`}>Change: <strong>{toPesos(lastSale.changeMinor)}</strong></p>
                 )}
-                {lastSale.paymentMethod === "credit" && <p className="mb-2 text-warning">Charged to credit (utang)</p>}
+                {lastSale.paymentMethod === "credit" && <p className="mb-2 text-warning">Charged to credit</p>}
                 <div className="d-grid gap-2">
                   <button className="btn btn-primary btn-lg" onClick={() => { setLastSale(null); resetSale(); setStep("products"); }}>
                     <i className="bi bi-plus-lg me-1"></i>New sale
@@ -689,12 +689,12 @@ export default function PosPanel({ onNavigate }: { onNavigate?: (tab: string) =>
                     <i className="bi bi-cash me-1"></i>Cash
                   </button>
                   <button type="button" className={`btn ${payment === "credit" ? "btn-warning" : "btn-outline-warning"} flex-fill`} onClick={() => setPayment("credit")}>
-                    <i className="bi bi-journal me-1"></i>Utang (credit)
+                    <i className="bi bi-journal me-1"></i>Credit
                   </button>
                 </div>
                 {shiftOpen === false && (
                   <div className="alert alert-warning py-2 small mb-3">
-                    <i className="bi bi-exclamation-triangle me-1"></i>Cash is unavailable while the drawer is closed — open a shift above, or sell on utang.
+                    <i className="bi bi-exclamation-triangle me-1"></i>Cash is unavailable while the drawer is closed — open a shift above, or sell on credit.
                   </div>
                 )}
 
@@ -715,7 +715,7 @@ export default function PosPanel({ onNavigate }: { onNavigate?: (tab: string) =>
                   </>
                 ) : (
                   <>
-                    <p className="small text-muted mb-2">Charged to the customer&apos;s credit (utang). Approved customers only.</p>
+                    <p className="small text-muted mb-2">Charged to the customer&apos;s credit. Approved customers only.</p>
                     {!customerId && (
                       <>
                         <input className="form-control form-control-sm mb-1" placeholder="Customer name (saves automatically)" value={newName} onChange={(e) => setNewName(e.target.value)} />
@@ -735,7 +735,7 @@ export default function PosPanel({ onNavigate }: { onNavigate?: (tab: string) =>
                     )}
                     {loyaltyPoints < 100 && <div className="small text-muted mb-1">{`Loyalty: 100 pts = ₱1. ${loyaltyPoints} pts available.`}</div>}
                     <div className="mb-3">
-                      <div className="small text-muted mb-1">Signature required for utang</div>
+                      <div className="small text-muted mb-1">Signature required for credit</div>
                       <SignaturePad onSignature={(d) => { setCreditSig(d); if (d) setCreditSigError(false); }} />
                       {creditSigError && <div className="text-danger small">Customer signature required — please sign above.</div>}
                     </div>
