@@ -611,7 +611,34 @@ export class RiceReportsService {
         list.push({ id: m.id, type: m.type, delta: m.delta, balanceAfter: m.balanceAfter, documentType: m.documentType, documentId: m.documentId, createdAt: m.createdAt });
         byLoc.set(m.warehouseId!, list);
       }
-      const totals = [...byLoc.entries()].filter(([id]) => locName.has(id)).map(([id, rows]) => ({ locationId: id, location: locName.get(id) ?? "", ...periodTotals(rows, from, to) }));
+      // Money, per location: what sold here in these dates (completed sales only), at the cost frozen with each sale,
+      // and what the stock left on the shelf is worth at the product's current cost (the main store's cost).
+      const soldLines = await prisma.orderItem.findMany({
+        where: { storeId, productId: product.id, order: { status: "COMPLETED", sellingLocationId: input.locationId ? input.locationId : { not: null }, OR: [{ occurredAt: { gte: from, lt: to } }, { occurredAt: null, createdAt: { gte: from, lt: to } }] } },
+        select: { soldBy: true, quantity: true, lineTotalMinor: true, unitCostMinor: true, order: { select: { sellingLocationId: true } } },
+      });
+      const money = new Map<string, { salesMinor: number; costOfSoldMinor: number }>();
+      for (const l of soldLines) {
+        const id = l.order.sellingLocationId;
+        if (!id) continue;
+        const m = money.get(id) ?? { salesMinor: 0, costOfSoldMinor: 0 };
+        m.salesMinor += l.lineTotalMinor;
+        m.costOfSoldMinor += lineCost(l, product.costMinor ?? 0, isLooseP(product));
+        money.set(id, m);
+      }
+      const unitCost = product.costMinor ?? 0;
+      const worth = (q: number | null) => (q === null ? null : isLooseP(product) ? Math.round((q * unitCost) / 1000) : q * unitCost);
+      const locIds = new Set<string>([...byLoc.keys(), ...money.keys()]);
+      const totals = [...locIds].filter((id) => locName.has(id)).map((id) => {
+        const t = periodTotals(byLoc.get(id) ?? [], from, to);
+        const m = money.get(id) ?? { salesMinor: 0, costOfSoldMinor: 0 };
+        const profitMinor = m.salesMinor - m.costOfSoldMinor;
+        return {
+          locationId: id, location: locName.get(id) ?? "", ...t,
+          stockValueMinor: worth(t.closing), salesMinor: m.salesMinor, costOfSoldMinor: m.costOfSoldMinor, profitMinor,
+          profitPct: m.salesMinor > 0 ? Math.round((profitMinor / m.salesMinor) * 1000) / 10 : null,
+        };
+      });
       const inRange = moves.filter((m) => m.createdAt >= from && m.createdAt < to && locName.has(m.warehouseId!));
       const shown = inRange.slice(-500).reverse();
       const withDoc = shown.filter((m) => m.documentType && m.documentId) as (typeof shown[number] & { documentType: string; documentId: string })[];

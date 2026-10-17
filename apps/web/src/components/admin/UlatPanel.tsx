@@ -128,7 +128,7 @@ function StockCheck() {
 }
 
 interface BookRow { id: string; at: string; location: string; type: string; docNumber: string | null; delta: number; balanceAfter: number | null; by: string | null; unitPriceMinor: number | null; unitCostMinor: number | null }
-interface BookTotal { locationId: string; location: string; opening: number | null; closing: number | null; inQty: number; outQty: number }
+interface BookTotal { locationId: string; location: string; opening: number | null; closing: number | null; inQty: number; outQty: number; stockValueMinor: number | null; salesMinor: number; costOfSoldMinor: number; profitMinor: number; profitPct: number | null }
 
 const BOOK_LABEL: Record<string, string> = {
   RECEIPT: "Stock in", STOCK_IN: "Stock in", TRANSFER_IN: "Trip received", TRANSFER_OUT: "Trip sent out", CONSUME: "Sold", ADJUST: "Adjusted",
@@ -196,7 +196,8 @@ function StockBook() {
       {totals.map((t) => (
         <div key={t.locationId} className="card mb-2"><div className="card-body py-2">
           <div className="fw-bold">{t.location}</div>
-          <div>Start {n(t.opening)} · In +{qty(loose, t.inQty)} · Out −{qty(loose, t.outQty)} · End {n(t.closing)}</div>
+          <div>Start {n(t.opening)} · In +{qty(loose, t.inQty)} · Out −{qty(loose, t.outQty)} · End {n(t.closing)}{t.stockValueMinor !== null ? ` (worth ${peso(t.stockValueMinor)})` : ""}</div>
+          <div>Sold {peso(t.salesMinor)} · Cost {peso(t.costOfSoldMinor)} · <span className={t.profitMinor < 0 ? "text-danger fw-bold" : "text-success fw-bold"}>Profit {peso(t.profitMinor)}{t.profitPct !== null ? ` (${t.profitPct}%)` : ""}</span></div>
         </div></div>
       ))}
       {rows.length > 0 && (
@@ -221,7 +222,7 @@ function StockBook() {
       )}
       {productId && !busy && !error && rows.length === 0 && <p className="text-muted">No stock changes in these dates.</p>}
       {truncated && <p className="small text-muted">Showing the latest 500 rows. Narrow the dates to see older ones.</p>}
-      {rows.length > 0 && <p className="small text-muted">Price and cost are shown for sales and stock-ins (per sack, or per kilo for loose rice).</p>}
+      {rows.length > 0 && <p className="small text-muted">Price and cost are shown for sales and stock-ins (per sack, or per kilo for loose rice). Profit uses the main store cost, frozen with each sale. Stock worth uses the current product cost.</p>}
     </div>
   );
 }
