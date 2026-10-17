@@ -113,7 +113,10 @@ async function main() {
   }
 
   const gen = await run("generate Prisma client", "npm run db:generate");
-  if (gen.code !== 0) return fail("db:generate");
+  if (gen.code !== 0) {
+    if (QUICK) out("NOTE: Prisma client not refreshed (the running app locks it). Quick mode goes on with the existing one.\n");
+    else return fail("db:generate");
+  }
   const tc = await run("typecheck", "npm run typecheck");
   if (tc.code !== 0) return fail("typecheck");
   results.push("typecheck: OK");

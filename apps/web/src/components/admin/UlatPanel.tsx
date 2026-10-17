@@ -127,12 +127,13 @@ function StockCheck() {
   );
 }
 
-interface BookRow { id: string; at: string; location: string; type: string; docNumber: string | null; delta: number; balanceAfter: number | null; by: string | null; unitPriceMinor: number | null; unitCostMinor: number | null }
-interface BookTotal { locationId: string; location: string; opening: number | null; closing: number | null; inQty: number; outQty: number; stockValueMinor: number | null; salesMinor: number; costOfSoldMinor: number; profitMinor: number; profitPct: number | null }
+interface BookRow { id: string; at: string; location: string; type: string; docNumber: string | null; note: string | null; delta: number; balanceAfter: number | null; by: string | null; unitPriceMinor: number | null; unitCostMinor: number | null }
+interface BookTotal { locationId: string; location: string; opening: number | null; closing: number | null; inQty: number; outQty: number; stockValueMinor: number | null; salesMinor: number; costOfSoldMinor: number; profitMinor: number; profitPct: number | null; soldQty: number; soldFromOtherQty: number }
 
 const BOOK_LABEL: Record<string, string> = {
   RECEIPT: "Stock in", STOCK_IN: "Stock in", TRANSFER_IN: "Trip received", TRANSFER_OUT: "Trip sent out", CONSUME: "Sold", ADJUST: "Adjusted",
   VOID_RESTORE: "Sale voided, stock back", CONVERSION_IN: "Resack in", CONVERSION_OUT: "Resack out", MERGE_OUT: "Merged out",
+  RELEASE_OUT: "Sent out", RESACK_OUT: "Resack out", RECEIVE_IN: "Received", COUNT_ADJUST: "Count fix", WRITE_OFF: "Written off", RETURN_IN: "Returned",
 };
 
 function StockBook() {
@@ -197,6 +198,7 @@ function StockBook() {
         <div key={t.locationId} className="card mb-2"><div className="card-body py-2">
           <div className="fw-bold">{t.location}</div>
           <div>Start {n(t.opening)} · In +{qty(loose, t.inQty)} · Out −{qty(loose, t.outQty)} · End {n(t.closing)}{t.stockValueMinor !== null ? ` (worth ${peso(t.stockValueMinor)})` : ""}</div>
+          {t.soldFromOtherQty > 0 && <div className="small text-muted">{qty(loose, t.soldFromOtherQty)} of what this location sold came off another location's shelf, so it is not a sale row here. Look for "Sent out … for sale" at the other location.</div>}
           <div>Sold {peso(t.salesMinor)} · Cost {peso(t.costOfSoldMinor)} · <span className={t.profitMinor < 0 ? "text-danger fw-bold" : "text-success fw-bold"}>Profit {peso(t.profitMinor)}{t.profitPct !== null ? ` (${t.profitPct}%)` : ""}</span></div>
         </div></div>
       ))}
@@ -209,7 +211,7 @@ function StockBook() {
                 <tr key={r.id}>
                   <td className="text-nowrap">{new Date(r.at).toLocaleString("en-PH", { dateStyle: "medium", timeStyle: "short" })}</td>
                   <td>{r.location}</td>
-                  <td>{BOOK_LABEL[r.type] ?? r.type}{r.docNumber ? ` · ${r.docNumber}` : ""}{r.by ? <span className="text-muted"> · {r.by}</span> : null}</td>
+                  <td>{BOOK_LABEL[r.type] ?? r.type}{r.docNumber ? ` · ${r.docNumber}` : ""}{r.note ? ` · ${r.note}` : ""}{r.by ? <span className="text-muted"> · {r.by}</span> : null}</td>
                   <td className={`text-end ${r.delta < 0 ? "text-danger" : "text-success"}`}>{r.delta > 0 ? "+" : "−"}{qty(loose, Math.abs(r.delta))}</td>
                   <td className="text-end">{n(r.balanceAfter)}</td>
                   <td className="text-end">{r.unitPriceMinor === null ? "" : peso(r.unitPriceMinor)}</td>

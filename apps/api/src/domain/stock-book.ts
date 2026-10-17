@@ -110,7 +110,11 @@ export function periodTotals(rowsAsc: LedgerRow[], from: Date, to: Date, ignore:
   const t: PeriodTotals = { opening: null, closing: null, inQty: 0, outQty: 0, byBucket: emptyBuckets() };
   for (const r of rows) {
     if (r.createdAt >= to) break;
-    if (r.createdAt >= from && !openingFixed) { opening = running; openingFixed = true; }
+    if (r.createdAt >= from && !openingFixed) {
+      // No earlier row: the shelf started at this row's balance minus what it moved (so a product that began in this period starts at 0, not "?").
+      opening = running !== null ? running : r.balanceAfter !== null ? r.balanceAfter - r.delta : null;
+      openingFixed = true;
+    }
     running = r.balanceAfter !== null ? r.balanceAfter : running !== null ? running + r.delta : null;
     if (r.createdAt >= from) {
       const b = t.byBucket[bucketOf(r)];

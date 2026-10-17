@@ -88,3 +88,11 @@ test("stock book: a period with no rows keeps the balance it started with", () =
   assert.equal(t.closing, 100);
   assert.equal(t.inQty + t.outQty, 0);
 });
+
+test("stock book: a product that began inside the period starts at 0, not unknown", () => {
+  const rows = [at(5, "RECEIPT", 20, 20, "STOCK_IN"), at(6, "CONSUME", -3, 17, "SALE")];
+  const t = periodTotals(rows, new Date(Date.UTC(2026, 9, 1)), new Date(Date.UTC(2026, 9, 8)));
+  assert.equal(t.opening, 0);
+  assert.equal(t.closing, 17);
+  assert.equal(t.opening! + t.inQty - t.outQty, t.closing);
+});

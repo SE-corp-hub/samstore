@@ -617,11 +617,12 @@ export class RiceReportsService {
         where: { storeId, productId: product.id, order: { status: "COMPLETED", sellingLocationId: input.locationId ? input.locationId : { not: null }, OR: [{ occurredAt: { gte: from, lt: to } }, { occurredAt: null, createdAt: { gte: from, lt: to } }] } },
         select: { soldBy: true, quantity: true, lineTotalMinor: true, unitCostMinor: true, order: { select: { sellingLocationId: true } } },
       });
-      const money = new Map<string, { salesMinor: number; costOfSoldMinor: number }>();
+      const money = new Map<string, { salesMinor: number; costOfSoldMinor: number; soldQty: number }>();
       for (const l of soldLines) {
         const id = l.order.sellingLocationId;
         if (!id) continue;
-        const m = money.get(id) ?? { salesMinor: 0, costOfSoldMinor: 0 };
+        const m = money.get(id) ?? { salesMinor: 0, costOfSoldMinor: 0, soldQty: 0 };
+        if (isLooseP(product) ? true : l.soldBy === "PIECE" || l.soldBy === null) m.soldQty += l.quantity;
         m.salesMinor += l.lineTotalMinor;
         m.costOfSoldMinor += lineCost(l, product.costMinor ?? 0, isLooseP(product));
         money.set(id, m);
@@ -631,10 +632,12 @@ export class RiceReportsService {
       const locIds = new Set<string>([...byLoc.keys(), ...money.keys()]);
       const totals = [...locIds].filter((id) => locName.has(id)).map((id) => {
         const t = periodTotals(byLoc.get(id) ?? [], from, to);
-        const m = money.get(id) ?? { salesMinor: 0, costOfSoldMinor: 0 };
+        const m = money.get(id) ?? { salesMinor: 0, costOfSoldMinor: 0, soldQty: 0 };
         const profitMinor = m.salesMinor - m.costOfSoldMinor;
+        // Sold here, but the rice came off another location's shelf (a release for the sale), so this shelf has no sale row for it.
+        const soldFromOtherQty = Math.max(0, m.soldQty - t.byBucket.sale.outQty);
         return {
-          locationId: id, location: locName.get(id) ?? "", ...t,
+          locationId: id, location: locName.get(id) ?? "", ...t, soldQty: m.soldQty, soldFromOtherQty,
           stockValueMinor: worth(t.closing), salesMinor: m.salesMinor, costOfSoldMinor: m.costOfSoldMinor, profitMinor,
           profitPct: m.salesMinor > 0 ? Math.round((profitMinor / m.salesMinor) * 1000) / 10 : null,
         };
@@ -642,6 +645,11 @@ export class RiceReportsService {
       const inRange = moves.filter((m) => m.createdAt >= from && m.createdAt < to && locName.has(m.warehouseId!));
       const shown = inRange.slice(-500).reverse();
       const withDoc = shown.filter((m) => m.documentType && m.documentId) as (typeof shown[number] & { documentType: string; documentId: string })[];
+      const tripIds = [...new Set(withDoc.filter((m) => m.documentType === "RELEASE" || m.documentType === "TRANSFER").map((m) => m.documentId))];
+      const trips = tripIds.length
+        ? await prisma.stockTransfer.findMany({ where: { storeId, id: { in: tripIds } }, select: { id: true, kind: true, order: { select: { orderNumber: true, sellingLocation: { select: { name: true } } } } } })
+        : [];
+      const tripNote = new Map(trips.map((t) => [t.id, t.order ? `for sale ${t.order.orderNumber}${t.order.sellingLocation ? ` at ${t.order.sellingLocation.name}` : ""}` : null]));
       const [docs, people, saleLines, inLines] = await Promise.all([
         this.docNumbers(storeId, withDoc.map((m) => ({ type: m.documentType, id: m.documentId }))),
         prisma.user.findMany({ where: { id: { in: [...new Set(shown.map((m) => m.createdBy ?? ""))] } }, select: { id: true, name: true, email: true } }),
@@ -661,6 +669,7 @@ export class RiceReportsService {
           return {
             id: m.id, at: m.createdAt, locationId: m.warehouseId, location: locName.get(m.warehouseId!) ?? "", type: m.type, documentType: m.documentType,
             docNumber: m.documentType && m.documentId ? docs.get(`${m.documentType}:${m.documentId}`) ?? null : null,
+            note: m.documentId ? tripNote.get(m.documentId) ?? null : null,
             delta: m.delta, balanceAfter: m.balanceAfter, by: m.createdBy ? who.get(m.createdBy) ?? null : null,
             unitPriceMinor: sl?.unitPriceMinor ?? null, unitCostMinor: sl?.unitCostMinor ?? il?.unitCostMinor ?? null,
           };
