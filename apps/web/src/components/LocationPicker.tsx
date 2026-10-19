@@ -17,11 +17,13 @@ interface Props {
   /** Called after a new place is created so the parent can reload its list. */
   onAdded?: (loc: PickableLocation) => void;
   label?: string;
+  /** What to show for each place (e.g. add the balance). */
+  labelFor?: (l: PickableLocation) => string;
   allowAdd?: boolean;
   id?: string;
 }
 
-export default function LocationPicker({ locations, value, onChange, onAdded, label, allowAdd = true, id }: Props) {
+export default function LocationPicker({ locations, value, onChange, onAdded, label, labelFor, allowAdd = true, id }: Props) {
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
@@ -51,9 +53,9 @@ export default function LocationPicker({ locations, value, onChange, onAdded, la
   return (
     <div>
       {label && <label className="form-label small mb-1" htmlFor={id}>{label}</label>}
-      <select id={id} className="form-select" value={value} onChange={(e) => (e.target.value === "__add" ? setAdding(true) : onChange(e.target.value))}>
+      <select id={id} className="form-select form-select-lg" value={value} onChange={(e) => (e.target.value === "__add" ? setAdding(true) : onChange(e.target.value))}>
         <option value="">Choose…</option>
-        {locations.map((l) => <option key={l.id} value={l.id}>{l.name}{l.code ? ` (${l.code})` : ""}</option>)}
+        {locations.map((l) => <option key={l.id} value={l.id}>{labelFor ? labelFor(l) : `${l.name}${l.code ? ` (${l.code})` : ""}`}</option>)}
         {allowAdd && <option value="__add">＋ Add a place that is not listed</option>}
       </select>
       {adding && (

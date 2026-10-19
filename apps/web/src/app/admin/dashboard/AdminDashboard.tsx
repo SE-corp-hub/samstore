@@ -13,7 +13,7 @@ import QueueBadge from "../../../components/admin/QueueBadge";
 import StaffHome from "../../../components/admin/StaffHome";
 
 /** Rice Ops M10: the store screens get the large, high-contrast look (globals.css .rice-ui). */
-const RICE_TABS = new Set(["benta", "utangrice", "agentorders", "agent", "approvals", "trips", "resack", "pasok", "bilangin", "ulat", "drafts", "kargadors"]);
+const RICE_TABS = new Set(["pos", "benta", "utangrice", "agentorders", "agent", "approvals", "trips", "resack", "pasok", "bilangin", "ulat", "drafts", "kargadors"]);
 // The landing panel stays eager (it is the first paint); every other panel loads when
 // its tab opens. Shipping all 22 at once cost ~95 kB of route JS for one visible screen,
 // and dragged jsbarcode/qrcode (used by two panels) into the initial payload.
@@ -71,7 +71,7 @@ const UlatPanel = panel(() => import("../../../components/admin/UlatPanel"));
  * reach: the server still decides what each role may do.
  */
 const STAFF_BAR: { id: string; label: string; icon: string }[] = [
-  { id: "benta", label: "Sell", icon: "bi-basket" },
+  { id: "pos", label: "POS", icon: "bi-basket" },
   { id: "trips", label: "Receive", icon: "bi-truck" },
   { id: "resack", label: "Resack", icon: "bi-arrow-repeat" },
   { id: "bilangin", label: "Count", icon: "bi-clipboard-check" },
@@ -249,7 +249,9 @@ export default function AdminDashboard() {
     switch (tab) {
       case "home": return <StaffHome role={role} onNavigate={(id) => { userNavigated.current = true; setTab(id); }} labelFor={navLabel} />;
       case "overview": return <OverviewPanel onNavigate={setTab} storeSlug={active?.slug} storeName={active?.name} />;
-      case "pos": return <PosPanel onNavigate={setTab} />;
+      // One POS: the rice-ready counter screen. The older POS stays reachable as "posold" for one release (roll-back).
+      case "pos": return <BentaPanel />;
+      case "posold": return <PosPanel onNavigate={setTab} />;
       case "preorders": return <PreOrdersPanel onNavigate={setTab} />;
       case "utang": return <UtangPanel />;
       case "inventory": return <InventoryPanel />;

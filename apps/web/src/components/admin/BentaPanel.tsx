@@ -19,6 +19,10 @@ import { photoToJpeg } from "../../lib/photo";
 import NumPad from "./NumPad";
 import SignaturePad from "./SignaturePad";
 import QuickCount from "./QuickCount";
+import LocationPicker from "../LocationPicker";
+import { PesoInput } from "../NumberBoxes";
+import { buildText, openTextApp } from "../../lib/text-message";
+import { printSlip } from "../../lib/slip-print";
 
 interface Loc { id: string; name: string; code: string | null; type: string }
 interface Item {
@@ -93,6 +97,11 @@ export default function BentaPanel() {
   const [newItem, setNewItem] = useState(false);
   const keyRef = useRef<string | null>(savedCart()?.key ?? null);
   const [drawerOpen, setDrawerOpen] = useState<boolean | null>(null);
+  const [shiftRequired, setShiftRequired] = useState(true); // the owner can switch this off in Settings
+  const [storeName, setStoreName] = useState("");
+  // What the done screen needs to text the customer, kept after the cart is cleared.
+  const [textInfo, setTextInfo] = useState<{ customerId: string; name: string | null; phone: string | null; balanceAfterMinor: number } | null>(null);
+  const [textPhone, setTextPhone] = useState("");
 
   const loadCatalog = useCallback(async (loc?: string) => {
     const q = loc ? `?locationId=${encodeURIComponent(loc)}` : "";
@@ -111,6 +120,7 @@ export default function BentaPanel() {
         fetch(`${API_URL}/admin/customers`, { headers: adminHeaders() }).then((r) => (r.ok ? r.json() : null)),
       ]);
       setHomeLocationId(me?.homeLocationId ?? null);
+      fetch(`${API_URL}/admin/settings`, { headers: adminHeaders() }).then((r) => (r.ok ? r.json() : null)).then((d) => setStoreName(d?.store?.name ?? "")).catch(() => {});
       setCustomers(((cs?.customers ?? []) as Customer[]));
       // A kept cart belongs to the location it was started at.
       const kept = savedCart();
@@ -128,6 +138,7 @@ export default function BentaPanel() {
   const checkDrawer = useCallback(async () => {
     const r = await fetch(`${API_URL}/admin/registers/current`, { headers: adminHeaders() }).then((x) => (x.ok ? x.json() : null)).catch(() => null);
     setDrawerOpen(r ? !!r.session : null);
+    setShiftRequired(r?.required !== false);
   }, []);
   useEffect(() => { if (pay === "cash") void checkDrawer(); }, [pay, checkDrawer]);
 
@@ -191,6 +202,8 @@ export default function BentaPanel() {
         return;
       }
       setLast(d as unknown as NonNullable<typeof last>);
+      setTextInfo(pay === "utang" && customer ? { customerId: customer.id, name: customer.name, phone: customer.phone, balanceAfterMinor: customer.creditBalanceMinor + total } : null);
+      setTextPhone(customer?.phone ?? "");
       toast(d.status === "WAITING_OWNER" ? `Waiting for the owner: ${String(d.orderNumber)}` : `Sold: ${String(d.orderNumber)}`);
       keyRef.current = null;
       try { window.sessionStorage.removeItem(cartKey()); } catch { /* convenience only */ }
@@ -231,6 +244,32 @@ export default function BentaPanel() {
           <li className="list-group-item d-flex justify-content-between fw-bold" style={{ fontSize: 28 }}><span>Total</span><span>{peso(last.totalMinor)}</span></li>
           {last.changeMinor > 0 && <li className="list-group-item d-flex justify-content-between fw-bold" style={{ fontSize: 24 }}><span>Change</span><span>{peso(last.changeMinor)}</span></li>}
         </ul>
+        <div className="d-flex flex-wrap gap-2 mb-3">
+          <button type="button" className="btn btn-outline-dark btn-lg flex-fill" onClick={() => printSlip({
+            storeName: storeName || "SAM STORE", title: "SALES RECEIPT", reference: last.orderNumber, when: new Date().toLocaleString("en-PH"),
+            rows: last.lines.map((l) => ({ name: l.name, qty: `${l.soldBy === "PIECE" || !l.grams ? `${l.quantity}` : kg(l.grams)}  ${peso(l.lineTotalMinor)}` })),
+            totals: [{ label: "TOTAL", value: peso(last.totalMinor) }, ...(last.changeMinor > 0 ? [{ label: "Change", value: peso(last.changeMinor) }] : [])],
+            footer: last.status === "WAITING_OWNER" ? "Waiting for owner approval" : "Salamat po!",
+          })}><i className="bi bi-printer me-1"></i>Print receipt</button>
+        </div>
+        {textInfo && last.status !== "DECLINED" && (
+          <div className="card mb-3"><div className="card-body">
+            <div className="fw-semibold mb-1">Text {textInfo.name ?? "the customer"} about this utang</div>
+            <div className="small text-muted mb-2">Opens your phone's text app with the message ready. Press Send there.</div>
+            {!textInfo.phone && (
+              <input className="form-control form-control-lg mb-2" inputMode="tel" placeholder="Mobile number (09…)" value={textPhone} onChange={(e) => setTextPhone(e.target.value)} />
+            )}
+            <button type="button" className="btn btn-primary btn-lg w-100" onClick={() => {
+              const text = buildText("credit_sale", {
+                storeName: storeName || "SAM STORE", customerName: textInfo.name, reference: last.orderNumber, totalMinor: last.totalMinor, balanceMinor: textInfo.balanceAfterMinor,
+                items: last.lines.map((l) => ({ name: l.name, qty: l.soldBy === "PIECE" || !l.grams ? `${l.quantity}×` : kg(l.grams) })),
+              });
+              const phone = textInfo.phone || textPhone;
+              if (!openTextApp({ phone, text, template: "credit_sale", storeCustomerId: textInfo.customerId, documentType: "SALE" })) { toast("That is not a mobile number", "danger"); return; }
+              if (!textInfo.phone) void fetch(`${API_URL}/admin/customers/${textInfo.customerId}`, { method: "PATCH", headers: { "Content-Type": "application/json", ...adminHeaders() }, body: JSON.stringify({ phone }) }).catch(() => {});
+            }}><i className="bi bi-chat-dots me-1"></i>Text customer</button>
+          </div></div>
+        )}
         {last.releases.length > 0 && <div className="alert alert-info">Will be released from another location: {last.releases.map((r) => r.docNumber).join(", ")}</div>}
         {checking ? (
           <QuickCount productId={checking.productId} name={checking.name} loose={!!byId.get(checking.productId)?.loose} locationId={locationId}
@@ -253,7 +292,7 @@ export default function BentaPanel() {
   return (
     <div style={{ fontSize: 18 }}>
       <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
-        <h1 className="h4 mb-0">Sell</h1>
+        <h1 className="h4 mb-0">POS</h1>
         {homeLocationId ? <span className="badge text-bg-light border fs-6">{here?.name}</span> : (
           <select className="form-select" style={{ maxWidth: 240 }} aria-label="Location" value={locationId} onChange={(e) => { reset(); void loadCatalog(e.target.value); }}>
             {locations.map((l) => <option key={l.id} value={l.id}>{l.code ? `${l.code} · ` : ""}{l.name}</option>)}
@@ -344,10 +383,14 @@ export default function BentaPanel() {
                 {editing.mode === "KILO" && c.totalMinor > 0 ? <div className="fs-5">= <strong>{peso(c.totalMinor)}</strong></div> : null}
                 {editing.mode === "PIECE" && c.totalMinor > 0 ? <div className="fs-5">= <strong>{peso(c.totalMinor)}</strong></div> : null}
               </div>
-              <label className="form-label mt-3" htmlFor="bt-from">Take from</label>
-              <select id="bt-from" className="form-select form-select-lg" value={from} onChange={(e) => setEditing({ ...editing, sourceLocationId: e.target.value === locationId ? null : e.target.value })}>
-                {locations.map((l) => <option key={l.id} value={l.id}>{l.name}{l.id === locationId ? " (here)" : ""} — {it.loose ? kg(it.stock[l.id] ?? 0) : `${it.stock[l.id] ?? 0}`}</option>)}
-              </select>
+              {it.tracked && (
+                <div className="mt-3">
+                  <LocationPicker id="bt-from" label="Taken from (where the item comes from)" locations={locations} value={from}
+                    labelFor={(l) => `${l.name}${l.id === locationId ? " (here)" : ""} — ${it.loose ? kg(it.stock[l.id] ?? 0) : `${it.stock[l.id] ?? 0}`}`}
+                    onAdded={(loc) => setLocations([...locations, { id: loc.id, name: loc.name, code: null, type: "STORE" }])}
+                    onChange={(id) => setEditing({ ...editing, sourceLocationId: id === locationId ? null : id })} />
+                </div>
+              )}
               {short && (
                 <div className="alert alert-danger mt-2 mb-0">
                   <strong>Short</strong> — only {it.loose ? kg(avail) : avail} at {code(from)}. Lower the amount, or take from another location.
@@ -382,7 +425,7 @@ export default function BentaPanel() {
               ))}
             </div>
 
-            {pay === "cash" && drawerOpen === false && (
+            {pay === "cash" && drawerOpen === false && shiftRequired && (
               <OpenDrawer onOpened={() => { setDrawerOpen(true); setError(null); }} />
             )}
             {pay === "cash" && (
@@ -488,10 +531,12 @@ function NewItemForm({ locationId, onCancel, onDone }: { locationId: string; onC
   const [price, setPrice] = useState("");
   const [cost, setCost] = useState("");
   const [onHand, setOnHand] = useState("");
+  const [noCount, setNoCount] = useState(false); // piece items only: sell any time, stock not counted
   const [sig, setSig] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const ready = name.trim().length >= 2 && Number(price) > 0 && Number(onHand) > 0 && !!sig && (soldAs !== "SACK" || Number(kilosPerSack) > 0);
+  const skipCount = noCount && soldAs === "PIECE";
+  const ready = name.trim().length >= 2 && Number(price) > 0 && (skipCount || Number(onHand) > 0) && !!sig && (soldAs !== "SACK" || Number(kilosPerSack) > 0);
 
   const save = async () => {
     setBusy(true); setError(null);
@@ -499,7 +544,8 @@ function NewItemForm({ locationId, onCancel, onDone }: { locationId: string; onC
       name: name.trim(), soldAs, locationId,
       gramsPerSack: soldAs === "SACK" ? Math.round(Number(kilosPerSack) * 1000) : undefined,
       priceMinor: toMinor(price), costMinor: toMinor(cost),
-      openingQty: soldAs === "KILO" ? Math.round(Number(onHand) * 1000) : Math.floor(Number(onHand)),
+      openingQty: skipCount ? 0 : soldAs === "KILO" ? Math.round(Number(onHand) * 1000) : Math.floor(Number(onHand)),
+      trackStock: skipCount ? false : undefined,
       signatures: [{ signerKind: "STAFF", imagePng: sig }],
     };
     const res = await fetch(`${API_URL}/admin/benta/manual-item`, { method: "POST", headers: { "Content-Type": "application/json", ...adminHeaders() }, body: JSON.stringify(body) });
@@ -529,12 +575,20 @@ function NewItemForm({ locationId, onCancel, onDone }: { locationId: string; onC
         )}
         <div className="row g-2">
           <div className="col-6"><label className="form-label" htmlFor="ni-price">Price{soldAs === "KILO" ? " /kg" : ""} (₱)</label>
-            <input id="ni-price" className="form-control form-control-lg" inputMode="decimal" value={price} onChange={(e) => setPrice(num(e.target.value))} /></div>
+            <PesoInput id="ni-price" className="form-control form-control-lg" value={price} onChange={setPrice} placeholder="0.00" /></div>
           <div className="col-6"><label className="form-label" htmlFor="ni-cost">Cost{soldAs === "KILO" ? " /kg" : ""} (₱)</label>
-            <input id="ni-cost" className="form-control form-control-lg" inputMode="decimal" value={cost} onChange={(e) => setCost(num(e.target.value))} /></div>
+            <PesoInput id="ni-cost" className="form-control form-control-lg" value={cost} onChange={setCost} placeholder="0.00" /></div>
         </div>
+        {soldAs === "PIECE" && (
+          <div className="form-check form-switch mt-2">
+            <input className="form-check-input" type="checkbox" id="ni-nocount" checked={noCount} onChange={(e) => setNoCount(e.target.checked)} />
+            <label className="form-check-label" htmlFor="ni-nocount">Don't count stock — sell it any time</label>
+          </div>
+        )}
+        {!skipCount && (<>
         <label className="form-label mt-2" htmlFor="ni-onhand">On hand now ({soldAs === "KILO" ? "kilos" : soldAs === "SACK" ? "sacks" : "pieces"})</label>
         <input id="ni-onhand" className="form-control form-control-lg mb-2" inputMode="decimal" value={onHand} onChange={(e) => setOnHand(num(e.target.value))} />
+        </>)}
         <div className="fw-semibold">Your signature (staff)</div>
         <SignaturePad onSignature={setSig} />
         <div className="d-flex justify-content-between mt-3">

@@ -87,6 +87,7 @@ export class BentaController {
     return unwrap(await this.benta.manualItem(storeId, actor, {
       name: body?.name, soldAs: body?.soldAs, gramsPerSack: body?.gramsPerSack, priceMinor: body?.priceMinor, costMinor: body?.costMinor,
       openingQty: body?.openingQty, locationId: str(body?.locationId), signatures: signaturesFrom(body?.signatures),
+      trackStock: body?.trackStock === false ? false : undefined,
     }));
   }
 

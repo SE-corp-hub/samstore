@@ -109,7 +109,7 @@ const PAY_CODE: Record<PayMethod, string> = { cash: "cash", gcash: "gcash", utan
 
 const productSelect = {
   id: true, name: true, sku: true, priceMinor: true, costMinor: true, isActive: true, reviewStatus: true,
-  stockBaseUnit: true, stockBaseQuantity: true, stockConversionFamily: true, soldByWeight: true,
+  stockBaseUnit: true, stockBaseQuantity: true, stockConversionFamily: true, soldByWeight: true, trackStock: true,
 } as const;
 type P = Prisma.ProductGetPayload<{ select: typeof productSelect }>;
 
@@ -207,7 +207,7 @@ export class BentaService {
         .map((p) => ({
           id: p.id, name: p.name, sku: p.sku, loose: isLoose(p), gramsPerUnit: p.stockBaseUnit === "g" ? p.stockBaseQuantity : null,
           priceMinor: priceAt(p.priceMinor, priceBy.get(p.id)), mainPriceMinor: p.priceMinor, forReview: p.reviewStatus === "FOR_REVIEW",
-          stock: stockBy.get(p.id) ?? {}, tracked: stockBy.has(p.id), sold30d: soldBy.get(p.id) ?? 0,
+          stock: stockBy.get(p.id) ?? {}, tracked: p.trackStock !== false && stockBy.has(p.id), sold30d: soldBy.get(p.id) ?? 0,
         }))
         .sort((a, b) => b.sold30d - a.sold30d || a.name.localeCompare(b.name));
       return { location: loc, locations, products: items };
@@ -431,7 +431,7 @@ export class BentaService {
         occurredAt: (paper?.occurredAt ?? now).toISOString(), encodedLater: !!paper, replayed: false,
         lines: items.map((i) => ({ productId: i.productId, name: i.productName, soldBy: i.soldBy, quantity: i.quantity, grams: i.grams, unitPriceMinor: i.unitPriceMinor, lineTotalMinor: i.lineTotalMinor, enteredAmountMinor: i.enteredAmountMinor, sourceLocationId: i.sourceLocationId })),
         releases,
-        zeroCheck: emptied.map((e) => ({ productId: e.productId, name: products.get(e.productId)?.name ?? "" })),
+        zeroCheck: emptied.filter((e) => products.get(e.productId)?.trackStock !== false).map((e) => ({ productId: e.productId, name: products.get(e.productId)?.name ?? "" })),
       };
       return view;
     }).catch(async (e) => {
@@ -522,11 +522,14 @@ export class BentaService {
 
   async manualItem(
     storeId: string, actor: Actor,
-    input: ManualItemAsk & { locationId?: string; signatures?: SignatureInput[] },
+    input: ManualItemAsk & { locationId?: string; signatures?: SignatureInput[]; trackStock?: boolean },
   ): Promise<BentaResult<{ productId: string; name: string; stockInDocNumber: string; approvalId: string }>> {
     return this.run(async () => {
       const loc = await this.location(storeId, actor, input.locationId);
-      const plan = planManualItem(input);
+      // "Do not count stock": only for pieces (rice with a sack weight must stay tracked). It sells at any time.
+      const untracked = input.trackStock === false;
+      if (untracked && (input as { soldAs?: unknown }).soldAs !== "PIECE") throw new SellingError("Only a piece item can skip stock counting — rice must be counted");
+      const plan = planManualItem(untracked ? { ...input, openingQty: 1 } : input);
       const dupe = await prisma.product.findFirst({ where: { storeId, name: { equals: plan.name, mode: "insensitive" }, isActive: true }, select: { name: true } });
       if (dupe) throw new SellingError(`"${dupe.name}" already exists — pick it from the list`);
       const result = await prisma.$transaction(async (tx) => {
@@ -535,12 +538,14 @@ export class BentaService {
             storeId, sku: `BAGO-${randomId().slice(-8).toUpperCase()}`, name: plan.name, priceMinor: plan.priceMinor, costMinor: plan.costMinor,
             stockBaseUnit: plan.stockBaseUnit, stockBaseQuantity: plan.stockBaseQuantity, soldByWeight: plan.soldByWeight,
             stockConversionFamily: plan.stockConversionFamily, unit: plan.soldAs === "KILO" ? "kilo" : plan.soldAs === "SACK" ? "sako" : "pc",
-            reviewStatus: "FOR_REVIEW", createdById: actor.userId,
+            reviewStatus: "FOR_REVIEW", createdById: actor.userId, trackStock: !untracked,
           },
           select: productSelect,
         });
-        const doc = await this.writeStockIn(tx, storeId, actor, loc.id, { supplierName: null, note: `New item: ${plan.name}`, lines: [{ product, quantity: plan.openingQty, unitCostMinor: null }] }, input.signatures);
-        const hawak = plan.soldAs === "KILO" ? formatKilos(plan.openingQty) : `${plan.openingQty} ${plan.soldAs === "SACK" ? "sack(s)" : "piece(s)"}`;
+        const doc = untracked
+          ? { id: "", docNumber: "" }
+          : await this.writeStockIn(tx, storeId, actor, loc.id, { supplierName: null, note: `New item: ${plan.name}`, lines: [{ product, quantity: plan.openingQty, unitCostMinor: null }] }, input.signatures);
+        const hawak = untracked ? "not counted" : plan.soldAs === "KILO" ? formatKilos(plan.openingQty) : `${plan.openingQty} ${plan.soldAs === "SACK" ? "sack(s)" : "piece(s)"}`;
         const approval = await requestApproval(tx, {
           storeId, kind: "MANUAL_ITEM", documentType: "PRODUCT", documentId: product.id, locationId: loc.id,
           summary: `New item at ${loc.name}: ${plan.name} — ₱${(plan.priceMinor / 100).toFixed(2)}${plan.soldAs === "KILO" ? "/kg" : ""}, cost ₱${(plan.costMinor / 100).toFixed(2)}, on hand ${hawak}. Approve it, or merge it into another product.`,
