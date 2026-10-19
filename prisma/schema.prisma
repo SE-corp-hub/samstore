@@ -796,6 +796,7 @@ model Warehouse {
   code      String? // M1: short code shown everywhere (S1, S2, S3, WH)
   address   String? // M1: where the kargador goes
   isActive  Boolean      @default(true) // M1: inactive locations keep history but take no new stock
+  needsReview Boolean    @default(false) // added by counter staff on the spot — the owner checks it
   createdAt DateTime     @default(now())
   updatedAt DateTime     @updatedAt
 

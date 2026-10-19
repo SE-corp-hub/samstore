@@ -60,6 +60,7 @@ const TEST_FILES = [
   "apps/web/src/lib/retryable.test.ts",
   "apps/web/src/lib/number-format.test.ts",
   "apps/web/src/lib/text-message.test.ts",
+  "apps/web/src/lib/slip-print.test.ts",
   "apps/api/src/domain/stock-book.test.ts",
   "apps/api/src/domain/price-history.test.ts",
   "apps/api/src/domain/shelf-cost.test.ts",

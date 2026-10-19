@@ -1219,12 +1219,27 @@ export class AdminController {
     return result.value;
   }
 
+  /** POST /admin/locations/quick — counter staff add a place on the spot; it is flagged for the owner to check. */
+  @Post("locations/quick")
+  async quickLocation(
+    @Req() req: Request & { user?: AuthPrincipal },
+    @Body() body: { name?: string; type?: string; address?: string | null },
+    @Headers("x-store-id") headerStoreId?: string,
+  ) {
+    const user = req.user;
+    requireUser(user);
+    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
+    const result = await this.warehouses.create(storeId, { name: body?.name, type: body?.type, address: body?.address, needsReview: true });
+    if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
+    return result.value;
+  }
+
   /** PATCH /admin/warehouses/:id — Rice Ops M1: rename, code, address, type, active, default. */
   @Patch("warehouses/:id")
   async updateWarehouse(
     @Req() req: Request & { user?: AuthPrincipal },
     @Param("id") id: string,
-    @Body() body: { name?: string; type?: string; code?: string | null; address?: string | null; isActive?: boolean; isDefault?: boolean },
+    @Body() body: { name?: string; type?: string; code?: string | null; address?: string | null; isActive?: boolean; isDefault?: boolean; needsReview?: boolean },
     @Headers("x-store-id") headerStoreId?: string,
   ) {
     const user = req.user;
@@ -1237,6 +1252,7 @@ export class AdminController {
       address: body?.address,
       isActive: typeof body?.isActive === "boolean" ? body.isActive : undefined,
       isDefault: typeof body?.isDefault === "boolean" ? body.isDefault : undefined,
+      needsReview: typeof body?.needsReview === "boolean" ? body.needsReview : undefined,
     });
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
     return result.value;

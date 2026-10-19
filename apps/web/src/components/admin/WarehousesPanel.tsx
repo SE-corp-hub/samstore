@@ -18,6 +18,7 @@ interface Location {
   address: string | null;
   isActive: boolean;
   isDefault: boolean;
+  needsReview?: boolean;
   stockCount: number;
 }
 interface Transfer {
@@ -131,7 +132,7 @@ export default function WarehousesPanel() {
     await load();
   };
 
-  const patchLocation = async (l: Location, patch: Partial<Pick<Location, "isActive" | "isDefault">>, done: string) => {
+  const patchLocation = async (l: Location, patch: Partial<Pick<Location, "isActive" | "isDefault" | "needsReview">>, done: string) => {
     setError(null);
     const { ok, data } = await call(`${API_URL}/admin/warehouses/${l.id}`, "PATCH", patch);
     if (!ok) { setError(errorText(data, "Could not update the location")); return; }
@@ -297,10 +298,12 @@ export default function WarehousesPanel() {
                           {l.type === "WAREHOUSE" ? "Warehouse" : "Store"} · {l.stockCount} products stocked
                           {l.isDefault && <span className="badge text-bg-primary ms-2">Default</span>}
                           {!l.isActive && <span className="badge text-bg-secondary ms-2">Switched off</span>}
+                          {l.needsReview && <span className="badge text-bg-warning ms-2">Added by staff — please check</span>}
                         </div>
                         {l.address && <div className="small text-muted">{l.address}</div>}
                       </div>
                       <div className="d-flex flex-wrap gap-1 justify-content-end">
+                        {l.needsReview && <button type="button" className="btn btn-sm btn-warning" onClick={() => void patchLocation(l, { needsReview: false }, `${l.name} checked`)}>Mark checked</button>}
                         <button type="button" className="btn btn-sm btn-outline-secondary" onClick={() => startEdit(l)}>Edit</button>
                         {!l.isDefault && l.isActive && (
                           <button type="button" className="btn btn-sm btn-outline-primary" onClick={() => void patchLocation(l, { isDefault: true }, `${l.name} is now the default`)}>Make default</button>

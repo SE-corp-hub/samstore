@@ -1,0 +1,64 @@
+// A small printable slip (receipt) for a 58 mm or 80 mm roll printer, or a plain A4 PDF.
+// Used by Resack, Stock in and anything else that needs "print what happened".
+// The HTML builder is pure so its escaping and layout are unit-tested.
+
+export interface SlipLine { label: string; value: string }
+export interface SlipRow { name: string; qty: string; note?: string }
+export interface SlipSignature { role: string; name: string; imageData?: string | null; at?: string | null }
+
+export interface Slip {
+  storeName: string;
+  title: string;                 // e.g. "RESACK RECEIPT"
+  reference?: string | null;     // document number
+  when?: string | null;          // already formatted
+  lines?: SlipLine[];            // label/value pairs under the heading (store, from, to…)
+  rows?: SlipRow[];              // the items
+  totals?: SlipLine[];           // e.g. remaining balance
+  signatures?: SlipSignature[];
+  footer?: string | null;
+  widthMm?: 58 | 80;
+}
+
+const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+/** Only a PNG/JPEG data URL is allowed as a signature image; anything else is dropped. */
+export function safeImage(src: string | null | undefined): string | null {
+  return src && /^data:image\/(png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(src) ? src : null;
+}
+
+export function slipHtml(s: Slip): string {
+  const w = s.widthMm ?? 58;
+  const lines = (s.lines ?? []).map((l) => `<div class="kv"><span>${esc(l.label)}</span><b>${esc(l.value)}</b></div>`).join("");
+  const rows = (s.rows ?? []).map((r) => `<div class="row"><span>${esc(r.name)}${r.note ? `<small> ${esc(r.note)}</small>` : ""}</span><b>${esc(r.qty)}</b></div>`).join("");
+  const totals = (s.totals ?? []).map((l) => `<div class="kv big"><span>${esc(l.label)}</span><b>${esc(l.value)}</b></div>`).join("");
+  const sigs = (s.signatures ?? []).map((g) => {
+    const img = safeImage(g.imageData);
+    return `<div class="sig">${img ? `<img src="${img}" alt="">` : '<div class="blank"></div>'}<div>${esc(g.name)} — ${esc(g.role)}</div>${g.at ? `<small>${esc(g.at)}</small>` : ""}</div>`;
+  }).join("");
+  return `<!doctype html><html><head><meta charset="utf-8"><title>${esc(s.title)}</title><style>
+@page { size: ${w}mm auto; margin: 2mm; }
+body { font: 11px/1.35 monospace; width: ${w - 4}mm; margin: 0 auto; color: #000; }
+h1 { font-size: 13px; text-align: center; margin: 4px 0 0; } .c { text-align: center; }
+hr { border: 0; border-top: 1px dashed #000; margin: 5px 0; }
+.kv, .row { display: flex; justify-content: space-between; gap: 6px; } .big { font-size: 12px; }
+small { font-size: 9px; } .sig { margin-top: 8px; text-align: center; } .sig img { max-width: 100%; max-height: 40px; }
+.blank { height: 28px; border-bottom: 1px solid #000; }
+</style></head><body>
+<h1>${esc(s.storeName)}</h1><div class="c">${esc(s.title)}</div>
+${s.reference ? `<div class="c">${esc(s.reference)}</div>` : ""}${s.when ? `<div class="c">${esc(s.when)}</div>` : ""}
+<hr>${lines}${lines ? "<hr>" : ""}${rows}${rows ? "<hr>" : ""}${totals}${totals ? "<hr>" : ""}${sigs}
+${s.footer ? `<hr><div class="c">${esc(s.footer)}</div>` : ""}
+</body></html>`;
+}
+
+/** Print the slip through a hidden frame (works on phones and desktops; "Save as PDF" is in the print dialog). */
+export function printSlip(s: Slip): void {
+  const frame = document.createElement("iframe");
+  frame.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0";
+  document.body.appendChild(frame);
+  const doc = frame.contentWindow?.document;
+  if (!doc || !frame.contentWindow) { frame.remove(); return; }
+  doc.open(); doc.write(slipHtml(s)); doc.close();
+  const go = () => { frame.contentWindow?.focus(); frame.contentWindow?.print(); setTimeout(() => frame.remove(), 60_000); };
+  setTimeout(go, 150);
+}

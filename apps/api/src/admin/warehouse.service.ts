@@ -28,6 +28,7 @@ export interface LocationInput {
   address?: string | null;
   isActive?: boolean;
   isDefault?: boolean;
+  needsReview?: boolean;
 }
 
 function validateLocation(input: LocationInput, creating: boolean): string[] {
@@ -68,6 +69,7 @@ export class WarehouseService {
       address: w.address,
       isActive: w.isActive,
       isDefault: w.isDefault,
+      needsReview: w.needsReview,
       stockCount: w._count.stockLevels,
     }));
   }
@@ -91,6 +93,7 @@ export class WarehouseService {
         type: (data.type as LocationType | undefined) ?? LocationType.STORE,
         address: data.address?.trim() || null,
         isDefault: count === 0,
+        needsReview: data.needsReview === true,
       },
     });
     return { ok: true, value: { id: warehouse.id } };
@@ -128,6 +131,7 @@ export class WarehouseService {
           ...(name !== undefined ? { name } : {}),
           ...(code !== undefined ? { code } : {}),
           ...(input.type !== undefined ? { type: input.type as LocationType } : {}),
+          ...(input.needsReview !== undefined ? { needsReview: input.needsReview } : {}),
           ...(input.address !== undefined ? { address: input.address?.trim() || null } : {}),
           ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
           ...(input.isDefault === true ? { isDefault: true } : {}),
