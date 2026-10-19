@@ -80,7 +80,7 @@ async function main() {
 
   const dir = resolve("go-live");
   mkdirSync(dir, { recursive: true });
-  const file = join(dir, "test-logins.txt");
+  const file = join(dir, process.env.TEST_LOGINS_FILE ?? "test-logins.txt");
   writeFileSync(file, [
     "TEST store logins (test only — not real accounts). New passwords on every run of test-setup.",
     `Store: TEST Bigasan (${SLUG})`,
