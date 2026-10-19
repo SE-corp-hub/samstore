@@ -736,3 +736,36 @@ test("Track stock off: sells at zero stock and writes no stock movement", async 
     await cleanupFixture(fx.storeId, fx.customerId);
   }
 });
+
+// ─── Pre-order finalize: paid in cash ─────────────────────────────────────────────
+
+test("finalize in cash: COMPLETED + COLLECTED, a cash payment with change, no credit entry, no signature needed", async () => {
+  const fx = await makeFixture();
+  try {
+    const created = await svc.createPreOrder(fx.storeId, "actorX", { customerId: fx.storeCustomerId, items: [{ productId: fx.productId, quantity: 1 }] });
+    assert.equal(created.ok, true);
+    if (!created.ok) return;
+    const r = await svc.finalizePreorder(fx.storeId, "actorX", created.value.orderId, { paymentMethod: "cash", tenderedMinor: 12000 });
+    assert.equal(r.ok, true);
+    if (!r.ok) return;
+    assert.equal(r.value.paymentMethod, "cash");
+    assert.equal(r.value.changeMinor, 2000);
+    const row = await prisma.order.findUnique({ where: { id: created.value.orderId } });
+    assert.equal(row?.status, "COMPLETED");
+    assert.equal(row?.paymentStatus, "COLLECTED");
+    assert.equal(row?.paymentMethod, "cash");
+    assert.equal(await prisma.creditEntry.count({ where: { orderId: created.value.orderId } }), 0);
+    const pays = await prisma.payment.findMany({ where: { orderId: created.value.orderId } });
+    assert.ok(pays.length >= 1 && pays.reduce((s, p) => s + p.amountMinor, 0) >= 10000);
+    const sc = await prisma.storeCustomer.findUnique({ where: { id: fx.storeCustomerId } });
+    assert.equal(sc?.creditBalanceMinor, 0, "paying cash must not add to the customer's utang");
+    // Credit still needs the signature.
+    const second = await svc.createPreOrder(fx.storeId, "actorX", { customerId: fx.storeCustomerId, items: [{ productId: fx.productId, quantity: 1 }] });
+    if (second.ok) {
+      const noSig = await svc.finalizePreorder(fx.storeId, "actorX", second.value.orderId, { paymentMethod: "credit" });
+      assert.equal(noSig.ok, false);
+    }
+  } finally {
+    await cleanupFixture(fx.storeId, fx.customerId);
+  }
+});
