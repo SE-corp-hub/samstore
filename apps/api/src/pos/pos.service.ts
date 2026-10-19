@@ -643,11 +643,13 @@ export class PosService {
   async finalizePreorder(storeId: string, actorId: string, id: string, input: PreOrderFinalizeRequest): Promise<PosResult<PreOrderFinalizeResponse>> {
     const order = await prisma.order.findFirst({ where: { storeId, id, source: "PRE_ORDER", status: "ON_HOLD" } });
     if (!order) return { ok: false, error: { type: "not_found", message: "Pre-order not found" } };
-    if (typeof input.signatureData !== "string" || input.signatureData.trim().length === 0) {
+    const method = input.paymentMethod === "cash" ? "cash" : "credit";
+    const hasSig = typeof input.signatureData === "string" && input.signatureData.trim().length > 0;
+    if (method === "credit" && !hasSig) {
       return { ok: false, error: { type: "validation", errors: ["Signature is required"] } };
     }
-    const signatureData = input.signatureData.trim();
-    if (!signatureData.startsWith("data:image/") || signatureData.length > PosService.SIGNATURE_MAX_LENGTH) {
+    const signatureData = hasSig ? input.signatureData!.trim() : null;
+    if (signatureData && (!signatureData.startsWith("data:image/") || signatureData.length > PosService.SIGNATURE_MAX_LENGTH)) {
       return { ok: false, error: { type: "validation", errors: ["Invalid signature"] } };
     }
     if (!order.storeCustomerId) {
@@ -660,6 +662,29 @@ export class PosService {
     const startAt = input.startAt ?? pre?.startAt;
     const dueAt = input.dueAt ?? pre?.dueAt;
     let creditEntryId = "";
+    if (method === "cash") {
+      // Paid in cash at finalize: the money goes in the drawer (needs an open shift only when the store requires one).
+      const session = await this.registers.requireOpenSession(storeId);
+      if (!session.ok) return { ok: false, error: { type: "conflict", message: session.error.message } };
+      const prepared = await this.prepareCounterTenders(storeId, id, { paymentMethod: "cash", tenderedMinor: input.tenderedMinor }, finalTotal, order.storeCustomerId);
+      if (!prepared.ok) return prepared;
+      const plan = prepared.value;
+      try {
+        await prisma.$transaction(async (tx) => {
+          await tx.order.update({ where: { id }, data: { status: "COMPLETED", paymentStatus: "COLLECTED", paymentMethod: "cash", signatureData, signatureAt: signatureData ? signatureAt : null, registerSessionId: session.value } });
+          await writeTenders(tx, { storeId, orderId: id, actorId, plan, note: "Pre-order paid in cash", registerSessionId: session.value });
+          await tx.orderStatusHistory.create({ data: { orderId: id, storeId, fromStatus: "ON_HOLD", toStatus: "COMPLETED", actorType: "pos_finalize", actorId } });
+        }, txOptions());
+      } catch (e) {
+        await cacheBust(cacheKey("orders", storeId));
+        return { ok: false, error: { type: "conflict", message: e instanceof Error ? e.message : "Could not finalize the pre-order" } };
+      }
+      await cacheBust(cacheKey("orders", storeId));
+      return {
+        ok: true,
+        value: { orderId: id, orderNumber: order.orderNumber, status: "COMPLETED", totalMinor: finalTotal, currencyCode: order.currencyCode, creditEntryId: "", signatureAt: signatureAt.toISOString(), paymentMethod: "cash", changeMinor: plan.hasCash ? plan.changeMinor : 0 },
+      };
+    }
     try {
       await prisma.$transaction(async (tx) => {
         const cr = await this.credit.sellOnCredit(tx as never, storeId, order.storeCustomerId!, id, finalTotal, actorId, { startAt, dueAt });

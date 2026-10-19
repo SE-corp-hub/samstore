@@ -13,6 +13,8 @@ import { API_URL } from "../../config";
 import { adminHeaders } from "../../lib/admin";
 import { toast } from "../../lib/toast";
 import ReceiptModal from "./ReceiptModal";
+import { PesoInput } from "../NumberBoxes";
+import { buildText, openTextApp } from "../../lib/text-message";
 
 interface Preorder {
   id: string; orderNumber: string; customerName: string; storeCustomerId: string | null;
@@ -159,7 +161,13 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
   const [confirmVoid, setConfirmVoid] = useState<{ id: string; orderNumber: string } | null>(null);
   const [voidReason, setVoidReason] = useState("");
   // Finalize modal
-  const [finalizeTarget, setFinalizeTarget] = useState<{ id: string; orderNumber: string; customerName: string; totalMinor: number; createdAt: string; dueAt: string | null } | null>(null);
+  const [finalizeTarget, setFinalizeTarget] = useState<{ id: string; orderNumber: string; customerName: string; storeCustomerId: string | null; totalMinor: number; createdAt: string; dueAt: string | null } | null>(null);
+  const [finalizePay, setFinalizePay] = useState<"cash" | "credit">("credit");
+  const [finalizeTendered, setFinalizeTendered] = useState("");
+  // After a credit finalize: what the "Text customer" button needs.
+  const [finalizedInfo, setFinalizedInfo] = useState<{ orderNumber: string; totalMinor: number; customerName: string; storeCustomerId: string | null; phone: string | null; balanceMinor: number | null } | null>(null);
+  const [finalizedPhone, setFinalizedPhone] = useState("");
+  const [storeName, setStoreName] = useState("");
   const [finalizeStart, setFinalizeStart] = useState("");
   const [finalizeDue, setFinalizeDue] = useState("");
   const [finalizeSig, setFinalizeSig] = useState<string | null>(null);
@@ -212,6 +220,7 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
         fetch(`${API_URL}/admin/settings`, { headers: adminHeaders() }).then((r) => r.json()),
       ]);
       setHidePrice(Boolean(s?.settings?.hidePricePreOrder));
+      setStoreName(s?.store?.name ?? "");
       setBuildProducts(p.products ?? []);
       setBuildCustomers(c.customers ?? []);
     } catch (e) {
@@ -335,7 +344,8 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
   };
 
   const openFinalize = (p: Preorder) => {
-    setFinalizeTarget({ id: p.id, orderNumber: p.orderNumber, customerName: p.customerName, totalMinor: p.totalMinor, createdAt: p.createdAt, dueAt: p.dueAt });
+    setFinalizePay("credit"); setFinalizeTendered("");
+    setFinalizeTarget({ id: p.id, orderNumber: p.orderNumber, customerName: p.customerName, storeCustomerId: p.storeCustomerId, totalMinor: p.totalMinor, createdAt: p.createdAt, dueAt: p.dueAt });
     setFinalizeStart(p.createdAt.slice(0, 10));
     setFinalizeDue(p.dueAt ? p.dueAt.slice(0, 10) : "");
     setFinalizeSig(null);
@@ -345,20 +355,32 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
 
   const doFinalize = async () => {
     if (!finalizeTarget) return;
-    if (!finalizeSig) { setFinalizeSigError(true); return; }
+    if (finalizePay === "credit" && !finalizeSig) { setFinalizeSigError(true); return; }
     setFinalizeBusy(true); setFinalizeError(null);
     try {
       const res = await fetch(`${API_URL}/admin/pos/preorders/${finalizeTarget.id}/finalize`, {
         method: "POST", headers: { "Content-Type": "application/json", ...adminHeaders() },
         body: JSON.stringify({
-          signatureData: finalizeSig,
+          paymentMethod: finalizePay,
+          tenderedMinor: finalizePay === "cash" && finalizeTendered ? Math.round(Number(finalizeTendered) * 100) : undefined,
+          signatureData: finalizeSig ?? undefined,
           startAt: finalizeStart ? new Date(finalizeStart).toISOString() : undefined,
           dueAt: finalizeDue ? new Date(finalizeDue).toISOString() : undefined,
         }),
       });
       const d = await res.json();
       if (!res.ok) { setFinalizeError(d?.errors?.join(", ") ?? d?.message ?? "Finalize failed"); return; }
-      toast(`Finalized — charged to credit · ${d.orderNumber ?? finalizeTarget.orderNumber}`);
+      const target = finalizeTarget;
+      toast(finalizePay === "cash"
+        ? `Finalized — paid in cash${d.changeMinor > 0 ? ` · change ${toPesos(d.changeMinor)}` : ""} · ${d.orderNumber ?? target.orderNumber}`
+        : `Finalized — charged to credit · ${d.orderNumber ?? target.orderNumber}`);
+      if (finalizePay === "credit") {
+        // The customer's new balance and number, so staff can text them the transaction.
+        const cs = await fetch(`${API_URL}/admin/customers`, { headers: adminHeaders() }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+        const c = ((cs?.customers ?? []) as { id: string; phone: string | null; creditBalanceMinor: number }[]).find((x) => x.id === target.storeCustomerId);
+        setFinalizedInfo({ orderNumber: d.orderNumber ?? target.orderNumber, totalMinor: target.totalMinor, customerName: target.customerName, storeCustomerId: target.storeCustomerId, phone: c?.phone ?? null, balanceMinor: c ? c.creditBalanceMinor : null });
+        setFinalizedPhone(c?.phone ?? "");
+      }
       setFinalizeTarget(null);
       setLastFinalizedOrderId(d.orderId ?? finalizeTarget.id);
       await loadPreorders();
@@ -863,6 +885,34 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
       )}
 
       {/* Finalize pre-order modal */}
+      {finalizedInfo && (
+        <>
+          <div className="modal fade show d-block" tabIndex={-1}>
+            <div className="modal-dialog modal-dialog-centered">
+              <div className="modal-content">
+                <div className="modal-header">
+                  <h5 className="modal-title">Charged to credit</h5>
+                  <button type="button" className="btn-close" onClick={() => setFinalizedInfo(null)}></button>
+                </div>
+                <div className="modal-body">
+                  <div className="alert alert-success py-2">{finalizedInfo.orderNumber} — {toPesos(finalizedInfo.totalMinor)} on {finalizedInfo.customerName || "the customer"}'s credit.</div>
+                  {!finalizedInfo.phone && (
+                    <input className="form-control mb-2" inputMode="tel" placeholder="Mobile number (09…)" value={finalizedPhone} onChange={(e) => setFinalizedPhone(e.target.value)} />
+                  )}
+                  <button type="button" className="btn btn-primary w-100" onClick={() => {
+                    const text = buildText("preorder_credit", { storeName: storeName || "SAM STORE", customerName: finalizedInfo.customerName, reference: finalizedInfo.orderNumber, totalMinor: finalizedInfo.totalMinor, balanceMinor: finalizedInfo.balanceMinor ?? finalizedInfo.totalMinor });
+                    const phone = finalizedInfo.phone || finalizedPhone;
+                    if (!openTextApp({ phone, text, template: "preorder_credit", storeCustomerId: finalizedInfo.storeCustomerId, documentType: "PRE_ORDER" })) { toast("That is not a mobile number", "danger"); return; }
+                    if (!finalizedInfo.phone && finalizedInfo.storeCustomerId) void fetch(`${API_URL}/admin/customers/${finalizedInfo.storeCustomerId}`, { method: "PATCH", headers: { "Content-Type": "application/json", ...adminHeaders() }, body: JSON.stringify({ phone }) }).catch(() => {});
+                  }}><i className="bi bi-chat-dots me-1"></i>Text the customer this transaction</button>
+                </div>
+                <div className="modal-footer"><button className="btn btn-outline-secondary" onClick={() => setFinalizedInfo(null)}>Close</button></div>
+              </div>
+            </div>
+          </div>
+          <div className="modal-backdrop fade show"></div>
+        </>
+      )}
       {finalizeTarget && (
         <>
           <div className="modal fade show d-block" tabIndex={-1}>
@@ -888,13 +938,29 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
                       <input className="form-control form-control-sm" type="date" value={finalizeDue} onChange={(e) => setFinalizeDue(e.target.value)} />
                     </div>
                   </div>
-                  <div className="small text-muted mb-1">Customer signature</div>
-                  <SignaturePad onSignature={(d) => { setFinalizeSig(d); if (d) setFinalizeSigError(false); }} />
-                  {finalizeSigError && <div className="text-danger small">Signature required — please sign above.</div>}
+                  <div className="small text-muted mb-1">How is the customer paying?</div>
+                  <div className="btn-group w-100 mb-2" role="group" aria-label="Payment method">
+                    <button type="button" className={`btn ${finalizePay === "cash" ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setFinalizePay("cash")}><i className="bi bi-cash me-1"></i>Cash</button>
+                    <button type="button" className={`btn ${finalizePay === "credit" ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setFinalizePay("credit")}><i className="bi bi-journal-text me-1"></i>Credit (utang)</button>
+                  </div>
+                  {finalizePay === "cash" ? (
+                    <div className="mb-2">
+                      <label className="form-label small">Cash received (₱) <span className="text-muted">— optional, to work out the change</span></label>
+                      <PesoInput value={finalizeTendered} onChange={setFinalizeTendered} placeholder="0.00" />
+                      {finalizeTendered && Number(finalizeTendered) * 100 < finalizeTarget.totalMinor && <div className="text-danger small">Less than the total ({toPesos(finalizeTarget.totalMinor)}).</div>}
+                      {finalizeTendered && Number(finalizeTendered) * 100 >= finalizeTarget.totalMinor && <div className="small">Change: <strong>{toPesos(Math.round(Number(finalizeTendered) * 100) - finalizeTarget.totalMinor)}</strong></div>}
+                    </div>
+                  ) : (
+                    <>
+                      <div className="small text-muted mb-1">Customer signature</div>
+                      <SignaturePad onSignature={(d) => { setFinalizeSig(d); if (d) setFinalizeSigError(false); }} />
+                      {finalizeSigError && <div className="text-danger small">Signature required — please sign above.</div>}
+                    </>
+                  )}
                 </div>
                 <div className="modal-footer">
                   <button className="btn btn-outline-secondary" onClick={() => setFinalizeTarget(null)}>Close</button>
-                  <button className="btn btn-success" disabled={!finalizeSig || finalizeBusy} onClick={doFinalize}>
+                  <button className="btn btn-success" disabled={(finalizePay === "credit" && !finalizeSig) || (finalizePay === "cash" && !!finalizeTendered && Number(finalizeTendered) * 100 < finalizeTarget.totalMinor) || finalizeBusy} onClick={doFinalize}>
                     {finalizeBusy ? "Finalizing…" : "Complete"}
                   </button>
                 </div>

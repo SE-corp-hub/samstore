@@ -376,8 +376,12 @@ export interface PreOrderCreateResponse {
 
 /** v4: finalize a pre-order — utang only, signature REQUIRED, order → COMPLETED + CreditEntry. */
 export interface PreOrderFinalizeRequest {
-  /** REQUIRED — finger-drawn signature (data-URL PNG) */
-  signatureData: string;
+  /** How the customer settles it. Default "credit" (utang). */
+  paymentMethod?: "cash" | "credit";
+  /** Cash only: what the customer handed over (for change). */
+  tenderedMinor?: number;
+  /** REQUIRED for credit — finger-drawn signature (data-URL PNG). Optional for cash. */
+  signatureData?: string;
   startAt?: string;
   dueAt?: string;
 }
@@ -390,6 +394,8 @@ export interface PreOrderFinalizeResponse {
   currencyCode: string;
   creditEntryId: string;
   signatureAt: string;
+  paymentMethod?: "cash" | "credit";
+  changeMinor?: number;
 }
 
 // ─────────────────────────────── Admin customers / loyalty (v4) ───────────────────────────────
