@@ -714,3 +714,25 @@ test("M1: a cash+utang counter sale needs the signature and leaves utang outstan
     await cleanupFixture(fx.storeId, fx.customerId);
   }
 });
+// ─── Track stock off: sells at any time, no stock check, no stock movement ─────────
+
+test("Track stock off: sells at zero stock and writes no stock movement", async () => {
+  const fx = await makeFixture();
+  try {
+    await prisma.stockLevel.updateMany({ where: { storeId: fx.storeId, productId: fx.productId }, data: { quantityOnHand: 0 } });
+    // Tracked and empty: refused.
+    const refused = await svc.sell(fx.storeId, "actorX", { items: [{ productId: fx.productId, quantity: 2 }], paymentMethod: "cash" });
+    assert.equal(refused.ok, false);
+    // Switch Track stock off: the same sale goes through.
+    await prisma.product.update({ where: { id: fx.productId }, data: { trackStock: false } });
+    const movementsBefore = await prisma.stockMovement.count({ where: { storeId: fx.storeId } });
+    const sold = await svc.sell(fx.storeId, "actorX", { items: [{ productId: fx.productId, quantity: 2 }], paymentMethod: "cash" });
+    assert.equal(sold.ok, true);
+    const movementsAfter = await prisma.stockMovement.count({ where: { storeId: fx.storeId } });
+    assert.equal(movementsAfter, movementsBefore, "an untracked sale must not move stock");
+    const level = await prisma.stockLevel.findFirst({ where: { storeId: fx.storeId, productId: fx.productId } });
+    assert.equal(level?.quantityOnHand, 0, "the shelf number is left alone");
+  } finally {
+    await cleanupFixture(fx.storeId, fx.customerId);
+  }
+});

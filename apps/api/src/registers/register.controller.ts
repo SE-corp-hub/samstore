@@ -2,6 +2,7 @@ import { Body, Controller, Get, Headers, HttpException, HttpStatus, Inject, Para
 import type { ApiError } from "@sam-store/contracts";
 import { JwtAuthGuard, type AuthPrincipal } from "../auth/auth.guard.js";
 import { resolveTenant, TENANT_ROLES } from "../auth/tenant-context.js";
+import { prisma } from "../persistence/prisma-repositories.js";
 import { REGISTER_SERVICE, RegisterService } from "./register.service.js";
 import { assertDto, CASH_MOVEMENT_DTO, CLOSE_SHIFT_DTO, OPEN_SHIFT_DTO } from "../security/validate.js";
 
@@ -44,7 +45,8 @@ export class RegisterController {
   async current(@Req() req: Request & { user?: AuthPrincipal }, @Headers("x-store-id") headerStoreId?: string) {
     const storeId = await this.guardStore(req, headerStoreId, TENANT_ROLES.VIEW);
     const session = await this.registers.currentSession(storeId);
-    return { storeId, session };
+    const settings = await prisma.storeSettings.findUnique({ where: { storeId }, select: { requireOpenShift: true } });
+    return { storeId, session, required: settings?.requireOpenShift ?? false };
   }
 
   /** POST /admin/registers/open — start a shift (opening float). */

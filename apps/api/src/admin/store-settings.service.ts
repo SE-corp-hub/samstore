@@ -18,6 +18,7 @@ export interface StoreSettingsInput {
   maxOpenOrdersPerCustomer?: number;
   creditLimitMinor?: number; // P11: default utang limit
   creditTermDays?: number; // V1: default dueAt offset
+  requireOpenShift?: boolean; // false = cash can be taken without opening a drawer shift
   receiptHeader?: string | null; // P11
   receiptFooter?: string | null; // P11
   showVatLabel?: boolean; // P11
@@ -74,6 +75,7 @@ export class StoreSettingsService {
         maxOpenOrdersPerCustomer: store.settings?.maxOpenOrdersPerCustomer ?? 10,
         creditLimitMinor: store.settings?.creditLimitMinor ?? 0,
         creditTermDays: store.settings?.creditTermDays ?? 30,
+        requireOpenShift: store.settings?.requireOpenShift ?? false,
         receiptHeader: store.settings?.receiptHeader ?? null,
         receiptFooter: store.settings?.receiptFooter ?? null,
         showVatLabel: store.settings?.showVatLabel ?? true,
@@ -125,6 +127,7 @@ export class StoreSettingsService {
         ...(input.maxOpenOrdersPerCustomer !== undefined ? { maxOpenOrdersPerCustomer: input.maxOpenOrdersPerCustomer } : {}),
         ...(input.creditLimitMinor !== undefined ? { creditLimitMinor: input.creditLimitMinor } : {}),
         ...(input.creditTermDays !== undefined ? { creditTermDays: input.creditTermDays } : {}),
+        ...(input.requireOpenShift !== undefined ? { requireOpenShift: input.requireOpenShift } : {}),
         ...(input.receiptHeader !== undefined ? { receiptHeader: input.receiptHeader } : {}),
         ...(input.receiptFooter !== undefined ? { receiptFooter: input.receiptFooter } : {}),
         ...(input.showVatLabel !== undefined ? { showVatLabel: input.showVatLabel } : {}),
@@ -157,6 +160,7 @@ export class StoreSettingsService {
         maxOpenOrdersPerCustomer: input.maxOpenOrdersPerCustomer ?? 10,
         creditLimitMinor: input.creditLimitMinor ?? 0,
         creditTermDays: input.creditTermDays ?? 30,
+        requireOpenShift: input.requireOpenShift ?? false,
         receiptHeader: input.receiptHeader ?? null,
         receiptFooter: input.receiptFooter ?? null,
         showVatLabel: input.showVatLabel ?? true,

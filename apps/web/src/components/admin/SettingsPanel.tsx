@@ -28,6 +28,7 @@ interface StoreSettings {
     maxOpenOrdersPerCustomer: number;
     creditLimitMinor: number;
     creditTermDays: number;
+    requireOpenShift?: boolean;
     receiptHeader: string | null;
     receiptFooter: string | null;
     showVatLabel: boolean;
@@ -81,6 +82,7 @@ export default function SettingsPanel() {
   const [closedStoreMessage, setClosedStoreMessage] = useState("");
   const [creditLimitPesos, setCreditLimitPesos] = useState("");
   const [creditTermDays, setCreditTermDays] = useState("30");
+  const [requireOpenShift, setRequireOpenShift] = useState(false);
 
   // ── Taxes ──
   const [vatEnabled, setVatEnabled] = useState(true);
@@ -125,6 +127,7 @@ export default function SettingsPanel() {
       setClosedStoreMessage(d.settings.closedStoreMessage ?? "");
       setCreditLimitPesos((d.settings.creditLimitMinor / 100).toString());
       setCreditTermDays(d.settings.creditTermDays.toString());
+      setRequireOpenShift(d.settings.requireOpenShift === true);
       setVatEnabled(d.settings.vatEnabled ?? true);
       setVatRatePct(((d.settings.vatRateBp ?? 1200) / 100).toString());
       setPricesIncludeVat(d.settings.pricesIncludeVat ?? true);
@@ -201,6 +204,7 @@ export default function SettingsPanel() {
     closedStoreMessage: closedStoreMessage || null,
     creditLimitMinor: Math.round(parseFloat(creditLimitPesos || "0") * 100),
     creditTermDays: parseInt(creditTermDays, 10) || 30,
+    requireOpenShift,
   });
 
   const saveTaxes = () => saveSection({
@@ -544,6 +548,12 @@ export default function SettingsPanel() {
                     <div className="col-md-4">
                       <label className="form-label small">Credit term (days)</label>
                       <input className="form-control" type="number" min="1" value={creditTermDays} onChange={(e) => setCreditTermDays(e.target.value)} />
+                    </div>
+                    <div className="col-12">
+                      <div className="form-check form-switch">
+                        <input className="form-check-input" type="checkbox" id="requireOpenShift" checked={requireOpenShift} onChange={(e) => setRequireOpenShift(e.target.checked)} />
+                        <label className="form-check-label small" htmlFor="requireOpenShift">Require an open cash drawer (shift) before taking cash <span className="text-muted">— off: staff can sell without opening a shift</span></label>
+                      </div>
                     </div>
                     <div className="col-md-8">
                       <label className="form-label small">Closed-store message</label>

@@ -50,7 +50,7 @@ interface Report {
 
 const fmtTime = (iso: string) => new Date(iso).toLocaleString("en-PH", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 
-export default function RegisterBar({ onShiftChange }: { onShiftChange?: (open: boolean) => void }) {
+export default function RegisterBar({ onShiftChange }: { onShiftChange?: (open: boolean, required: boolean) => void }) {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -67,6 +67,8 @@ export default function RegisterBar({ onShiftChange }: { onShiftChange?: (open: 
   const [countedInput, setCountedInput] = useState("");
   const [closeNotes, setCloseNotes] = useState("");
 
+  const [required, setRequired] = useState(true);
+
   const [report, setReport] = useState<Report | null>(null);
 
   const load = useCallback(async () => {
@@ -75,7 +77,9 @@ export default function RegisterBar({ onShiftChange }: { onShiftChange?: (open: 
       const data = await res.json();
       const s: Session | null = data?.session ?? null;
       setSession(s);
-      onShiftChange?.(Boolean(s));
+      const req = data?.required !== false;
+      setRequired(req);
+      onShiftChange?.(Boolean(s), req);
     } catch {
       setSession(null);
     } finally {
@@ -127,7 +131,7 @@ export default function RegisterBar({ onShiftChange }: { onShiftChange?: (open: 
             <span className="badge text-bg-light ms-1">{session.live.cashSalesCount} cash sale{session.live.cashSalesCount === 1 ? "" : "s"}</span>
           </>
         ) : (
-          <span className="fw-semibold">No shift open — cash sales are blocked until you open the drawer</span>
+          <span className="fw-semibold">{required ? "No shift open — cash sales are blocked until you open the drawer" : "No shift open — you can still sell. Open one if you want to track the drawer."}</span>
         )}
         <div className="ms-auto d-flex flex-wrap gap-2">
           {session ? (

@@ -1,5 +1,6 @@
 "use client";
 
+import { PesoInput, WholeInput } from "../NumberBoxes";
 import { useCallback, useEffect, useState } from "react";
 import { API_URL } from "../../config";
 import { adminHeaders } from "../../lib/admin";
@@ -490,11 +491,11 @@ export default function ProductsPanel() {
                     <div className="row">
                       <div className="col-6 mb-2">
                         <label className="form-label small" htmlFor="productSellingPrice">Selling price (₱) per unit *</label>
-                        <input id="productSellingPrice" className="form-control" required type="number" step="0.01" min="0" value={form.priceMinor} onChange={(e) => setForm({ ...form, priceMinor: e.target.value })} />
+                        <PesoInput id="productSellingPrice" required value={form.priceMinor} onChange={(v) => setForm({ ...form, priceMinor: v })} placeholder="0.00" />
                       </div>
                       <div className="col-6 mb-2">
                         <label className="form-label small" htmlFor="productUnitCost">Unit acquisition cost (₱)</label>
-                        <input id="productUnitCost" className="form-control" type="number" step="0.01" min="0" value={form.costMinor} onChange={(e) => setForm({ ...form, costMinor: e.target.value })} />
+                        <PesoInput id="productUnitCost" value={form.costMinor} onChange={(v) => setForm({ ...form, costMinor: v })} placeholder="0.00" />
                         <small className="text-muted">Purchases update this to the latest received cost.</small>
                       </div>
                     </div>
@@ -502,11 +503,11 @@ export default function ProductsPanel() {
                     <div className="row">
                       <div className="col-6 mb-2">
                         <label className="form-label small">Opening stock</label>
-                        <input className="form-control" type="number" min="0" value={form.stock} onChange={(e) => setForm({ ...form, stock: e.target.value })} />
+                        <WholeInput value={form.stock} onChange={(v) => setForm({ ...form, stock: v })} placeholder="0" />
                       </div>
                       <div className="col-6 mb-2">
                         <label className="form-label small">Reorder at</label>
-                        <input className="form-control" type="number" min="0" placeholder="0" title="Flag LOW stock at or below this on-hand qty" value={form.reorderThreshold} onChange={(e) => setForm({ ...form, reorderThreshold: e.target.value })} />
+                        <WholeInput placeholder="0" title="Flag LOW stock at or below this on-hand qty" value={form.reorderThreshold} onChange={(v) => setForm({ ...form, reorderThreshold: v })} />
                       </div>
                     </div>
                     <div className="mb-2">

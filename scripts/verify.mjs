@@ -58,6 +58,7 @@ const TEST_FILES = [
   "apps/api/src/security/idempotency-m10.test.ts",
   "apps/web/src/lib/toast.test.ts",
   "apps/web/src/lib/retryable.test.ts",
+  "apps/web/src/lib/number-format.test.ts",
   "apps/api/src/domain/stock-book.test.ts",
   "apps/api/src/domain/price-history.test.ts",
   "apps/api/src/domain/shelf-cost.test.ts",

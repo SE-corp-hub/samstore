@@ -152,6 +152,9 @@ export default function PosPanel({ onNavigate }: { onNavigate?: (tab: string) =>
   const [tendered, setTendered] = useState("");
   // N1: null = unknown, true = drawer open, false = no open shift (cash disabled)
   const [shiftOpen, setShiftOpen] = useState<boolean | null>(null);
+  const [shiftRequired, setShiftRequired] = useState(true);
+  const onShiftChange = useCallback((open: boolean, required: boolean) => { setShiftOpen(open); setShiftRequired(required); }, []);
+  const cashBlocked = shiftOpen === false && shiftRequired; // the owner can switch the shift rule off in Settings
   const [startAt, setStartAt] = useState("");
   const [dueAt, setDueAt] = useState("");
   const [termDays, setTermDays] = useState(30);
@@ -415,7 +418,7 @@ export default function PosPanel({ onNavigate }: { onNavigate?: (tab: string) =>
     <div>
       <h1 className="h4 mb-2"><i className="bi bi-cash-register me-2"></i>POS</h1>
       {/* N1: cash drawer / shift bar — cash sales are blocked until a shift is open */}
-      <RegisterBar onShiftChange={setShiftOpen} />
+      <RegisterBar onShiftChange={onShiftChange} />
       {error && <div className="alert alert-danger py-2 small">{error}</div>}
       {receiptOrder && <ReceiptModal orderId={receiptOrder} onClose={() => setReceiptOrder(null)} />}
 
@@ -685,14 +688,14 @@ export default function PosPanel({ onNavigate }: { onNavigate?: (tab: string) =>
               <div className="card-body">
                 <h6 className="small fw-bold mb-2">Mode of payment</h6>
                 <div className="d-flex gap-2 mb-3">
-                  <button type="button" className={`btn ${payment === "cash" ? "btn-success" : "btn-outline-success"} flex-fill`} disabled={shiftOpen === false} onClick={() => setPayment("cash")}>
+                  <button type="button" className={`btn ${payment === "cash" ? "btn-success" : "btn-outline-success"} flex-fill`} disabled={cashBlocked} onClick={() => setPayment("cash")}>
                     <i className="bi bi-cash me-1"></i>Cash
                   </button>
                   <button type="button" className={`btn ${payment === "credit" ? "btn-warning" : "btn-outline-warning"} flex-fill`} onClick={() => setPayment("credit")}>
                     <i className="bi bi-journal me-1"></i>Credit
                   </button>
                 </div>
-                {shiftOpen === false && (
+                {cashBlocked && (
                   <div className="alert alert-warning py-2 small mb-3">
                     <i className="bi bi-exclamation-triangle me-1"></i>Cash is unavailable while the drawer is closed — open a shift above, or sell on credit.
                   </div>
