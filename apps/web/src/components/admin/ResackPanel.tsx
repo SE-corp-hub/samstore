@@ -1,10 +1,9 @@
 "use client";
 
-// Rice Ops M4 — Resack: any rice into any rice, at this location.
-//   Resack now      — weigh in, weigh out, sign (one step)
-//   Start / Finish  — the kargador needs time: the input leaves the shelf now and
-//                     shows as "in resack" until someone finishes it
-//   Open a sack     — one sack becomes loose kilos for tingi
+// Resack: any rice into any rice. Store first, then the rice (with what is left on
+// the shelf), weigh in, weigh out, and only the porter (kargador) signs. A receipt
+// can be printed right away and reprinted later from "Recent resacks".
+// (Old "started" jobs from before are still listed so they can be finished or cancelled.)
 // The screen does the arithmetic: kilos in, kilos out, the loss and whether it is
 // within 1% — before anyone signs. Over 1% goes to the owner; the stock still moves.
 
@@ -15,6 +14,7 @@ import { toast } from "../../lib/toast";
 import { sendStep } from "../../lib/offlineQueue";
 import SignCapture, { type KargadorOption, type SignatureOut } from "./SignCapture";
 import { askText } from "../../lib/ask";
+import { printSlip, type Slip } from "../../lib/slip-print";
 
 interface Product { id: string; name: string; stockBaseUnit: string | null; stockBaseQuantity: number | null; stockConversionFamily: string | null; isActive?: boolean }
 interface Location { id: string; name: string; code: string | null; isActive: boolean }
@@ -24,7 +24,7 @@ interface Job {
   kargador: { id: string; name: string } | null; approvalId: string | null; startedAt: string;
   outputs: { product: { name: string; soldByWeight?: boolean }; quantity: number }[];
 }
-type Mode = "now" | "start" | "open" | "finish";
+type Mode = "now";
 interface OutRow { productId: string; amount: string } // sacks, or kilos for loose rice
 type ApiBody = { message?: string; errors?: string[] } & Record<string, unknown>;
 
@@ -56,6 +56,10 @@ export default function ResackPanel() {
   const [kargadorId, setKargadorId] = useState("");
   const [signing, setSigning] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [chosen, setChosen] = useState(false);            // store picked (or fixed to this staff's store)
+  const [stock, setStock] = useState<Record<string, number>>({});
+  const [storeName, setStoreName] = useState("");
+  const [receipt, setReceipt] = useState<Slip | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -68,7 +72,9 @@ export default function ResackPanel() {
       const active = ((locs?.warehouses ?? []) as Location[]).filter((l) => l.isActive);
       setLocations(active);
       setHomeLocationId(me?.homeLocationId ?? null);
-      setLocationId(me?.homeLocationId ?? active[0]?.id ?? "");
+      setLocationId(me?.homeLocationId ?? "");
+      setChosen(!!me?.homeLocationId);
+      fetch(`${API_URL}/admin/settings`, { headers: adminHeaders() }).then((r) => (r.ok ? r.json() : null)).then((d) => setStoreName(d?.store?.name ?? "")).catch(() => {});
       setKargadors((ks?.kargadors ?? []) as KargadorOption[]);
       setProducts(((ps?.products ?? []) as Product[]).filter((p) => p.isActive !== false && weighed(p)));
     })().catch(() => setError("Could not load"));
@@ -80,10 +86,16 @@ export default function ResackPanel() {
     if (res.ok) setJobs((await res.json()).resacks);
   }, [locationId]);
   useEffect(() => { void loadJobs(); }, [loadJobs]);
+  const loadStock = useCallback(async () => {
+    if (!locationId) return;
+    const res = await fetch(`${API_URL}/admin/benta/catalog?locationId=${encodeURIComponent(locationId)}`, { headers: adminHeaders() });
+    const d = res.ok ? ((await res.json().catch(() => null)) as { products?: { id: string; stock: Record<string, number> }[] } | null) : null;
+    setStock(Object.fromEntries((d?.products ?? []).map((i) => [i.id, i.stock?.[locationId] ?? 0])));
+  }, [locationId]);
+  useEffect(() => { void loadStock(); }, [loadStock]);
+  const left = (p: Product) => (isLoose(p) ? `${kg(stock[p.id] ?? 0)} kg left` : `${stock[p.id] ?? 0} sacks left`);
 
   const byId = useMemo(() => new Map(products.map((p) => [p.id, p])), [products]);
-  const sacks = products.filter((p) => !isLoose(p));
-  const loose = products.filter(isLoose);
   const here = locations.find((l) => l.id === locationId);
   const inProduct = finishing ? byId.get(finishing.input.id) : byId.get(inputId);
   const inQty = finishing ? finishing.inputQty : Number(inputQty);
@@ -94,7 +106,7 @@ export default function ResackPanel() {
   const lossPct = gramsIn > 0 ? (loss * 100) / gramsIn : 0;
   const overTolerance = loss * 10_000 > 100 * gramsIn;
   const outsValid = outs.length > 0 && outs.every((o, i) => o.productId && (outUnits[i] ?? 0) > 0);
-  const readyToSign = mode === "start" ? gramsIn > 0 : gramsIn > 0 && outsValid && gramsOut <= gramsIn;
+  const readyToSign = gramsIn > 0 && outsValid && gramsOut <= gramsIn && !!(finishing?.kargador?.id ?? kargadorId);
 
   const reset = () => {
     setMode(null); setFinishing(null); setSigning(false); setInputId(""); setInputQty("1");
@@ -105,7 +117,6 @@ export default function ResackPanel() {
     const outText = outs.map((o, i) => { const p = byId.get(o.productId); return p ? (isLoose(p) ? `${kg(outUnits[i] ?? 0)} kg ${p.name}` : `${outUnits[i]} × ${p.name}`) : ""; }).filter(Boolean).join(", ");
     const k = kargadors.find((x) => x.id === (finishing?.kargador?.id ?? kargadorId))?.name;
     const dala = k ? `, done by ${k}` : "";
-    if (mode === "start") return `Start resack at ${here?.name}: ${inQty} × ${inProduct?.name} (${kg(gramsIn)} kg) leaves the shelf${dala}.`;
     return `Resack at ${here?.name}: ${inQty} × ${inProduct?.name} (${kg(gramsIn)} kg) → ${outText} (${kg(gramsOut)} kg). ${loss > 0 ? `Short ${kg(loss)} kg (${lossPct.toFixed(1)}%)` : "Nothing short"}${dala}.`;
   };
 
@@ -117,17 +128,24 @@ export default function ResackPanel() {
     let path = "/admin/resacks";
     let body: Record<string, unknown>;
     if (finishing) { path = `/admin/resacks/${finishing.id}/finish`; body = { outputs, signatures }; }
-    else if (mode === "start") { path = "/admin/resacks/start"; body = { locationId, inputProductId: inputId, inputQty: inQty, kargadorId: k, signatures }; }
-    else if (mode === "open") { path = "/admin/resacks/open-sack"; body = { locationId, sackProductId: inputId, sacks: inQty, looseProductId: outs[0]?.productId, looseGrams: outUnits[0], kargadorId: k, signatures }; }
     else body = { locationId, inputProductId: inputId, inputQty: inQty, outputs, kargadorId: k, signatures };
     const r = await sendStep(path, body, `Resack ${inProduct?.name ?? ""}`.trim());
     setBusy(false);
     if (r.status === "queued") { toast("No signal — saved on this phone, it will be sent when the signal returns"); reset(); return; }
     const data = r.data as ApiBody | null;
     if (!r.ok) { setSigning(false); setError(errText(data, "Did not go through")); return; }
-    toast(mode === "start" ? `Started: ${String(data?.docNumber ?? "")}` : data?.needsApproval ? "Done — short by more than 1%, the owner was told" : "Resack done");
+    toast(data?.needsApproval ? "Done — short by more than 1%, the owner was told" : "Resack done");
+    const slip: Slip = {
+      storeName: storeName || "SAM STORE", title: "RESACK RECEIPT", reference: String(data?.docNumber ?? "") || null, when: new Date().toLocaleString("en-PH"),
+      lines: [{ label: "Store", value: here?.name ?? "" }, { label: "From", value: `${inQty} × ${inProduct?.name ?? ""} (${kg(gramsIn)} kg)` }],
+      rows: outs.map((o, i) => { const p = byId.get(o.productId); return { name: p?.name ?? "", qty: p ? (isLoose(p) ? `${kg(outUnits[i] ?? 0)} kg` : `${outUnits[i]} sacks`) : "" }; }),
+      totals: [{ label: "Out", value: `${kg(gramsOut)} kg` }, { label: loss > 0 ? "Short" : "Short", value: loss > 0 ? `${kg(loss)} kg (${lossPct.toFixed(1)}%)` : "none" }],
+      signatures: [{ role: "Porter", name: kargadors.find((x) => x.id === (finishing?.kargador?.id ?? kargadorId))?.name ?? "" }],
+      footer: "Signed on the device by the porter.", widthMm: 58,
+    };
     reset();
-    await loadJobs();
+    setReceipt(slip);
+    await Promise.all([loadJobs(), loadStock()]);
   };
 
   const cancelJob = async (j: Job) => {
@@ -142,27 +160,48 @@ export default function ResackPanel() {
 
   const started = jobs.filter((j) => j.status === "STARTED");
   const recent = jobs.filter((j) => j.status !== "STARTED").slice(0, 10);
-  const needKargador = !!(finishing?.kargador?.id ?? kargadorId);
+  const reprint = (j: Job) => printSlip({
+    storeName: storeName || "SAM STORE", title: "RESACK RECEIPT (REPRINT)", reference: j.docNumber, when: new Date(j.startedAt).toLocaleString("en-PH"),
+    lines: [{ label: "Store", value: here?.name ?? "" }, { label: "From", value: `${j.inputQty} × ${j.input.name} (${kg(j.inputGrams)} kg)` }],
+    rows: j.outputs.map((o) => ({ name: o.product.name, qty: o.product.soldByWeight ? `${kg(o.quantity)} kg` : `${o.quantity} sacks` })),
+    totals: [{ label: "Out", value: `${kg(j.outputGrams ?? 0)} kg` }, { label: "Short", value: `${kg(j.lossGrams ?? 0)} kg` }],
+    signatures: j.kargador ? [{ role: "Porter", name: j.kargador.name }] : [], footer: "Reprint", widthMm: 58,
+  });
 
   return (
     <div style={{ fontSize: 18 }}>
       <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
         <h1 className="h4 mb-0">Resack</h1>
-        {homeLocationId ? <span className="badge text-bg-light border fs-6">{here?.name}</span> : (
-          <select className="form-select" style={{ maxWidth: 240 }} aria-label="Location" value={locationId} onChange={(e) => { setLocationId(e.target.value); reset(); }}>
-            {locations.map((l) => <option key={l.id} value={l.id}>{l.code ? `${l.code} · ` : ""}{l.name}</option>)}
-          </select>
-        )}
+        {chosen && here && (homeLocationId ? <span className="badge text-bg-light border fs-6">{here.name}</span> : (
+          <button type="button" className="btn btn-outline-secondary" onClick={() => { setChosen(false); setLocationId(""); reset(); setReceipt(null); }}>Store: {here.name} · change</button>
+        ))}
       </div>
       {error && <div className="alert alert-danger py-2" role="alert">{error}</div>}
       {products.length === 0 && <div className="alert alert-warning py-2">No rice with a weight set. In Products, set the size of each sack (e.g. 25 kg), or 1 g for loose rice.</div>}
 
-      {!mode && !finishing && (
+      {!chosen && (
+        <>
+          <h2 className="h5">Which store?</h2>
+          <div className="d-grid gap-2 mb-4" style={{ maxWidth: 420 }}>
+            {locations.map((l) => <button key={l.id} type="button" className="btn btn-outline-success btn-lg" onClick={() => { setLocationId(l.id); setChosen(true); }}>{l.code ? `${l.code} · ` : ""}{l.name}</button>)}
+          </div>
+        </>
+      )}
+
+      {chosen && receipt && !mode && !finishing && (
+        <div className="alert alert-success d-flex flex-wrap align-items-center justify-content-between gap-2">
+          <strong>Resack saved{receipt.reference ? ` — ${receipt.reference}` : ""}.</strong>
+          <span className="d-flex gap-2">
+            <button type="button" className="btn btn-dark" onClick={() => printSlip(receipt)}>Print receipt</button>
+            <button type="button" className="btn btn-outline-secondary" onClick={() => setReceipt(null)}>Close</button>
+          </span>
+        </div>
+      )}
+
+      {chosen && !mode && !finishing && (
         <>
           <div className="d-grid gap-2 mb-4" style={{ maxWidth: 420 }}>
-            <button className="btn btn-success btn-lg" onClick={() => setMode("now")}>Resack now</button>
-            <button className="btn btn-outline-dark btn-lg" onClick={() => setMode("start")}>Start (finish later)</button>
-            <button className="btn btn-outline-dark btn-lg" onClick={() => { setMode("open"); setOuts([{ productId: loose[0]?.id ?? "", amount: "" }]); }}>Open a sack (loose)</button>
+            <button className="btn btn-success btn-lg" onClick={() => { setReceipt(null); setMode("now"); }}>Resack now</button>
           </div>
           <h2 className="h5">In resack ({started.length})</h2>
           {started.length === 0 ? <p className="text-muted">None.</p> : (
@@ -192,6 +231,7 @@ export default function ResackPanel() {
                       {j.status === "FINISHED" && <div className="small">{kg(j.inputGrams)} kg → {kg(j.outputGrams ?? 0)} kg · short {kg(j.lossGrams ?? 0)} kg ({((j.lossBp ?? 0) / 100).toFixed(2)}%)</div>}
                     </div>
                     <div className="text-end">
+                      {j.status === "FINISHED" && <button type="button" className="btn btn-sm btn-outline-dark me-2" onClick={() => reprint(j)}>Reprint</button>}
                       {j.status === "CANCELLED" && <span className="badge text-bg-secondary">Cancelled</span>}
                       {j.varietyChange && <span className="badge text-bg-info ms-1">Variety change</span>}
                       {j.approvalId && <span className="badge text-bg-warning ms-1">To the owner</span>}
@@ -204,10 +244,10 @@ export default function ResackPanel() {
         </>
       )}
 
-      {(mode || finishing) && !signing && (
+      {chosen && (mode || finishing) && !signing && (
         <div className="card border-success">
           <div className="card-body">
-            <h2 className="h5">{finishing ? `Finish ${finishing.docNumber}` : mode === "start" ? "Start a resack" : mode === "open" ? "Open a sack" : "Resack now"}</h2>
+            <h2 className="h5">{finishing ? `Finish ${finishing.docNumber}` : "Resack now"}</h2>
 
             <div className="fw-semibold mt-2">Going in</div>
             {finishing ? <p className="mb-2">{finishing.inputQty} × {finishing.input.name} ({kg(finishing.inputGrams)} kg)</p> : (
@@ -215,7 +255,7 @@ export default function ResackPanel() {
                 <div className="col-8">
                   <select className="form-select form-select-lg" aria-label="Rice going in" value={inputId} onChange={(e) => setInputId(e.target.value)}>
                     <option value="">Choose…</option>
-                    {(mode === "open" ? sacks : products).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                    {products.map((p) => <option key={p.id} value={p.id}>{p.name} — {left(p)}</option>)}
                   </select>
                 </div>
                 <div className="col-4">
@@ -224,7 +264,7 @@ export default function ResackPanel() {
               </div>
             )}
 
-            {mode !== "start" && (
+            {(
               <>
                 <div className="fw-semibold mt-3">Coming out</div>
                 {outs.map((o, i) => {
@@ -234,7 +274,7 @@ export default function ResackPanel() {
                       <div className="col-7">
                         <select className="form-select form-select-lg" aria-label={`Coming out ${i + 1}`} value={o.productId} onChange={(e) => setOuts(outs.map((x, j) => (j === i ? { ...x, productId: e.target.value } : x)))}>
                           <option value="">Choose…</option>
-                          {(mode === "open" ? loose : products).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+                          {products.map((x) => <option key={x.id} value={x.id}>{x.name} — {left(x)}</option>)}
                         </select>
                       </div>
                       <div className="col-4">
@@ -250,7 +290,7 @@ export default function ResackPanel() {
                     </div>
                   );
                 })}
-                {mode !== "open" && outs.length < 10 && <button type="button" className="btn btn-outline-secondary" onClick={() => setOuts([...outs, { productId: "", amount: "" }])}>+ Another output</button>}
+                {outs.length < 10 && <button type="button" className="btn btn-outline-secondary" onClick={() => setOuts([...outs, { productId: "", amount: "" }])}>+ Another output</button>}
 
                 {gramsIn > 0 && (
                   <div className={`alert mt-3 mb-0 ${gramsOut > gramsIn ? "alert-danger" : overTolerance ? "alert-warning" : "alert-success"}`} style={{ fontVariantNumeric: "tabular-nums" }}>
@@ -265,9 +305,9 @@ export default function ResackPanel() {
 
             {!finishing && (
               <div className="mt-3">
-                <label className="form-label" htmlFor="rs-kargador">Porter who did it (if any)</label>
+                <label className="form-label" htmlFor="rs-kargador">Porter (kargador) who did it — he signs</label>
                 <select id="rs-kargador" className="form-select form-select-lg" value={kargadorId} onChange={(e) => setKargadorId(e.target.value)}>
-                  <option value="">None / staff only</option>
+                  <option value="">Choose…</option>
                   {kargadors.map((k) => <option key={k.id} value={k.id}>{k.name}</option>)}
                 </select>
               </div>
@@ -275,7 +315,7 @@ export default function ResackPanel() {
 
             <div className="d-flex justify-content-between mt-3">
               <button type="button" className="btn btn-outline-secondary btn-lg" onClick={reset}>Back</button>
-              <button type="button" className="btn btn-success btn-lg" disabled={!readyToSign || (mode !== "start" && !finishing && !inputId)} onClick={() => setSigning(true)}>Next</button>
+              <button type="button" className="btn btn-success btn-lg" disabled={!readyToSign || (!finishing && !inputId)} onClick={() => setSigning(true)}>Next</button>
             </div>
           </div>
         </div>
@@ -285,7 +325,8 @@ export default function ResackPanel() {
         <SignCapture
           sentence={sentence()}
           staffName="you (staff)"
-          needKargador={needKargador}
+          skipStaff
+          needKargador
           kargadors={kargadors}
           presetKargadorId={finishing?.kargador?.id ?? (kargadorId || null)}
           busy={busy}

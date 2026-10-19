@@ -145,7 +145,7 @@ test("M9: the daily totals equal the sum of the day's documents; Pagsasara locks
   const pay = await new UtangService().collect(fx.storeId, fx.staff1, { customerId: fx.customerId, amountMinor: 50_000, method: "cash", signatures: staffSig });
   assert.equal(pay.ok, true, msg(pay));
   assert.equal((await new CountService().writeOff(fx.storeId, fx.staff1, { productId: fx.loose.id, kilos: "0.3", reason: "TAPON", signatures: staffSig })).ok, true);
-  const rs = await new ResackService().resack(fx.storeId, fx.staff1, { locationId: fx.s1, inputProductId: fx.sin25.id, inputQty: 1, outputs: [{ productId: fx.loose.id, quantity: 24_800 }], signatures: staffSig });
+  const rs = await new ResackService().resack(fx.storeId, fx.staff1, { locationId: fx.s1, inputProductId: fx.sin25.id, inputQty: 1, outputs: [{ productId: fx.loose.id, quantity: 24_800 }], kargadorId: fx.kargadorId, signatures: [{ signerKind: "KARGADOR", kargadorId: fx.kargadorId, imagePng: PNG }] });
   assert.equal(rs.ok, true, msg(rs));
 
   const d = await reports.daily(fx.storeId, fx.owner, { date: today, locationId: fx.s1 });

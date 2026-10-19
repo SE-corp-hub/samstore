@@ -183,6 +183,7 @@ export class ResackService {
     return this.run(async () => {
       const loc = await this.location(storeId, actor, input.locationId);
       const kargador = await this.kargador(storeId, input.kargadorId);
+      if (!kargador) throw new ResackError("Choose the porter (kargador) who did the resack — only the porter signs");
       const qty = input.inputQty;
       if (typeof qty !== "number") throw new ResackError("Enter how many go in");
       const byId = await this.products(storeId, [input.inputProductId ?? "", ...(input.outputs ?? []).map((o) => o.productId ?? "")]);
@@ -210,6 +211,7 @@ export class ResackService {
     return this.run(async () => {
       const loc = await this.location(storeId, actor, input.locationId);
       const kargador = await this.kargador(storeId, input.kargadorId);
+      if (!kargador) throw new ResackError("Choose the porter (kargador) who did the resack — only the porter signs");
       const qty = input.inputQty;
       if (typeof qty !== "number") throw new ResackError("Enter how many go in");
       const byId = await this.products(storeId, [input.inputProductId ?? ""]);

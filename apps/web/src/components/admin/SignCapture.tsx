@@ -26,6 +26,7 @@ export default function SignCapture({
   sentence,
   staffName,
   needKargador = false,
+  skipStaff = false,
   kargadors = [],
   presetKargadorId,
   customer,
@@ -36,6 +37,8 @@ export default function SignCapture({
   sentence: string;
   staffName: string;
   needKargador?: boolean;
+  /** Only the porter signs (Resack). */
+  skipStaff?: boolean;
   kargadors?: KargadorOption[];
   /** The trip's kargador (already chosen): shown, not picked again. */
   presetKargadorId?: string | null;
@@ -46,7 +49,7 @@ export default function SignCapture({
   onCancel: () => void;
 }) {
   const { t } = useLang();
-  const signers: Signer[] = ["STAFF", ...(needKargador ? (["KARGADOR"] as Signer[]) : []), ...(customer ? (["CUSTOMER"] as Signer[]) : [])];
+  const signers: Signer[] = [...(skipStaff ? [] : (["STAFF"] as Signer[])), ...(needKargador ? (["KARGADOR"] as Signer[]) : []), ...(customer ? (["CUSTOMER"] as Signer[]) : [])];
   const [step, setStep] = useState(0); // 0 = read-back, then one screen per signer
   const [ink, setInk] = useState<string | null>(null);
   const [done, setDone] = useState<SignatureOut[]>([]);
