@@ -77,7 +77,7 @@ const svc = new ResackService();
 
 test("M4: 1 × 25 kg → 5 × 5 kg balances — no loss, no approval, cost carried, ledger both ways", async () => {
   const fx = await fixture();
-  const r = await svc.resack(fx.storeId, fx.staff1, { locationId: fx.s1, inputProductId: fx.sin25.id, inputQty: 1, outputs: [{ productId: fx.sin5.id, quantity: 5 }], kargadorId: fx.kargadorId, signatures: withKargador(fx.kargadorId) });
+  const r = await svc.resack(fx.storeId, fx.staff1, { locationId: fx.s1, inputProductId: fx.sin25.id, inputQty: 1, outputs: [{ productId: fx.sin5.id, quantity: 5 }], signatures: withKargador(fx.kargadorId) });
   assert.equal(r.ok, true, msg(r));
   if (!r.ok) return;
   assert.match(r.value.docNumber, /^RSK-\d{6}$/);
@@ -95,7 +95,7 @@ test("M4: 1 × 25 kg → 5 × 5 kg balances — no loss, no approval, cost carri
 
 test("M4: Sinandomeng → Dinorado is Ibang klase and carries Sinandomeng's cost", async () => {
   const fx = await fixture();
-  const r = await svc.resack(fx.storeId, fx.staff1, { locationId: fx.s1, inputProductId: fx.sin25.id, inputQty: 1, outputs: [{ productId: fx.din25.id, quantity: 1 }], kargadorId: fx.kargadorId, signatures: withKargador(fx.kargadorId) });
+  const r = await svc.resack(fx.storeId, fx.staff1, { locationId: fx.s1, inputProductId: fx.sin25.id, inputQty: 1, outputs: [{ productId: fx.din25.id, quantity: 1 }], signatures: withKargador(fx.kargadorId) });
   assert.equal(r.ok && r.value.varietyChange, true, msg(r));
   const job = await prisma.resackJob.findUniqueOrThrow({ where: { id: r.ok ? r.value.id : "" }, include: { outputs: true } });
   assert.equal(job.varietyChange, true);
@@ -105,14 +105,14 @@ test("M4: Sinandomeng → Dinorado is Ibang klase and carries Sinandomeng's cost
   // The owner's report: 1 × Sinandomeng 25 kg → 1 × Dinorado 25 kg must work even when the
   // two products carry different conversion-family labels (Products page vs import).
   await prisma.product.update({ where: { id: fx.din25.id }, data: { stockConversionFamily: "dinorado" } });
-  const again = await svc.resack(fx.storeId, fx.staff1, { locationId: fx.s1, inputProductId: fx.sin25.id, inputQty: 1, outputs: [{ productId: fx.din25.id, quantity: 1 }], kargadorId: fx.kargadorId, signatures: withKargador(fx.kargadorId) });
+  const again = await svc.resack(fx.storeId, fx.staff1, { locationId: fx.s1, inputProductId: fx.sin25.id, inputQty: 1, outputs: [{ productId: fx.din25.id, quantity: 1 }], signatures: withKargador(fx.kargadorId) });
   assert.equal(again.ok && again.value.varietyChange, true, msg(again));
   assert.equal(await onHand(fx, fx.din25.id), 2);
 });
 
 test("M4: a 2% loss waits for the owner — and the stock still moves", async () => {
   const fx = await fixture();
-  const r = await svc.resack(fx.storeId, fx.staff1, { locationId: fx.s1, inputProductId: fx.sin25.id, inputQty: 1, outputs: [{ productId: fx.loose.id, quantity: 24_500 }], kargadorId: fx.kargadorId, signatures: withKargador(fx.kargadorId) });
+  const r = await svc.resack(fx.storeId, fx.staff1, { locationId: fx.s1, inputProductId: fx.sin25.id, inputQty: 1, outputs: [{ productId: fx.loose.id, quantity: 24_500 }], signatures: withKargador(fx.kargadorId) });
   assert.equal(r.ok, true, msg(r));
   if (!r.ok) return;
   assert.deepEqual([r.value.lossGrams, r.value.lossBp, r.value.needsApproval], [500, 200, true]);
@@ -127,7 +127,7 @@ test("M4: a 2% loss waits for the owner — and the stock still moves", async ()
   assert.equal(job.approvalId, approval.id);
 
   // Within 1% needs no one.
-  const ok = await svc.resack(fx.storeId, fx.staff1, { locationId: fx.s1, inputProductId: fx.sin25.id, inputQty: 1, outputs: [{ productId: fx.loose.id, quantity: 24_800 }], kargadorId: fx.kargadorId, signatures: withKargador(fx.kargadorId) });
+  const ok = await svc.resack(fx.storeId, fx.staff1, { locationId: fx.s1, inputProductId: fx.sin25.id, inputQty: 1, outputs: [{ productId: fx.loose.id, quantity: 24_800 }], signatures: withKargador(fx.kargadorId) });
   assert.equal(ok.ok && ok.value.needsApproval, false, "0.8% is within tolerance");
 });
 
@@ -150,7 +150,7 @@ test("M4: no signature, no resack — nothing moves", async () => {
 
 test("M4: Simulan → nasa resack → Tapusin; Tapusin twice is refused; cancel puts the sack back", async () => {
   const fx = await fixture();
-  const s = await svc.start(fx.storeId, fx.staff1, { locationId: fx.s1, inputProductId: fx.sin25.id, inputQty: 2, kargadorId: fx.kargadorId, signatures: withKargador(fx.kargadorId) });
+  const s = await svc.start(fx.storeId, fx.staff1, { locationId: fx.s1, inputProductId: fx.sin25.id, inputQty: 2, signatures: withKargador(fx.kargadorId) });
   assert.equal(s.ok, true, msg(s));
   const id = s.ok ? s.value.id : "";
   assert.equal(await onHand(fx, fx.sin25.id), 8, "the 2 sacks are off the shelf");
@@ -166,38 +166,38 @@ test("M4: Simulan → nasa resack → Tapusin; Tapusin twice is refused; cancel 
   assert.equal(again.ok, false, "a job finishes once");
   assert.equal(await onHand(fx, fx.sin5.id), 9);
 
-  const s2 = await svc.start(fx.storeId, fx.staff1, { locationId: fx.s1, inputProductId: fx.sin25.id, inputQty: 1, kargadorId: fx.kargadorId, signatures: withKargador(fx.kargadorId) });
+  const s2 = await svc.start(fx.storeId, fx.staff1, { locationId: fx.s1, inputProductId: fx.sin25.id, inputQty: 1, signatures: withKargador(fx.kargadorId) });
   const id2 = s2.ok ? s2.value.id : "";
   assert.equal(await onHand(fx, fx.sin25.id), 7);
   assert.equal((await svc.cancel(fx.storeId, fx.staff1, id2, "")).ok, false, "a cancel needs a reason");
   assert.equal((await svc.cancel(fx.storeId, fx.staff1, id2, "walang bakanteng sako")).ok, true);
   assert.equal(await onHand(fx, fx.sin25.id), 8, "the sack is back");
-  assert.equal((await svc.finish(fx.storeId, fx.staff1, id2, { outputs: [{ productId: fx.sin5.id, quantity: 5 }], kargadorId: fx.kargadorId, signatures: withKargador(fx.kargadorId) })).ok, false);
+  assert.equal((await svc.finish(fx.storeId, fx.staff1, id2, { outputs: [{ productId: fx.sin5.id, quantity: 5 }], signatures: withKargador(fx.kargadorId) })).ok, false);
 });
 
 test("M4: Buksan ang sako — one sack becomes loose kilos", async () => {
   const fx = await fixture();
-  const r = await svc.resack(fx.storeId, fx.staff1, { locationId: fx.s1, inputProductId: fx.sin25.id, inputQty: 1, outputs: [{ productId: fx.loose.id, quantity: 24_900 }], openSack: true, kargadorId: fx.kargadorId, signatures: withKargador(fx.kargadorId) });
+  const r = await svc.resack(fx.storeId, fx.staff1, { locationId: fx.s1, inputProductId: fx.sin25.id, inputQty: 1, outputs: [{ productId: fx.loose.id, quantity: 24_900 }], openSack: true, signatures: withKargador(fx.kargadorId) });
   assert.equal(r.ok, true, msg(r));
   assert.equal(await onHand(fx, fx.loose.id), 24_900);
   const job = await prisma.resackJob.findUniqueOrThrow({ where: { id: r.ok ? r.value.id : "" }, include: { outputs: true } });
   assert.equal(job.openSack, true);
   assert.equal(job.outputs[0]!.valueMinor + (job.lossValueMinor ?? 0), 110_000);
-  const notLoose = await svc.resack(fx.storeId, fx.staff1, { locationId: fx.s1, inputProductId: fx.sin25.id, inputQty: 1, outputs: [{ productId: fx.sin5.id, quantity: 5 }], openSack: true, kargadorId: fx.kargadorId, signatures: withKargador(fx.kargadorId) });
+  const notLoose = await svc.resack(fx.storeId, fx.staff1, { locationId: fx.s1, inputProductId: fx.sin25.id, inputQty: 1, outputs: [{ productId: fx.sin5.id, quantity: 5 }], openSack: true, signatures: withKargador(fx.kargadorId) });
   assert.equal(notLoose.ok, false, "opening a sack produces loose rice only");
 });
 
 test("M4: impossible or out-of-place resacks are refused", async () => {
   const fx = await fixture();
-  const heavier = await svc.resack(fx.storeId, fx.staff1, { locationId: fx.s1, inputProductId: fx.sin25.id, inputQty: 1, outputs: [{ productId: fx.sin5.id, quantity: 6 }], kargadorId: fx.kargadorId, signatures: withKargador(fx.kargadorId) });
+  const heavier = await svc.resack(fx.storeId, fx.staff1, { locationId: fx.s1, inputProductId: fx.sin25.id, inputQty: 1, outputs: [{ productId: fx.sin5.id, quantity: 6 }], signatures: withKargador(fx.kargadorId) });
   assert.match(msg(heavier), /weighs more/);
-  const notRice = await svc.resack(fx.storeId, fx.staff1, { locationId: fx.s1, inputProductId: fx.kape.id, inputQty: 1, outputs: [{ productId: fx.sin5.id, quantity: 1 }], kargadorId: fx.kargadorId, signatures: withKargador(fx.kargadorId) });
+  const notRice = await svc.resack(fx.storeId, fx.staff1, { locationId: fx.s1, inputProductId: fx.kape.id, inputQty: 1, outputs: [{ productId: fx.sin5.id, quantity: 1 }], signatures: withKargador(fx.kargadorId) });
   assert.match(msg(notRice), /weight of Kape/);
-  const tooMany = await svc.resack(fx.storeId, fx.staff1, { locationId: fx.s1, inputProductId: fx.sin25.id, inputQty: 11, outputs: [{ productId: fx.sin5.id, quantity: 55 }], kargadorId: fx.kargadorId, signatures: withKargador(fx.kargadorId) });
+  const tooMany = await svc.resack(fx.storeId, fx.staff1, { locationId: fx.s1, inputProductId: fx.sin25.id, inputQty: 11, outputs: [{ productId: fx.sin5.id, quantity: 55 }], signatures: withKargador(fx.kargadorId) });
   assert.equal(!tooMany.ok && tooMany.error.type, "conflict", "only 10 sacks at Store 1");
-  const wrongPlace = await svc.resack(fx.storeId, fx.staff2, { locationId: fx.s1, inputProductId: fx.sin25.id, inputQty: 1, outputs: [{ productId: fx.sin5.id, quantity: 5 }], kargadorId: fx.kargadorId, signatures: withKargador(fx.kargadorId) });
+  const wrongPlace = await svc.resack(fx.storeId, fx.staff2, { locationId: fx.s1, inputProductId: fx.sin25.id, inputQty: 1, outputs: [{ productId: fx.sin5.id, quantity: 5 }], signatures: withKargador(fx.kargadorId) });
   assert.equal(!wrongPlace.ok && wrongPlace.error.type, "forbidden", "Store 2 staff cannot resack Store 1's rice");
-  const noneThere = await svc.resack(fx.storeId, fx.owner, { locationId: fx.s2, inputProductId: fx.sin25.id, inputQty: 1, outputs: [{ productId: fx.sin5.id, quantity: 5 }], kargadorId: fx.kargadorId, signatures: withKargador(fx.kargadorId) });
+  const noneThere = await svc.resack(fx.storeId, fx.owner, { locationId: fx.s2, inputProductId: fx.sin25.id, inputQty: 1, outputs: [{ productId: fx.sin5.id, quantity: 5 }], signatures: withKargador(fx.kargadorId) });
   assert.equal(noneThere.ok, false, "Store 2 has no 25 kg sacks");
   assert.equal(await onHand(fx, fx.sin25.id), 10, "nothing moved");
 });
@@ -208,8 +208,8 @@ test("M4: one store cannot see or finish another store's resack", async () => {
   const s = await svc.start(a.storeId, a.staff1, { locationId: a.s1, inputProductId: a.sin25.id, inputQty: 1, kargadorId: a.kargadorId, signatures: withKargador(a.kargadorId) });
   const id = s.ok ? s.value.id : "";
   assert.equal((await svc.list(b.storeId, b.owner, { status: "ALL" })).some((j) => j.id === id), false);
-  const r = await svc.finish(b.storeId, b.owner, id, { outputs: [{ productId: b.sin5.id, quantity: 5 }], kargadorId: b.kargadorId, signatures: withKargador(b.kargadorId) });
+  const r = await svc.finish(b.storeId, b.owner, id, { outputs: [{ productId: b.sin5.id, quantity: 5 }], signatures: withKargador(b.kargadorId) });
   assert.equal(!r.ok && r.error.type, "not_found");
-  const cross = await svc.resack(b.storeId, b.owner, { locationId: b.s1, inputProductId: a.sin25.id, inputQty: 1, outputs: [{ productId: b.sin5.id, quantity: 5 }], kargadorId: b.kargadorId, signatures: withKargador(b.kargadorId) });
+  const cross = await svc.resack(b.storeId, b.owner, { locationId: b.s1, inputProductId: a.sin25.id, inputQty: 1, outputs: [{ productId: b.sin5.id, quantity: 5 }], signatures: withKargador(b.kargadorId) });
   assert.equal(cross.ok, false, "store B cannot use store A's product");
 });

@@ -189,7 +189,7 @@ export class UtangService {
       ? { creditUnlimited: true, creditApproved: true }
       : { creditUnlimited: false, creditLimitMinor: limitMinor as number, creditApproved: (limitMinor as number) > 0 };
     const updated = await prisma.storeCustomer.update({ where: { id: sc.id }, data, select: { id: true, creditApproved: true, creditLimitMinor: true, creditUnlimited: true } });
-    await prisma.auditLog.create({ data: { storeId, actorType: "USER", actorId: actor.userId, action: "utang.limit", entityType: "StoreCustomer", entityId: sc.id, before: { limitMinor: sc.creditLimitMinor, unlimited: sc.creditUnlimited }, after: { limitMinor: unlimited ? null : limitMinor, unlimited } } });
+    await prisma.auditLog.create({ data: { storeId, actorType: "USER", actorId: actor.userId, action: "utang.limit", entityType: "StoreCustomer", entityId: sc.id, before: { limitMinor: sc.creditLimitMinor, unlimited: sc.creditUnlimited }, after: { limitMinor: unlimited ? null : (limitMinor as number), unlimited } } });
     await bustCredit(storeId);
     return { ok: true as const, value: { id: updated.id, creditApproved: updated.creditApproved, limitMinor: updated.creditUnlimited ? null : updated.creditLimitMinor, unlimited: updated.creditUnlimited } };
   }

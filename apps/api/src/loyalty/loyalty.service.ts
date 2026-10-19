@@ -5,6 +5,7 @@ import { prisma } from "../persistence/prisma-repositories.js";
 import { cacheGet, cacheSet, cacheBust, cacheKey } from "../persistence/ttl-cache.js";
 import { pointsEarnedFor, pointsEarned, redeemDiscountMinor, expirablePoints } from "../domain/loyalty.js";
 import type { ApiError, AdminCreateCustomerRequest, AdminUpdateCustomerRequest } from "@sam-store/contracts";
+import { creditStatus } from "../domain/utang.js";
 import type { LoyaltyGateway } from "../checkout/checkout.service.js";
 
 export type LoyaltyResult<T> = { ok: true; value: T } | { ok: false; error: ApiError };
