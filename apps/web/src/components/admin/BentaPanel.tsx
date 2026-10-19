@@ -524,7 +524,7 @@ function OpenDrawer({ onOpened }: { onOpened: () => void }) {
 }
 
 /** New item: name, sold as, weight, price, cost, what is on hand now — signed by staff. */
-function NewItemForm({ locationId, onCancel, onDone }: { locationId: string; onCancel: () => void; onDone: () => void | Promise<void> }) {
+export function NewItemForm({ locationId, onCancel, onDone }: { locationId: string; onCancel: () => void; onDone: () => void | Promise<void> }) {
   const [name, setName] = useState("");
   const [soldAs, setSoldAs] = useState<"SACK" | "KILO" | "PIECE">("SACK");
   const [kilosPerSack, setKilosPerSack] = useState("25");

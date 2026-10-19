@@ -2,6 +2,7 @@
 
 import { PesoInput, WholeInput } from "../NumberBoxes";
 import { useCallback, useEffect, useState } from "react";
+import AddSeveralProducts from "./AddSeveralProducts";
 import { API_URL } from "../../config";
 import { adminHeaders } from "../../lib/admin";
 import LabelSheet from "./LabelSheet";
@@ -154,6 +155,7 @@ export default function ProductsPanel() {
   // M3: batch label printing — the selected product ids open the 57 × 40 mm label sheet.
   const [selected, setSelected] = useState<string[]>([]);
   const [labelOpen, setLabelOpen] = useState(false);
+  const [several, setSeveral] = useState(false);
   // P2c: variant + add-on management modal
   const [optionsFor, setOptionsFor] = useState<AdminProduct | null>(null);
 
@@ -299,12 +301,16 @@ export default function ProductsPanel() {
                       <i className="bi bi-tags me-1"></i>Print labels ({selected.length})
                     </button>
                   )}
+                  <button className="btn btn-outline-success btn-sm" onClick={() => setSeveral(true)}>
+                    <i className="bi bi-table me-1"></i>Add several
+                  </button>
                   <button className="btn btn-primary btn-sm" onClick={openCreate}>
           <i className="bi bi-plus-lg me-1"></i>New product
                   </button>
                   </div>
                 </div>
       {error && <div className="alert alert-danger py-2 small">{error}</div>}
+      {several && <AddSeveralProducts onClose={() => setSeveral(false)} onDone={load} />}
 
             {/* P7 filter bar */}
             <div className="row g-2 mb-3">

@@ -11,6 +11,7 @@ import { toast } from "../../lib/toast";
 import { sendStep } from "../../lib/offlineQueue";
 import SignaturePad from "./SignaturePad";
 import { askConfirm } from "../../lib/ask";
+import { NewItemForm } from "./BentaPanel";
 
 interface Loc { id: string; name: string; code: string | null; isActive: boolean }
 interface Product { id: string; name: string; stockBaseUnit: string | null; stockBaseQuantity: number | null; isActive?: boolean; reviewStatus?: string }
@@ -37,6 +38,8 @@ export default function PasokPanel({ role }: { role?: string; onNavigate?: (tab:
   const [reviews, setReviews] = useState<Review[]>([]);
   const [mergeInto, setMergeInto] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
+  const [chosen, setChosen] = useState(false); // store picked first
+  const [adding, setAdding] = useState(false);   // the "New item" form
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -49,7 +52,8 @@ export default function PasokPanel({ role }: { role?: string; onNavigate?: (tab:
     const active = ((locs?.warehouses ?? []) as Loc[]).filter((l) => l.isActive);
     setLocations(active);
     setHomeLocationId(me?.homeLocationId ?? null);
-    setLocationId((cur) => cur || me?.homeLocationId || active[0]?.id || "");
+    setLocationId((cur) => cur || me?.homeLocationId || "");
+    if (me?.homeLocationId) setChosen(true);
     setProducts(((ps?.products ?? []) as Product[]).filter((p) => p.isActive !== false));
     setReviews((rv?.products ?? []) as Review[]);
   }, []);
@@ -92,12 +96,20 @@ export default function PasokPanel({ role }: { role?: string; onNavigate?: (tab:
     <div style={{ fontSize: 18 }}>
       <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
         <h1 className="h4 mb-0">Stock in & review</h1>
-        {homeLocationId ? <span className="badge text-bg-light border fs-6">{here?.name}</span> : (
-          <select className="form-select" style={{ maxWidth: 240 }} aria-label="Location" value={locationId} onChange={(e) => setLocationId(e.target.value)}>
-            {locations.map((l) => <option key={l.id} value={l.id}>{l.code ? `${l.code} · ` : ""}{l.name}</option>)}
-          </select>
-        )}
+        {chosen && here && (homeLocationId ? <span className="badge text-bg-light border fs-6">{here.name}</span> : (
+          <button type="button" className="btn btn-outline-secondary" onClick={() => { setChosen(false); setLocationId(""); setAdding(false); }}>Store: {here.name} · change</button>
+        ))}
       </div>
+      {!chosen && (
+        <>
+          <h2 className="h5">Which store?</h2>
+          <div className="d-grid gap-2 mb-4" style={{ maxWidth: 420 }}>
+            {locations.map((l) => <button key={l.id} type="button" className="btn btn-outline-success btn-lg" onClick={() => { setLocationId(l.id); setChosen(true); }}>{l.code ? `${l.code} · ` : ""}{l.name}</button>)}
+          </div>
+        </>
+      )}
+      {chosen && adding && <NewItemForm locationId={locationId} onCancel={() => setAdding(false)} onDone={async () => { setAdding(false); await load(); }} />}
+      {chosen && !adding && (<>
       <ul className="nav nav-tabs mb-3">
         <li className="nav-item"><button className={`nav-link ${tab === "pasok" ? "active" : ""}`} onClick={() => setTab("pasok")}>Manual stock in</button></li>
         <li className="nav-item"><button className={`nav-link ${tab === "review" ? "active" : ""}`} onClick={() => setTab("review")}>To review {reviews.length > 0 && <span className="badge text-bg-warning">{reviews.length}</span>}</button></li>
@@ -129,7 +141,10 @@ export default function PasokPanel({ role }: { role?: string; onNavigate?: (tab:
                 </div>
               );
             })}
-            <button type="button" className="btn btn-outline-secondary mb-3" onClick={() => setRows([...rows, { productId: "", amount: "", cost: "" }])}>+ One more</button>
+            <div className="d-flex flex-wrap gap-2 mb-3">
+              <button type="button" className="btn btn-outline-secondary" onClick={() => setRows([...rows, { productId: "", amount: "", cost: "" }])}>+ One more</button>
+              <button type="button" className="btn btn-outline-success" onClick={() => setAdding(true)}>+ New item (not in the list)</button>
+            </div>
             <div className="fw-semibold">Signature of the receiver</div>
             <SignaturePad key={sigKey} onSignature={setSig} />
             <button type="button" className="btn btn-success btn-lg w-100 mt-3" disabled={!ready} onClick={() => void saveIn()}>{busy ? "Please wait…" : "Receive"}</button>
@@ -161,6 +176,7 @@ export default function PasokPanel({ role }: { role?: string; onNavigate?: (tab:
           </div>
         )
       )}
+    </>)}
     </div>
   );
 }
