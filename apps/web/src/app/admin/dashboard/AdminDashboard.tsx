@@ -46,6 +46,7 @@ const UserAccessPanel = panel(() => import("../../../components/admin/UserAccess
 const PosPanel = panel(() => import("../../../components/admin/PosPanel"));
 const PreOrdersPanel = panel(() => import("../../../components/admin/PreOrdersPanel"));
 const UtangPanel = panel(() => import("../../../components/admin/UtangPanel"));
+const CounterSettingsPanel = panel(() => import("../../../components/admin/CounterSettingsPanel"));
 const ExpensesPanel = panel(() => import("../../../components/admin/ExpensesPanel"));
 const PurchasesPanel = panel(() => import("../../../components/admin/PurchasesPanel"));
 const InventoryPanel = panel(() => import("../../../components/admin/InventoryPanel"));
@@ -259,6 +260,7 @@ export default function AdminDashboard() {
       case "orders": return <OrdersPanel />;
       case "products": return <ProductsPanel />;
       case "settings": return <SettingsPanel />;
+      case "countersettings": return <CounterSettingsPanel />;
       case "vouchers": return <VouchersPanel />;
       case "team": return <TeamPanel />;
       case "customers": return <CustomersPanel />;

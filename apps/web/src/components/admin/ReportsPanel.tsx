@@ -28,7 +28,7 @@ const toPesos = (m: number) => `₱${(m / 100).toFixed(2)}`;
 export default function ReportsPanel() {
   const storeId = getAdminStoreId();
   const [days, setDays] = useState(30);
-  const [activeTab, setActiveTab] = useState<ReportTab>("profit");
+  const [activeTab, setActiveTab] = useState<ReportTab>(roleCan(getAdminRole(), "profit") ? "profit" : "sales");
   const [profit, setProfit] = useState<ProfitData | null>(null);
   const [sales, setSales] = useState<SalesData | null>(null);
   const [stockLow, setStockLow] = useState<{ rows: StockLowRow[]; count: number } | null>(null);
@@ -95,7 +95,8 @@ export default function ReportsPanel() {
   };
   const print = () => window.print();
 
-  const reportTabs: { id: ReportTab; label: string }[] = [
+  // Counter staff see sales and stock reports only — no profit, cost or income figures.
+  const reportTabs: { id: ReportTab; label: string }[] = ([
     { id: "profit", label: "Profit" },
     { id: "sales", label: "Sales" },
     { id: "stock-low", label: "Stock low" },
@@ -103,7 +104,7 @@ export default function ReportsPanel() {
     { id: "income-loss", label: "Income & Loss" },
     { id: "sales-by-payment", label: "Sales by payment" },
     { id: "customer-statement", label: "Customer statement" },
-  ];
+  ] as { id: ReportTab; label: string }[]).filter((t) => canProfit || ["sales", "stock-low", "sold-stock", "sales-by-payment"].includes(t.id));
 
   return (
     <div>

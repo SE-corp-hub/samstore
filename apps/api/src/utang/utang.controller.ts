@@ -7,7 +7,7 @@ import { JwtAuthGuard, type AuthPrincipal } from "../auth/auth.guard.js";
 import { requireUser, resolveTenant, TENANT_ROLES } from "../auth/tenant-context.js";
 import { loadActor } from "../people/people.service.js";
 import { signaturesFrom } from "../people/signature-input.js";
-import { listSms, resendSms } from "../sms/sms.service.js";
+import { listSms, logOpenedText, resendSms } from "../sms/sms.service.js";
 import { UtangService } from "./utang.service.js";
 
 function statusFor(error: ApiError): HttpStatus {
@@ -78,6 +78,23 @@ export class UtangController {
   async sms(@Req() req: Req_, @Query("customerId") customerId?: string, @Query("status") status?: string, @Headers("x-store-id") h?: string) {
     const { storeId } = await this.ctx(req, h);
     return { storeId, messages: await listSms(storeId, { storeCustomerId: customerId, status }) };
+  }
+
+  /** POST /admin/sms/opened — log that a text was opened in the phone's SMS app (never "sent"). */
+  @Post("sms/opened")
+  async opened(@Req() req: Req_, @Body() body: Record<string, unknown>, @Headers("x-store-id") h?: string) {
+    const { storeId, actor } = await this.ctx(req, h);
+    const template = str(body?.template);
+    const text = str(body?.text);
+    if (!template || !text) throw new HttpException({ type: "validation", errors: ["template and text are required"] }, HttpStatus.BAD_REQUEST);
+    try {
+      return await logOpenedText(storeId, {
+        storeCustomerId: str(body?.storeCustomerId) ?? null, phone: str(body?.phone) ?? null, template, text,
+        documentType: str(body?.documentType) ?? null, documentId: str(body?.documentId) ?? null, createdById: actor.userId,
+      });
+    } catch (e) {
+      throw new HttpException({ type: "not_found", message: e instanceof Error ? e.message : "Could not log the text" }, HttpStatus.NOT_FOUND);
+    }
   }
 
   /** POST /admin/sms/:id/resend — Ipadala ulit. */

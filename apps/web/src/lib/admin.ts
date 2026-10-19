@@ -188,6 +188,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { id: "analytics", label: "Analytics", icon: "bi-graph-up-arrow" },
       { id: "reports", label: "Reports", icon: "bi-file-bar-graph" },
       { id: "settings", label: "Settings", icon: "bi-gear" },
+      { id: "countersettings", label: "Counter settings", icon: "bi-sliders" },
       { id: "storelink", label: "Store Link", icon: "bi-link-45deg" },
     ],
   },
@@ -221,7 +222,7 @@ export const TABS_BY_ROLE: Record<string, string[]> = {
   // Platform operators manage tenants/access and monitor the platform; daily POS/catalog tabs belong to store roles.
   PLATFORM_ADMIN: ["overview", "stores", "useraccess", "maintenance", "analytics", "reports", "settings"],
   MANAGER: ["overview", "pos", "preorders", "orders", "utang", "products", "inventory", "expenses", "purchases", "team", "customers", "vouchers", "crm", "erp", "analytics", "reports", "settings", "warehouses", "approvals", "trips", "resack", "drafts", "kargadors", "benta", "pasok", "utangrice", "agentorders", "bilangin", "ulat"],
-  STAFF: ["overview", "pos", "preorders", "orders", "products", "inventory", "customers", "trips", "resack", "drafts", "kargadors", "benta", "pasok", "utangrice", "agentorders", "bilangin", "ulat"],
+  STAFF: ["overview", "pos", "preorders", "orders", "utang", "products", "inventory", "expenses", "purchases", "customers", "reports", "countersettings", "trips", "resack", "drafts", "kargadors", "benta", "pasok", "utangrice", "agentorders", "bilangin", "ulat"],
   SALES_AGENT: ["agent", "overview", "orders", "customers", "crm", "reports"],
   DELIVERY: [],
 };

@@ -89,8 +89,33 @@ export async function handleSmsEvent(payload: Record<string, unknown>): Promise<
   if (r.status === "FAILED" && r.attempts < SMS_MAX_ATTEMPTS) throw new Error("sms send failed — will retry");
 }
 
+/**
+ * Record that a text was opened in the phone's own SMS app. Status OPENED — we cannot know
+ * whether the person pressed Send, so it is never recorded as SENT. Never blocks the sale.
+ */
+export async function logOpenedText(
+  storeId: string,
+  input: { storeCustomerId?: string | null; phone?: string | null; template: string; text: string; documentType?: string | null; documentId?: string | null; createdById?: string | null },
+): Promise<{ id: string }> {
+  let phoneRaw = input.phone ?? "";
+  if (input.storeCustomerId) {
+    const sc = await prisma.storeCustomer.findFirst({ where: { id: input.storeCustomerId, storeId }, select: { customer: { select: { phone: true } } } });
+    if (!sc) throw new Error("Customer not found");
+    phoneRaw = phoneRaw || sc.customer.phone || "";
+  }
+  const row = await prisma.smsMessage.create({
+    data: {
+      storeId, storeCustomerId: input.storeCustomerId ?? null, phone: toE164(phoneRaw) || null,
+      template: input.template.slice(0, 40), text: input.text.slice(0, 1000), status: "OPENED", provider: "phone",
+      documentType: input.documentType ?? null, documentId: input.documentId ?? null, createdById: input.createdById ?? null,
+    },
+    select: { id: true },
+  });
+  return { id: row.id };
+}
+
 export async function listSms(storeId: string, f: { storeCustomerId?: string; status?: string; take?: number } = {}) {
-  const status = f.status && ["QUEUED", "SENT", "FAILED", "SKIPPED"].includes(f.status) ? (f.status as "QUEUED" | "SENT" | "FAILED" | "SKIPPED") : undefined;
+  const status = f.status && ["QUEUED", "SENT", "FAILED", "SKIPPED", "OPENED"].includes(f.status) ? (f.status as "QUEUED" | "SENT" | "FAILED" | "SKIPPED" | "OPENED") : undefined;
   return prisma.smsMessage.findMany({
     where: { storeId, ...(f.storeCustomerId ? { storeCustomerId: f.storeCustomerId } : {}), ...(status ? { status } : {}) },
     orderBy: { createdAt: "desc" },

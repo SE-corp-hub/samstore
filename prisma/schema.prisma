@@ -2020,6 +2020,7 @@ enum SmsStatus {
   SENT
   FAILED // shows "Hindi naipadala" with Ipadala ulit
   SKIPPED // no valid mobile number / texts switched off
+  OPENED // the phone's own SMS app was opened with the text ready — never claimed as sent
 }
 
 // Every utang text: what was sent, to whom, and whether it went. A failed text never

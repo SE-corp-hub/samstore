@@ -37,7 +37,7 @@ export class ReportsController {
   @Get("reports/stock-low")
   async stockLow(@Req() req: Request & { user?: AuthPrincipal }, @Query("from") from?: string, @Query("to") to?: string, @Headers("x-store-id") headerStoreId?: string) {
     const user = req.user;
-    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.OWNER_MANAGER);
+    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.VIEW);
     const { from: f, to: t } = parseRange(from, to);
     return { ...(await this.reportsSvc.stockLow(storeId, f, t)), storeId };
   }

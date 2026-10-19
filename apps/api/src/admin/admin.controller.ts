@@ -725,6 +725,36 @@ export class AdminController {
     return result.value;
   }
 
+  /** GET /admin/counter-settings — the few switches counter staff may change (today: the shift rule). */
+  @Get("counter-settings")
+  async getCounterSettings(@Req() req: Request & { user?: AuthPrincipal }, @Headers("x-store-id") headerStoreId?: string) {
+    const user = req.user;
+    requireUser(user);
+    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
+    const row = await prisma.storeSettings.findUnique({ where: { storeId }, select: { requireOpenShift: true } });
+    return { storeId, requireOpenShift: row?.requireOpenShift ?? false };
+  }
+
+  /** PATCH /admin/counter-settings — change a counter switch. Only the listed keys are accepted. */
+  @Patch("counter-settings")
+  async updateCounterSettings(
+    @Req() req: Request & { user?: AuthPrincipal },
+    @Body() body: { requireOpenShift?: boolean },
+    @Headers("x-store-id") headerStoreId?: string,
+  ) {
+    const user = req.user;
+    requireUser(user);
+    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
+    if (typeof body?.requireOpenShift !== "boolean") throw new HttpException({ type: "validation", errors: ["requireOpenShift must be true or false"] }, HttpStatus.BAD_REQUEST);
+    await prisma.storeSettings.upsert({
+      where: { storeId },
+      update: { requireOpenShift: body.requireOpenShift },
+      create: { storeId, requireOpenShift: body.requireOpenShift },
+    });
+    await cacheBust(cacheKey("settings", storeId));
+    return { storeId, requireOpenShift: body.requireOpenShift };
+  }
+
   /** GET /admin/settings — store + settings + public link. */
   @Get("settings")
   async getSettings(@Req() req: Request & { user?: AuthPrincipal }, @Headers("x-store-id") headerStoreId?: string) {
@@ -757,7 +787,8 @@ export class AdminController {
   ) {
     const user = req.user;
     requireUser(user);
-    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
+    const { storeId, role } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
+    if (role === "STAFF") throw new HttpException({ type: "forbidden", message: "Store settings are for the owner or manager — use Counter settings" }, HttpStatus.FORBIDDEN);
     const result = await this.settingsAdmin.update(storeId, body);
         if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
         await cacheBust(cacheKey("settings", storeId));
