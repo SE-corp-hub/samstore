@@ -3,6 +3,7 @@
 // - Completing a purchase ADDS stock (default warehouse) and updates product costMinor (COGS feed).
 // - Replenishment list: products with available ≤ reorder threshold → one-tap purchase.
 
+import { isUntracked } from "../domain/movements.js";
 import { prisma } from "../persistence/prisma-repositories.js";
 import type { ApiError } from "@sam-store/contracts";
 import { cacheBust, cacheKey } from "../persistence/ttl-cache.js";
@@ -68,38 +69,41 @@ export class PurchasesService {
         },
       });
       for (const it of input.items) {
-        const level = defaultWarehouse
-          ? await tx.stockLevel.findFirst({ where: { storeId, productId: it.productId, warehouseId: defaultWarehouse.id } })
-          : await tx.stockLevel.findFirst({ where: { storeId, productId: it.productId, warehouseId: null } });
-        let balanceAfter: number;
-        if (level) {
-          const updated = await tx.stockLevel.update({ where: { id: level.id }, data: { quantityOnHand: { increment: it.quantity } } });
-          balanceAfter = updated.quantityOnHand;
-        } else {
-          const created = await tx.stockLevel.create({
+        // Track stock off: the cost is still recorded below, but there is no shelf to add to.
+        if (!(await isUntracked(tx, storeId, it.productId))) {
+          const level = defaultWarehouse
+            ? await tx.stockLevel.findFirst({ where: { storeId, productId: it.productId, warehouseId: defaultWarehouse.id } })
+            : await tx.stockLevel.findFirst({ where: { storeId, productId: it.productId, warehouseId: null } });
+          let balanceAfter: number;
+          if (level) {
+            const updated = await tx.stockLevel.update({ where: { id: level.id }, data: { quantityOnHand: { increment: it.quantity } } });
+            balanceAfter = updated.quantityOnHand;
+          } else {
+            const created = await tx.stockLevel.create({
+              data: {
+                storeId,
+                productId: it.productId,
+                warehouseId: defaultWarehouse?.id ?? null,
+                quantityOnHand: it.quantity,
+                quantityReserved: 0,
+              },
+            });
+            balanceAfter = created.quantityOnHand;
+          }
+          await tx.stockMovement.create({
             data: {
               storeId,
               productId: it.productId,
               warehouseId: defaultWarehouse?.id ?? null,
-              quantityOnHand: it.quantity,
-              quantityReserved: 0,
+              delta: it.quantity,
+              type: "RECEIPT",
+              orderId: null,
+              createdBy: actorId,
+              note: "purchase received",
+              balanceAfter,
             },
           });
-          balanceAfter = created.quantityOnHand;
         }
-        await tx.stockMovement.create({
-          data: {
-            storeId,
-            productId: it.productId,
-            warehouseId: defaultWarehouse?.id ?? null,
-            delta: it.quantity,
-            type: "RECEIPT",
-            orderId: null,
-            createdBy: actorId,
-            note: "purchase received",
-            balanceAfter,
-          },
-        });
         const before = await tx.product.findUnique({ where: { id: it.productId }, select: { costMinor: true } });
         if (before && before.costMinor !== it.costMinor) {
           await tx.priceHistory.create({ data: { storeId, productId: it.productId, field: "COST", oldMinor: before.costMinor, newMinor: it.costMinor, source: "PURCHASE", changedById: actorId ?? null } });
@@ -129,6 +133,7 @@ export class PurchasesService {
       include: { stockLevels: true },
     });
     return products
+      .filter((p) => p.trackStock !== false) // not tracked = never "low"
       .map((p) => {
         const available = p.stockLevels.reduce((s, l) => s + (l.quantityOnHand - l.quantityReserved), 0);
         const threshold = Math.max(...p.stockLevels.map((l) => l.reorderThreshold), 0);

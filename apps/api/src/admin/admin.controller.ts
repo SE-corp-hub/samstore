@@ -557,7 +557,7 @@ export class AdminController {
   @Post("products")
   async createProduct(
     @Req() req: Request & { user?: AuthPrincipal },
-    @Body() body: { name: string; sku: string; priceMinor: number; costMinor?: number; stock?: number; categorySlug?: string; categoryName?: string; stockBaseUnit?: string | null; stockBaseQuantity?: number | null; stockConversionFamily?: string | null; description?: string; barcode?: string | null; unit?: string | null; soldByWeight?: boolean; featured?: boolean; tags?: string[]; reorderThreshold?: number },
+    @Body() body: { name: string; sku: string; priceMinor: number; costMinor?: number; stock?: number; categorySlug?: string; categoryName?: string; stockBaseUnit?: string | null; stockBaseQuantity?: number | null; stockConversionFamily?: string | null; description?: string; barcode?: string | null; unit?: string | null; soldByWeight?: boolean; trackStock?: boolean; featured?: boolean; tags?: string[]; reorderThreshold?: number },
     @Headers("x-store-id") headerStoreId?: string,
   ) {
     const user = req.user;
@@ -575,7 +575,7 @@ export class AdminController {
   async updateProduct(
     @Req() req: Request & { user?: AuthPrincipal },
     @Param("id") id: string,
-    @Body() body: Partial<{ name: string; sku: string; priceMinor: number; costMinor: number; stock?: number; categorySlug?: string; stockBaseUnit?: string | null; stockBaseQuantity?: number | null; stockConversionFamily?: string | null; description?: string; isActive?: boolean; barcode?: string | null; unit?: string | null; soldByWeight?: boolean; featured?: boolean; tags?: string[]; relatedProductIds?: string[]; upsellProductIds?: string[]; reorderThreshold?: number }>,
+    @Body() body: Partial<{ name: string; sku: string; priceMinor: number; costMinor: number; stock?: number; categorySlug?: string; stockBaseUnit?: string | null; stockBaseQuantity?: number | null; stockConversionFamily?: string | null; description?: string; isActive?: boolean; barcode?: string | null; unit?: string | null; soldByWeight?: boolean; trackStock?: boolean; featured?: boolean; tags?: string[]; relatedProductIds?: string[]; upsellProductIds?: string[]; reorderThreshold?: number }>,
     @Headers("x-store-id") headerStoreId?: string,
   ) {
     const user = req.user;

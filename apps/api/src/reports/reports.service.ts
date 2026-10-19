@@ -107,6 +107,7 @@ export class ReportsService {
       include: { stockLevels: true },
     });
     const rows = products
+      .filter((p) => p.trackStock !== false) // not tracked = never "low"
       .map((p) => {
         const available = p.stockLevels.reduce((s, l) => s + (l.quantityOnHand - l.quantityReserved), 0);
         const threshold = Math.max(...p.stockLevels.map((l) => l.reorderThreshold), 0);

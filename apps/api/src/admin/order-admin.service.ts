@@ -1,5 +1,6 @@
 // Order admin service — status transitions with the state machine + audit history.
 
+import { availableOf } from "../domain/stock-tracking.js";
 import { prisma } from "../persistence/prisma-repositories.js";
 import { cacheBust, cacheKey } from "../persistence/ttl-cache.js";
 import { deductStock, restoreStock } from "../domain/movements.js";
@@ -154,7 +155,7 @@ export class OrderAdminService {
     }
     for (const it of items) {
       const p = products.find((x) => x.id === it.productId)!;
-      const available = p.stockLevels.reduce((s, l) => s + (l.quantityOnHand - l.quantityReserved), 0);
+      const available = availableOf(p, p.stockLevels.reduce((s, l) => s + l.quantityOnHand, 0), p.stockLevels.reduce((s, l) => s + l.quantityReserved, 0));
       if (available < it.quantity) {
         return { ok: false, error: { type: "conflict", message: `Only ${available} in stock for ${p.name}` } };
       }

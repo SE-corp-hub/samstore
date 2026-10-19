@@ -18,7 +18,8 @@ import type {
   AtomicCheckoutEffects,
 } from "./repositories.js";
 import { OrderStatus, PaymentStatus } from "@prisma/client";
-import { InsufficientStockError } from "../domain/movements.js";
+import { InsufficientStockError, untrackedIds } from "../domain/movements.js";
+import { UNLIMITED_STOCK, isTracked } from "../domain/stock-tracking.js";
 
 // Module 4/5 hardening: the managed Postgres pooler can take several seconds to
 // hand out a connection (cold start), while Prisma's interactive-transaction
@@ -124,8 +125,10 @@ export class PrismaCatalogRepository implements CatalogRepository {
       stockLevels: { quantityOnHand: number; quantityReserved: number }[];
     },
   ): ProductRecord {
-    const onHand = p.stockLevels.reduce((s, l) => s + l.quantityOnHand, 0);
-    const reserved = p.stockLevels.reduce((s, l) => s + l.quantityReserved, 0);
+    // Track stock off: an unlimited shelf, so every "enough stock?" check passes and nothing is reserved.
+    const tracked = isTracked(p);
+    const onHand = tracked ? p.stockLevels.reduce((s, l) => s + l.quantityOnHand, 0) : UNLIMITED_STOCK;
+    const reserved = tracked ? p.stockLevels.reduce((s, l) => s + l.quantityReserved, 0) : 0;
     return {
       id: p.id,
       storeId: p.storeId,
@@ -612,8 +615,10 @@ export class PrismaOrderRepository implements OrderRepository {
       //    "two buyers, one last unit" safe: the loser's UPDATE matches 0 rows and
       //    the whole transaction rolls back. Variant rows (P2a) reserve the variant's
       //    own counters + a movement carrying variantId; plain products use StockLevel.
+      const untracked = await untrackedIds(tx, order.storeId, (effects.stockReservations ?? []).map((r) => r.productId));
       for (const r of effects.stockReservations ?? []) {
         if (r.quantity <= 0) continue;
+        if (untracked.has(r.productId)) continue; // Track stock off — nothing is held
         if (r.variantId) {
           const rows = await tx.$executeRawUnsafe(
             'UPDATE "ProductVariant" SET "quantityReserved" = "quantityReserved" + $2 WHERE "id" = $1 AND ("quantityOnHand" - "quantityReserved") >= $2',

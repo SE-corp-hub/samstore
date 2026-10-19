@@ -65,11 +65,12 @@ export class InventoryService {
       const reserved = levels.reduce((s, l) => s + l.quantityReserved, 0);
       const threshold = Math.max(0, ...levels.map((l) => l.reorderThreshold));
       const available = onHand - reserved;
-      let status: "in" | "low" | "out";
-      if (available <= 0 && onHand <= 0) status = "out";
+      let status: "in" | "low" | "out" | "untracked";
+      if (p.trackStock === false) status = "untracked"; // sells at any time — never out or low
+      else if (available <= 0 && onHand <= 0) status = "out";
       else if (threshold > 0 && available <= threshold) status = "low";
       else status = "in";
-      const valueMinor = onHand * p.costMinor;
+      const valueMinor = p.trackStock === false ? 0 : onHand * p.costMinor;
       return {
         id: p.id,
         name: p.name,
@@ -80,6 +81,7 @@ export class InventoryService {
          availableQuantity: available,
          reorderThreshold: threshold,
          costMinor: p.costMinor,
+         trackStock: p.trackStock !== false,
          stockBaseUnit: p.stockBaseUnit,
          stockBaseQuantity: p.stockBaseQuantity,
          stockConversionFamily: p.stockConversionFamily,

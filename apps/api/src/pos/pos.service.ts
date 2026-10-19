@@ -5,6 +5,7 @@
 //                     with optional line replacement (resume-edit), void restores stock.
 // Totals are always server-computed; stock mutations are atomic.
 
+import { isTracked } from "../domain/stock-tracking.js";
 import { prisma } from "../persistence/prisma-repositories.js";
 import { cacheBust, cacheKey } from "../persistence/ttl-cache.js";
 import { deductStock, restoreStock as restoreStockLedger } from "../domain/movements.js";
@@ -110,6 +111,8 @@ export class PosService {
         if (available < it.quantity) {
           return { ok: false, error: { type: "conflict", message: `Only ${available} in stock for ${p.name} (${v.name})` } };
         }
+      } else if (!isTracked(p)) {
+        continue; // Track stock off — sells at any time, nothing to check
       } else {
         const remote = it.sourceLocationId && it.sourceLocationId !== defaultLocation?.id ? it.sourceLocationId : null;
         const pick = pickDeductionLevel(p.stockLevels, it.quantity, remote ? { warehouseId: remote, defaultWarehouseId: defaultLocation?.id ?? null } : { defaultWarehouseId: defaultLocation?.id ?? null });

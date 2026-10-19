@@ -7,6 +7,22 @@
 import type { Prisma } from "@prisma/client";
 import { allocateRestore, pickDeductionLevel, type LevelView } from "./stock-location.js";
 
+/**
+ * Track stock off: the ids (among `productIds`) of products that are NOT tracked. Every writer below
+ * skips them — no stock check, no movement — so a not-tracked item sells at any time (domain/stock-tracking.ts).
+ */
+export async function untrackedIds(tx: MovementTx, storeId: string, productIds: string[]): Promise<Set<string>> {
+  const ids = [...new Set(productIds)];
+  if (ids.length === 0) return new Set();
+  const rows = await tx.product.findMany({ where: { storeId, id: { in: ids }, trackStock: false }, select: { id: true } });
+  return new Set(rows.map((r) => r.id));
+}
+
+/** True when this one product is not tracked. */
+export async function isUntracked(tx: MovementTx, storeId: string, productId: string): Promise<boolean> {
+  return (await untrackedIds(tx, storeId, [productId])).has(productId);
+}
+
 export type MovementTx = Prisma.TransactionClient;
 
 export interface MovementInput {
@@ -131,8 +147,10 @@ export async function deductStock(
 ): Promise<void> {
   const type = opts?.type ?? "CONSUME";
   let defaultId: string | null | undefined;
+  const untracked = await untrackedIds(tx, storeId, lines.map((l) => l.productId));
   for (const l of lines) {
     if (l.quantity <= 0) continue;
+    if (untracked.has(l.productId)) continue; // Track stock off — no stock accounting
     // P2b: VARIANT lines decrement the variant's own counter (guarded the same way).
     if (l.variantId) {
       const take = l.quantity;
@@ -229,6 +247,7 @@ export async function adjustStock(
   if (input.setTo !== undefined && (!Number.isInteger(input.setTo) || input.setTo < 0)) {
     throw new Error("setTo must be a non-negative integer");
   }
+  if (await isUntracked(tx, storeId, productId)) return { levelId: "", balanceAfter: 0, delta: 0 }; // Track stock off
 
   // Resolve the level: the requested warehouse, else the store's default, else the first row.
   let level = input.warehouseId
@@ -303,8 +322,10 @@ export async function restoreStock(
 ): Promise<void> {
   const type = opts?.type ?? "RELEASE";
   let fallbackId: string | null | undefined;
+  const untracked = await untrackedIds(tx, storeId, lines.map((l) => l.productId));
   for (const l of lines) {
     if (l.quantity <= 0) continue;
+    if (untracked.has(l.productId)) continue; // Track stock off — nothing left the shelf, nothing goes back
     // P2b: variant lines restore the variant's counter.
     if (l.variantId) {
       const updated = await tx.productVariant.update({
@@ -394,6 +415,7 @@ export async function transferStock(
   const { storeId, productId, fromWarehouseId, toWarehouseId, quantity } = input;
   if (!Number.isInteger(quantity) || quantity <= 0) throw new Error("transfer quantity must be a positive whole number");
   if (fromWarehouseId === toWarehouseId) throw new Error("transfer source and destination must differ");
+  if (await isUntracked(tx, storeId, productId)) return { fromBalance: 0, toBalance: 0 }; // Track stock off
 
   const source = await tx.stockLevel.findFirst({ where: { storeId, productId, warehouseId: fromWarehouseId }, select: { id: true } });
   if (!source) throw new InsufficientStockError(productId, quantity);
@@ -440,6 +462,7 @@ async function levelFor(tx: MovementTx, leg: TripLeg) {
 /** Hold `qty` of AVAILABLE stock at a location for a trip. Throws InsufficientStockError. */
 export async function reserveForTrip(tx: MovementTx, leg: TripLeg, qty: number): Promise<number> {
   if (!Number.isInteger(qty) || qty <= 0) throw new Error("reserve quantity must be a positive whole number");
+  if (await isUntracked(tx, leg.storeId, leg.productId)) return 0; // Track stock off
   const level = await levelFor(tx, leg);
   if (!level) throw new InsufficientStockError(leg.productId, qty);
   const rows = await tx.$queryRaw<{ quantityReserved: number }[]>`
@@ -457,6 +480,7 @@ export async function reserveForTrip(tx: MovementTx, leg: TripLeg, qty: number):
 /** Drop a trip's hold (cancel). Never below zero. */
 export async function unreserveForTrip(tx: MovementTx, leg: TripLeg, qty: number): Promise<void> {
   if (qty <= 0) return;
+  if (await isUntracked(tx, leg.storeId, leg.productId)) return; // Track stock off
   const level = await levelFor(tx, leg);
   if (!level) return;
   const rows = await tx.$queryRaw<{ quantityReserved: number }[]>`
@@ -472,6 +496,7 @@ export async function unreserveForTrip(tx: MovementTx, leg: TripLeg, qty: number
  */
 export async function releaseForTrip(tx: MovementTx, leg: TripLeg, heldQty: number, releaseQty: number, type: "RELEASE_OUT" | "RESACK_OUT" | "CONSUME" | "WRITE_OFF" = "RELEASE_OUT"): Promise<number> {
   if (!Number.isInteger(releaseQty) || releaseQty <= 0) throw new Error("release quantity must be a positive whole number");
+  if (await isUntracked(tx, leg.storeId, leg.productId)) return 0; // Track stock off
   const level = await levelFor(tx, leg);
   if (!level) throw new InsufficientStockError(leg.productId, releaseQty);
   const rows = await tx.$queryRaw<{ quantityOnHand: number; quantityReserved: number }[]>`
@@ -499,6 +524,7 @@ export async function releaseForTrip(tx: MovementTx, leg: TripLeg, heldQty: numb
 export async function addForTrip(tx: MovementTx, leg: TripLeg, qty: number, type: "RECEIVE_IN" | "RETURN_IN" | "RESACK_IN" | "RESACK_RETURN" | "STOCK_IN" | "MERGE_IN" | "COUNT_ADJUST_IN"): Promise<number> {
   if (!Number.isInteger(qty) || qty < 0) throw new Error("quantity must be a whole number ≥ 0");
   if (qty === 0) return 0;
+  if (await isUntracked(tx, leg.storeId, leg.productId)) return 0; // Track stock off — only the cost changes elsewhere
   const row = await tx.stockLevel.upsert({
     where: { storeId_productId_warehouseId: { storeId: leg.storeId, productId: leg.productId, warehouseId: leg.warehouseId } },
     create: { storeId: leg.storeId, productId: leg.productId, warehouseId: leg.warehouseId, quantityOnHand: qty, quantityReserved: 0 },
@@ -517,6 +543,7 @@ export async function addForTrip(tx: MovementTx, leg: TripLeg, qty: number, type
 export async function adjustForCount(tx: MovementTx, leg: TripLeg, delta: number): Promise<number> {
   if (!Number.isInteger(delta)) throw new Error("count adjustment must be a whole number");
   if (delta === 0) return 0; // Tama — nothing to post
+  if (await isUntracked(tx, leg.storeId, leg.productId)) return 0; // Track stock off
   if (delta > 0) {
     const row = await tx.stockLevel.upsert({
       where: { storeId_productId_warehouseId: { storeId: leg.storeId, productId: leg.productId, warehouseId: leg.warehouseId } },

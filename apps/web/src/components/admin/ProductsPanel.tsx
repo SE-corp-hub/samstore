@@ -14,6 +14,7 @@ export interface AdminProduct {
   barcode: string | null;
   unit: string | null;
   soldByWeight: boolean;
+  trackStock?: boolean;
   priceMinor: number;
   costMinor: number;
   stockBaseUnit: string | null;
@@ -40,6 +41,7 @@ interface ProductForm {
   barcode: string;
   unit: string;
   soldByWeight: boolean;
+  trackStock: boolean; // off = sells at any time, no stock check
   priceMinor: string; // pesos input, converted to minor units
   costMinor: string; // acquisition cost in pesos, converted to minor units
   conversionEnabled: boolean;
@@ -61,7 +63,7 @@ interface ProductForm {
   reorderThreshold: string;
 }
 
-const EMPTY_FORM: ProductForm = { name: "", sku: "", barcode: "", unit: "", soldByWeight: false, priceMinor: "", costMinor: "", conversionEnabled: false, packageSize: "", packageUnit: "kg", stockConversionFamily: "", stock: "", categorySlug: "", categoryName: "", description: "", taxExempt: false, featured: false, tags: "", related: [], upsell: [], reorderThreshold: "" };
+const EMPTY_FORM: ProductForm = { name: "", sku: "", barcode: "", unit: "", soldByWeight: false, trackStock: true, priceMinor: "", costMinor: "", conversionEnabled: false, packageSize: "", packageUnit: "kg", stockConversionFamily: "", stock: "", categorySlug: "", categoryName: "", description: "", taxExempt: false, featured: false, tags: "", related: [], upsell: [], reorderThreshold: "" };
 const formatStockSize = (quantity: number, unit: string) => {
   if ((unit === "g" || unit === "ml") && quantity % 1000 === 0) {
     return `${quantity / 1000} ${unit === "g" ? "kg" : "L"}`;
@@ -200,6 +202,7 @@ export default function ProductsPanel() {
       barcode: p.barcode ?? "",
       unit: p.unit ?? "",
       soldByWeight: p.soldByWeight ?? false,
+      trackStock: p.trackStock !== false,
       priceMinor: (p.priceMinor / 100).toString(),
       costMinor: (p.costMinor / 100).toString(),
       conversionEnabled: Boolean(p.stockBaseUnit),
@@ -234,6 +237,7 @@ export default function ProductsPanel() {
         barcode: form.barcode.trim() || null,
         unit: form.unit.trim() || null,
         soldByWeight: form.soldByWeight,
+        trackStock: form.trackStock,
         priceMinor,
         costMinor: form.costMinor.trim() === "" ? undefined : Math.round(parseFloat(form.costMinor) * 100),
         stockBaseUnit: measure.stockBaseUnit,
@@ -380,6 +384,7 @@ export default function ProductsPanel() {
                     {p.stockBaseUnit && p.stockBaseQuantity && <span className="badge text-bg-light border ms-1">{formatStockSize(p.stockBaseQuantity, p.stockBaseUnit)}</span>}
                     {p.stockConversionFamily && <span className="badge text-bg-info ms-1">{p.stockConversionFamily}</span>}
                     {p.soldByWeight && <span className="badge text-bg-secondary ms-1" title="Sold by weight">per-kilo</span>}
+                    {p.trackStock === false && <span className="badge text-bg-warning ms-1" title="Sells at any time — stock is not counted">Not tracked</span>}
                   </td>
                 <td className="text-muted small">
                   {p.sku}
@@ -387,9 +392,9 @@ export default function ProductsPanel() {
                 </td>
                 <td className="text-end">{toPesos(p.priceMinor)}</td>
                 <td className="text-end text-muted">{toPesos(p.costMinor)}</td>
-                <td className={`text-end ${p.reorderThreshold > 0 && p.availableQuantity <= p.reorderThreshold ? "text-danger fw-semibold" : ""}`}>
-                  {p.availableQuantity}
-                  {p.reorderThreshold > 0 && <small className="text-muted"> ≤{p.reorderThreshold}</small>}
+                <td className={`text-end ${p.trackStock !== false && p.reorderThreshold > 0 && p.availableQuantity <= p.reorderThreshold ? "text-danger fw-semibold" : ""}`}>
+                  {p.trackStock === false ? <span className="text-muted">—</span> : p.availableQuantity}
+                  {p.trackStock !== false && p.reorderThreshold > 0 && <small className="text-muted"> ≤{p.reorderThreshold}</small>}
                   {p.quantityReserved > 0 && <small className="text-muted"> ({p.quantityReserved} reserved)</small>}
                 </td>
                 <td className="small">{p.category?.name ?? "—"}</td>
@@ -473,6 +478,11 @@ export default function ProductsPanel() {
                         </div>
                       </div>
                     )}
+                    <div className="form-check form-switch mb-2">
+                      <input className="form-check-input" type="checkbox" id="trackStock" checked={form.trackStock} onChange={(e) => setForm({ ...form, trackStock: e.target.checked })} />
+                      <label className="form-check-label small" htmlFor="trackStock">Track stock <span className="text-muted">— turn off to sell this item even at zero; its stock is not counted</span></label>
+                      {!form.trackStock && form.conversionEnabled && <div className="text-danger small">Rice with a sack weight must keep Track stock on — resack works from the shelf.</div>}
+                    </div>
                     <div className="form-check form-switch mb-2">
                       <input className="form-check-input" type="checkbox" id="soldByWeight" checked={form.soldByWeight} onChange={(e) => setForm({ ...form, soldByWeight: e.target.checked })} />
                       <label className="form-check-label small" htmlFor="soldByWeight">Sold per weight (kilo) <span className="text-muted">— decimal quantity on a future module; pricing stays per-unit for now</span></label>

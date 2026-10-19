@@ -1,5 +1,6 @@
 // Product admin service — tenant-scoped product CRUD + stock.
 
+import { UNLIMITED_STOCK, isTracked, trackOffRefusal } from "../domain/stock-tracking.js";
 import { prisma } from "../persistence/prisma-repositories.js";
 import { recordMovement } from "../domain/movements.js";
 import { priceChanges } from "../domain/price-history.js";
@@ -46,8 +47,9 @@ export class ProductAdminService {
       },
     });
     return products.map((p) => {
-      const onHand = p.stockLevels.reduce((s, l) => s + l.quantityOnHand, 0);
-      const reserved = p.stockLevels.reduce((s, l) => s + l.quantityReserved, 0);
+      const tracked = isTracked(p);
+      const onHand = tracked ? p.stockLevels.reduce((s, l) => s + l.quantityOnHand, 0) : UNLIMITED_STOCK;
+      const reserved = tracked ? p.stockLevels.reduce((s, l) => s + l.quantityReserved, 0) : 0;
       const link = (kind: "related" | "upsell") => p.relationsFrom
         .filter((r) => r.kind === kind)
         .map((r) => ({ id: r.targetProduct.id, name: r.targetProduct.name, priceMinor: r.targetProduct.priceMinor, isActive: r.targetProduct.isActive }));
@@ -64,6 +66,7 @@ export class ProductAdminService {
       stockConversionFamily: p.stockConversionFamily,
       priceMinor: p.priceMinor,
       costMinor: p.costMinor,
+      trackStock: tracked,
       isActive: p.isActive,
       taxExempt: p.taxExempt,
       featured: p.featured,
@@ -107,6 +110,11 @@ export class ProductAdminService {
     });
     if (existing) return { ok: false, error: { type: "conflict", message: "A product with this SKU already exists" } };
 
+    if (input.trackStock === false) {
+      const refusal = trackOffRefusal(input);
+      if (refusal) return { ok: false, error: { type: "validation", errors: [refusal] } };
+    }
+
     // M5: store-scoped barcode uniqueness (null-safe — multiple products may lack a barcode).
     const barcode = input.barcode?.trim() || null;
     if (barcode) {
@@ -147,6 +155,7 @@ export class ProductAdminService {
           stockConversionFamily: input.stockConversionFamily?.trim().toLowerCase() || null,
           priceMinor: input.priceMinor,
           costMinor: input.costMinor ?? 0,
+          trackStock: input.trackStock ?? true,
           isActive: input.isActive ?? true,
           taxExempt: input.taxExempt ?? false,
           featured: input.featured ?? false,
@@ -156,7 +165,7 @@ export class ProductAdminService {
       });
 
       // Opening stock and its ledger receipt are committed with the product/category.
-      if (input.stock !== undefined || input.reorderThreshold !== undefined) {
+      if ((input.stock !== undefined || input.reorderThreshold !== undefined) && input.trackStock !== false) {
         const defaultWarehouse = await tx.warehouse.findFirst({ where: { storeId, isDefault: true } });
         const openingStock = input.stock ?? 0;
         const level = await tx.stockLevel.create({
@@ -214,6 +223,12 @@ export class ProductAdminService {
       if (hasStock) return { ok: false, error: { type: "conflict", message: "Cannot change a configured stock measure while inventory or reservations exist" } };
     }
 
+    const nextTrack = input.trackStock ?? isTracked(product);
+    if (!nextTrack) {
+      const refusal = trackOffRefusal({ stockBaseUnit: nextStockBaseUnit, stockBaseQuantity: nextStockBaseQuantity, stockConversionFamily: nextConversionFamily });
+      if (refusal) return { ok: false, error: { type: "validation", errors: [refusal] } };
+    }
+
     // M5: barcode uniqueness on edit — exclude self, allow clearing.
     const barcode = input.barcode !== undefined ? (input.barcode?.trim() || null) : undefined;
     if (barcode) {
@@ -260,6 +275,7 @@ export class ProductAdminService {
           stockConversionFamily: input.stockConversionFamily !== undefined ? (input.stockConversionFamily?.trim().toLowerCase() || null) : product.stockConversionFamily,
           priceMinor: input.priceMinor ?? product.priceMinor,
           costMinor: input.costMinor ?? product.costMinor,
+          trackStock: nextTrack,
           isActive: input.isActive ?? product.isActive,
           taxExempt: input.taxExempt ?? product.taxExempt,
           featured: input.featured ?? product.featured,
@@ -280,7 +296,7 @@ export class ProductAdminService {
           });
         }
       }
-      if (input.stock !== undefined) {
+      if (input.stock !== undefined && nextTrack) {
         // Update stock on the default warehouse (or warehouse-less legacy row) — first match. + ledger (ADJUST)
         const defaultWarehouse = await tx.warehouse.findFirst({ where: { storeId, isDefault: true } });
         const existing = await tx.stockLevel.findFirst({

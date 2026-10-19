@@ -15,6 +15,8 @@ export interface ProductInput {
   stockBaseQuantity?: number | null;
   /** Conversion family prevents unrelated same-unit goods from being transformed. */
   stockConversionFamily?: string | null;
+  /** false = sells at any time, no stock check or movement. Default true. */
+  trackStock?: boolean;
   description?: string | null;
   isActive?: boolean;
   /** M4: a VAT-exempt product (basic/zero-rated goods) — reported as non-VAT sales. */

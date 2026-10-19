@@ -61,6 +61,7 @@ const TEST_FILES = [
   "apps/api/src/domain/stock-book.test.ts",
   "apps/api/src/domain/price-history.test.ts",
   "apps/api/src/domain/shelf-cost.test.ts",
+  "apps/api/src/domain/stock-tracking.test.ts",
   "apps/api/src/security/security-m11.test.ts",
   "apps/api/src/imports/imports-m12.test.ts",
   "apps/api/src/auth/auth.service.test.ts",

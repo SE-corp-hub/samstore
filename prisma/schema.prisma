@@ -370,6 +370,7 @@ model Product {
   createdById           String? // Rice Ops M5: who added it (manual items)
   mergedIntoId          String? // Rice Ops M5: the product a manual item was merged into
   priceMinor            Int // integer minor units; NEVER float
+  trackStock            Boolean   @default(true) // false = sells at any time, no stock check and no stock movement ("not tracked")
   taxExempt             Boolean   @default(false) // M4: VAT-exempt line (e.g. basic goods / zero-rated)
   costMinor             Int       @default(0) // latest purchase cost (P5) — feeds COGS/profit (P10)
   isActive              Boolean   @default(true)
