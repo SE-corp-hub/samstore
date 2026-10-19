@@ -13,7 +13,7 @@ import QueueBadge from "../../../components/admin/QueueBadge";
 import StaffHome from "../../../components/admin/StaffHome";
 
 /** Rice Ops M10: the store screens get the large, high-contrast look (globals.css .rice-ui). */
-const RICE_TABS = new Set(["pos", "benta", "utangrice", "agentorders", "agent", "approvals", "trips", "resack", "pasok", "bilangin", "ulat", "drafts", "kargadors"]);
+const RICE_TABS = new Set(["pos", "benta", "utang", "utangrice", "agentorders", "agent", "approvals", "trips", "resack", "pasok", "bilangin", "ulat", "drafts", "kargadors"]);
 // The landing panel stays eager (it is the first paint); every other panel loads when
 // its tab opens. Shipping all 22 at once cost ~95 kB of route JS for one visible screen,
 // and dragged jsbarcode/qrcode (used by two panels) into the initial payload.
@@ -253,7 +253,8 @@ export default function AdminDashboard() {
       case "pos": return <BentaPanel />;
       case "posold": return <PosPanel onNavigate={setTab} />;
       case "preorders": return <PreOrdersPanel onNavigate={setTab} />;
-      case "utang": return <UtangPanel />;
+      case "utang": return <UtangRicePanel role={role} />; // one merged Credit screen
+      case "utangold": return <UtangPanel />; // the old ledger, kept hidden for one release (roll-back)
       case "inventory": return <InventoryPanel />;
       case "expenses": return <ExpensesPanel />;
       case "purchases": return <PurchasesPanel />;

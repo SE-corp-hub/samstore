@@ -14,12 +14,14 @@ import { toast } from "../../lib/toast";
 import { sendStep } from "../../lib/offlineQueue";
 import NumPad from "./NumPad";
 import SignaturePad from "./SignaturePad";
+import { PesoInput } from "../NumberBoxes";
+import { buildText, openTextApp, type TextKind } from "../../lib/text-message";
 
 interface Cust {
   id: string; name: string; phone: string | null; balanceMinor: number; creditApproved: boolean; limitMinor: number; ownLimit: boolean;
   oldestUtangAt: string | null; lastText: { status: string; createdAt: string } | null;
 }
-interface Sms { id: string; template: string; text: string; status: "QUEUED" | "SENT" | "FAILED" | "SKIPPED"; provider: string | null; lastError: string | null; createdAt: string; storeCustomer: { customer: { name: string | null } } | null }
+interface Sms { id: string; template: string; text: string; status: "QUEUED" | "SENT" | "FAILED" | "SKIPPED" | "OPENED"; provider: string | null; lastError: string | null; createdAt: string; storeCustomer: { customer: { name: string | null } } | null }
 interface Settings { utangSmsEnabled: boolean; utangMonthlyReminder: boolean; utangOverdueReminder: boolean; utangOverdueDays: number; smsSenderName: string | null }
 type ApiBody = { message?: string; errors?: string[] } & Record<string, unknown>;
 
@@ -32,6 +34,7 @@ function SmsBadge({ s }: { s: Sms["status"] }) {
   if (s === "SENT") return <span className="badge text-bg-success">Sent</span>;
   if (s === "QUEUED") return <span className="badge text-bg-info">Sending</span>;
   if (s === "FAILED") return <span className="badge text-bg-danger">Failed</span>;
+  if (s === "OPENED") return <span className="badge text-bg-primary" title="Opened in the phone's text app — we cannot tell if it was sent">Text opened</span>;
   return <span className="badge text-bg-secondary">Not sent</span>;
 }
 
@@ -52,6 +55,10 @@ export default function UtangRicePanel({ role }: { role?: string; onNavigate?: (
   const [settings, setSettings] = useState<Settings | null>(null);
   const [locationId, setLocationId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [filter, setFilter] = useState<"owing" | "all">("owing");
+  const [storeName, setStoreName] = useState("");
+  const [history, setHistory] = useState<{ id: string; type: string; amountMinor: number; startAt: string; dueAt: string | null; note: string | null }[] | null>(null);
+  const [justPaid, setJustPaid] = useState<{ paidMinor: number; balanceMinor: number } | null>(null);
 
   const load = useCallback(async () => {
     const q = search.trim() ? `?search=${encodeURIComponent(search.trim())}` : "";
@@ -67,10 +74,23 @@ export default function UtangRicePanel({ role }: { role?: string; onNavigate?: (
   useEffect(() => { void load(); }, [load]);
   useEffect(() => {
     void fetch(`${API_URL}/admin/me/rice`, { headers: adminHeaders() }).then((r) => (r.ok ? r.json() : null)).then((me) => setLocationId(me?.homeLocationId ?? null));
+    void fetch(`${API_URL}/admin/settings`, { headers: adminHeaders() }).then((r) => (r.ok ? r.json() : null)).then((d) => setStoreName(d?.store?.name ?? "")).catch(() => {});
     void fetch(`${API_URL}/admin/utang/settings`, { headers: adminHeaders() }).then((r) => (r.ok ? r.json() : null)).then((d) => d && setSettings(d.settings as Settings));
   }, []);
   useEffect(() => { if (tab === "texts") void loadTexts(); }, [tab, loadTexts]);
   useEffect(() => { if (selected) void loadTexts(selected.id); }, [selected, loadTexts]);
+  useEffect(() => {
+    setHistory(null); setJustPaid(null);
+    if (!selected) return;
+    void fetch(`${API_URL}/admin/credit/${encodeURIComponent(selected.id)}`, { headers: adminHeaders() }).then((r) => (r.ok ? r.json() : null)).then((d) => setHistory(d?.entries ?? [])).catch(() => setHistory([]));
+  }, [selected?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /** Open the phone's text app with the customer's balance (or a payment receipt) ready. */
+  const textCustomer = (c: Cust, kind: TextKind, extra: { paidMinor?: number; balanceMinor: number }) => {
+    const text = buildText(kind, { storeName: storeName || "SAM STORE", customerName: c.name, paidMinor: extra.paidMinor, balanceMinor: extra.balanceMinor });
+    if (!openTextApp({ phone: c.phone, text, template: kind, storeCustomerId: c.id })) { toast("This customer has no valid mobile number — add it first", "danger"); return; }
+    window.setTimeout(() => void loadTexts(c.id), 1500);
+  };
 
   const resend = async (id: string) => {
     const r = await post(`/admin/sms/${id}/resend`, {});
@@ -87,6 +107,7 @@ export default function UtangRicePanel({ role }: { role?: string; onNavigate?: (
   };
 
   const owing = customers.filter((c) => c.balanceMinor > 0);
+  const shown = filter === "owing" ? owing : customers;
   const totalOwed = owing.reduce((s, c) => s + c.balanceMinor, 0);
 
   return (
@@ -108,8 +129,12 @@ export default function UtangRicePanel({ role }: { role?: string; onNavigate?: (
             <input className="form-control form-control-lg" placeholder="Search (name or number)" aria-label="Search" value={search} onChange={(e) => setSearch(e.target.value)} />
             <button type="button" className="btn btn-success btn-lg text-nowrap" onClick={() => setAdding(true)}>+ Customer</button>
           </div>
+          <div className="btn-group mb-3" role="group" aria-label="Who to show">
+            <button type="button" className={`btn ${filter === "owing" ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setFilter("owing")}>Who owes ({owing.length})</button>
+            <button type="button" className={`btn ${filter === "all" ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setFilter("all")}>All customers ({customers.length})</button>
+          </div>
           <div className="list-group">
-            {customers.map((c) => (
+            {shown.map((c) => (
               <button key={c.id} type="button" className="list-group-item list-group-item-action py-3 d-flex justify-content-between align-items-center" onClick={() => setSelected(c)}>
                 <span>
                   <span className="fw-semibold">{c.name}</span>
@@ -121,7 +146,7 @@ export default function UtangRicePanel({ role }: { role?: string; onNavigate?: (
                 </span>
               </button>
             ))}
-            {customers.length === 0 && <p className="text-muted">No customers yet.</p>}
+            {shown.length === 0 && <p className="text-muted">{filter === "owing" ? "Nobody owes right now." : "No customers yet."}</p>}
           </div>
         </>
       )}
@@ -138,9 +163,29 @@ export default function UtangRicePanel({ role }: { role?: string; onNavigate?: (
               <div className="fs-3" style={{ fontVariantNumeric: "tabular-nums" }}>Owes: <strong>{peso(selected.balanceMinor)}</strong></div>
               <div>Limit: {selected.creditApproved ? peso(selected.limitMinor) : "none yet — cannot buy on credit yet"}</div>
               {owner && <LimitEditor customer={selected} onSaved={async (limitMinor) => { setSelected({ ...selected, limitMinor, creditApproved: limitMinor > 0 }); await load(); }} />}
-              <button type="button" className="btn btn-success btn-lg w-100 mt-3" disabled={selected.balanceMinor <= 0} onClick={() => setPaying(true)}>Credit payment</button>
+              <div className="d-grid gap-2 mt-3">
+                <button type="button" className="btn btn-success btn-lg" disabled={selected.balanceMinor <= 0} onClick={() => setPaying(true)}>Credit payment</button>
+                <button type="button" className="btn btn-outline-primary btn-lg" onClick={() => textCustomer(selected, "balance", { balanceMinor: selected.balanceMinor })}><i className="bi bi-chat-dots me-1"></i>Text the balance ({peso(selected.balanceMinor)})</button>
+              </div>
+              {justPaid && (
+                <div className="alert alert-success mt-3 mb-0">
+                  Received {peso(justPaid.paidMinor)} — {peso(justPaid.balanceMinor)} left.
+                  <button type="button" className="btn btn-primary btn-sm ms-2" onClick={() => textCustomer(selected, "payment_received", { paidMinor: justPaid.paidMinor, balanceMinor: justPaid.balanceMinor })}>Text the customer</button>
+                </div>
+              )}
             </div>
           </div>
+          <h2 className="h6">History</h2>
+          {history === null ? <p className="text-muted">Loading…</p> : history.length === 0 ? <p className="text-muted">No credit entries yet.</p> : (
+            <ul className="list-group mb-3" style={{ fontVariantNumeric: "tabular-nums" }}>
+              {history.slice(0, 30).map((e) => (
+                <li key={e.id} className="list-group-item d-flex justify-content-between gap-2">
+                  <span className="small">{new Date(e.startAt).toLocaleDateString("en-PH")} · {e.type === "purchase" ? "Utang" : e.type === "payment" ? "Payment" : e.type}{e.dueAt && e.type === "purchase" ? ` · due ${new Date(e.dueAt).toLocaleDateString("en-PH")}` : ""}{e.note ? ` · ${e.note}` : ""}</span>
+                  <span className={e.type === "payment" ? "text-success" : ""}>{e.type === "payment" ? "−" : ""}{peso(Math.abs(e.amountMinor))}</span>
+                </li>
+              ))}
+            </ul>
+          )}
           <h2 className="h6">Texts</h2>
           <TextList texts={texts} onResend={resend} />
         </div>
@@ -148,7 +193,7 @@ export default function UtangRicePanel({ role }: { role?: string; onNavigate?: (
 
       {tab === "list" && selected && paying && (
         <PayForm customer={selected} locationId={locationId} onCancel={() => setPaying(false)}
-          onDone={async (balanceMinor) => { setPaying(false); setSelected({ ...selected, balanceMinor }); await load(); await loadTexts(selected.id); }} />
+          onDone={async (balanceMinor, paidMinor) => { setPaying(false); setSelected({ ...selected, balanceMinor }); await load(); await loadTexts(selected.id); setJustPaid({ paidMinor, balanceMinor }); }} />
       )}
 
       {tab === "texts" && <TextList texts={texts} onResend={resend} showName />}
@@ -208,7 +253,7 @@ function LimitEditor({ customer, onSaved }: { customer: Cust; onSaved: (limitMin
   return (
     <div className="input-group mt-2">
       <span className="input-group-text">Limit ₱</span>
-      <input className="form-control" inputMode="decimal" aria-label="Limit" value={value} onChange={(e) => setValue(e.target.value.replace(/[^\d.]/g, "").slice(0, 10))} />
+      <PesoInput aria-label="Limit" value={value} onChange={setValue} placeholder="0.00" />
       <button type="button" className="btn btn-outline-dark" disabled={busy} onClick={() => void save()}>Save</button>
     </div>
   );
@@ -239,7 +284,7 @@ function AddCustomer({ owner, onCancel, onDone }: { owner: boolean; onCancel: ()
         <input id="ac-phone" className="form-control form-control-lg mb-2" inputMode="tel" placeholder="09xx xxx xxxx" value={phone} onChange={(e) => setPhone(e.target.value.slice(0, 16))} />
         {owner ? (
           <><label className="form-label" htmlFor="ac-limit">Credit limit (₱)</label>
-            <input id="ac-limit" className="form-control form-control-lg mb-2" inputMode="decimal" value={limit} onChange={(e) => setLimit(e.target.value.replace(/[^\d.]/g, "").slice(0, 10))} /></>
+            <PesoInput id="ac-limit" className="form-control form-control-lg mb-2" value={limit} onChange={setLimit} placeholder="0.00" /></>
         ) : <p className="small text-muted">The owner sets the credit limit.</p>}
         <div className="d-flex justify-content-between mt-3">
           <button type="button" className="btn btn-outline-secondary btn-lg" disabled={busy} onClick={onCancel}>Back</button>
@@ -250,7 +295,7 @@ function AddCustomer({ owner, onCancel, onDone }: { owner: boolean; onCancel: ()
   );
 }
 
-function PayForm({ customer, locationId, onCancel, onDone }: { customer: Cust; locationId: string | null; onCancel: () => void; onDone: (balanceMinor: number) => void | Promise<void> }) {
+function PayForm({ customer, locationId, onCancel, onDone }: { customer: Cust; locationId: string | null; onCancel: () => void; onDone: (balanceMinor: number, paidMinor: number) => void | Promise<void> }) {
   const [amount, setAmount] = useState("");
   const [method, setMethod] = useState<"cash" | "gcash">("cash");
   const [reference, setReference] = useState("");
@@ -265,12 +310,12 @@ function PayForm({ customer, locationId, onCancel, onDone }: { customer: Cust; l
     const signatures = [{ signerKind: "STAFF", imagePng: staffSig }, ...(custSig ? [{ signerKind: "CUSTOMER", signerName: customer.name, imagePng: custSig }] : [])];
     const sent = await sendStep("/admin/utang/payments", { customerId: customer.id, amountMinor: amt, method, reference: method === "gcash" ? reference.trim() : undefined, locationId: locationId ?? undefined, signatures }, `Payment from ${customer.name}`);
     setBusy(false);
-    if (sent.status === "queued") { toast("No signal — saved on this phone, will be sent when the signal is back"); await onDone(customer.balanceMinor - amt); return; }
+    if (sent.status === "queued") { toast("No signal — saved on this phone, will be sent when the signal is back"); await onDone(customer.balanceMinor - amt, amt); return; }
     const r = { ok: sent.ok, data: sent.data as ApiBody | null };
     if (!r.ok) { setError(errText(r.data, "Did not go through")); return; }
     const bal = Number(r.data?.balanceMinor ?? 0);
     toast(`Received ${peso(amt)} — ${peso(bal)} left${r.data?.smsStatus === "SKIPPED" ? " (no number, no text sent)" : ""}`);
-    await onDone(bal);
+    await onDone(bal, amt);
   };
   return (
     <div className="card border-success" style={{ maxWidth: 520 }}>
