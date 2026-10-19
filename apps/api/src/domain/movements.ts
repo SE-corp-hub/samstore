@@ -110,6 +110,22 @@ async function takeAvailable(tx: MovementTx, levelId: string, take: number): Pro
   return rows[0]?.quantityOnHand ?? null;
 }
 
+/** Take stock even though the count is short: the level goes below zero (a ledger row says so). */
+async function takeBelowZero(
+  tx: MovementTx, storeId: string, productId: string, warehouseId: string | null, quantity: number, type: string,
+  opts: { orderId?: string | null; createdBy?: string | null; documentType?: string | null; documentId?: string | null },
+): Promise<void> {
+  let level = await tx.stockLevel.findFirst({ where: { storeId, productId, warehouseId }, select: { id: true, warehouseId: true } });
+  if (!level) level = await tx.stockLevel.create({ data: { storeId, productId, warehouseId, quantityOnHand: 0 }, select: { id: true, warehouseId: true } });
+  const rows = await tx.$queryRaw<{ quantityOnHand: number }[]>`
+    UPDATE "StockLevel" SET "quantityOnHand" = "quantityOnHand" - ${quantity}::int, "updatedAt" = now()
+    WHERE id = ${level.id} RETURNING "quantityOnHand"`;
+  await recordMovement(tx, {
+    storeId, productId, warehouseId: level.warehouseId, delta: -quantity, type, orderId: opts.orderId, createdBy: opts.createdBy,
+    balanceAfter: rows[0]?.quantityOnHand ?? null, documentType: opts.documentType, documentId: opts.documentId, note: "Sold below zero (the count was short)",
+  });
+}
+
 /**
  * Thrown when a guarded stock write cannot be satisfied (Module 4 fix): the level
  * dropped below the requested quantity between the read and the write. Callers
@@ -143,7 +159,7 @@ export async function deductStock(
   tx: MovementTx,
   storeId: string,
   lines: { productId: string; variantId?: string | null; quantity: number }[],
-  opts?: { type?: string; orderId?: string | null; createdBy?: string | null; warehouseId?: string | null; documentType?: string | null; documentId?: string | null },
+  opts?: { type?: string; orderId?: string | null; createdBy?: string | null; warehouseId?: string | null; documentType?: string | null; documentId?: string | null; /** The counter may sell what the count says is gone: the count goes below zero and the next count fixes it. */ allowBelowZero?: boolean },
 ): Promise<void> {
   const type = opts?.type ?? "CONSUME";
   let defaultId: string | null | undefined;
@@ -184,10 +200,18 @@ export async function deductStock(
     const pick = pickDeductionLevel(levels, l.quantity, { warehouseId: opts?.warehouseId ?? null, defaultWarehouseId: defaultId });
     if (!pick.ok) {
       if (pick.reason === "untracked") continue; // untracked product — no stock accounting
+      if (opts?.allowBelowZero) {
+        await takeBelowZero(tx, storeId, l.productId, opts.warehouseId ?? defaultId ?? null, l.quantity, type, opts);
+        continue;
+      }
       const available = pick.reason === "short" ? pick.available : 0;
       throw new InsufficientStockError(l.productId, l.quantity - available, pick.elsewhere);
     }
     const balanceAfter = await takeAvailable(tx, pick.level.id, l.quantity);
+    if (balanceAfter === null && opts?.allowBelowZero) {
+      await takeBelowZero(tx, storeId, l.productId, pick.level.warehouseId, l.quantity, type, opts);
+      continue;
+    }
     if (balanceAfter === null) {
       // The row changed between the read and the guarded write (a concurrent sale).
       const fresh = await tx.stockLevel.findUnique({ where: { id: pick.level.id }, select: { quantityOnHand: true, quantityReserved: true } });

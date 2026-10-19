@@ -408,6 +408,8 @@ export interface AdminCreateCustomerRequest {
   /** v4: pre-approve for credit + optional limit (minor) */
   creditApproved?: boolean;
   creditLimitMinor?: number;
+  /** Credit with no limit (the default when created on credit without a limit). */
+  creditUnlimited?: boolean;
 }
 
 export interface AdminUpdateCustomerRequest {
@@ -416,6 +418,8 @@ export interface AdminUpdateCustomerRequest {
   email?: string;
   address?: string;
   creditLimitMinor?: number;
+  /** true = no credit limit (owner/manager only). */
+  creditUnlimited?: boolean;
 }
 
 export interface LoyaltyAdjustRequest {

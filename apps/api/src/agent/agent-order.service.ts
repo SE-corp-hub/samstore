@@ -302,7 +302,7 @@ export class AgentOrderService {
         const sc = o.storeCustomerId ? await prisma.storeCustomer.findFirst({ where: { id: o.storeCustomerId, storeId } }) : null;
         if (!sc?.creditApproved) throw new SellingError(`${o.customerName} has no credit limit yet — use cash or GCash, or ask the owner to set one`);
         const limitMinor = await credit.effectiveLimit(storeId, sc);
-        if (!limitCheck(sc.creditBalanceMinor, due, limitMinor).ok) throw new StepError(conflict(`Over ${o.customerName}'s credit limit — use cash or GCash, or ask the owner to raise the limit`));
+        if (limitMinor !== null && !limitCheck(sc.creditBalanceMinor, due, limitMinor).ok) throw new StepError(conflict(`${o.customerName} is at the credit limit — take a payment first, or use cash or GCash`));
       }
       const code = method === "utang" ? "credit" : method!;
       const prepared = await prepareTenders({

@@ -1,7 +1,7 @@
 "use client";
 
 // Rice Ops M6 — Credit: the customer list, Credit payment at this location, and the texts.
-//   * Customers: name + mobile. The owner/manager sets each limit (no limit = no utang).
+//   * Customers: name + mobile. New customers have NO credit limit; the owner/manager can set one (0 = no credit). At the limit, the customer pays first.
 //   * Credit payment: cash or GCash, partial is fine; the money goes to this location's
 //     drawer; a text goes out with what is left.
 //   * Texts: each one shows Sent / Failed (with Send again) / No number.
@@ -16,9 +16,10 @@ import NumPad from "./NumPad";
 import SignaturePad from "./SignaturePad";
 import { PesoInput } from "../NumberBoxes";
 import { buildText, openTextApp, type TextKind } from "../../lib/text-message";
+import { creditStatusWords, limitPhrase } from "../../lib/credit-status";
 
 interface Cust {
-  id: string; name: string; phone: string | null; balanceMinor: number; creditApproved: boolean; limitMinor: number; ownLimit: boolean;
+  id: string; name: string; phone: string | null; balanceMinor: number; creditApproved: boolean; limitMinor: number | null; unlimited: boolean; ownLimit: boolean; status: string; availableMinor: number | null;
   oldestUtangAt: string | null; lastText: { status: string; createdAt: string } | null;
 }
 interface Sms { id: string; template: string; text: string; status: "QUEUED" | "SENT" | "FAILED" | "SKIPPED" | "OPENED"; provider: string | null; lastError: string | null; createdAt: string; storeCustomer: { customer: { name: string | null } } | null }
@@ -138,10 +139,11 @@ export default function UtangRicePanel({ role }: { role?: string; onNavigate?: (
               <button key={c.id} type="button" className="list-group-item list-group-item-action py-3 d-flex justify-content-between align-items-center" onClick={() => setSelected(c)}>
                 <span>
                   <span className="fw-semibold">{c.name}</span>
-                  <span className="d-block small text-muted">{c.phone ?? "no number"} · limit {c.creditApproved ? peso(c.limitMinor) : "none yet"}{c.balanceMinor > 0 && c.oldestUtangAt ? ` · ${days(c.oldestUtangAt)} days` : ""}</span>
+                  <span className="d-block small text-muted">{c.phone ?? "no number"} · limit {limitPhrase(c, peso)}{c.balanceMinor > 0 && c.oldestUtangAt ? ` · ${days(c.oldestUtangAt)} days` : ""}</span>
                 </span>
                 <span className="text-end" style={{ fontVariantNumeric: "tabular-nums" }}>
-                  <span className={`fs-5 ${c.balanceMinor > c.limitMinor && c.limitMinor > 0 ? "text-danger" : ""}`}>{peso(c.balanceMinor)}</span>
+                  <span className={`fs-5 ${c.status === "AT_LIMIT" ? "text-danger" : ""}`}>{peso(c.balanceMinor)}</span>
+                  {c.creditApproved && <span className="d-block"><span className={`badge ${creditStatusWords(c.status).cls}`}>{creditStatusWords(c.status).label}</span></span>}
                   {c.lastText?.status === "FAILED" && <span className="d-block"><span className="badge text-bg-danger">Failed</span></span>}
                 </span>
               </button>
@@ -161,8 +163,10 @@ export default function UtangRicePanel({ role }: { role?: string; onNavigate?: (
               <div className="h5 mb-1">{selected.name}</div>
               <div className="text-muted mb-2">{selected.phone ?? "no number"}</div>
               <div className="fs-3" style={{ fontVariantNumeric: "tabular-nums" }}>Owes: <strong>{peso(selected.balanceMinor)}</strong></div>
-              <div>Limit: {selected.creditApproved ? peso(selected.limitMinor) : "none yet — cannot buy on credit yet"}</div>
-              {owner && <LimitEditor customer={selected} onSaved={async (limitMinor) => { setSelected({ ...selected, limitMinor, creditApproved: limitMinor > 0 }); await load(); }} />}
+              <div>Limit: {limitPhrase(selected, peso)}{!selected.creditApproved && " — cannot buy on credit yet"}</div>
+              {selected.creditApproved && <div className="mb-1">Status: <span className={`badge ${creditStatusWords(selected.status).cls}`}>{creditStatusWords(selected.status).label}</span>{selected.availableMinor !== null && <span className="ms-2">can still borrow {peso(selected.availableMinor)}</span>}</div>}
+              {selected.status === "AT_LIMIT" && <div className="alert alert-warning py-2 mt-2 mb-0">At the limit. The customer must pay some of the balance first, then can buy on credit again.</div>}
+              {owner && <LimitEditor customer={selected} onSaved={async () => { setSelected(null); await load(); }} />}
               <div className="d-grid gap-2 mt-3">
                 <button type="button" className="btn btn-success btn-lg" disabled={selected.balanceMinor <= 0} onClick={() => setPaying(true)}>Credit payment</button>
                 <button type="button" className="btn btn-outline-primary btn-lg" onClick={() => textCustomer(selected, "balance", { balanceMinor: selected.balanceMinor })}><i className="bi bi-chat-dots me-1"></i>Text the balance ({peso(selected.balanceMinor)})</button>
@@ -238,23 +242,29 @@ function TextList({ texts, onResend, showName = false }: { texts: Sms[]; onResen
   );
 }
 
-function LimitEditor({ customer, onSaved }: { customer: Cust; onSaved: (limitMinor: number) => void | Promise<void> }) {
-  const [value, setValue] = useState(customer.creditApproved ? String(customer.limitMinor / 100) : "");
+function LimitEditor({ customer, onSaved }: { customer: Cust; onSaved: () => void | Promise<void> }) {
+  const [value, setValue] = useState(customer.creditApproved && customer.limitMinor !== null && !customer.unlimited ? String(customer.limitMinor / 100) : "");
   const [busy, setBusy] = useState(false);
-  const save = async () => {
+  const save = async (unlimited: boolean) => {
     setBusy(true);
     const limitMinor = toMinor(value);
-    const r = await post(`/admin/utang/customers/${customer.id}/limit`, { limitMinor });
+    const r = await post(`/admin/utang/customers/${customer.id}/limit`, unlimited ? { unlimited: true } : { limitMinor });
     setBusy(false);
     if (!r.ok) { toast(errText(r.data, "Could not save")); return; }
-    toast(limitMinor > 0 ? `Limit: ${peso(limitMinor)}` : "Credit removed");
-    await onSaved(limitMinor);
+    toast(unlimited ? "No limit" : limitMinor > 0 ? `Limit: ${peso(limitMinor)}` : "Credit removed");
+    await onSaved();
   };
   return (
-    <div className="input-group mt-2">
-      <span className="input-group-text">Limit ₱</span>
-      <PesoInput aria-label="Limit" value={value} onChange={setValue} placeholder="0.00" />
-      <button type="button" className="btn btn-outline-dark" disabled={busy} onClick={() => void save()}>Save</button>
+    <div className="mt-2">
+      <div className="input-group">
+        <span className="input-group-text">Limit ₱</span>
+        <PesoInput aria-label="Limit" value={value} onChange={setValue} placeholder="0.00" />
+        <button type="button" className="btn btn-outline-dark" disabled={busy} onClick={() => void save(false)}>Save limit</button>
+      </div>
+      <div className="d-flex flex-wrap gap-2 mt-2">
+        {!customer.unlimited && <button type="button" className="btn btn-outline-secondary btn-sm" disabled={busy} onClick={() => void save(true)}>No limit</button>}
+        <span className="small text-muted align-self-center">0 = no credit at all.</span>
+      </div>
     </div>
   );
 }
@@ -283,9 +293,9 @@ function AddCustomer({ owner, onCancel, onDone }: { owner: boolean; onCancel: ()
         <label className="form-label" htmlFor="ac-phone">Mobile number</label>
         <input id="ac-phone" className="form-control form-control-lg mb-2" inputMode="tel" placeholder="09xx xxx xxxx" value={phone} onChange={(e) => setPhone(e.target.value.slice(0, 16))} />
         {owner ? (
-          <><label className="form-label" htmlFor="ac-limit">Credit limit (₱)</label>
-            <PesoInput id="ac-limit" className="form-control form-control-lg mb-2" value={limit} onChange={setLimit} placeholder="0.00" /></>
-        ) : <p className="small text-muted">The owner sets the credit limit.</p>}
+          <><label className="form-label" htmlFor="ac-limit">Credit limit (₱) — leave empty for no limit</label>
+            <PesoInput id="ac-limit" className="form-control form-control-lg mb-2" value={limit} onChange={setLimit} placeholder="No limit" /></>
+        ) : <p className="small text-muted">New customers start with no limit. The owner can set one later.</p>}
         <div className="d-flex justify-content-between mt-3">
           <button type="button" className="btn btn-outline-secondary btn-lg" disabled={busy} onClick={onCancel}>Back</button>
           <button type="button" className="btn btn-success btn-lg" disabled={busy || name.trim().length < 2 || phone.trim().length < 10} onClick={() => void save()}>Add</button>

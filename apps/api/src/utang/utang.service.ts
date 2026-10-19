@@ -14,7 +14,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../persistence/prisma-repositories.js";
 import { cacheBust, cacheKey } from "../persistence/ttl-cache.js";
 import { toE164 } from "../domain/phone.js";
-import { checkPayment, daysSince, manilaParts, monthKey, monthlyText, overdueText, paymentText, pesoText, refundValue, UtangError, weekKey } from "../domain/utang.js";
+import { checkPayment, creditStatus, daysSince, manilaParts, monthKey, monthlyText, overdueText, paymentText, pesoText, refundValue, UtangError, weekKey } from "../domain/utang.js";
 import { prepareTenders } from "../payments/tenders.js";
 import { RegisterService } from "../registers/register.service.js";
 import { queueSms } from "../sms/sms.service.js";
@@ -137,15 +137,19 @@ export class UtangService {
       }),
       prisma.storeSettings.findUnique({ where: { storeId }, select: { creditLimitMinor: true } }),
     ]);
-    return rows.map((r) => ({
-      id: r.id, name: r.customer.name ?? "", phone: r.customer.phone, balanceMinor: r.creditBalanceMinor, creditApproved: r.creditApproved,
-      limitMinor: r.creditLimitMinor > 0 ? r.creditLimitMinor : settings?.creditLimitMinor ?? 0, ownLimit: r.creditLimitMinor > 0,
-      oldestUtangAt: r.creditBalanceMinor > 0 ? r.credit[0]?.createdAt ?? null : null,
-      lastText: r.smsMessages[0] ?? null,
-    }));
+    return rows.map((r) => {
+      const limitMinor = r.creditUnlimited ? null : r.creditLimitMinor > 0 ? r.creditLimitMinor : settings?.creditLimitMinor ?? 0;
+      const st = creditStatus({ approved: r.creditApproved, unlimited: r.creditUnlimited, limitMinor, balanceMinor: r.creditBalanceMinor });
+      return {
+        id: r.id, name: r.customer.name ?? "", phone: r.customer.phone, balanceMinor: r.creditBalanceMinor, creditApproved: r.creditApproved,
+        limitMinor, unlimited: r.creditUnlimited, ownLimit: r.creditLimitMinor > 0, status: st.status, availableMinor: st.availableMinor,
+        oldestUtangAt: r.creditBalanceMinor > 0 ? r.credit[0]?.createdAt ?? null : null,
+        lastText: r.smsMessages[0] ?? null,
+      };
+    });
   }
 
-  /** Add a customer to the list (name + mobile). Only the owner/manager gives them a limit. */
+  /** Add a customer to the list (name + mobile). On credit with NO limit unless the owner/manager gives one. */
   async addCustomer(storeId: string, actor: Actor, input: { name?: string; phone?: string; limitMinor?: unknown }) {
     return this.run(async () => {
       const name = input.name?.trim().replace(/\s+/g, " ") ?? "";
@@ -164,27 +168,30 @@ export class UtangService {
         const before = await tx.storeCustomer.findUnique({ where: { storeId_customerId: { storeId, customerId: customer.id } }, select: { id: true } });
         if (before) throw new StepError(conflict("This number is already on the list"));
         const sc = await tx.storeCustomer.create({
-          data: { storeId, customerId: customer.id, ...(typeof limit === "number" ? { creditLimitMinor: limit, creditApproved: limit > 0 } : {}) },
-          select: { id: true, creditApproved: true, creditLimitMinor: true },
+          data: { storeId, customerId: customer.id, ...(typeof limit === "number" ? { creditLimitMinor: limit, creditApproved: limit > 0, creditUnlimited: false } : { creditApproved: true, creditUnlimited: true }) },
+          select: { id: true, creditApproved: true, creditLimitMinor: true, creditUnlimited: true },
         });
         await tx.auditLog.create({ data: { storeId, actorType: "USER", actorId: actor.userId, action: "utang.customer_add", entityType: "StoreCustomer", entityId: sc.id, after: { name, limitMinor: typeof limit === "number" ? limit : null } } });
-        return { id: sc.id, name, phone, creditApproved: sc.creditApproved, limitMinor: sc.creditLimitMinor };
+        return { id: sc.id, name, phone, creditApproved: sc.creditApproved, limitMinor: sc.creditUnlimited ? null : sc.creditLimitMinor, unlimited: sc.creditUnlimited };
       });
       await bustCredit(storeId);
       return out;
     });
   }
 
-  /** The owner/manager sets (or removes, with 0) a customer's utang limit. */
-  async setLimit(storeId: string, actor: Actor, storeCustomerId: string, limitMinor: unknown) {
-    if (!LIMIT_ROLES.includes(actor.role)) return forbidden("Only the owner can set the limit");
-    if (typeof limitMinor !== "number" || !Number.isInteger(limitMinor) || limitMinor < 0 || limitMinor > MAX_LIMIT_MINOR) return invalid("Invalid limit");
-    const sc = await prisma.storeCustomer.findFirst({ where: { id: storeCustomerId, storeId }, select: { id: true, creditLimitMinor: true } });
+  /** The owner/manager sets a customer's credit limit: a peso amount, "unlimited", or 0 = no credit. */
+  async setLimit(storeId: string, actor: Actor, storeCustomerId: string, limitMinor: unknown, unlimited = false) {
+    if (!LIMIT_ROLES.includes(actor.role)) return forbidden("Only the owner or manager can change the limit");
+    if (!unlimited && (typeof limitMinor !== "number" || !Number.isInteger(limitMinor) || limitMinor < 0 || limitMinor > MAX_LIMIT_MINOR)) return invalid("Invalid limit");
+    const sc = await prisma.storeCustomer.findFirst({ where: { id: storeCustomerId, storeId }, select: { id: true, creditLimitMinor: true, creditUnlimited: true } });
     if (!sc) return notFound("Customer not found");
-    const updated = await prisma.storeCustomer.update({ where: { id: sc.id }, data: { creditLimitMinor: limitMinor, creditApproved: limitMinor > 0 }, select: { id: true, creditApproved: true, creditLimitMinor: true } });
-    await prisma.auditLog.create({ data: { storeId, actorType: "USER", actorId: actor.userId, action: "utang.limit", entityType: "StoreCustomer", entityId: sc.id, before: { limitMinor: sc.creditLimitMinor }, after: { limitMinor } } });
+    const data = unlimited
+      ? { creditUnlimited: true, creditApproved: true }
+      : { creditUnlimited: false, creditLimitMinor: limitMinor as number, creditApproved: (limitMinor as number) > 0 };
+    const updated = await prisma.storeCustomer.update({ where: { id: sc.id }, data, select: { id: true, creditApproved: true, creditLimitMinor: true, creditUnlimited: true } });
+    await prisma.auditLog.create({ data: { storeId, actorType: "USER", actorId: actor.userId, action: "utang.limit", entityType: "StoreCustomer", entityId: sc.id, before: { limitMinor: sc.creditLimitMinor, unlimited: sc.creditUnlimited }, after: { limitMinor: unlimited ? null : limitMinor, unlimited } } });
     await bustCredit(storeId);
-    return { ok: true as const, value: { id: updated.id, creditApproved: updated.creditApproved, limitMinor: updated.creditLimitMinor } };
+    return { ok: true as const, value: { id: updated.id, creditApproved: updated.creditApproved, limitMinor: updated.creditUnlimited ? null : updated.creditLimitMinor, unlimited: updated.creditUnlimited } };
   }
 
   // ─────────────────────────── Bayad sa utang ───────────────────────────

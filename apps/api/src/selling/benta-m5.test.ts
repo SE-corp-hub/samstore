@@ -266,19 +266,20 @@ test("M5: utang needs a customer on the list and their signature; GCash needs a 
   assert.equal((await prisma.payment.findFirstOrThrow({ where: { orderId: gcash.ok ? gcash.value.orderId : "" } })).method, "gcash");
 });
 
-test("M5: 'kulang' says where the stock is; Kunin sa ibang tindahan holds it there", async () => {
+test("M5: the counter sells even when the count is short (it goes below zero); Kunin sa ibang tindahan still holds stock there", async () => {
   const fx = await fixture();
   const short = await svc.sell(fx.storeId, fx.staff1, { idempotencyKey: key(), lines: [{ productId: fx.sin25.id, quantity: 11 }], payment: { method: "cash" } });
-  assert.equal(short.ok, false);
-  assert.match(msg(short), /Only 10 Sinandomeng 25 kg left at Store 1\. Lower the amount, or take from Store 2 \(has 5\)/);
-  assert.equal(await prisma.order.count({ where: { storeId: fx.storeId } }), 0, "nothing half-sold");
+  assert.equal(short.ok, true, msg(short));
+  assert.equal(await onHand(fx, fx.sin25.id, fx.s1), -1, "the count goes below zero; the next count fixes it");
+  const mv = await prisma.stockMovement.findFirstOrThrow({ where: { storeId: fx.storeId, productId: fx.sin25.id, warehouseId: fx.s1, delta: -11 } });
+  assert.match(mv.note ?? "", /below zero/);
 
   const r = await svc.sell(fx.storeId, fx.staff1, { idempotencyKey: key(), lines: [{ productId: fx.sin25.id, quantity: 2, sourceLocationId: fx.s2 }], payment: { method: "cash" } });
   assert.equal(r.ok, true, msg(r));
   assert.match(r.ok ? r.value.releases[0]!.docNumber : "", /^REL-\d{6}$/);
   const s2 = await prisma.stockLevel.findFirstOrThrow({ where: { storeId: fx.storeId, productId: fx.sin25.id, warehouseId: fx.s2 } });
   assert.deepEqual([s2.quantityOnHand, s2.quantityReserved], [5, 2], "held at Store 2 until its Ilabas");
-  assert.equal(await onHand(fx, fx.sin25.id, fx.s1), 10, "Store 1's own stock untouched");
+  assert.equal(await onHand(fx, fx.sin25.id, fx.s1), -1, "Store 1's own stock untouched by the held sale");
 });
 
 test("M5: staff sell only at their own location; another store's product is not found", async () => {

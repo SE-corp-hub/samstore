@@ -5,6 +5,7 @@ import { API_URL } from "../../config";
 import { adminHeaders } from "../../lib/admin";
 import { toast } from "../../lib/toast";
 import CustomerBarcode from "./CustomerBarcode";
+import { creditStatusWords } from "../../lib/credit-status";
 
 interface CustomerRow {
   id: string;
@@ -16,6 +17,9 @@ interface CustomerRow {
   approvalStatus: string;
   creditApproved: boolean;
   creditLimitMinor: number;
+  creditUnlimited?: boolean;
+  creditStatus?: string;
+  creditAvailableMinor?: number | null;
   creditBalanceMinor: number;
   joinedAt: string;
 }
@@ -26,6 +30,7 @@ interface ProfileData {
   approvalStatus: string;
   creditApproved: boolean;
   creditLimitMinor: number;
+  creditUnlimited?: boolean;
   creditBalanceMinor: number;
   createdAt: string;
   orders: { id: string; orderNumber: string; status: string; totalMinor: number; source: string; createdAt: string }[];
@@ -58,6 +63,10 @@ const parseLimitMinor = (s: string): number | null => {
   return Number.isFinite(v) && v >= 0 ? Math.round(v * 100) : null;
 };
 
+/** The limit in words: "No limit", "store default", or the peso amount. */
+const limitWords = (c: { creditUnlimited?: boolean; creditLimitMinor: number }) =>
+  c.creditUnlimited ? "No limit" : c.creditLimitMinor > 0 ? `${toPesos(c.creditLimitMinor)} limit` : "store default limit";
+
 export default function CustomersPanel() {
   const [customers, setCustomers] = useState<CustomerRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -85,6 +94,7 @@ export default function CustomersPanel() {
   // Edit customer modal
   const [editTarget, setEditTarget] = useState<CustomerRow | null>(null);
   const [editName, setEditName] = useState("");
+  const [editLimitTouched, setEditLimitTouched] = useState(false);
   const [editPhone, setEditPhone] = useState("");
     const [editEmail, setEditEmail] = useState("");
     const [editAddress, setEditAddress] = useState("");
@@ -123,12 +133,16 @@ export default function CustomersPanel() {
 
   const approveCredit = async () => {
     if (!approveTarget) return;
+    // Empty limit = approve with no limit; a number = that limit.
+    const noLimit = limitInput.trim() === "";
     const limitMinor = Math.round(parseFloat(limitInput || "0") * 100);
-    const res = await fetch(`${API_URL}/admin/credit/${approveTarget.id}/approve`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json", ...adminHeaders() },
-      body: JSON.stringify({ limitMinor }),
-    });
+    const res = noLimit
+      ? await fetch(`${API_URL}/admin/customers/${approveTarget.id}`, { method: "PATCH", headers: { "Content-Type": "application/json", ...adminHeaders() }, body: JSON.stringify({ creditUnlimited: true }) })
+      : await fetch(`${API_URL}/admin/credit/${approveTarget.id}/approve`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json", ...adminHeaders() },
+          body: JSON.stringify({ limitMinor }),
+        });
     if (res.ok) {
       setApproveTarget(null);
       setLimitInput("");
@@ -165,8 +179,9 @@ export default function CustomersPanel() {
 
   const addCustomer = async () => {
     if (!addName.trim()) { setAddError("Name is required."); return; }
-    const creditLimitMinor = addPreapprove ? parseLimitMinor(addLimit) : null;
-    if (addPreapprove && creditLimitMinor === null) { setAddError("Enter a valid credit limit (₱)."); return; }
+    // Credit with an empty limit = no limit. Only the owner/manager can type a limit.
+    const creditLimitMinor = addPreapprove && addLimit.trim() !== "" ? parseLimitMinor(addLimit) : null;
+    if (addPreapprove && addLimit.trim() !== "" && creditLimitMinor === null) { setAddError("Enter a valid credit limit (₱), or leave it empty for no limit."); return; }
     setAddSaving(true);
     setAddError(null);
     try {
@@ -176,7 +191,7 @@ export default function CustomersPanel() {
             if (addAddress.trim()) body.address = addAddress.trim();
       if (addPreapprove) {
         body.creditApproved = true;
-        body.creditLimitMinor = creditLimitMinor;
+        if (creditLimitMinor !== null) body.creditLimitMinor = creditLimitMinor;
       }
       const res = await fetch(`${API_URL}/admin/customers`, {
         method: "POST",
@@ -205,19 +220,22 @@ export default function CustomersPanel() {
         setEditPhone(c.phone ?? "");
         setEditEmail(c.email ?? "");
         setEditAddress(c.address ?? "");
-        setEditLimit(Number.isFinite(c.creditLimitMinor) ? (c.creditLimitMinor / 100).toFixed(2) : "");
+        setEditLimit(!c.creditUnlimited && c.creditLimitMinor > 0 ? (c.creditLimitMinor / 100).toFixed(2) : "");
+        setEditLimitTouched(false);
         setEditError(null);
   };
 
   const saveEdit = async () => {
     if (!editTarget) return;
     if (!editName.trim()) { setEditError("Name is required."); return; }
-    const creditLimitMinor = parseLimitMinor(editLimit);
-    if (creditLimitMinor === null) { setEditError("Enter a valid credit limit (₱)."); return; }
+    // Only send the credit part when the limit box was changed (staff can still fix a name).
+    const creditLimitMinor = editLimit.trim() === "" ? null : parseLimitMinor(editLimit);
+    if (editLimitTouched && editLimit.trim() !== "" && creditLimitMinor === null) { setEditError("Enter a valid credit limit (₱), or empty for no limit."); return; }
     setEditSaving(true);
     setEditError(null);
     try {
-      const body: Record<string, unknown> = { name: editName.trim(), creditLimitMinor };
+      const body: Record<string, unknown> = { name: editName.trim() };
+      if (editLimitTouched) { if (creditLimitMinor === null) body.creditUnlimited = true; else body.creditLimitMinor = creditLimitMinor; }
             if (editPhone.trim()) body.phone = editPhone.trim();
             if (editEmail.trim()) body.email = editEmail.trim();
             if (editAddress.trim()) body.address = editAddress.trim();
@@ -328,8 +346,11 @@ export default function CustomersPanel() {
                 </td>
                 <td>
                   {c.creditApproved ? (
-                    <span className="badge text-bg-warning" onClick={(e) => e.stopPropagation()}>
-                      {c.creditBalanceMinor > 0 ? `${toPesos(c.creditBalanceMinor)} owed · ` : ""}{toPesos(c.creditLimitMinor)} limit
+                    <span onClick={(e) => e.stopPropagation()}>
+                      <span className={`badge ${creditStatusWords(c.creditStatus).cls}`}>{creditStatusWords(c.creditStatus).label}</span>
+                      <span className="d-block small text-muted">
+                        {c.creditBalanceMinor > 0 ? `${toPesos(c.creditBalanceMinor)} owed · ` : ""}{limitWords(c)}
+                      </span>
                     </span>
                   ) : (
                     <button className="btn btn-sm btn-outline-warning" onClick={(e) => { e.stopPropagation(); setApproveTarget(c); }}>Approve credit</button>
@@ -369,7 +390,8 @@ export default function CustomersPanel() {
                   {addPreapprove && (
                     <>
                       <label className="form-label small mt-2">Credit limit (₱)</label>
-                      <input className="form-control" type="number" min="0" step="0.01" value={addLimit} onChange={(e) => setAddLimit(e.target.value)} placeholder="e.g. 500" />
+                      <input className="form-control" type="number" min="0" step="0.01" value={addLimit} onChange={(e) => setAddLimit(e.target.value)} placeholder="No limit" />
+                      <div className="form-text">Leave empty for no limit. Only the owner or manager can set a limit.</div>
                     </>
                   )}
                 </div>
@@ -405,7 +427,8 @@ export default function CustomersPanel() {
                                     <label className="form-label small mt-2">Address</label>
                                     <input className="form-control" value={editAddress} onChange={(e) => setEditAddress(e.target.value)} placeholder="Home/barangay address (optional)" />
                                     <label className="form-label small mt-2">Credit limit (₱)</label>
-                  <input className="form-control" type="number" min="0" step="0.01" value={editLimit} onChange={(e) => setEditLimit(e.target.value)} placeholder="e.g. 500" />
+                  <input className="form-control" type="number" min="0" step="0.01" value={editLimit} onChange={(e) => { setEditLimit(e.target.value); setEditLimitTouched(true); }} placeholder="No limit" />
+                  <div className="form-text">Empty = no limit. 0 = no credit. Only the owner or manager can change this.</div>
                 </div>
                 <div className="modal-footer">
                   <button className="btn btn-outline-secondary" onClick={() => setEditTarget(null)}>Cancel</button>
@@ -430,8 +453,8 @@ export default function CustomersPanel() {
                 </div>
                 <div className="modal-body">
                   <label className="form-label small">Credit limit (₱)</label>
-                  <input className="form-control" type="number" min="0" step="0.01" value={limitInput} onChange={(e) => setLimitInput(e.target.value)} placeholder="e.g. 500" />
-                  <div className="form-text">0 = store default limit. Credit disabled if both are 0.</div>
+                  <input className="form-control" type="number" min="0" step="0.01" value={limitInput} onChange={(e) => setLimitInput(e.target.value)} placeholder="No limit" />
+                  <div className="form-text">Leave empty for no limit. When the customer reaches the limit they must pay first.</div>
                 </div>
                 <div className="modal-footer">
                   <button className="btn btn-outline-secondary" onClick={() => setApproveTarget(null)}>Cancel</button>
@@ -463,7 +486,7 @@ export default function CustomersPanel() {
                         <div className="col-6">Phone: <strong>{profile.customer.phone ?? "—"}</strong></div>
                         <div className="col-12">Address: <strong>{profile.customer.address ?? "—"}</strong></div>
                         <div className="col-6">Status: <span className={`badge ${APPROVAL_BADGE[profile.approvalStatus] ?? "text-bg-secondary"}`}>{profile.approvalStatus}</span></div>
-                                                <div className="col-6">Credit: <span className={profile.creditBalanceMinor > 0 ? "text-danger fw-bold" : ""}>{toPesos(profile.creditBalanceMinor)} owed</span> (limit {toPesos(profile.creditLimitMinor)})</div>
+                                                <div className="col-6">Credit: <span className={profile.creditBalanceMinor > 0 ? "text-danger fw-bold" : ""}>{toPesos(profile.creditBalanceMinor)} owed</span> ({limitWords(profile)})</div>
                       </div>
                       <h6 className="small fw-bold">Recent orders</h6>
                       {profile.orders.length === 0 ? (

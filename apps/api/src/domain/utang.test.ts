@@ -1,7 +1,7 @@
 // Rice Ops M6 — utang rules and texts (pure, no DB).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import {
+import { creditStatus,
   checkPayment, daysSince, itemsText, limitCheck, monthKey, monthlyText, overdueText, paymentText, pesoText, refundValue,
   saleText, shortDate, smsSegments, UtangError, weekKey,
 } from "./utang.js";
@@ -60,4 +60,13 @@ test("M6: returned rice is valued at what it sold for", () => {
   assert.equal(refundValue({ soldBy: "PESO", unitPriceMinor: 5_200, quantity: 1_923, lineTotalMinor: 10_000 }, 1_923), 10_000, "the whole by-peso line = the pesos paid");
   assert.equal(refundValue({ soldBy: "KILO", unitPriceMinor: 5_200, quantity: 2_000, lineTotalMinor: 10_400 }, 500), 2_600);
   assert.equal(refundValue({ soldBy: null, unitPriceMinor: 100, quantity: 1, lineTotalMinor: 100 }, 0), 0);
+});
+
+test("credit status: no credit, no limit, OK, near (80%+), at the limit; available is what is left", () => {
+  assert.deepEqual(creditStatus({ approved: false, unlimited: false, limitMinor: 0, balanceMinor: 0 }), { status: "NO_CREDIT", availableMinor: 0 });
+  assert.deepEqual(creditStatus({ approved: true, unlimited: true, limitMinor: null, balanceMinor: 900_000 }), { status: "NO_LIMIT", availableMinor: null });
+  assert.deepEqual(creditStatus({ approved: true, unlimited: false, limitMinor: 100_000, balanceMinor: 50_000 }), { status: "OK", availableMinor: 50_000 });
+  assert.deepEqual(creditStatus({ approved: true, unlimited: false, limitMinor: 100_000, balanceMinor: 80_000 }), { status: "NEAR_LIMIT", availableMinor: 20_000 });
+  assert.deepEqual(creditStatus({ approved: true, unlimited: false, limitMinor: 100_000, balanceMinor: 100_000 }), { status: "AT_LIMIT", availableMinor: 0 });
+  assert.deepEqual(creditStatus({ approved: true, unlimited: false, limitMinor: 100_000, balanceMinor: 120_000 }), { status: "AT_LIMIT", availableMinor: 0 });
 });

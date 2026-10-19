@@ -56,11 +56,11 @@ export class UtangController {
     return unwrap(await this.utang.addCustomer(storeId, actor, { name: str(body?.name), phone: str(body?.phone), limitMinor: body?.limitMinor }));
   }
 
-  /** POST /admin/utang/customers/:id/limit — { limitMinor } (owner/manager; 0 = no utang). */
+  /** POST /admin/utang/customers/:id/limit — { limitMinor } or { unlimited: true } (owner/manager; 0 = no utang). */
   @Post("utang/customers/:id/limit")
   async setLimit(@Req() req: Req_, @Param("id") id: string, @Body() body: Record<string, unknown>, @Headers("x-store-id") h?: string) {
     const { storeId, actor } = await this.ctx(req, h);
-    return unwrap(await this.utang.setLimit(storeId, actor, id, body?.limitMinor));
+    return unwrap(await this.utang.setLimit(storeId, actor, id, body?.limitMinor, body?.unlimited === true));
   }
 
   /** POST /admin/utang/payments — Bayad sa utang: { customerId, amountMinor, method:"cash"|"gcash", tenderedMinor?, reference?, locationId?, signatures } */

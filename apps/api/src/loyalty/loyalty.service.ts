@@ -21,6 +21,11 @@ export type AdminCustomerRow = {
   loyaltyPoints: number;
   creditApproved: boolean;
   creditLimitMinor: number;
+  creditUnlimited: boolean;
+  /** NO_CREDIT | NO_LIMIT | OK | NEAR_LIMIT | AT_LIMIT */
+  creditStatus: string;
+  /** What the customer can still borrow; null = no limit. */
+  creditAvailableMinor: number | null;
   creditBalanceMinor: number;
   joinedAt: Date;
 };
@@ -31,7 +36,7 @@ export const LOYALTY_SERVICE = Symbol("LOYALTY_SERVICE");
 /** StoreCustomer row + nested Customer (what adminCustomers returns, cached value shape). */
 interface AdminCustomerWithProfile {
   id: string; storeId: string; customerId: string; approvalStatus: string; loyaltyBalancePoints: number;
-  creditApproved: boolean; creditLimitMinor: number; creditBalanceMinor: number; createdAt: Date; updatedAt: Date;
+  creditApproved: boolean; creditLimitMinor: number; creditUnlimited: boolean; creditBalanceMinor: number; createdAt: Date; updatedAt: Date;
   customer: { id: string; email: string | null; name: string | null; phone: string | null; address: string | null };
 }
 
@@ -287,6 +292,7 @@ export class LoyaltyService implements LoyaltyGateway {
       loyaltyBalancePoints: sc.loyaltyBalancePoints,
       creditApproved: sc.creditApproved,
       creditLimitMinor: sc.creditLimitMinor,
+      creditUnlimited: sc.creditUnlimited,
       creditBalanceMinor: sc.creditBalanceMinor,
       createdAt: sc.createdAt,
       orders,
@@ -304,10 +310,17 @@ export class LoyaltyService implements LoyaltyGateway {
       loyaltyBalancePoints: number;
       creditApproved: boolean;
       creditLimitMinor: number;
+      creditUnlimited?: boolean;
       creditBalanceMinor: number;
       createdAt: Date;
       customer: { name: string | null; email: string | null; phone: string | null; address: string | null };
     }): AdminCustomerRow {
+      const unlimited = sc.creditUnlimited === true;
+      // An approved customer with no own limit uses the store default (not known here): shown as OK.
+      const usesStoreDefault = sc.creditApproved && !unlimited && sc.creditLimitMinor === 0;
+      const st = usesStoreDefault
+        ? { status: "OK", availableMinor: null as number | null }
+        : creditStatus({ approved: sc.creditApproved, unlimited, limitMinor: unlimited ? null : sc.creditLimitMinor, balanceMinor: sc.creditBalanceMinor });
       return {
         id: sc.id,
         customerId: sc.customerId,
@@ -319,6 +332,9 @@ export class LoyaltyService implements LoyaltyGateway {
         loyaltyPoints: sc.loyaltyBalancePoints,
         creditApproved: sc.creditApproved,
         creditLimitMinor: sc.creditLimitMinor,
+        creditUnlimited: unlimited,
+        creditStatus: st.status,
+        creditAvailableMinor: st.availableMinor,
         creditBalanceMinor: sc.creditBalanceMinor,
         joinedAt: sc.createdAt,
       };
@@ -331,8 +347,10 @@ export class LoyaltyService implements LoyaltyGateway {
     const phone = typeof input.phone === "string" && input.phone.trim() ? input.phone.trim() : null;
         const email = typeof input.email === "string" && input.email.trim() ? input.email.trim() : null;
         const address = typeof input.address === "string" && input.address.trim() ? input.address.trim() : null;
-        const creditApproved = input.creditApproved === true;
+        const creditApproved = input.creditApproved === true || input.creditUnlimited === true;
         const creditLimitMinor = input.creditLimitMinor ?? 0;
+        // Created on credit without a limit = no limit (the owner can set one later).
+        const creditUnlimited = creditApproved && (input.creditUnlimited === true || input.creditLimitMinor === undefined);
         if (!Number.isInteger(creditLimitMinor) || creditLimitMinor < 0) {
           return { ok: false, error: { type: "validation", errors: ["creditLimitMinor must be a non-negative integer"] } };
         }
@@ -352,6 +370,7 @@ export class LoyaltyService implements LoyaltyGateway {
           approvalStatus: creditApproved ? "APPROVED" : "NOT_REQUIRED",
           creditApproved,
           creditLimitMinor,
+          creditUnlimited,
         },
         include: { customer: { select: { id: true, email: true, name: true, phone: true, address: true } } },
       });
@@ -384,7 +403,8 @@ export class LoyaltyService implements LoyaltyGateway {
           customerData.address = address || null;
         }
     let creditLimitMinor: number | undefined;
-    if (input.creditLimitMinor !== undefined) {
+    const makeUnlimited = input.creditUnlimited === true;
+    if (!makeUnlimited && input.creditLimitMinor !== undefined) {
       if (!Number.isInteger(input.creditLimitMinor) || input.creditLimitMinor < 0) {
         return { ok: false, error: { type: "validation", errors: ["creditLimitMinor must be a non-negative integer"] } };
       }
@@ -400,8 +420,10 @@ export class LoyaltyService implements LoyaltyGateway {
       if (Object.keys(customerData).length > 0) {
         await tx.customer.update({ where: { id: sc.customerId }, data: customerData });
       }
-      if (creditLimitMinor !== undefined) {
-        await tx.storeCustomer.update({ where: { id: sc.id }, data: { creditLimitMinor } });
+      if (makeUnlimited) {
+        await tx.storeCustomer.update({ where: { id: sc.id }, data: { creditUnlimited: true, creditApproved: true } });
+      } else if (creditLimitMinor !== undefined) {
+        await tx.storeCustomer.update({ where: { id: sc.id }, data: { creditLimitMinor, creditUnlimited: false, ...(creditLimitMinor > 0 ? { creditApproved: true } : {}) } });
       }
       const fresh = await tx.storeCustomer.findFirst({
         where: { id: sc.id },

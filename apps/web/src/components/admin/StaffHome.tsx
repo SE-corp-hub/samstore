@@ -6,8 +6,8 @@
 
 import { allowedTabs, navItemFor } from "../../lib/admin";
 
-const DAILY = ["pos", "trips", "resack", "bilangin", "agentorders", "drafts"];
-const OTHER = ["pasok", "utangrice", "kargadors", "ulat", "orders", "preorders", "products", "inventory", "customers", "expenses", "purchases", "reports", "countersettings", "overview"];
+const DAILY = ["pos", "preorders", "resack", "utang", "orders", "trips"];
+const OTHER = ["bilangin", "pasok", "agentorders", "drafts", "kargadors", "ulat", "products", "inventory", "customers", "expenses", "purchases", "reports", "countersettings", "overview"];
 
 interface Props {
   role: string;

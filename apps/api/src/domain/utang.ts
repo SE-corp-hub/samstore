@@ -72,6 +72,17 @@ export function overdueText(x: { customerName: string; balanceMinor: number; day
   return `Paalala po, ${firstName(x.customerName)}: may utang kayong ${P(x.balanceMinor)} sa ${x.storeName}, ${x.days} araw na. Salamat po!`;
 }
 
+export type CreditStatus = "NO_CREDIT" | "NO_LIMIT" | "OK" | "NEAR_LIMIT" | "AT_LIMIT";
+
+/** What the screens show for a customer's credit: no credit, no limit, OK, near the limit (80%+), at the limit. */
+export function creditStatus(a: { approved: boolean; unlimited: boolean; limitMinor: number | null; balanceMinor: number }): { status: CreditStatus; availableMinor: number | null } {
+  if (!a.approved && !a.unlimited) return { status: "NO_CREDIT", availableMinor: 0 };
+  if (a.unlimited || a.limitMinor === null) return { status: "NO_LIMIT", availableMinor: null };
+  const available = Math.max(0, a.limitMinor - a.balanceMinor);
+  if (a.limitMinor <= 0 || a.balanceMinor >= a.limitMinor) return { status: "AT_LIMIT", availableMinor: available };
+  return { status: a.balanceMinor * 10 >= a.limitMinor * 8 ? "NEAR_LIMIT" : "OK", availableMinor: available };
+}
+
 /** A credit limit decision: within, or over (→ the owner's Para sa iyo). */
 export function limitCheck(balanceMinor: number, amountMinor: number, limitMinor: number): { ok: true } | { ok: false; overByMinor: number } {
   if (!Number.isInteger(amountMinor) || amountMinor <= 0) throw new UtangError("Invalid amount");

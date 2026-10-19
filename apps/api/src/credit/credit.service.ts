@@ -39,14 +39,15 @@ export class CreditService {
     if (!sc) return { ok: false, error: { type: "not_found", message: "Customer not found in this store" } };
     const updated = await prisma.storeCustomer.update({
           where: { id: sc.id },
-          data: { creditApproved: true, creditLimitMinor: limitMinor },
+          data: { creditApproved: true, creditLimitMinor: limitMinor, creditUnlimited: false },
         });
         await bustLedger(storeId);
         return { ok: true, value: { id: updated.id, creditApproved: updated.creditApproved, creditLimitMinor: updated.creditLimitMinor } };
   }
 
-  /** Effective limit for a customer (per-customer override, else store default). */
-  async effectiveLimit(storeId: string, sc: { creditLimitMinor: number }): Promise<number> {
+  /** Effective limit for a customer: null = no limit; else the customer's own limit, else the store default. */
+  async effectiveLimit(storeId: string, sc: { creditLimitMinor: number; creditUnlimited?: boolean }): Promise<number | null> {
+      if (sc.creditUnlimited) return null;
       if (sc.creditLimitMinor > 0) return sc.creditLimitMinor;
       const settings = await this._prisma.storeSettings.findUnique({ where: { storeId } });
       return settings?.creditLimitMinor ?? 0;
@@ -78,13 +79,17 @@ export class CreditService {
     if (!sc.creditApproved) return { ok: false, error: { type: "conflict", message: "Customer is not approved for credit" } };
     if (!opts.overLimitApprovedBy) {
       const limit = await this.effectiveLimit(storeId, sc);
-      if (limit <= 0) return { ok: false, error: { type: "conflict", message: "Credit is disabled for this store" } };
-      const guarded = await tx.storeCustomer.updateMany({
-        where: { id: sc.id, storeId, creditBalanceMinor: { lte: limit - amountMinor } },
-        data: { creditBalanceMinor: { increment: amountMinor } },
-      });
-      if (guarded.count === 0) {
-        return { ok: false, error: { type: "conflict", message: `Credit limit exceeded (limit ₱${(limit / 100).toFixed(2)})` } };
+      if (limit !== null && limit <= 0) return { ok: false, error: { type: "conflict", message: "Credit is disabled for this store" } };
+      if (limit === null) {
+        await tx.storeCustomer.update({ where: { id: sc.id }, data: { creditBalanceMinor: { increment: amountMinor } } });
+      } else {
+        const guarded = await tx.storeCustomer.updateMany({
+          where: { id: sc.id, storeId, creditBalanceMinor: { lte: limit - amountMinor } },
+          data: { creditBalanceMinor: { increment: amountMinor } },
+        });
+        if (guarded.count === 0) {
+          return { ok: false, error: { type: "conflict", message: `Credit limit reached (limit ₱${(limit / 100).toFixed(2)}). The customer must pay first.` } };
+        }
       }
     } else {
       await tx.storeCustomer.update({ where: { id: sc.id }, data: { creditBalanceMinor: { increment: amountMinor } } });
@@ -107,9 +112,10 @@ export class CreditService {
     if (!sc) return { ok: false, message: "Customer not found in this store" };
     if (!sc.creditApproved) return { ok: false, message: "Customer is not approved for credit" };
     const limit = await this.effectiveLimit(storeId, sc);
+    if (limit === null) return { ok: true };
     if (limit <= 0) return { ok: false, message: "Credit is disabled for this store" };
     if (sc.creditBalanceMinor + amountMinor > limit) {
-      return { ok: false, message: `Credit limit exceeded (limit ₱${(limit / 100).toFixed(2)})` };
+      return { ok: false, message: `Credit limit reached (limit ₱${(limit / 100).toFixed(2)}). The customer must pay first.` };
     }
     return { ok: true };
   }

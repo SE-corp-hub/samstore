@@ -64,7 +64,7 @@ after(async () => {
 
 const phoneFor = () => `0917${String(Math.floor(Math.random() * 10_000_000)).padStart(7, "0")}`;
 
-async function fixture(opts: { limit?: number; phone?: string | null } = {}) {
+async function fixture(opts: { limit?: number; phone?: string | null; unlimited?: boolean } = {}) {
   seq += 1;
   const slug = `${randomBytes(6).toString("hex").replace(/[0-9]/g, (d) => "ghijklmnop"[Number(d)]!).slice(0, 6)}-${run}-${seq}`.toLowerCase();
   const store = await prisma.store.create({ data: { slug, name: `Bigasan M6 ${seq}` } });
@@ -79,7 +79,7 @@ async function fixture(opts: { limit?: number; phone?: string | null } = {}) {
   const cust = await prisma.customer.create({ data: { name: "Juan Dela Cruz", phone, email: null, passwordHash: null } });
   customerIds.push(cust.id);
   const limit = opts.limit ?? 500_000;
-  const sc = await prisma.storeCustomer.create({ data: { storeId: store.id, customerId: cust.id, creditApproved: limit > 0, creditLimitMinor: limit } });
+  const sc = await prisma.storeCustomer.create({ data: { storeId: store.id, customerId: cust.id, creditApproved: limit > 0 || !!opts.unlimited, creditLimitMinor: limit, creditUnlimited: !!opts.unlimited } });
   const pinHash = bcrypt.hashSync(PIN, 4);
   const mk = async (name: string, role: "OWNER" | "STAFF", home: string | null): Promise<Actor> => {
     const u = await prisma.user.create({ data: { email: `${run}-${seq}-${name.replace(/\s/g, "")}@m6.test`, passwordHash: "x", name, role: role === "OWNER" ? "STORE_OWNER" : "STAFF", pinHash } });
@@ -178,48 +178,47 @@ test("M6: a failed text never blocks a sale — it rests as FAILED and Ipadala u
   assert.equal(s2.ok && s2.value.status === "COMPLETED" && s2.value.smsStatus, "SKIPPED", msg(s2));
 });
 
-test("M6: utang over the limit waits for the owner — the rice is held; approve posts it, decline frees it", async () => {
+test("M6: at the credit limit the sale is refused (pay first); after a payment credit works again; no-limit customers are never blocked", async () => {
   const fx = await fixture({ limit: 200_000 });
   setSmsProviderForTests(new MockSmsProvider());
   const ok = await sellUtang(fx, 1); // 1,300 of 2,000
   assert.equal(ok.ok && ok.value.status, "COMPLETED", msg(ok));
-  const over = await sellUtang(fx, 1); // → 2,600 > 2,000
-  assert.equal(over.ok, true, msg(over));
-  if (!over.ok) return;
-  assert.equal(over.value.status, "WAITING_OWNER");
-  assert.ok(over.value.approvalId);
-  assert.deepEqual(await level(fx, fx.s1), { quantityOnHand: 9, quantityReserved: 1 }, "held, not sold");
-  assert.equal(await balance(fx.customerId), 130_000, "no utang posted yet");
-  const appr = await prisma.approvalRequest.findUniqueOrThrow({ where: { id: over.value.approvalId! } });
-  assert.match(appr.summary, /over by ₱600/);
-  // The held sack cannot be sold to someone else meanwhile.
-  const cash = await benta.sell(fx.storeId, fx.staff1, { idempotencyKey: key(), lines: [{ productId: fx.sin25.id, quantity: 9 }], payment: { method: "cash" } });
-  assert.equal(cash.ok, false, "only 8 are free");
+  const over = await sellUtang(fx, 1); // would be 2,600 > 2,000
+  assert.equal(over.ok, false, "refused, not held for the owner");
+  assert.match(msg(over), /take a payment first/);
+  assert.deepEqual(await level(fx, fx.s1), { quantityOnHand: 9, quantityReserved: 0 }, "nothing held or sold");
+  assert.equal(await balance(fx.customerId), 130_000);
 
-  const people = new PeopleService();
-  const staffTry = await people.decideApproval(fx.storeId, appr.id, fx.staff1, { decision: "APPROVE", pin: PIN });
-  assert.equal(staffTry.ok, false, "only the owner decides");
-  const yes = await people.decideApproval(fx.storeId, appr.id, fx.owner, { decision: "APPROVE", pin: PIN });
-  assert.equal(yes.ok, true, msg(yes));
-  assert.deepEqual(await level(fx, fx.s1), { quantityOnHand: 8, quantityReserved: 0 });
-  assert.equal(await balance(fx.customerId), 260_000, "posted past the limit, with the owner's approval");
-  const o = await prisma.order.findUniqueOrThrow({ where: { id: over.value.orderId } });
-  assert.deepEqual([o.status, o.source], ["COMPLETED", "pos"]);
-  const text = await prisma.smsMessage.findFirstOrThrow({ where: { storeId: fx.storeId, documentId: o.id } });
-  assert.match(text.text, /Kabuuang utang: P2,600\.$/);
-
+  // Pay some of it: now there is room again.
+  const paid = await utang.collect(fx.storeId, fx.staff1, { customerId: fx.customerId, amountMinor: 130_000, method: "cash", signatures: staffSig });
+  assert.equal(paid.ok, true, msg(paid));
   const again = await sellUtang(fx, 1);
-  assert.equal(again.ok && again.value.status, "WAITING_OWNER", msg(again));
-  const no = await people.decideApproval(fx.storeId, again.ok ? again.value.approvalId! : "", fx.owner, { decision: "DECLINE", pin: PIN, note: "Bayaran muna" });
-  assert.equal(no.ok, true, msg(no));
-  assert.deepEqual(await level(fx, fx.s1), { quantityOnHand: 8, quantityReserved: 0 }, "the hold is gone, nothing sold");
-  assert.equal(await balance(fx.customerId), 260_000);
-  assert.equal((await prisma.order.findUniqueOrThrow({ where: { id: again.ok ? again.value.orderId : "" } })).status, "CANCELLED");
+  assert.equal(again.ok && again.value.status, "COMPLETED", msg(again));
+
+  // Created on credit = no limit: any number of sales goes through.
+  const free = await fixture({ limit: 0, unlimited: true });
+  for (let i = 0; i < 3; i++) assert.equal((await sellUtang(free, 1)).ok, true, "no limit");
+  assert.equal(await balance(free.customerId), 390_000);
+  const list = await utang.customers(free.storeId);
+  const row = list.find((c) => c.id === free.customerId)!;
+  assert.deepEqual([row.status, row.limitMinor, row.unlimited], ["NO_LIMIT", null, true]);
 
   const noLimit = await fixture({ limit: 0 });
   const refused = await sellUtang(noLimit, 1);
   assert.equal(refused.ok, false);
   assert.match(msg(refused), /has no credit limit yet/);
+});
+
+test("M6: only the owner or manager changes a credit limit; unlimited and limited can be switched", async () => {
+  const fx = await fixture({ limit: 0, unlimited: true });
+  const byStaff = await utang.setLimit(fx.storeId, fx.staff1, fx.customerId, 100_000);
+  assert.equal(byStaff.ok, false, "staff cannot set a limit");
+  const set = await utang.setLimit(fx.storeId, fx.owner, fx.customerId, 100_000);
+  assert.equal(set.ok && set.value.unlimited, false, msg(set));
+  const sc = await prisma.storeCustomer.findUniqueOrThrow({ where: { id: fx.customerId } });
+  assert.deepEqual([sc.creditLimitMinor, sc.creditUnlimited, sc.creditApproved], [100_000, false, true]);
+  const back = await utang.setLimit(fx.storeId, fx.owner, fx.customerId, undefined, true);
+  assert.equal(back.ok && back.value.unlimited, true, msg(back));
 });
 
 test("M6: Bayad sa utang — no overpaying, racing payments never go below zero, staff only at their store", async () => {

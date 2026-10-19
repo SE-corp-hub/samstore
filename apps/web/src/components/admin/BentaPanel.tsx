@@ -23,6 +23,7 @@ import LocationPicker from "../LocationPicker";
 import { PesoInput } from "../NumberBoxes";
 import { buildText, openTextApp } from "../../lib/text-message";
 import { printSlip } from "../../lib/slip-print";
+import { creditStatusWords } from "../../lib/credit-status";
 
 interface Loc { id: string; name: string; code: string | null; type: string }
 interface Item {
@@ -30,7 +31,7 @@ interface Item {
   stock: Record<string, number>; tracked: boolean;
 }
 // Shape of GET /admin/customers (flat: name/phone on the row).
-interface Customer { id: string; name: string | null; phone: string | null; creditApproved: boolean; creditLimitMinor: number; creditBalanceMinor: number }
+interface Customer { id: string; name: string | null; phone: string | null; creditApproved: boolean; creditLimitMinor: number; creditUnlimited?: boolean; creditStatus?: string; creditAvailableMinor?: number | null; creditBalanceMinor: number }
 type Mode = "PIECE" | "KILO" | "PESO";
 interface CartLine { productId: string; mode: Mode; value: string; sourceLocationId: string | null }
 type Pay = "cash" | "gcash" | "utang";
@@ -85,6 +86,7 @@ export default function BentaPanel() {
   const [reference, setReference] = useState("");
   const [customerId, setCustomerId] = useState("");
   const [customerSig, setCustomerSig] = useState<string | null>(null);
+  const [newCust, setNewCust] = useState(false);       // the "New customer" mini form in the credit step
   const [paper, setPaper] = useState(false);
   const [slipNo, setSlipNo] = useState("");
   const [slipTime, setSlipTime] = useState("");
@@ -153,6 +155,8 @@ export default function BentaPanel() {
   const total = computed.reduce((s, c) => s + c.totalMinor, 0);
   const change = pay === "cash" && tendered ? toMinor(tendered) - total : 0;
   const customer = customers.find((c) => c.id === customerId);
+  // A customer with a limit who would pass it must pay first (the server refuses it too).
+  const overLimit = !!customer && !customer.creditUnlimited && customer.creditLimitMinor > 0 && customer.creditBalanceMinor + total > customer.creditLimitMinor;
 
   const reset = () => {
     keyRef.current = null;
@@ -164,7 +168,7 @@ export default function BentaPanel() {
   const canSubmit = total > 0 && !!pay && !busy
     && (pay !== "cash" || !tendered || toMinor(tendered) >= total)
     && (pay !== "gcash" || reference.trim().length >= 4)
-    && (pay !== "utang" || (!!customer && !!customerSig))
+    && (pay !== "utang" || (!!customer && !!customerSig && !overLimit))
     && (!paper || (!!slipNo.trim() && !!slipTime && !!slipPhoto && !!staffSig));
 
   const submit = async () => {
@@ -365,7 +369,9 @@ export default function BentaPanel() {
         const c = lineOf(it, editing);
         const from = editing.sourceLocationId ?? locationId;
         const avail = it.stock[from] ?? 0;
-        const short = it.tracked && c.units > avail;
+        const over = it.tracked && c.units > avail;
+        const short = over && from !== locationId; // the counter itself may sell below zero
+        const belowZero = over && from === locationId;
         return (
           <div className="card border-success" style={{ maxWidth: 520 }}>
             <div className="card-body">
@@ -389,6 +395,12 @@ export default function BentaPanel() {
                     labelFor={(l) => `${l.name}${l.id === locationId ? " (here)" : ""} — ${it.loose ? kg(it.stock[l.id] ?? 0) : `${it.stock[l.id] ?? 0}`}`}
                     onAdded={(loc) => setLocations([...locations, { id: loc.id, name: loc.name, code: null, type: "STORE" }])}
                     onChange={(id) => setEditing({ ...editing, sourceLocationId: id === locationId ? null : id })} />
+                </div>
+              )}
+              {belowZero && (
+                <div className="alert alert-warning mt-2 mb-0">
+                  <strong>Count is {it.loose ? kg(avail) : avail}</strong> — you can still sell. The count goes below zero until the next count.
+                  <button type="button" className="btn btn-dark btn-sm ms-2" onClick={() => setChecking({ productId: it.id, name: it.name })}>Any left? Count</button>
                 </div>
               )}
               {short && (
@@ -445,13 +457,20 @@ export default function BentaPanel() {
                 <label className="form-label" htmlFor="bt-cust">Customer</label>
                 <select id="bt-cust" className="form-select form-select-lg mb-2" value={customerId} onChange={(e) => { setCustomerId(e.target.value); setCustomerSig(null); }}>
                   <option value="">Choose…</option>
-                  {customers.filter((c) => c.creditApproved).map((c) => <option key={c.id} value={c.id}>{c.name ?? c.phone ?? "—"} — owes {peso(c.creditBalanceMinor)}</option>)}
+                  {customers.filter((c) => c.creditApproved).map((c) => <option key={c.id} value={c.id}>{c.name ?? c.phone ?? "—"} — owes {peso(c.creditBalanceMinor)} · {creditStatusWords(c.creditStatus).label}</option>)}
                 </select>
+                {!newCust && <button type="button" className="btn btn-outline-success mb-2" onClick={() => setNewCust(true)}>+ New customer</button>}
+                {newCust && <QuickCustomer onCancel={() => setNewCust(false)} onAdded={async (id) => {
+                  const res = await fetch(`${API_URL}/admin/customers`, { headers: adminHeaders() });
+                  if (res.ok) setCustomers(((await res.json()).customers ?? []) as Customer[]);
+                  setCustomerId(id); setCustomerSig(null); setNewCust(false);
+                }} />}
                 {customer && (
                   <>
                     <p className="mb-2">This sale on credit: <strong>{peso(total)}</strong>. Total owed after: <strong>{peso(customer.creditBalanceMinor + total)}</strong>.</p>
-                    {customer.creditLimitMinor > 0 && customer.creditBalanceMinor + total > customer.creditLimitMinor && (
-                      <div className="alert alert-warning py-2">Over the limit ({peso(customer.creditLimitMinor)}) — the owner will be told. The rice is set aside while waiting.</div>
+                    {customer.creditUnlimited && <p className="small text-muted mb-2">No credit limit.</p>}
+                    {overLimit && (
+                      <div className="alert alert-danger py-2">Over the credit limit ({peso(customer.creditLimitMinor)}). The customer must pay some of the balance first — use the Credit screen — then can buy on credit again.</div>
                     )}
                     <div className="fw-semibold">Signature of {customer.name ?? "the customer"}</div>
                     <SignaturePad key={customerId} onSignature={setCustomerSig} />
@@ -519,6 +538,35 @@ function OpenDrawer({ onOpened }: { onOpened: () => void }) {
       {error && <div className="text-danger mb-2">{error}</div>}
       <NumPad value={float} onChange={setFloat} decimals={2} label="Cash in the drawer now (change fund)" unit="₱" />
       <button type="button" className="btn btn-dark btn-lg w-100 mt-2" disabled={busy} onClick={() => void open()}>{busy ? "Please wait…" : "Open the cash drawer"}</button>
+    </div>
+  );
+}
+
+/** Add a customer from the POS: name + mobile. On credit with no limit until the owner sets one. */
+function QuickCustomer({ onCancel, onAdded }: { onCancel: () => void; onAdded: (storeCustomerId: string) => void | Promise<void> }) {
+  const [name, setName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const save = async () => {
+    setBusy(true); setError(null);
+    const res = await fetch(`${API_URL}/admin/utang/customers`, { method: "POST", headers: { "Content-Type": "application/json", ...adminHeaders() }, body: JSON.stringify({ name: name.trim(), phone: phone.trim() }) });
+    const d = (await res.json().catch(() => null)) as ApiBody | null;
+    setBusy(false);
+    if (!res.ok) { setError(errText(d, "Could not add")); return; }
+    toast(`Added: ${name.trim()}`);
+    await onAdded(String(d?.id));
+  };
+  return (
+    <div className="border rounded p-2 mb-2">
+      <div className="fw-semibold mb-1">New customer</div>
+      {error && <div className="alert alert-danger py-2">{error}</div>}
+      <input className="form-control form-control-lg mb-2" aria-label="Customer name" placeholder="Name" value={name} onChange={(e) => setName(e.target.value.slice(0, 80))} />
+      <input className="form-control form-control-lg mb-2" aria-label="Mobile number" placeholder="09xx xxx xxxx" inputMode="tel" value={phone} onChange={(e) => setPhone(e.target.value.slice(0, 16))} />
+      <div className="d-flex justify-content-between">
+        <button type="button" className="btn btn-outline-secondary" disabled={busy} onClick={onCancel}>Cancel</button>
+        <button type="button" className="btn btn-success" disabled={busy || name.trim().length < 2 || phone.trim().length < 10} onClick={() => void save()}>{busy ? "Please wait…" : "Add customer"}</button>
+      </div>
     </div>
   );
 }

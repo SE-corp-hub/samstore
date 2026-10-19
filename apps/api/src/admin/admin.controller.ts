@@ -938,20 +938,10 @@ export class AdminController {
       onlyUtang: onlyUtang === "true",
     });
     return {
-      customers: customers.map((sc) => ({
-              id: sc.id,
-              customerId: sc.customerId,
-              name: sc.customer.name,
-              email: sc.customer.email,
-              phone: sc.customer.phone,
-              address: sc.customer.address,
-              approvalStatus: sc.approvalStatus,
-              loyaltyPoints: sc.loyaltyBalancePoints,
-              creditApproved: sc.creditApproved,
-              creditLimitMinor: sc.creditLimitMinor,
-              creditBalanceMinor: sc.creditBalanceMinor,
-              joinedAt: sc.createdAt,
-            })),
+      customers: customers.map((sc) => {
+              const row = LoyaltyService.toAdminRow(sc);
+              return { ...row, loyaltyPoints: sc.loyaltyBalancePoints };
+            }),
       storeId,
     };
   }
@@ -960,14 +950,19 @@ export class AdminController {
   @Post("customers")
   async createCustomer(
     @Req() req: Request & { user?: AuthPrincipal },
-    @Body() body: { name: string; phone?: string; email?: string; address?: string; creditApproved?: boolean; creditLimitMinor?: number },
+    @Body() body: { name: string; phone?: string; email?: string; address?: string; creditApproved?: boolean; creditLimitMinor?: number; creditUnlimited?: boolean },
     @Headers("x-store-id") headerStoreId?: string,
   ) {
     const user = req.user;
     requireUser(user);
-    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
+    const { storeId, role } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
+    // Anyone on the counter can add a customer on credit (no limit); only the owner/manager sets a limit.
+    if (body?.creditLimitMinor !== undefined && !(["OWNER", "STORE_OWNER", "MANAGER", "PLATFORM_ADMIN"] as string[]).includes(role)) {
+      throw new HttpException({ type: "forbidden", message: "Only the owner or manager can set a credit limit" }, HttpStatus.FORBIDDEN);
+    }
     const result = await this.loyalty.createCustomer(storeId, body);
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
+    await cacheBust(cacheKey("customers", storeId));
     return { ...result.value, storeId };
   }
 
@@ -1028,14 +1023,18 @@ export class AdminController {
   async updateCustomer(
     @Req() req: Request & { user?: AuthPrincipal },
     @Param("id") id: string,
-    @Body() body: { name?: string; phone?: string; email?: string; address?: string; creditLimitMinor?: number },
+    @Body() body: { name?: string; phone?: string; email?: string; address?: string; creditLimitMinor?: number; creditUnlimited?: boolean },
     @Headers("x-store-id") headerStoreId?: string,
   ) {
     const user = req.user;
     requireUser(user);
-    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
+    const { storeId, role } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
+    if ((body?.creditLimitMinor !== undefined || body?.creditUnlimited !== undefined) && !(["OWNER", "STORE_OWNER", "MANAGER", "PLATFORM_ADMIN"] as string[]).includes(role)) {
+      throw new HttpException({ type: "forbidden", message: "Only the owner or manager can change a credit limit" }, HttpStatus.FORBIDDEN);
+    }
     const result = await this.loyalty.updateCustomer(storeId, id, body);
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
+    await cacheBust(cacheKey("customers", storeId));
     return { ...result.value, storeId };
   }
 

@@ -298,16 +298,19 @@ export class BentaService {
       // Utang needs a customer on the list and their signature; cash/GCash take the drawer of this location.
       let storeCustomerId: string | null = null;
       let customerName = input.customerName?.trim().slice(0, 80) || "Walk-in";
-      let waitOwner: { balanceMinor: number; limitMinor: number } | null = null;
+      // Over the limit is now refused (pay first). The hold-for-the-owner path below stays only for old held sales.
+      let waitOwner = null as { balanceMinor: number; limitMinor: number } | null;
       if (method === "utang") {
         const sc = input.customerId ? await prisma.storeCustomer.findFirst({ where: { storeId, id: input.customerId }, include: { customer: { select: { name: true } } } }) : null;
         if (!sc) throw new SellingError("Choose a customer for credit");
         storeCustomerId = sc.id;
         customerName = sc.customer.name ?? "Customer";
         if (!sc.creditApproved) throw new SellingError(`${customerName} has no credit limit yet — ask the owner to set one`);
-        // Over the limit → the sale waits for the owner (Para sa iyo); the rice is held meanwhile.
+        // A customer with no limit may always buy on credit; with a limit, at the limit they must pay first.
         const limitMinor = await credit.effectiveLimit(storeId, sc);
-        if (!limitCheck(sc.creditBalanceMinor, subtotal, limitMinor).ok) waitOwner = { balanceMinor: sc.creditBalanceMinor, limitMinor };
+        if (limitMinor !== null && !limitCheck(sc.creditBalanceMinor, subtotal, limitMinor).ok) {
+          throw new SellingError(`${customerName} owes ${pesoText(sc.creditBalanceMinor)} of a ${pesoText(limitMinor)} credit limit. This sale would pass the limit — take a payment first, then sell on credit again.`);
+        }
       }
       const paper = input.paperSlip ? checkPaperSlip(input.paperSlip, new Date()) : null;
       const registerSessionId = method === "utang" ? null : await this.drawerFor(storeId, loc.id);
@@ -388,7 +391,7 @@ export class BentaService {
             await writeTenders(tx, { storeId, orderId, actorId: actor.userId, plan: plan!, note: paper ? `Benta (papel #${paper.slipNo})` : "Benta", registerSessionId });
             const local = priced.filter((l) => !l.sourceLocationId);
             for (const l of local) {
-              await deductStock(tx, storeId, [{ productId: l.product.id, quantity: l.stockQty }], { type: "CONSUME", orderId, createdBy: actor.userId, warehouseId: loc.id, documentType: "SALE", documentId: orderId });
+              await deductStock(tx, storeId, [{ productId: l.product.id, quantity: l.stockQty }], { type: "CONSUME", orderId, createdBy: actor.userId, warehouseId: loc.id, documentType: "SALE", documentId: orderId, allowBelowZero: true });
             }
             for (const l of priced.filter((x) => x.sourceLocationId)) {
               releases.push(await this.flow.createOrderRelease(tx, {

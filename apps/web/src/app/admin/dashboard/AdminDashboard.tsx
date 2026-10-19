@@ -72,10 +72,10 @@ const UlatPanel = panel(() => import("../../../components/admin/UlatPanel"));
  */
 const STAFF_BAR: { id: string; label: string; icon: string }[] = [
   { id: "pos", label: "POS", icon: "bi-basket" },
-  { id: "trips", label: "Receive", icon: "bi-truck" },
+  { id: "preorders", label: "Pre-order", icon: "bi-bag-check" },
   { id: "resack", label: "Resack", icon: "bi-arrow-repeat" },
-  { id: "bilangin", label: "Count", icon: "bi-clipboard-check" },
-  { id: "agentorders", label: "Agents", icon: "bi-person-lines-fill" },
+  { id: "utang", label: "Credit", icon: "bi-journal-text" },
+  { id: "orders", label: "Orders", icon: "bi-receipt" },
 ];
 
 interface MyStore { id: string; name: string; slug: string; role: string; }

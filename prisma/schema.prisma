@@ -1513,6 +1513,7 @@ model StoreCustomer {
   loyaltyBalancePoints Int                    @default(0) // loyalty points balance (per-store)
   creditApproved       Boolean                @default(false) // approved for utang (P3)
   creditLimitMinor     Int                    @default(0) // per-customer credit limit (0 = store default)
+  creditUnlimited      Boolean                @default(false) // approved for credit with NO limit (the default for a customer created on credit)
   creditBalanceMinor   Int                    @default(0) // open balance (positive = owes)
   // P8: CRM tags (free-form, e.g. ["vip", "bday"]) + campaign recipients.
   tags                 String[]               @default([])
