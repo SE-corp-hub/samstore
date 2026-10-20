@@ -14,6 +14,7 @@ import { adminHeaders } from "../../lib/admin";
 import { toast } from "../../lib/toast";
 import ReceiptModal from "./ReceiptModal";
 import { PesoInput } from "../NumberBoxes";
+import { NewItemForm } from "./BentaPanel";
 import { buildText, openTextApp } from "../../lib/text-message";
 
 interface Preorder {
@@ -180,6 +181,7 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
   const [buildCustomers, setBuildCustomers] = useState<PosCustomer[]>([]);
   const [buildCart, setBuildCart] = useState<CartLine[]>([]);
   const [buildStep, setBuildStep] = useState<"products" | "review">("products");
+  const [newItemOpen, setNewItemOpen] = useState(false);
   const [buildCustomerId, setBuildCustomerId] = useState("");
   const [buildNewName, setBuildNewName] = useState("");
   const [buildNewPhone, setBuildNewPhone] = useState("");
@@ -397,7 +399,6 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
     setBuildCart((c) => {
       const found = c.find((l) => l.product.id === product.id);
       if (found) {
-        if (found.quantity + 1 > product.availableQuantity) { setError(`Only ${product.availableQuantity} left for ${product.name}`); return c; }
         return c.map((l) => (l.product.id === product.id ? { ...l, quantity: l.quantity + 1 } : l));
       }
       return [...c, { product, quantity: 1 }];
@@ -632,8 +633,14 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
 
   const renderBuild = () => (
     <>
-      {buildStep === "products" && (
+      {buildStep === "products" && newItemOpen && (
+        <NewItemForm preorder onCancel={() => setNewItemOpen(false)} onDone={async () => { setNewItemOpen(false); await loadBuilder(); }} />
+      )}
+      {buildStep === "products" && !newItemOpen && (
         <>
+          <button type="button" className="btn btn-outline-success btn-sm mb-2" onClick={() => setNewItemOpen(true)}>
+            <i className="bi bi-plus-lg me-1"></i>New item (with cost and selling price)
+          </button>
           <p className="small text-muted mb-2"><i className="bi bi-bag-check me-1"></i>Tap products to add them, then Review order and Save as pre-order (customer required).</p>
           <div className="d-flex gap-2 mb-2 flex-wrap">
             <input className="form-control form-control-sm" style={{ maxWidth: 200 }} placeholder="Search…" value={buildSearch} onChange={(e) => setBuildSearch(e.target.value)} />
@@ -652,13 +659,12 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
                 <button
                   type="button"
                   className="btn btn-outline-primary w-100 py-3 d-flex flex-column"
-                  disabled={p.availableQuantity <= 0}
                   onClick={() => addProduct(p)}
                 >
                   <span className="fw-semibold small text-truncate w-100 text-center">{p.name}</span>
                   <span className="small">{maybePrice(p.priceMinor)}</span>
                   <span className={`small ${p.availableQuantity <= 0 ? "text-danger" : "text-muted"}`}>
-                    {p.availableQuantity <= 0 ? "Out" : `${p.availableQuantity} left`}
+                    {p.availableQuantity <= 0 ? "No stock — pre-order OK" : `${p.availableQuantity} left`}
                   </span>
                 </button>
               </div>

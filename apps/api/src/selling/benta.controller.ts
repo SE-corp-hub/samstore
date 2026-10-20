@@ -88,6 +88,7 @@ export class BentaController {
       name: body?.name, soldAs: body?.soldAs, gramsPerSack: body?.gramsPerSack, priceMinor: body?.priceMinor, costMinor: body?.costMinor,
       openingQty: body?.openingQty, locationId: str(body?.locationId), signatures: signaturesFrom(body?.signatures),
       trackStock: body?.trackStock === false ? false : undefined,
+      noOpeningStock: body?.noOpeningStock === true ? true : undefined,
     }));
   }
 

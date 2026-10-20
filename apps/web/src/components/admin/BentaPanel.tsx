@@ -33,7 +33,8 @@ interface Item {
 // Shape of GET /admin/customers (flat: name/phone on the row).
 interface Customer { id: string; name: string | null; phone: string | null; creditApproved: boolean; creditLimitMinor: number; creditUnlimited?: boolean; creditStatus?: string; creditAvailableMinor?: number | null; creditBalanceMinor: number }
 type Mode = "PIECE" | "KILO" | "PESO";
-interface CartLine { productId: string; mode: Mode; value: string; sourceLocationId: string | null }
+interface CartLine { productId: string; mode: Mode; value: string; sourceLocationId: string | null; /** Manual price (centavos per piece / per kilo), only when it differs from the list price. */ price?: number; reason?: string }
+interface Held { id: string; label: string; at: number; locationId: string; cart: CartLine[] }
 type Pay = "cash" | "gcash" | "utang";
 type ApiBody = { message?: string; errors?: string[] } & Record<string, unknown>;
 
@@ -45,19 +46,27 @@ const toMinor = (s: string) => Math.round(Number(s || "0") * 100);
 /** What a cart line comes to — the same arithmetic the server does (domain/selling.ts). */
 function lineOf(item: Item | undefined, l: CartLine): { grams: number | null; units: number; totalMinor: number } {
   if (!item) return { grams: null, units: 0, totalMinor: 0 };
+  const unit = l.price ?? item.priceMinor;
   if (l.mode === "PESO") {
     const amt = toMinor(l.value);
-    const g = amt > 0 ? Math.floor((amt * 1000) / item.priceMinor) : 0;
+    const g = amt > 0 ? Math.floor((amt * 1000) / unit) : 0;
     return { grams: g, units: g, totalMinor: g > 0 ? amt : 0 };
   }
   if (l.mode === "KILO") {
     const g = Math.round(Number(l.value || "0") * 1000);
-    const scaled = g * item.priceMinor;
+    const scaled = g * unit;
     return { grams: g, units: g, totalMinor: Math.floor(scaled / 1000) + (scaled % 1000 >= 500 ? 1 : 0) };
   }
   const n = Number(l.value || "0");
-  return { grams: item.gramsPerUnit ? item.gramsPerUnit * n : null, units: n, totalMinor: n * item.priceMinor };
+  return { grams: item.gramsPerUnit ? item.gramsPerUnit * n : null, units: n, totalMinor: n * unit };
 }
+
+/** Held sales ("Hold"): parked on this phone so staff can serve the next customer and come back. */
+const holdKey = () => { try { return `rice-benta-holds:${getAdminStoreId() ?? ""}`; } catch { return "rice-benta-holds"; } };
+function loadHolds(): Held[] {
+  try { const v = JSON.parse(window.localStorage.getItem(holdKey()) ?? "[]"); return Array.isArray(v) ? v : []; } catch { return []; }
+}
+function saveHolds(h: Held[]) { try { window.localStorage.setItem(holdKey(), JSON.stringify(h)); } catch { /* convenience only */ } }
 
 /** The cart is kept on this phone while staff look at another tab, so nothing is retyped. */
 const cartKey = () => {
@@ -80,6 +89,9 @@ export default function BentaPanel() {
   const [search, setSearch] = useState("");
   const [cart, setCart] = useState<CartLine[]>(() => savedCart()?.cart ?? []);
   const [editing, setEditing] = useState<CartLine | null>(null);
+  const [editIdx, setEditIdx] = useState<number | null>(null); // which cart line is being edited (null = adding a new one)
+  const [holds, setHolds] = useState<Held[]>(() => loadHolds());
+  const [showHeld, setShowHeld] = useState(false);
   const [step, setStep] = useState<"pick" | "pay" | "done">("pick");
   const [pay, setPay] = useState<Pay | null>(null);
   const [tendered, setTendered] = useState("");
@@ -185,6 +197,7 @@ export default function BentaPanel() {
       lines: cart.map((l) => ({
         productId: l.productId, sourceLocationId: l.sourceLocationId ?? undefined,
         ...(l.mode === "PIECE" ? { quantity: Number(l.value) } : l.mode === "KILO" ? { kilos: l.value } : { amountMinor: toMinor(l.value) }),
+        ...(l.price !== undefined && l.price !== byId.get(l.productId)?.priceMinor ? { unitPriceMinorOverride: l.price, priceOverrideReason: l.reason?.trim() } : {}),
       })),
       payment: { method: pay, tenderedMinor: pay === "cash" && tendered ? toMinor(tendered) : undefined, reference: pay === "gcash" ? reference.trim() : undefined },
       customerId: pay === "utang" ? customerId : undefined,
@@ -297,12 +310,49 @@ export default function BentaPanel() {
     <div style={{ fontSize: 18 }}>
       <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
         <h1 className="h4 mb-0">POS</h1>
-        {homeLocationId ? <span className="badge text-bg-light border fs-6">{here?.name}</span> : (
-          <select className="form-select" style={{ maxWidth: 240 }} aria-label="Location" value={locationId} onChange={(e) => { reset(); void loadCatalog(e.target.value); }}>
-            {locations.map((l) => <option key={l.id} value={l.id}>{l.code ? `${l.code} · ` : ""}{l.name}</option>)}
-          </select>
+        <button type="button" className="btn btn-outline-dark" onClick={() => setShowHeld(!showHeld)}>
+          <i className="bi bi-pause-circle me-1"></i>Held{holds.filter((h) => h.locationId === locationId).length > 0 ? ` (${holds.filter((h) => h.locationId === locationId).length})` : ""}
+        </button>
+      </div>
+      <div className="mb-3">
+        <div className="small text-muted mb-1">Selling at</div>
+        {homeLocationId ? (
+          <div><span className="badge text-bg-dark fs-6">{here?.name}</span> <span className="small text-muted ms-1">your store, set by the owner</span></div>
+        ) : (
+          <>
+            <div className="d-flex flex-wrap gap-2" role="group" aria-label="Store">
+              {locations.map((l) => (
+                <button key={l.id} type="button" disabled={cart.length > 0 && l.id !== locationId}
+                  className={`btn btn-lg ${l.id === locationId ? "btn-dark" : "btn-outline-dark"}`}
+                  onClick={() => { if (l.id !== locationId) { reset(); void loadCatalog(l.id); } }}>
+                  {l.code ? `${l.code} · ` : ""}{l.name}
+                </button>
+              ))}
+            </div>
+            {cart.length > 0 && <div className="small text-muted mt-1">To switch store, hold or clear this sale first.</div>}
+          </>
         )}
       </div>
+      {showHeld && (
+        <div className="card mb-3"><div className="card-body">
+          <h2 className="h6">Held sales at {here?.name}</h2>
+          {holds.filter((h) => h.locationId === locationId).length === 0 && <div className="text-muted">Nothing on hold.</div>}
+          <ul className="list-unstyled mb-0">
+            {holds.filter((h) => h.locationId === locationId).map((h) => (
+              <li key={h.id} className="d-flex justify-content-between align-items-center py-1 border-bottom">
+                <span>{h.label}<span className="small text-muted"> · {new Date(h.at).toLocaleTimeString("en-PH", { hour: "numeric", minute: "2-digit" })}</span></span>
+                <span className="text-nowrap">
+                  <button type="button" className="btn btn-success btn-sm me-1" onClick={() => {
+                    setCart([...cart, ...h.cart]);
+                    const rest = holds.filter((x) => x.id !== h.id); setHolds(rest); saveHolds(rest); setShowHeld(false);
+                  }}>Resume</button>
+                  <button type="button" className="btn btn-outline-danger btn-sm" onClick={() => { const rest = holds.filter((x) => x.id !== h.id); setHolds(rest); saveHolds(rest); }}>Delete</button>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div></div>
+      )}
       {error && <div className="alert alert-danger py-2" role="alert">{error}</div>}
 
       {step === "pick" && !editing && !newItem && (
@@ -340,8 +390,10 @@ export default function BentaPanel() {
                           {l.mode === "PIECE" ? `${l.value} × ` : `${kg(c.grams ?? 0)} `}{it?.name}
                           {l.mode === "PESO" && <span className="text-muted"> (₱{l.value})</span>}
                           {l.sourceLocationId && <span className="badge text-bg-info ms-1">take from {code(l.sourceLocationId)}</span>}
+                          {l.price !== undefined && <span className="badge text-bg-warning ms-1">price {peso(l.price)}{it?.loose ? "/kg" : ""}</span>}
                         </span>
                         <span className="text-nowrap">{peso(c.totalMinor)}
+                          <button type="button" className="btn btn-link p-0 ms-2" aria-label="Edit" onClick={() => { setEditing(l); setEditIdx(idx); }}>Edit</button>
                           <button type="button" className="btn btn-link text-danger p-0 ms-2" aria-label="Remove" onClick={() => setCart(cart.filter((_, j) => j !== idx))}>×</button>
                         </span>
                       </li>
@@ -350,7 +402,15 @@ export default function BentaPanel() {
                 </ul>
                 <div className="d-flex justify-content-between align-items-center">
                   <span style={{ fontSize: 28, fontVariantNumeric: "tabular-nums" }} className="fw-bold">{peso(total)}</span>
-                  <button type="button" className="btn btn-success btn-lg" onClick={() => setStep("pay")}>Pay</button>
+                  <span className="d-flex gap-2">
+                    <button type="button" className="btn btn-outline-dark btn-lg" onClick={() => {
+                      const first = byId.get(cart[0]!.productId)?.name ?? "Sale";
+                      const h: Held = { id: `${Date.now()}`, label: `${first}${cart.length > 1 ? ` +${cart.length - 1}` : ""} · ${peso(total)}`, at: Date.now(), locationId, cart };
+                      const all = [...holds, h]; setHolds(all); saveHolds(all);
+                      keyRef.current = null; setCart([]); setError(null); toast("Sale put on hold");
+                    }}>Hold</button>
+                    <button type="button" className="btn btn-success btn-lg" onClick={() => setStep("pay")}>Pay</button>
+                  </span>
                 </div>
               </div>
             </div>
@@ -372,6 +432,8 @@ export default function BentaPanel() {
         const over = it.tracked && c.units > avail;
         const short = over && from !== locationId; // the counter itself may sell below zero
         const belowZero = over && from === locationId;
+        const changed = editing.price !== undefined && editing.price !== it.priceMinor;
+        const reasonOk = !changed || (editing.reason ?? "").trim().length >= 3;
         return (
           <div className="card border-success" style={{ maxWidth: 520 }}>
             <div className="card-body">
@@ -388,6 +450,15 @@ export default function BentaPanel() {
                 {editing.mode === "PESO" && c.grams ? <div className="fs-5">= <strong>{kg(c.grams)}</strong> · pay <strong>{peso(c.totalMinor)}</strong></div> : null}
                 {editing.mode === "KILO" && c.totalMinor > 0 ? <div className="fs-5">= <strong>{peso(c.totalMinor)}</strong></div> : null}
                 {editing.mode === "PIECE" && c.totalMinor > 0 ? <div className="fs-5">= <strong>{peso(c.totalMinor)}</strong></div> : null}
+              </div>
+              <div className="mt-3">
+                <label className="form-label mb-1" htmlFor="bt-price">Price {it.loose ? "per kilo" : "each"} <span className="text-muted small">(list price {peso(it.priceMinor)} — change it only if needed)</span></label>
+                <PesoInput id="bt-price" className="form-control form-control-lg" value={editing.price !== undefined ? String(editing.price / 100) : ""} placeholder={(it.priceMinor / 100).toFixed(2)}
+                  onChange={(v) => { const m = v === "" ? undefined : toMinor(v); setEditing({ ...editing, price: m === undefined || m === it.priceMinor ? undefined : m, reason: m === undefined || m === it.priceMinor ? undefined : editing.reason }); }} />
+                {changed && (
+                  <input className="form-control mt-2" aria-label="Reason for the new price" placeholder="Why the price changed (e.g. regular customer, damaged sack)" maxLength={140}
+                    value={editing.reason ?? ""} onChange={(e) => setEditing({ ...editing, reason: e.target.value })} />
+                )}
               </div>
               {it.tracked && (
                 <div className="mt-3">
@@ -410,9 +481,9 @@ export default function BentaPanel() {
                 </div>
               )}
               <div className="d-flex justify-content-between mt-3">
-                <button type="button" className="btn btn-outline-secondary btn-lg" onClick={() => setEditing(null)}>Back</button>
-                <button type="button" className="btn btn-success btn-lg" disabled={c.totalMinor <= 0 || short || (editing.mode === "PIECE" && !Number.isInteger(c.units))}
-                  onClick={() => { setCart([...cart, editing]); setEditing(null); setSearch(""); }}>Add</button>
+                <button type="button" className="btn btn-outline-secondary btn-lg" onClick={() => { setEditing(null); setEditIdx(null); }}>Back</button>
+                <button type="button" className="btn btn-success btn-lg" disabled={c.totalMinor <= 0 || short || !reasonOk || (editing.mode === "PIECE" && !Number.isInteger(c.units))}
+                  onClick={() => { setCart(editIdx === null ? [...cart, editing] : cart.map((x, j) => (j === editIdx ? editing : x))); setEditing(null); setEditIdx(null); setSearch(""); }}>{editIdx === null ? "Add" : "Save"}</button>
               </div>
             </div>
           </div>
@@ -572,7 +643,7 @@ function QuickCustomer({ onCancel, onAdded }: { onCancel: () => void; onAdded: (
 }
 
 /** New item: name, sold as, weight, price, cost, what is on hand now — signed by staff. */
-export function NewItemForm({ locationId, onCancel, onDone }: { locationId: string; onCancel: () => void; onDone: () => void | Promise<void> }) {
+export function NewItemForm({ locationId, onCancel, onDone, preorder = false }: { locationId?: string; onCancel: () => void; onDone: () => void | Promise<void>; /** Pre-order: only the cost and the selling price; nothing is on hand yet, and no signature. */ preorder?: boolean }) {
   const [name, setName] = useState("");
   const [soldAs, setSoldAs] = useState<"SACK" | "KILO" | "PIECE">("SACK");
   const [kilosPerSack, setKilosPerSack] = useState("25");
@@ -584,7 +655,7 @@ export function NewItemForm({ locationId, onCancel, onDone }: { locationId: stri
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const skipCount = noCount && soldAs === "PIECE";
-  const ready = name.trim().length >= 2 && Number(price) > 0 && (skipCount || Number(onHand) > 0) && !!sig && (soldAs !== "SACK" || Number(kilosPerSack) > 0);
+  const ready = name.trim().length >= 2 && Number(price) > 0 && (preorder || (skipCount || Number(onHand) > 0) && !!sig) && (soldAs !== "SACK" || Number(kilosPerSack) > 0);
 
   const save = async () => {
     setBusy(true); setError(null);
@@ -592,9 +663,10 @@ export function NewItemForm({ locationId, onCancel, onDone }: { locationId: stri
       name: name.trim(), soldAs, locationId,
       gramsPerSack: soldAs === "SACK" ? Math.round(Number(kilosPerSack) * 1000) : undefined,
       priceMinor: toMinor(price), costMinor: toMinor(cost),
-      openingQty: skipCount ? 0 : soldAs === "KILO" ? Math.round(Number(onHand) * 1000) : Math.floor(Number(onHand)),
+      ...(preorder ? { noOpeningStock: true } : {}),
+      openingQty: preorder || skipCount ? 0 : soldAs === "KILO" ? Math.round(Number(onHand) * 1000) : Math.floor(Number(onHand)),
       trackStock: skipCount ? false : undefined,
-      signatures: [{ signerKind: "STAFF", imagePng: sig }],
+      signatures: preorder ? [] : [{ signerKind: "STAFF", imagePng: sig }],
     };
     const res = await fetch(`${API_URL}/admin/benta/manual-item`, { method: "POST", headers: { "Content-Type": "application/json", ...adminHeaders() }, body: JSON.stringify(body) });
     const d = (await res.json().catch(() => null)) as ApiBody | null;
@@ -622,23 +694,24 @@ export function NewItemForm({ locationId, onCancel, onDone }: { locationId: stri
             <input id="ni-kg" className="form-control form-control-lg mb-2" inputMode="decimal" value={kilosPerSack} onChange={(e) => setKilosPerSack(num(e.target.value))} /></>
         )}
         <div className="row g-2">
-          <div className="col-6"><label className="form-label" htmlFor="ni-price">Price{soldAs === "KILO" ? " /kg" : ""} (₱)</label>
+          <div className="col-6"><label className="form-label" htmlFor="ni-price">{preorder ? "Selling price" : "Price"}{soldAs === "KILO" ? " /kg" : ""} (₱)</label>
             <PesoInput id="ni-price" className="form-control form-control-lg" value={price} onChange={setPrice} placeholder="0.00" /></div>
-          <div className="col-6"><label className="form-label" htmlFor="ni-cost">Cost{soldAs === "KILO" ? " /kg" : ""} (₱)</label>
+          <div className="col-6"><label className="form-label" htmlFor="ni-cost">{preorder ? "Unit cost (what you pay)" : "Cost"}{soldAs === "KILO" ? " /kg" : ""} (₱)</label>
             <PesoInput id="ni-cost" className="form-control form-control-lg" value={cost} onChange={setCost} placeholder="0.00" /></div>
         </div>
-        {soldAs === "PIECE" && (
+        {soldAs === "PIECE" && !preorder && (
           <div className="form-check form-switch mt-2">
             <input className="form-check-input" type="checkbox" id="ni-nocount" checked={noCount} onChange={(e) => setNoCount(e.target.checked)} />
             <label className="form-check-label" htmlFor="ni-nocount">Don't count stock — sell it any time</label>
           </div>
         )}
-        {!skipCount && (<>
+        {!skipCount && !preorder && (<>
         <label className="form-label mt-2" htmlFor="ni-onhand">On hand now ({soldAs === "KILO" ? "kilos" : soldAs === "SACK" ? "sacks" : "pieces"})</label>
         <input id="ni-onhand" className="form-control form-control-lg mb-2" inputMode="decimal" value={onHand} onChange={(e) => setOnHand(num(e.target.value))} />
         </>)}
-        <div className="fw-semibold">Your signature (staff)</div>
-        <SignaturePad onSignature={setSig} />
+        {!preorder && (<><div className="fw-semibold">Your signature (staff)</div>
+        <SignaturePad onSignature={setSig} /></>)}
+        {preorder && <p className="small text-muted mt-2 mb-0">Nothing is on hand yet. The owner will review this new item.</p>}
         <div className="d-flex justify-content-between mt-3">
           <button type="button" className="btn btn-outline-secondary btn-lg" disabled={busy} onClick={onCancel}>Back</button>
           <button type="button" className="btn btn-success btn-lg" disabled={!ready || busy} onClick={() => void save()}>{busy ? "Please wait…" : "Add"}</button>

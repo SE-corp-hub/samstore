@@ -525,14 +525,15 @@ export class BentaService {
 
   async manualItem(
     storeId: string, actor: Actor,
-    input: ManualItemAsk & { locationId?: string; signatures?: SignatureInput[]; trackStock?: boolean },
+    input: ManualItemAsk & { locationId?: string; signatures?: SignatureInput[]; trackStock?: boolean; /** Pre-order: the item is added with a cost and a selling price but nothing on hand yet. */ noOpeningStock?: boolean },
   ): Promise<BentaResult<{ productId: string; name: string; stockInDocNumber: string; approvalId: string }>> {
     return this.run(async () => {
       const loc = await this.location(storeId, actor, input.locationId);
       // "Do not count stock": only for pieces (rice with a sack weight must stay tracked). It sells at any time.
       const untracked = input.trackStock === false;
       if (untracked && (input as { soldAs?: unknown }).soldAs !== "PIECE") throw new SellingError("Only a piece item can skip stock counting — rice must be counted");
-      const plan = planManualItem(untracked ? { ...input, openingQty: 1 } : input);
+      const noStock = input.noOpeningStock === true && !untracked;
+      const plan = planManualItem(untracked || noStock ? { ...input, openingQty: 1 } : input);
       const dupe = await prisma.product.findFirst({ where: { storeId, name: { equals: plan.name, mode: "insensitive" }, isActive: true }, select: { name: true } });
       if (dupe) throw new SellingError(`"${dupe.name}" already exists — pick it from the list`);
       const result = await prisma.$transaction(async (tx) => {
@@ -545,14 +546,14 @@ export class BentaService {
           },
           select: productSelect,
         });
-        const doc = untracked
+        const doc = untracked || noStock
           ? { id: "", docNumber: "" }
           : await this.writeStockIn(tx, storeId, actor, loc.id, { supplierName: null, note: `New item: ${plan.name}`, lines: [{ product, quantity: plan.openingQty, unitCostMinor: null }] }, input.signatures);
-        const hawak = untracked ? "not counted" : plan.soldAs === "KILO" ? formatKilos(plan.openingQty) : `${plan.openingQty} ${plan.soldAs === "SACK" ? "sack(s)" : "piece(s)"}`;
+        const hawak = untracked ? "not counted" : noStock ? "none yet (pre-order)" : plan.soldAs === "KILO" ? formatKilos(plan.openingQty) : `${plan.openingQty} ${plan.soldAs === "SACK" ? "sack(s)" : "piece(s)"}`;
         const approval = await requestApproval(tx, {
           storeId, kind: "MANUAL_ITEM", documentType: "PRODUCT", documentId: product.id, locationId: loc.id,
           summary: `New item at ${loc.name}: ${plan.name} — ₱${(plan.priceMinor / 100).toFixed(2)}${plan.soldAs === "KILO" ? "/kg" : ""}, cost ₱${(plan.costMinor / 100).toFixed(2)}, on hand ${hawak}. Approve it, or merge it into another product.`,
-          detail: { soldAs: plan.soldAs, gramsPerUnit: plan.stockBaseQuantity, priceMinor: plan.priceMinor, costMinor: plan.costMinor, openingQty: plan.openingQty, stockInId: doc.id },
+          detail: { soldAs: plan.soldAs, gramsPerUnit: plan.stockBaseQuantity, priceMinor: plan.priceMinor, costMinor: plan.costMinor, openingQty: noStock ? 0 : plan.openingQty, stockInId: doc.id },
           requestedById: actor.userId,
         });
         await tx.auditLog.create({ data: { storeId, actorType: "USER", actorId: actor.userId, action: "product.manual_create", entityType: "Product", entityId: product.id, after: { name: plan.name, soldAs: plan.soldAs, priceMinor: plan.priceMinor, costMinor: plan.costMinor } } });

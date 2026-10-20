@@ -67,7 +67,7 @@ export class PosService {
 
   /** Load fresh products for a store (active) + validate availability. P2b: variant lines
  *  resolve their own price + stock (variant must belong to the product and be active). */
-  private async loadProducts(storeId: string, items: PosSellItem[], opts: { allowRemote?: boolean } = {}): Promise<PosResult<{ products: any[]; lines: LoadedLine[]; totals: any }>> {
+  private async loadProducts(storeId: string, items: PosSellItem[], opts: { allowRemote?: boolean; allowShort?: boolean } = {}): Promise<PosResult<{ products: any[]; lines: LoadedLine[]; totals: any }>> {
     const ids = items.map((i) => i.productId);
     // Rice Ops M3: a line may be served from another location — immediate sales only.
     const remoteIds = [...new Set(items.map((i) => i.sourceLocationId).filter((x): x is string => typeof x === "string" && x.length > 0))];
@@ -113,6 +113,8 @@ export class PosService {
         }
       } else if (!isTracked(p)) {
         continue; // Track stock off — sells at any time, nothing to check
+      } else if (opts.allowShort && !it.sourceLocationId) {
+        continue; // Pre-order / hold: may be taken even when the count is short (it goes below zero)
       } else {
         const remote = it.sourceLocationId && it.sourceLocationId !== defaultLocation?.id ? it.sourceLocationId : null;
         const pick = pickDeductionLevel(p.stockLevels, it.quantity, remote ? { warehouseId: remote, defaultWarehouseId: defaultLocation?.id ?? null } : { defaultWarehouseId: defaultLocation?.id ?? null });
@@ -179,8 +181,8 @@ export class PosService {
   }
 
   /** Decrement stock for a set of lines (prefer default warehouse, then any level) + ledger. */
-  private async decrementStock(tx: any, storeId: string, lines: StockLine[], opts: { orderId?: string | null; createdBy?: string | null } = {}) {
-    await deductStock(tx, storeId, lines, { type: "CONSUME", orderId: opts.orderId, createdBy: opts.createdBy });
+  private async decrementStock(tx: any, storeId: string, lines: StockLine[], opts: { orderId?: string | null; createdBy?: string | null; allowBelowZero?: boolean } = {}) {
+    await deductStock(tx, storeId, lines, { type: "CONSUME", orderId: opts.orderId, createdBy: opts.createdBy, allowBelowZero: opts.allowBelowZero });
   }
 
   /** Increment stock back for a set of lines (void / cancel) + ledger. */
@@ -591,7 +593,7 @@ export class PosService {
     if (!this.validateItems(input.items)) {
       return { ok: false, error: { type: "validation", errors: ["At least one item with positive quantity is required"] } };
     }
-    const loaded = await this.loadProducts(storeId, input.items);
+    const loaded = await this.loadProducts(storeId, input.items, { allowShort: true });
     if (!loaded.ok) return loaded;
     const { storeCustomerId: custId, displayName } = await this.resolveCustomer(storeId, input);
     if (!custId) {
@@ -610,7 +612,7 @@ export class PosService {
         currencyCode: store.currencyCode, totals, storeCustomerId: custId, customerName: displayName, lines,
         preorder: { startAt: input.startAt ?? new Date().toISOString(), dueAt: input.dueAt ?? null },
       });
-      await this.decrementStock(tx, storeId, lines, { orderId: id, createdBy: actorId });
+      await this.decrementStock(tx, storeId, lines, { orderId: id, createdBy: actorId, allowBelowZero: true });
     }, txOptions());
     await cacheBust(cacheKey("products", storeId));
     await cacheBust(cacheKey("orders", storeId));
@@ -736,7 +738,7 @@ export class PosService {
       };
     }
 
-    const loaded = await this.loadProducts(storeId, input.items);
+    const loaded = await this.loadProducts(storeId, input.items, { allowShort: opts?.source === "PRE_ORDER" });
     if (!loaded.ok) return loaded;
     // Only the stock identity of the previous lines matters here (restore delta).
     const oldLines = (await prisma.orderItem.findMany({ where: { orderId: holdId } })).map((i) => ({
@@ -755,7 +757,7 @@ export class PosService {
     await prisma.$transaction(async (tx) => {
       // Restore stock for removed lines, decrement for added (delta approach).
       await this.restoreStock(tx, storeId, oldLines, { orderId: holdId, createdBy: actorId });
-      await this.decrementStock(tx, storeId, lines, { orderId: holdId, createdBy: actorId });
+      await this.decrementStock(tx, storeId, lines, { orderId: holdId, createdBy: actorId, allowBelowZero: opts?.source === "PRE_ORDER" });
       await tx.orderItem.deleteMany({ where: { orderId: holdId } });
       await tx.orderItem.createMany({
         data: lines.map((l) => ({
