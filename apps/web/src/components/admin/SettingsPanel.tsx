@@ -6,6 +6,7 @@ import { adminHeaders, getAdminStoreId, getAuthItem, setAuthItem } from "../../l
 import { toast } from "../../lib/toast";
 import DeliveryZonesCard from "./DeliveryZonesCard";
 import NoStoreScope from "./NoStoreScope";
+import PrinterSettingsCard from "./PrinterSettingsCard";
 import { askConfirm } from "../../lib/ask";
 
 interface StoreSettings {
@@ -695,6 +696,7 @@ function AccountSection() {
 
   return (
     <>
+      <PrinterSettingsCard />
       <div className="card mb-4">
         <div className="card-body">
           <h6 className="fw-bold"><i className="bi bi-person me-2"></i>My profile</h6>

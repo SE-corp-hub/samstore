@@ -285,7 +285,7 @@ body {
 .staff-bar button:focus-visible { outline: 3px solid #0b4f8a; outline-offset: -3px; }
 @media (max-width: 767.98px) {
   /* Keep the last content row clear of the fixed bar. */
-  main.has-staff-bar { padding-bottom: calc(80px + env(safe-area-inset-bottom)) !important; }
+  main.has-staff-bar { padding-bottom: calc(80px + env(safe-area-inset-bottom)) !important; --staff-bar-h: calc(66px + env(safe-area-inset-bottom)); }
 }
 
 /* Staff home: one big tile per screen. */
@@ -299,3 +299,6 @@ body {
 .staff-tile:focus-visible { outline: 3px solid #0b4f8a; outline-offset: 2px; }
 .staff-other > summary { list-style: none; }
 .staff-other > summary::-webkit-details-marker { display: none; }
+
+/* Pay / Hold bars that stick to the bottom of a screen sit above the staff bar on a phone. */
+.sticky-above-bar { bottom: var(--staff-bar-h, 0px) !important; }

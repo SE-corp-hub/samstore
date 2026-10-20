@@ -672,7 +672,7 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
           </div>
 
           {/* sticky bottom bar (sticky inside the panel, unlike POS's fixed bar) */}
-          <div className="position-sticky bottom-0 bg-white border-top shadow-sm d-flex align-items-center justify-content-between px-3 py-2" style={{ zIndex: 5 }}>
+          <div className="position-sticky bottom-0 sticky-above-bar bg-white border-top shadow-sm d-flex align-items-center justify-content-between px-3 py-2" style={{ zIndex: 5 }}>
             <div>
               <div className="fw-bold">{buildCart.reduce((s, l) => s + l.quantity, 0)} item(s)</div>
               <div className="text-muted small">{maybePrice(buildSubtotal)}</div>

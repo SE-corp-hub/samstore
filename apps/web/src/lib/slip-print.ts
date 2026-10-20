@@ -2,6 +2,8 @@
 // Used by Resack, Stock in and anything else that needs "print what happened".
 // The HTML builder is pure so its escaping and layout are unit-tested.
 
+import { getPrinterSettings } from "./printer-settings";
+
 export interface SlipLine { label: string; value: string }
 export interface SlipRow { name: string; qty: string; note?: string }
 export interface SlipSignature { role: string; name: string; imageData?: string | null; at?: string | null }
@@ -17,6 +19,8 @@ export interface Slip {
   signatures?: SlipSignature[];
   footer?: string | null;
   widthMm?: 58 | 80;
+  header?: string | null;        // a line under the store name
+  copies?: number;               // 2 = one for the customer, one for the store
 }
 
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -43,16 +47,21 @@ hr { border: 0; border-top: 1px dashed #000; margin: 5px 0; }
 .kv, .row { display: flex; justify-content: space-between; gap: 6px; } .big { font-size: 12px; }
 small { font-size: 9px; } .sig { margin-top: 8px; text-align: center; } .sig img { max-width: 100%; max-height: 40px; }
 .blank { height: 28px; border-bottom: 1px solid #000; }
+.cut { page-break-after: always; break-after: page; }
 </style></head><body>
-<h1>${esc(s.storeName)}</h1><div class="c">${esc(s.title)}</div>
+${Array.from({ length: Math.min(2, Math.max(1, Math.floor(s.copies ?? 1))) }, (_, i) => `${i > 0 ? '<div class="cut"></div>' : ""}<section>
+<h1>${esc(s.storeName)}</h1>${s.header ? `<div class="c">${esc(s.header)}</div>` : ""}<div class="c">${esc(s.title)}</div>
 ${s.reference ? `<div class="c">${esc(s.reference)}</div>` : ""}${s.when ? `<div class="c">${esc(s.when)}</div>` : ""}
 <hr>${lines}${lines ? "<hr>" : ""}${rows}${rows ? "<hr>" : ""}${totals}${totals ? "<hr>" : ""}${sigs}
 ${s.footer ? `<hr><div class="c">${esc(s.footer)}</div>` : ""}
+</section>`).join("")}
 </body></html>`;
 }
 
 /** Print the slip through a hidden frame (works on phones and desktops; "Save as PDF" is in the print dialog). */
 export function printSlip(s: Slip): void {
+  const cfg = getPrinterSettings();
+  s = { ...s, widthMm: s.widthMm ?? cfg.widthMm, header: s.header ?? (cfg.header || null), footer: cfg.footer || s.footer, copies: s.copies ?? cfg.copies };
   const frame = document.createElement("iframe");
   frame.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0";
   document.body.appendChild(frame);

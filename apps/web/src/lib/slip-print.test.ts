@@ -16,3 +16,12 @@ test("only png/jpeg data images are printed as signatures", () => {
   const html = slipHtml({ storeName: "S", title: "T", signatures: [{ role: "Kargador", name: "Mang Jose", imageData: "javascript:alert(1)" }] });
   assert.ok(html.includes('class="blank"') && !html.includes("javascript:"));
 });
+
+test("a header line and two copies are printed when asked", () => {
+  const one = slipHtml({ storeName: "S", title: "T", header: "Tel 0917" });
+  assert.ok(one.includes("Tel 0917"));
+  assert.equal(one.split("<section>").length - 1, 1);
+  const two = slipHtml({ storeName: "S", title: "T", copies: 2 });
+  assert.equal(two.split("<section>").length - 1, 2);
+  assert.equal(slipHtml({ storeName: "S", title: "T", copies: 9 }).split("<section>").length - 1, 2);
+});

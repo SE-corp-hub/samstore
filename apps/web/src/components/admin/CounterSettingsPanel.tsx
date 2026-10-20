@@ -7,6 +7,7 @@ import { useCallback, useEffect, useState } from "react";
 import { API_URL } from "../../config";
 import { adminHeaders } from "../../lib/admin";
 import { toast } from "../../lib/toast";
+import PrinterSettingsCard from "./PrinterSettingsCard";
 
 export default function CounterSettingsPanel() {
   const [requireOpenShift, setRequireOpenShift] = useState<boolean | null>(null);
@@ -42,6 +43,7 @@ export default function CounterSettingsPanel() {
   return (
     <div style={{ maxWidth: 640 }}>
       <h1 className="h4 mb-3"><i className="bi bi-sliders me-2"></i>Counter settings</h1>
+      <PrinterSettingsCard />
       {requireOpenShift === null ? (
         <div className="text-muted">Loading…</div>
       ) : (

@@ -186,7 +186,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { id: "analytics", label: "Analytics", icon: "bi-graph-up-arrow" },
       { id: "reports", label: "Reports", icon: "bi-file-bar-graph" },
       { id: "settings", label: "Settings", icon: "bi-gear" },
-      { id: "countersettings", label: "Counter settings", icon: "bi-sliders" },
+      { id: "countersettings", label: "Counter & printer", icon: "bi-sliders" },
       { id: "storelink", label: "Store Link", icon: "bi-link-45deg" },
     ],
   },

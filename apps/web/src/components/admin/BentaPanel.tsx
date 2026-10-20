@@ -23,6 +23,7 @@ import LocationPicker from "../LocationPicker";
 import { PesoInput } from "../NumberBoxes";
 import { buildText, openTextApp } from "../../lib/text-message";
 import { printSlip } from "../../lib/slip-print";
+import { getPrinterSettings } from "../../lib/printer-settings";
 import { creditStatusWords } from "../../lib/credit-status";
 
 interface Loc { id: string; name: string; code: string | null; type: string }
@@ -156,6 +157,21 @@ export default function BentaPanel() {
   }, []);
   useEffect(() => { if (pay === "cash") void checkDrawer(); }, [pay, checkDrawer]);
 
+  const receiptSlip = (l: NonNullable<typeof last>) => ({
+    storeName: storeName || "SAM STORE", title: "SALES RECEIPT", reference: l.orderNumber, when: new Date().toLocaleString("en-PH"),
+    rows: l.lines.map((x) => ({ name: x.name, qty: `${x.soldBy === "PIECE" || !x.grams ? `${x.quantity}` : kg(x.grams)}  ${peso(x.lineTotalMinor)}` })),
+    totals: [{ label: "TOTAL", value: peso(l.totalMinor) }, ...(l.changeMinor > 0 ? [{ label: "Change", value: peso(l.changeMinor) }] : [])],
+    footer: l.status === "WAITING_OWNER" ? "Waiting for owner approval" : "Salamat po!",
+  });
+  // "Print the receipt right after each sale" (Printer settings on this phone): once per sale.
+  const printedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (step !== "done" || !last || last.status === "DECLINED" || printedFor.current === last.orderNumber) return;
+    printedFor.current = last.orderNumber;
+    if (getPrinterSettings().autoPrint) printSlip(receiptSlip(last));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, last]);
+
   const byId = useMemo(() => new Map(items.map((i) => [i.id, i])), [items]);
   const here = locations.find((l) => l.id === locationId);
   const code = (id: string) => { const l = locations.find((x) => x.id === id); return l?.code ?? l?.name ?? "?"; };
@@ -262,12 +278,7 @@ export default function BentaPanel() {
           {last.changeMinor > 0 && <li className="list-group-item d-flex justify-content-between fw-bold" style={{ fontSize: 24 }}><span>Change</span><span>{peso(last.changeMinor)}</span></li>}
         </ul>
         <div className="d-flex flex-wrap gap-2 mb-3">
-          <button type="button" className="btn btn-outline-dark btn-lg flex-fill" onClick={() => printSlip({
-            storeName: storeName || "SAM STORE", title: "SALES RECEIPT", reference: last.orderNumber, when: new Date().toLocaleString("en-PH"),
-            rows: last.lines.map((l) => ({ name: l.name, qty: `${l.soldBy === "PIECE" || !l.grams ? `${l.quantity}` : kg(l.grams)}  ${peso(l.lineTotalMinor)}` })),
-            totals: [{ label: "TOTAL", value: peso(last.totalMinor) }, ...(last.changeMinor > 0 ? [{ label: "Change", value: peso(last.changeMinor) }] : [])],
-            footer: last.status === "WAITING_OWNER" ? "Waiting for owner approval" : "Salamat po!",
-          })}><i className="bi bi-printer me-1"></i>Print receipt</button>
+          <button type="button" className="btn btn-outline-dark btn-lg flex-fill" onClick={() => printSlip(receiptSlip(last))}><i className="bi bi-printer me-1"></i>Print receipt</button>
         </div>
         {textInfo && last.status !== "DECLINED" && (
           <div className="card mb-3"><div className="card-body">
@@ -378,7 +389,7 @@ export default function BentaPanel() {
           <button type="button" className="btn btn-outline-secondary mb-3" onClick={() => setNewItem(true)}>+ New item (not on the list yet)</button>
 
           {cart.length > 0 && (
-            <div className="card border-success position-sticky bottom-0">
+            <div className="card border-success position-sticky bottom-0 sticky-above-bar">
               <div className="card-body">
                 <ul className="list-unstyled mb-2" style={{ fontVariantNumeric: "tabular-nums" }}>
                   {cart.map((l, idx) => {

@@ -6,6 +6,7 @@ import { adminHeaders } from "../../lib/admin";
 import { toast } from "../../lib/toast";
 import CustomerBarcode from "./CustomerBarcode";
 import { creditStatusWords } from "../../lib/credit-status";
+import { buildText, openTextApp } from "../../lib/text-message";
 
 interface CustomerRow {
   id: string;
@@ -68,6 +69,8 @@ const limitWords = (c: { creditUnlimited?: boolean; creditLimitMinor: number }) 
   c.creditUnlimited ? "No limit" : c.creditLimitMinor > 0 ? `${toPesos(c.creditLimitMinor)} limit` : "store default limit";
 
 export default function CustomersPanel() {
+  const [storeNameForText, setStoreNameForText] = useState("");
+  useEffect(() => { fetch(`${API_URL}/admin/settings`, { headers: adminHeaders() }).then((r) => (r.ok ? r.json() : null)).then((d) => setStoreNameForText(d?.store?.name ?? "")).catch(() => {}); }, []);
   const [customers, setCustomers] = useState<CustomerRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -487,6 +490,14 @@ export default function CustomersPanel() {
                         <div className="col-12">Address: <strong>{profile.customer.address ?? "—"}</strong></div>
                         <div className="col-6">Status: <span className={`badge ${APPROVAL_BADGE[profile.approvalStatus] ?? "text-bg-secondary"}`}>{profile.approvalStatus}</span></div>
                                                 <div className="col-6">Credit: <span className={profile.creditBalanceMinor > 0 ? "text-danger fw-bold" : ""}>{toPesos(profile.creditBalanceMinor)} owed</span> ({limitWords(profile)})</div>
+                        {profile.customer.phone && (
+                          <div className="col-12">
+                            <button type="button" className="btn btn-outline-primary btn-sm" onClick={() => {
+                              const text = buildText("balance", { storeName: storeNameForText || "SAM STORE", customerName: profile.customer.name, balanceMinor: profile.creditBalanceMinor });
+                              if (!openTextApp({ phone: profile.customer.phone, text, template: "balance" })) toast("That is not a mobile number", "danger");
+                            }}><i className="bi bi-chat-dots me-1"></i>Text balance (opens your phone's text app)</button>
+                          </div>
+                        )}
                       </div>
                       <h6 className="small fw-bold">Recent orders</h6>
                       {profile.orders.length === 0 ? (

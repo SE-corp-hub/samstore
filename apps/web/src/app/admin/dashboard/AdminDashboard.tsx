@@ -369,7 +369,7 @@ case "erp": return <ErpPanel />;
               {(stores.length > 1 || (role === "PLATFORM_ADMIN" && stores.length > 0)) && (
                 <select
                   className="form-select form-select-sm"
-                  style={{ width: 190 }}
+                  style={{ width: "min(190px, 40vw)" }}
                   value={activeStore ?? ""}
                   onChange={(e) => e.target.value && switchStore(e.target.value)}
                 >
@@ -379,7 +379,7 @@ case "erp": return <ErpPanel />;
                 </select>
               )}
               <QueueBadge />
-              <span className="badge text-bg-primary text-uppercase">{role}</span>
+              <span className="badge text-bg-primary text-uppercase d-none d-sm-inline">{role}</span>
               {active && (
                 <a className="btn btn-sm btn-outline-primary" href={`/${active.slug}`} target="_blank" rel="noreferrer" title="Open storefront">
                   <i className="bi bi-box-arrow-up-right"></i>
@@ -412,8 +412,8 @@ case "erp": return <ErpPanel />;
             ))}
             <button
               type="button"
-              className={tab === "home" ? "active" : ""}
-              aria-current={tab === "home" ? "page" : undefined}
+              className={!STAFF_BAR.some((b) => b.id === tab) ? "active" : ""}
+              aria-current={!STAFF_BAR.some((b) => b.id === tab) ? "page" : undefined}
               onClick={() => { userNavigated.current = true; setTab("home"); setMobileNav(false); }}
             >
               <i className="bi bi-grid-3x3-gap"></i>

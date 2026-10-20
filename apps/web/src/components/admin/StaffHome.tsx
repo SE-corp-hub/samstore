@@ -7,7 +7,9 @@
 import { allowedTabs, navItemFor } from "../../lib/admin";
 
 const DAILY = ["pos", "preorders", "resack", "utang", "orders", "trips"];
-const OTHER = ["bilangin", "pasok", "agentorders", "drafts", "kargadors", "ulat", "products", "inventory", "customers", "expenses", "purchases", "reports", "countersettings", "overview"];
+// Stock screens are always in view (not hidden under "Other screens").
+const STOCK = ["pasok", "bilangin", "inventory", "products"];
+const OTHER = ["agentorders", "drafts", "kargadors", "ulat", "customers", "expenses", "purchases", "reports", "countersettings", "overview"];
 
 interface Props {
   role: string;
@@ -28,6 +30,7 @@ export default function StaffHome({ role, onNavigate, labelFor }: Props) {
       .filter((x): x is { id: string; icon: string; label: string } => x !== null);
 
   const daily = items(DAILY);
+  const stock = items(STOCK);
   const other = items(OTHER);
 
   const Tile = ({ id, icon, label }: { id: string; icon: string; label: string }) => (
@@ -45,6 +48,14 @@ export default function StaffHome({ role, onNavigate, labelFor }: Props) {
       <div className="row g-3 mb-4">
         {daily.map((d) => <Tile key={d.id} {...d} />)}
       </div>
+      {stock.length > 0 && (
+        <>
+          <h2 className="h6 text-uppercase text-muted mb-2">Stock</h2>
+          <div className="row g-3 mb-4">
+            {stock.map((d) => <Tile key={d.id} {...d} />)}
+          </div>
+        </>
+      )}
       {other.length > 0 && (
         <details className="staff-other">
           <summary className="btn btn-outline-dark w-100 py-3 fs-5">Other screens ({other.length})</summary>
