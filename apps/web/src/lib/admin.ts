@@ -142,15 +142,15 @@ export const NAV_GROUPS: NavGroup[] = [
     group: "sell",
     label: "Sell",
     items: [
-      { id: "pos", label: "POS", icon: "bi-cash-register" },
-      { id: "preorders", label: "Pre Order", icon: "bi-bag-check" },
+      { id: "pos", label: "POS", icon: "bi-basket" },
+      { id: "preorders", label: "Pre-order", icon: "bi-bag-check" },
     ],
   },
   {
     group: "rice",
     label: "Rice",
     items: [
-      { id: "utangrice", label: "Credit", icon: "bi-journal-richtext" }, // Credit + Credit Ledger, merged (the old ledger screen is reachable as "utangold")
+      { id: "utangrice", label: "Credit", icon: "bi-journal-text" }, // Credit + Credit Ledger, merged (the old ledger screen is reachable as "utangold")
       { id: "agentorders", label: "Agent orders", icon: "bi-person-lines-fill" },
       { id: "agent", label: "New order (agent)", icon: "bi-phone" },
       { id: "approvals", label: "For your approval", icon: "bi-inbox" },

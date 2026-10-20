@@ -78,6 +78,14 @@ const STAFF_BAR: { id: string; label: string; icon: string }[] = [
   { id: "orders", label: "Orders", icon: "bi-receipt" },
 ];
 
+/** Roles that get the phone bottom bar: the same five jobs for staff, manager and owner. */
+const BAR_ROLES = ["STAFF", "MANAGER", "OWNER", "STORE_OWNER"];
+/** The older screen ids that open the same screen as a bar button. */
+const BAR_ALIAS: Record<string, string> = { benta: "pos", utangrice: "utang", utangold: "utang", posold: "pos" };
+
+/** Screens opened by a bar button that the menu lists under another id (for the page title and icon). */
+const NAV_ID: Record<string, string> = { utang: "utangrice" };
+
 interface MyStore { id: string; name: string; slug: string; role: string; }
 
 export default function AdminDashboard() {
@@ -362,8 +370,8 @@ case "erp": return <ErpPanel />;
               <i className="bi bi-list"></i>
             </button>
             <span className="navbar-brand fw-semibold fs-6 mb-0 d-flex align-items-center gap-2">
-              {role === "DELIVERY" ? <i className="bi bi-truck"></i> : <i className={`bi ${navItemFor(tab)?.icon ?? "bi-speedometer2"}`}></i>}
-              {role === "DELIVERY" ? "Courier" : tab === "home" ? "Home" : (() => { const n = navItemFor(tab); return n ? navLabel(n.id, n.label) : "Dashboard"; })()}
+              {role === "DELIVERY" ? <i className="bi bi-truck"></i> : <i className={`bi ${navItemFor(NAV_ID[tab] ?? tab)?.icon ?? "bi-speedometer2"}`}></i>}
+              {role === "DELIVERY" ? "Courier" : tab === "home" ? "Home" : (() => { const n = navItemFor(NAV_ID[tab] ?? tab); return n ? navLabel(n.id, n.label) : "Dashboard"; })()}
             </span>
             <div className="ms-auto d-flex align-items-center gap-2">
               {(stores.length > 1 || (role === "PLATFORM_ADMIN" && stores.length > 0)) && (
@@ -392,18 +400,18 @@ case "erp": return <ErpPanel />;
           </div>
         </nav>
 
-        <main className={`container-fluid py-4 flex-grow-1${role === "STAFF" ? " has-staff-bar" : ""}`} style={{ background: "#faf7f2" }}>
+        <main className={`container-fluid py-4 flex-grow-1${BAR_ROLES.includes(role) ? " has-staff-bar" : ""}`} style={{ background: "#faf7f2" }}>
           {RICE_TABS.has(tab) ? <div className="rice-ui p-2 rounded">{renderTab()}</div> : renderTab()}
         </main>
 
-        {role === "STAFF" && (
+        {BAR_ROLES.includes(role) && (
           <nav className="staff-bar d-md-none" aria-label="Main actions">
             {STAFF_BAR.filter((b) => allowed.includes(b.id)).map((b) => (
               <button
                 key={b.id}
                 type="button"
-                className={tab === b.id ? "active" : ""}
-                aria-current={tab === b.id ? "page" : undefined}
+                className={(BAR_ALIAS[tab] ?? tab) === b.id ? "active" : ""}
+                aria-current={(BAR_ALIAS[tab] ?? tab) === b.id ? "page" : undefined}
                 onClick={() => { userNavigated.current = true; setTab(b.id); setMobileNav(false); }}
               >
                 <i className={`bi ${b.icon}`}></i>
@@ -412,9 +420,9 @@ case "erp": return <ErpPanel />;
             ))}
             <button
               type="button"
-              className={!STAFF_BAR.some((b) => b.id === tab) ? "active" : ""}
-              aria-current={!STAFF_BAR.some((b) => b.id === tab) ? "page" : undefined}
-              onClick={() => { userNavigated.current = true; setTab("home"); setMobileNav(false); }}
+              className={!STAFF_BAR.some((b) => b.id === (BAR_ALIAS[tab] ?? tab)) ? "active" : ""}
+              aria-current={!STAFF_BAR.some((b) => b.id === (BAR_ALIAS[tab] ?? tab)) ? "page" : undefined}
+              onClick={() => { userNavigated.current = true; if (role === "STAFF") { setTab("home"); setMobileNav(false); } else setMobileNav(true); }}
             >
               <i className="bi bi-grid-3x3-gap"></i>
               <span>More</span>
