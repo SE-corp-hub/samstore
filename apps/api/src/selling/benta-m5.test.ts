@@ -323,3 +323,15 @@ test("M5: Manual na pasok adds signed stock and records the latest cost", async 
   const away = await svc.stockIn(fx.storeId, fx.staff2, { locationId: fx.s1, lines: [{ productId: fx.sin25.id, quantity: 1 }], signatures: staffSig });
   assert.equal(away.ok, false, "Store 2 staff cannot receive at Store 1");
 });
+
+test("Buffer store: a short sale is covered from the Buffer (the store stays at zero) and the Buffer cannot sell", async () => {
+  const fx = await fixture();
+  const buffer = await prisma.warehouse.create({ data: { storeId: fx.storeId, name: "Buffer store", code: "BF", type: "BUFFER" } });
+  const r = await svc.sell(fx.storeId, fx.staff1, { idempotencyKey: key(), lines: [{ productId: fx.sin25.id, quantity: 13 }], payment: { method: "cash" } });
+  assert.equal(r.ok, true, msg(r));
+  assert.equal(await onHand(fx, fx.sin25.id, fx.s1), 0, "the store gives what it had");
+  const level = await prisma.stockLevel.findFirstOrThrow({ where: { storeId: fx.storeId, productId: fx.sin25.id, warehouseId: buffer.id } });
+  assert.equal(level.quantityOnHand, -3, "the Buffer covers the rest and is now 3 short (to fix)");
+  const enough = await svc.sell(fx.storeId, fx.owner, { idempotencyKey: key(), locationId: buffer.id, lines: [{ productId: fx.sin25.id, quantity: 1 }], payment: { method: "cash" } });
+  assert.equal(enough.ok, false, "the Buffer is not a place to sell");
+});
