@@ -412,7 +412,7 @@ export class TransferFlowService {
     if (typeof qty !== "number" || !Number.isInteger(qty) || qty < 1) return invalid("Enter how many to move (1 or more)");
     if (!input.fromLocationId || !input.toLocationId) return invalid("Choose where it comes from and where it goes");
     if (input.fromLocationId === input.toLocationId) return invalid("Pick two different places");
-    const places = await prisma.warehouse.findMany({ where: { storeId, isActive: true, id: { in: [input.fromLocationId, input.toLocationId] } }, select: { id: true, name: true, code: true } });
+    const places = await prisma.warehouse.findMany({ where: { storeId, isActive: true, id: { in: [input.fromLocationId, input.toLocationId] } }, select: { id: true, name: true, code: true, type: true } });
     const from = places.find((w) => w.id === input.fromLocationId);
     const to = places.find((w) => w.id === input.toLocationId);
     if (!from || !to) return invalid("Unknown place");
@@ -434,7 +434,7 @@ export class TransferFlowService {
           select: { id: true },
         });
         await recordCostIn(tx, { storeId, productId: product.id, warehouseId: to.id }, qty, await shelfCostFor(tx, storeId, product.id, from.id));
-        await transferStock(tx, { storeId, productId: product.id, fromWarehouseId: from.id, toWarehouseId: to.id, quantity: qty, actorId: actor.userId, documentType: "TRANSFER", documentId: t.id, note: docNumber });
+        await transferStock(tx, { storeId, productId: product.id, fromWarehouseId: from.id, toWarehouseId: to.id, quantity: qty, actorId: actor.userId, documentType: "TRANSFER", documentId: t.id, note: docNumber, sourceMayGoNegative: from.type === "BUFFER" });
         await tx.auditLog.create({ data: { storeId, actorType: "USER", actorId: actor.userId, action: "transfer.move", entityType: "StockTransfer", entityId: t.id, after: { quantity: qty, from: from.name, to: to.name } } });
         out = { id: t.id, docNumber };
       }, txOptions());

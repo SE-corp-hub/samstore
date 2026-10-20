@@ -17,14 +17,15 @@ const peso = (m: number) => `₱${(m / 100).toLocaleString("en-PH", { minimumFra
 const today = () => new Date(Date.now() + 8 * 3_600_000).toISOString().slice(0, 10);
 const kgText = (g: number) => `${(g / 1000).toLocaleString("en-PH", { maximumFractionDigits: 3 })} kg`;
 
-interface Place { id: string; name: string; code: string | null; isActive: boolean }
-type Tab = "stock" | "sales" | "compare" | "day";
+interface Place { id: string; name: string; code: string | null; isActive: boolean; type?: string }
+type Tab = "stock" | "sales" | "compare" | "day" | "buffer";
 
 interface StockRow { productId: string; name: string; loose: boolean; unit: string; onHand: number; reserved: number; available: number; flag: "ZERO" | "LOW" | "OK"; unitPriceMinor: number; valueMinor: number; costValueMinor?: number }
 interface StockData { location: { id: string; name: string }; rows: StockRow[]; totals: { items: number; low: number; empty: number; valueMinor: number; costValueMinor?: number } }
 interface SalesTotals { count: number; totalMinor: number; cashMinor: number; gcashMinor: number; creditMinor: number; otherMinor: number; costMinor?: number; grossProfitMinor?: number }
 interface SalesData { location: { id: string; name: string }; from: string; to: string; sales: SalesTotals; cashInMinor: number; creditGivenMinor: number; creditCollectedMinor: number; items: { name: string; unit: string; quantity: number; salesMinor: number }[]; days: { date: string; count: number; totalMinor: number }[] }
 interface CompareData { from: string; to: string; stores: { location: { id: string; name: string; type: string }; sales: SalesTotals; cashInMinor: number; creditGivenMinor: number; creditCollectedMinor: number; stock: { items: number; low: number; empty: number; valueMinor: number } }[]; total: { salesMinor: number; count: number; grossProfitMinor: number; creditGivenMinor: number; stockValueMinor: number } }
+interface BufferData { buffer: { id: string; name: string } | null; owed: { productId: string; name: string; unit: string; quantity: number; valueMinor: number; oldestAt: string | null }[]; surplus: { productId: string; name: string; unit: string; quantity: number }[]; totals: { owedMinor: number; owedItems: number }; entries: { at: string; productName: string; unit: string; quantity: number; orderNumber: string | null; store: string | null; by: string | null }[] }
 interface DaySection { location: { id: string; name: string }; locked: boolean; closedAt: string | null; cashCountedMinor: number | null; cashVarianceMinor: number | null; sales: { count: number; totalMinor: number; cashMinor: number; gcashMinor: number; utangMinor: number }; cash: { expectedMinor: number }; utang: { givenMinor: number; collectedMinor: number }; stockIn: { documents: number; units: number }; kilosByVariety: { variety: string; grams: number; salesMinor: number }[] }
 
 const qtyText = (r: StockRow) => (r.loose ? kgText(r.onHand) : `${r.onHand.toLocaleString("en-PH")} pcs`);
@@ -47,6 +48,7 @@ export default function StoreReportPanel({ role, onNavigate }: { role?: string; 
   const [sales, setSales] = useState<SalesData | null>(null);
   const [compare, setCompare] = useState<CompareData | null>(null);
   const [day, setDay] = useState<DaySection | null>(null);
+  const [buffer, setBuffer] = useState<BufferData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -64,7 +66,7 @@ export default function StoreReportPanel({ role, onNavigate }: { role?: string; 
   }, []);
 
   const load = useCallback(async () => {
-    if (!locationId && tab !== "compare") return;
+    if (!locationId && tab !== "compare" && tab !== "buffer") return;
     setLoading(true);
     setError(null);
     try {
@@ -76,6 +78,10 @@ export default function StoreReportPanel({ role, onNavigate }: { role?: string; 
         const r = await getJson<SalesData>(`/admin/rice/store-sales?locationId=${locationId}&from=${from}&to=${to}`);
         if (!r.ok) throw new Error(r.data?.errors?.join(", ") ?? r.data?.message ?? "Could not load the sales");
         setSales(r.data);
+      } else if (tab === "buffer") {
+        const r = await getJson<BufferData>(`/admin/rice/store-buffer`);
+        if (!r.ok) throw new Error(r.data?.errors?.join(", ") ?? r.data?.message ?? "Could not load the Buffer store");
+        setBuffer(r.data);
       } else if (tab === "compare") {
         const r = await getJson<CompareData>(`/admin/rice/store-compare?from=${from}&to=${to}`);
         if (!r.ok) throw new Error(r.data?.errors?.join(", ") ?? r.data?.message ?? "Could not load the comparison");
@@ -84,6 +90,7 @@ export default function StoreReportPanel({ role, onNavigate }: { role?: string; 
         const r = await getJson<{ sections: DaySection[] }>(`/admin/rice/daily?date=${from}&locationId=${locationId}`);
         if (!r.ok) throw new Error(r.data?.errors?.join(", ") ?? r.data?.message ?? "Could not load the day");
         setDay(r.data?.sections?.[0] ?? null);
+        if (owner) { const b = await getJson<BufferData>(`/admin/rice/store-buffer`); setBuffer(b.ok ? b.data : null); }
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Load failed");
@@ -126,7 +133,7 @@ export default function StoreReportPanel({ role, onNavigate }: { role?: string; 
   };
 
   const tabs: [Tab, string][] = [["stock", "Stock left"], ["sales", "Sales"], ...(owner ? ([["compare", "Compare stores"]] as [Tab, string][]) : []), ["day", "End of day"]];
-  const single = tab !== "compare";
+  const single = tab !== "compare" && tab !== "buffer";
   const range = tab === "sales" || tab === "compare";
 
   return (
@@ -223,6 +230,41 @@ export default function StoreReportPanel({ role, onNavigate }: { role?: string; 
         </>
       )}
 
+      {tab === "buffer" && buffer && (
+        !buffer.buffer ? (
+          <p className="text-muted">No Buffer store yet. Add one in Warehouses (type: Buffer store). Short sales are then covered from it instead of making a store negative.</p>
+        ) : (
+          <>
+            <div className={`alert ${buffer.totals.owedItems > 0 ? "alert-warning" : "alert-success"}`}>
+              {buffer.totals.owedItems > 0
+                ? <>The Buffer covered <b>{buffer.totals.owedItems}</b> item(s) worth about <b>{peso(buffer.totals.owedMinor)}</b>. Record the missing stock (Stock in or Move stock at the Buffer) or count it, to bring these back to zero.</>
+                : "Nothing to fix. The Buffer has not covered any shortage."}
+            </div>
+            {buffer.owed.length > 0 && (
+              <table className="table table-sm align-middle">
+                <thead><tr><th>To fix</th><th className="text-end">Missing</th><th className="text-end">Worth</th><th className="text-end">Since</th></tr></thead>
+                <tbody>{buffer.owed.map((o) => {
+                  const days = o.oldestAt ? Math.floor((Date.now() - new Date(o.oldestAt).getTime()) / 86_400_000) : null;
+                  return <tr key={o.productId}><td>{o.name}</td><td className="text-end fw-semibold">{o.quantity.toLocaleString("en-PH", { maximumFractionDigits: 3 })} {o.unit}</td><td className="text-end">{peso(o.valueMinor)}</td><td className={`text-end ${days !== null && days >= 7 ? "text-danger fw-semibold" : ""}`}>{days === null ? "" : days === 0 ? "today" : `${days} d ago`}</td></tr>;
+                })}</tbody>
+              </table>
+            )}
+            {buffer.surplus.length > 0 && <p className="small text-muted">Extra stock sitting in the Buffer: {buffer.surplus.map((x) => `${x.quantity} ${x.unit} ${x.name}`).join(" · ")}</p>}
+            <h6>What it covered (latest)</h6>
+            {buffer.entries.length === 0 ? <p className="text-muted small">None.</p> : (
+              <ul className="list-group">
+                {buffer.entries.map((e, i) => (
+                  <li key={i} className="list-group-item small">
+                    <b>{e.quantity.toLocaleString("en-PH", { maximumFractionDigits: 3 })} {e.unit} {e.productName}</b>{e.store ? ` · sold at ${e.store}` : ""}
+                    <div className="text-muted">{e.orderNumber ?? ""}{e.by ? ` · ${e.by}` : ""} · {new Date(e.at).toLocaleString()}</div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </>
+        )
+      )}
+
       {tab === "day" && day && (
         <>
           <div className="border rounded p-3 mb-3">
@@ -233,6 +275,7 @@ export default function StoreReportPanel({ role, onNavigate }: { role?: string; 
               <li>Credit collected: {peso(day.utang.collectedMinor)}</li>
               <li>Cash expected in the drawer: <b>{peso(day.cash.expectedMinor)}</b>{day.cashCountedMinor !== null && <> · counted {peso(day.cashCountedMinor)} ({(day.cashVarianceMinor ?? 0) === 0 ? "matches" : `off by ${peso(day.cashVarianceMinor ?? 0)}`})</>}</li>
               <li>Stock in today: {day.stockIn.documents} document(s)</li>
+              {buffer?.buffer && buffer.totals.owedItems > 0 && <li className="text-warning-emphasis">Buffer still to fix: {buffer.totals.owedItems} item(s), about {peso(buffer.totals.owedMinor)}</li>}
               {day.kilosByVariety.map((v) => <li key={v.variety} className="small text-muted">{v.variety}: {kgText(v.grams)} · {peso(v.salesMinor)}</li>)}
             </ul>
           </div>

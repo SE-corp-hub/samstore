@@ -38,7 +38,7 @@ function validateLocation(input: LocationInput, creating: boolean): string[] {
     if (name.length < 2 || name.length > 60) errors.push("Location name must be 2–60 characters");
   }
   if (input.type !== undefined && !(Object.values(LocationType) as string[]).includes(input.type)) {
-    errors.push("type must be STORE or WAREHOUSE");
+    errors.push("type must be STORE, WAREHOUSE or BUFFER");
   }
   if (input.code !== undefined && input.code !== null && input.code !== "" && !CODE_RE.test(input.code.trim().toUpperCase())) {
     errors.push("code must be 1–6 letters or digits (e.g. S1, WH)");
@@ -83,7 +83,10 @@ export class WarehouseService {
     const clash = await prisma.warehouse.findFirst({ where: { storeId, OR: [{ name }, ...(code ? [{ code }] : [])] } });
     if (clash) return { ok: false, error: { type: "conflict", message: clash.name === name ? "A location with this name already exists" : `Code ${code} is already used by ${clash.name}` } };
 
-    // The first location becomes the default.
+    if (data.type === "BUFFER" && (await prisma.warehouse.findFirst({ where: { storeId, type: "BUFFER" }, select: { id: true } }))) {
+      return { ok: false, error: { type: "conflict", message: "There is already a Buffer store" } };
+    }
+    // The first location becomes the default (never the buffer).
     const count = await prisma.warehouse.count({ where: { storeId } });
     const warehouse = await prisma.warehouse.create({
       data: {
@@ -92,7 +95,7 @@ export class WarehouseService {
         code,
         type: (data.type as LocationType | undefined) ?? LocationType.STORE,
         address: data.address?.trim() || null,
-        isDefault: count === 0,
+        isDefault: count === 0 && data.type !== "BUFFER",
         needsReview: data.needsReview === true,
       },
     });

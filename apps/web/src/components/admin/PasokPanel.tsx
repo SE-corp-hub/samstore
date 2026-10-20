@@ -118,7 +118,7 @@ export default function PasokPanel(_props: { role?: string; onNavigate?: (tab: s
       <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
         <h1 className="h4 mb-0">Stock in</h1>
       </div>
-      <StoreBar locations={locations} value={locationId} homeLocationId={homeLocationId} locked={adding || rows.some((r) => r.productId || r.amount)}
+      <StoreBar includeBuffer locations={locations} value={locationId} homeLocationId={homeLocationId} locked={adding || rows.some((r) => r.productId || r.amount)}
         lockedNote="Receive or clear what you started to switch store." onPick={(id) => { setLocationId(id); setJustDone(null); }} />
       {chosen && adding && <NewItemForm preorder onCancel={() => setAdding(false)} onDone={addCreated} locationId={locationId} />}
       {chosen && !adding && (<>

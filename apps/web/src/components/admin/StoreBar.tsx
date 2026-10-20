@@ -3,9 +3,9 @@
 // "Selling at / Working at": the store chips shared by POS, Resack and Stock in, so the owner and the staff
 // see the same screen. A staff member the owner tied to one store sees only that store (the server enforces it too).
 
-export interface StoreOption { id: string; name: string; code?: string | null }
+export interface StoreOption { id: string; name: string; code?: string | null; type?: string }
 
-export default function StoreBar({ label = "Working at", locations, value, homeLocationId, onPick, locked = false, lockedNote }: {
+export default function StoreBar({ label = "Working at", locations: all, value, homeLocationId, onPick, locked = false, lockedNote, includeBuffer = false }: {
   label?: string;
   locations: StoreOption[];
   value: string;
@@ -14,8 +14,11 @@ export default function StoreBar({ label = "Working at", locations, value, homeL
   /** A sale / resack / stock-in is under way: switching is off until it is finished or cleared. */
   locked?: boolean;
   lockedNote?: string;
+  /** The Buffer store covers shortages; it is not a place to sell, so it is hidden unless asked for. */
+  includeBuffer?: boolean;
 }) {
-  const here = locations.find((l) => l.id === value);
+  const locations = includeBuffer ? all : all.filter((l) => l.type !== "BUFFER");
+  const here = all.find((l) => l.id === value);
   return (
     <div className="mb-3">
       <div className="small text-muted mb-1">{label}</div>

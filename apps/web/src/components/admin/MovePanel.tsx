@@ -72,7 +72,7 @@ export default function MovePanel() {
     <div className="container py-3" style={{ maxWidth: 640 }}>
       <h5 className="mb-3">Move stock</h5>
       {error && <div className="alert alert-danger py-2">{error}</div>}
-      <StoreBar label="Moving to" locations={places} value={to} homeLocationId={home} onPick={(id) => { setTo(id); if (id === from) setFrom(""); }} />
+      <StoreBar label="Moving to" locations={places} value={to} homeLocationId={home} includeBuffer onPick={(id) => { setTo(id); if (id === from) setFrom(""); }} />
       <div className="mb-3">
         <div className="small text-muted mb-1">Taking from</div>
         <div className="d-flex flex-wrap gap-2">

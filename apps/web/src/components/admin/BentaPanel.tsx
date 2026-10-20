@@ -125,7 +125,7 @@ export default function BentaPanel() {
     const res = await fetch(`${API_URL}/admin/benta/catalog${q}`, { headers: adminHeaders() });
     const d = (await res.json().catch(() => null)) as ApiBody | null;
     if (!res.ok || !d) { setError(errText(d, "Could not load the products")); return; }
-    setLocations(d.locations as Loc[]);
+    setLocations((d.locations as Loc[]).filter((l) => (l as { type?: string }).type !== "BUFFER"));
     setItems(d.products as Item[]);
     setLocationId((d.location as Loc).id);
   }, []);

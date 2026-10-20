@@ -50,7 +50,7 @@ export default function AgentOrdersPanel() {
       fetch(`${API_URL}/admin/benta/catalog`, { headers: adminHeaders() }).then((r) => (r.ok ? r.json() : null)),
     ]);
     setOrders((o?.orders ?? []) as Order[]);
-    setLocations((c?.locations ?? []) as Loc[]);
+    setLocations(((c?.locations ?? []) as (Loc & { type?: string })[]).filter((l) => l.type !== "BUFFER"));
     setStock(Object.fromEntries(((c?.products ?? []) as { id: string; stock: Record<string, number> }[]).map((p) => [p.id, p.stock])));
   }, [view]);
   useEffect(() => { void load().catch(() => setError("Could not load")); }, [load]);

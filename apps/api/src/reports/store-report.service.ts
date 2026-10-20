@@ -174,7 +174,7 @@ export class StoreReportService {
       if (p.res) return p.res;
       const stores: CompareRow[] = [];
       // One store at a time: the database pool is small.
-      for (const l of p.wanted) {
+      for (const l of p.wanted.filter((x) => x.type !== "BUFFER")) {
         const s = await this.salesOf(storeId, l.id, r.start, r.end, true);
         const stock = await this.stockRows(storeId, l.id, true);
         stores.push({
@@ -194,5 +194,47 @@ export class StoreReportService {
       if (e instanceof ReportError) return fail("validation", e.message);
       throw e;
     }
+  }
+  // ─────────────────────────── Buffer store: the "to fix" list (owner) ───────────────────────────
+
+  async buffer(storeId: string, actor: Actor): Promise<StoreReportResult<{
+    buffer: { id: string; name: string } | null;
+    owed: { productId: string; name: string; unit: string; quantity: number; valueMinor: number; oldestAt: string | null }[];
+    surplus: { productId: string; name: string; unit: string; quantity: number }[];
+    totals: { owedMinor: number; owedItems: number };
+    entries: { at: string; productName: string; unit: string; quantity: number; orderNumber: string | null; store: string | null; by: string | null }[];
+  }>> {
+    if (!isOwner(actor)) return fail("forbidden", "The Buffer report is for the owner");
+    const buf = await prisma.warehouse.findFirst({ where: { storeId, type: "BUFFER", isActive: true }, select: { id: true, name: true } });
+    if (!buf) return { ok: true, value: { buffer: null, owed: [], surplus: [], totals: { owedMinor: 0, owedItems: 0 }, entries: [] } };
+    const rows = await this.stockRows(storeId, buf.id, false);
+    const moves = await prisma.stockMovement.findMany({
+      where: { storeId, warehouseId: buf.id, delta: { lt: 0 }, documentType: "SALE" }, orderBy: { createdAt: "desc" }, take: 150,
+      select: { createdAt: true, productId: true, delta: true, documentId: true, createdBy: true },
+    });
+    const orders = new Map((await prisma.order.findMany({ where: { storeId, id: { in: [...new Set(moves.map((m) => m.documentId).filter((x): x is string => !!x))] } }, select: { id: true, orderNumber: true, sellingLocation: { select: { name: true } } } })).map((o) => [o.id, o]));
+    const users = new Map((await prisma.user.findMany({ where: { id: { in: [...new Set(moves.map((m) => m.createdBy).filter((x): x is string => !!x))] } }, select: { id: true, name: true } })).map((u) => [u.id, u.name]));
+    const prods = new Map((await prisma.product.findMany({ where: { storeId, id: { in: [...new Set(moves.map((m) => m.productId))] } }, select: productSelect })).map((x) => [x.id, x]));
+    const oldest = new Map<string, Date>();
+    for (const m of moves) oldest.set(m.productId, m.createdAt); // moves are newest first, so the last write is the oldest
+    const owedRows = rows.filter((r) => r.onHand < 0);
+    return {
+      ok: true,
+      value: {
+        buffer: { id: buf.id, name: buf.name },
+        owed: owedRows.map((r) => ({
+          productId: r.productId, name: r.name, unit: r.unit, quantity: r.loose ? -r.onHand / 1000 : -r.onHand,
+          valueMinor: valueOf(r.loose, -r.onHand, r.unitPriceMinor), oldestAt: oldest.get(r.productId)?.toISOString() ?? null,
+        })),
+        surplus: rows.filter((r) => r.onHand > 0).map((r) => ({ productId: r.productId, name: r.name, unit: r.unit, quantity: r.loose ? r.onHand / 1000 : r.onHand })),
+        totals: { owedMinor: owedRows.reduce((s, r) => s + valueOf(r.loose, -r.onHand, r.unitPriceMinor), 0), owedItems: owedRows.length },
+        entries: moves.slice(0, 40).map((m) => {
+          const p = prods.get(m.productId);
+          const loose = p ? isLooseP(p) : false;
+          const o = m.documentId ? orders.get(m.documentId) : undefined;
+          return { at: m.createdAt.toISOString(), productName: p?.name ?? "Item", unit: loose ? "kg" : "pcs", quantity: loose ? -m.delta / 1000 : -m.delta, orderNumber: o?.orderNumber ?? null, store: o?.sellingLocation?.name ?? null, by: m.createdBy ? users.get(m.createdBy) ?? null : null };
+        }),
+      },
+    };
   }
 }

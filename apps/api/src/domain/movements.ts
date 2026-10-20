@@ -434,6 +434,8 @@ export async function transferStock(
     documentType: string;
     documentId: string;
     note?: string | null;
+    /** The Buffer store never refuses stock: its count may go negative. */
+    sourceMayGoNegative?: boolean;
   },
 ): Promise<{ fromBalance: number; toBalance: number }> {
   const { storeId, productId, fromWarehouseId, toWarehouseId, quantity } = input;
@@ -441,9 +443,12 @@ export async function transferStock(
   if (fromWarehouseId === toWarehouseId) throw new Error("transfer source and destination must differ");
   if (await isUntracked(tx, storeId, productId)) return { fromBalance: 0, toBalance: 0 }; // Track stock off
 
-  const source = await tx.stockLevel.findFirst({ where: { storeId, productId, warehouseId: fromWarehouseId }, select: { id: true } });
+  let source = await tx.stockLevel.findFirst({ where: { storeId, productId, warehouseId: fromWarehouseId }, select: { id: true } });
+  if (!source && input.sourceMayGoNegative) source = await tx.stockLevel.create({ data: { storeId, productId, warehouseId: fromWarehouseId, quantityOnHand: 0 }, select: { id: true } });
   if (!source) throw new InsufficientStockError(productId, quantity);
-  const fromBalance = await takeAvailable(tx, source.id, quantity);
+  const fromBalance = input.sourceMayGoNegative
+    ? ((await tx.$queryRaw<{ quantityOnHand: number }[]>`UPDATE "StockLevel" SET "quantityOnHand" = "quantityOnHand" - ${quantity}::int, "updatedAt" = now() WHERE id = ${source.id} RETURNING "quantityOnHand"`)[0]?.quantityOnHand ?? null)
+    : await takeAvailable(tx, source.id, quantity);
   if (fromBalance === null) {
     const fresh = await tx.stockLevel.findUnique({ where: { id: source.id }, select: { quantityOnHand: true, quantityReserved: true } });
     throw new InsufficientStockError(productId, quantity - Math.max(0, (fresh?.quantityOnHand ?? 0) - (fresh?.quantityReserved ?? 0)));

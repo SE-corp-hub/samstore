@@ -827,6 +827,7 @@ model Warehouse {
 enum LocationType {
   STORE
   WAREHOUSE
+  BUFFER // covers shortages: never refuses stock, its count may go negative = the "to fix" list
 }
 
 // M1: a location's own selling price for a product. No row = the product's main

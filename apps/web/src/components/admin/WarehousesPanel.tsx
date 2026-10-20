@@ -9,7 +9,7 @@ import { adminHeaders } from "../../lib/admin";
 import { toast } from "../../lib/toast";
 import SignCapture, { type SignatureOut } from "./SignCapture";
 
-type LocationType = "STORE" | "WAREHOUSE";
+type LocationType = "STORE" | "WAREHOUSE" | "BUFFER";
 interface Location {
   id: string;
   name: string;
@@ -222,6 +222,7 @@ export default function WarehousesPanel() {
                   <select id="loc-type" className="form-select form-select-sm" value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value as LocationType })}>
                     <option value="STORE">Store (counter)</option>
                     <option value="WAREHOUSE">Warehouse (bulk stock)</option>
+                    <option value="BUFFER">Buffer store (covers shortages, no limit)</option>
                   </select>
                 </div>
                 <div className="col-12">
@@ -295,7 +296,7 @@ export default function WarehousesPanel() {
                       <div>
                         <div className="fw-semibold">{label(l)}</div>
                         <div className="small text-muted">
-                          {l.type === "WAREHOUSE" ? "Warehouse" : "Store"} · {l.stockCount} products stocked
+                          {l.type === "WAREHOUSE" ? "Warehouse" : l.type === "BUFFER" ? "Buffer" : "Store"} · {l.stockCount} products stocked
                           {l.isDefault && <span className="badge text-bg-primary ms-2">Default</span>}
                           {!l.isActive && <span className="badge text-bg-secondary ms-2">Switched off</span>}
                           {l.needsReview && <span className="badge text-bg-warning ms-2">Added by staff — please check</span>}

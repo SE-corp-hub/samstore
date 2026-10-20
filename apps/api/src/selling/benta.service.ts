@@ -24,6 +24,7 @@ import { cacheBust, cacheKey } from "../persistence/ttl-cache.js";
 import { PrismaOrderSequenceRepository } from "../persistence/prisma-repositories.js";
 import { randomId } from "../persistence/repositories.js";
 import { addForTrip, deductStock, InsufficientStockError, recordMovement, releaseForTrip, reserveForTrip, unreserveForTrip, type TripLeg } from "../domain/movements.js";
+import { deductWithBuffer } from "../domain/buffer.js";
 import { formatOrderNumber } from "../domain/order-number.js";
 import { resolveLinePrice, PriceOverrideError } from "../domain/price-override.js";
 import { taxColumnsFor } from "../domain/tax-store.js";
@@ -171,7 +172,7 @@ export class BentaService {
   /** The selling location: the one asked for, else the person's home, else the store default. */
   private async location(storeId: string, actor: Actor, locationId: string | undefined) {
     const id = locationId || actor.homeLocationId || (await prisma.warehouse.findFirst({ where: { storeId, isDefault: true }, select: { id: true } }))?.id;
-    const loc = id ? await prisma.warehouse.findFirst({ where: { id, storeId, isActive: true }, select: { id: true, name: true } }) : null;
+    const loc = id ? await prisma.warehouse.findFirst({ where: { id, storeId, isActive: true }, select: { id: true, name: true, type: true } }) : null;
     if (!loc) throw new StepError(invalid("Choose a location"));
     const refusal = locationRefusal(actor, loc.id);
     if (refusal) throw new StepError(forbidden(refusal));
@@ -257,6 +258,7 @@ export class BentaService {
 
     const out = await this.run(async () => {
       const loc = await this.location(storeId, actor, input.locationId);
+      if (loc.type === "BUFFER") throw new SellingError("The Buffer store cannot sell — pick a store");
       const lines = Array.isArray(input.lines) ? input.lines : [];
       if (lines.length === 0) throw new SellingError("The sale is empty");
       if (lines.length > 50) throw new SellingError("Up to 50 lines per sale");
@@ -387,7 +389,7 @@ export class BentaService {
             await writeTenders(tx, { storeId, orderId, actorId: actor.userId, plan: plan!, note: paper ? `Benta (papel #${paper.slipNo})` : "Benta", registerSessionId });
             const local = priced.filter((l) => !l.sourceLocationId);
             for (const l of local) {
-              await deductStock(tx, storeId, [{ productId: l.product.id, quantity: l.stockQty }], { type: "CONSUME", orderId, createdBy: actor.userId, warehouseId: loc.id, documentType: "SALE", documentId: orderId, allowBelowZero: true });
+              await deductWithBuffer(tx, storeId, { productId: l.product.id, quantity: l.stockQty }, { orderId, createdBy: actor.userId, warehouseId: loc.id, documentType: "SALE", documentId: orderId });
             }
             // Rice taken from another store/warehouse leaves that place at once — no porter, no release step.
             for (const l of priced.filter((x) => x.sourceLocationId)) {
