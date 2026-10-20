@@ -526,7 +526,7 @@ export class BentaService {
   async manualItem(
     storeId: string, actor: Actor,
     input: ManualItemAsk & { locationId?: string; signatures?: SignatureInput[]; trackStock?: boolean; /** Pre-order: the item is added with a cost and a selling price but nothing on hand yet. */ noOpeningStock?: boolean },
-  ): Promise<BentaResult<{ productId: string; name: string; stockInDocNumber: string; approvalId: string }>> {
+  ): Promise<BentaResult<{ productId: string; name: string; stockInDocNumber: string; approvalId: string | null }>> {
     return this.run(async () => {
       const loc = await this.location(storeId, actor, input.locationId);
       // "Do not count stock": only for pieces (rice with a sack weight must stay tracked). It sells at any time.
@@ -542,7 +542,7 @@ export class BentaService {
             storeId, sku: `BAGO-${randomId().slice(-8).toUpperCase()}`, name: plan.name, priceMinor: plan.priceMinor, costMinor: plan.costMinor,
             stockBaseUnit: plan.stockBaseUnit, stockBaseQuantity: plan.stockBaseQuantity, soldByWeight: plan.soldByWeight,
             stockConversionFamily: plan.stockConversionFamily, unit: plan.soldAs === "KILO" ? "kilo" : plan.soldAs === "SACK" ? "sako" : "pc",
-            reviewStatus: "FOR_REVIEW", createdById: actor.userId, trackStock: !untracked,
+            reviewStatus: "ACTIVE", createdById: actor.userId, trackStock: !untracked, // goes straight into Products — no owner review
           },
           select: productSelect,
         });
@@ -550,17 +550,31 @@ export class BentaService {
           ? { id: "", docNumber: "" }
           : await this.writeStockIn(tx, storeId, actor, loc.id, { supplierName: null, note: `New item: ${plan.name}`, lines: [{ product, quantity: plan.openingQty, unitCostMinor: null }] }, input.signatures);
         const hawak = untracked ? "not counted" : noStock ? "none yet (pre-order)" : plan.soldAs === "KILO" ? formatKilos(plan.openingQty) : `${plan.openingQty} ${plan.soldAs === "SACK" ? "sack(s)" : "piece(s)"}`;
-        const approval = await requestApproval(tx, {
-          storeId, kind: "MANUAL_ITEM", documentType: "PRODUCT", documentId: product.id, locationId: loc.id,
-          summary: `New item at ${loc.name}: ${plan.name} — ₱${(plan.priceMinor / 100).toFixed(2)}${plan.soldAs === "KILO" ? "/kg" : ""}, cost ₱${(plan.costMinor / 100).toFixed(2)}, on hand ${hawak}. Approve it, or merge it into another product.`,
-          detail: { soldAs: plan.soldAs, gramsPerUnit: plan.stockBaseQuantity, priceMinor: plan.priceMinor, costMinor: plan.costMinor, openingQty: noStock ? 0 : plan.openingQty, stockInId: doc.id },
-          requestedById: actor.userId,
-        });
-        await tx.auditLog.create({ data: { storeId, actorType: "USER", actorId: actor.userId, action: "product.manual_create", entityType: "Product", entityId: product.id, after: { name: plan.name, soldAs: plan.soldAs, priceMinor: plan.priceMinor, costMinor: plan.costMinor } } });
-        return { productId: product.id, name: product.name, stockInDocNumber: doc.docNumber, approvalId: approval.id };
+        await tx.auditLog.create({ data: { storeId, actorType: "USER", actorId: actor.userId, action: "product.manual_create", entityType: "Product", entityId: product.id, after: { name: plan.name, soldAs: plan.soldAs, priceMinor: plan.priceMinor, costMinor: plan.costMinor, onHand: noStock ? "none yet" : hawak } } });
+        return { productId: product.id, name: product.name, stockInDocNumber: doc.docNumber, approvalId: null };
       }, txOptions());
       await cacheBust(cacheKey("products", storeId));
       return result;
+    });
+  }
+
+  /** Recent manual stock-ins (newest first) with their lines, so each one can be printed as a receipt. */
+  async stockInList(storeId: string, actor: Actor, locationId: string | undefined) {
+    return this.run(async () => {
+      const loc = await this.location(storeId, actor, locationId);
+      const docs = await prisma.stockIn.findMany({
+        where: { storeId, locationId: loc.id }, orderBy: { createdAt: "desc" }, take: 30,
+        select: { id: true, docNumber: true, supplierName: true, note: true, createdAt: true, lines: { select: { productId: true, quantity: true, unitCostMinor: true } } },
+      });
+      const ids = [...new Set(docs.flatMap((d) => d.lines.map((l) => l.productId)))];
+      const prods = new Map((await prisma.product.findMany({ where: { storeId, id: { in: ids } }, select: { id: true, name: true, stockBaseUnit: true, stockBaseQuantity: true } })).map((p) => [p.id, p]));
+      return {
+        location: { id: loc.id, name: loc.name },
+        stockIns: docs.map((d) => ({
+          id: d.id, docNumber: d.docNumber, supplierName: d.supplierName, note: d.note, createdAt: d.createdAt,
+          lines: d.lines.map((l) => { const p = prods.get(l.productId); return { name: p?.name ?? "", loose: p?.stockBaseUnit === "g" && p?.stockBaseQuantity === 1, quantity: l.quantity, unitCostMinor: l.unitCostMinor }; }),
+        })),
+      };
     });
   }
 

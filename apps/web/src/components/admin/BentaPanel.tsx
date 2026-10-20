@@ -654,7 +654,7 @@ function QuickCustomer({ onCancel, onAdded }: { onCancel: () => void; onAdded: (
 }
 
 /** New item: name, sold as, weight, price, cost, what is on hand now — signed by staff. */
-export function NewItemForm({ locationId, onCancel, onDone, preorder = false }: { locationId?: string; onCancel: () => void; onDone: () => void | Promise<void>; /** Pre-order: only the cost and the selling price; nothing is on hand yet, and no signature. */ preorder?: boolean }) {
+export function NewItemForm({ locationId, onCancel, onDone, preorder = false }: { locationId?: string; onCancel: () => void; onDone: (created?: { productId: string; name: string; costMinor: number; priceMinor: number }) => void | Promise<void>; /** Pre-order / stock in: only the cost and the selling price; nothing is on hand yet, and no signature. */ preorder?: boolean }) {
   const [name, setName] = useState("");
   const [soldAs, setSoldAs] = useState<"SACK" | "KILO" | "PIECE">("SACK");
   const [kilosPerSack, setKilosPerSack] = useState("25");
@@ -683,8 +683,8 @@ export function NewItemForm({ locationId, onCancel, onDone, preorder = false }: 
     const d = (await res.json().catch(() => null)) as ApiBody | null;
     setBusy(false);
     if (!res.ok) { setError(errText(d, "Could not add")); return; }
-    toast(`Added: ${name.trim()} (the owner will review it)`);
-    await onDone();
+    toast(`Added: ${name.trim()}`);
+    await onDone({ productId: String(d?.productId ?? ""), name: name.trim(), costMinor: toMinor(cost), priceMinor: toMinor(price) });
   };
 
   const num = (v: string) => v.replace(/[^\d.]/g, "").replace(/(\..*)\./g, "$1").slice(0, 10);
@@ -722,7 +722,7 @@ export function NewItemForm({ locationId, onCancel, onDone, preorder = false }: 
         </>)}
         {!preorder && (<><div className="fw-semibold">Your signature (staff)</div>
         <SignaturePad onSignature={setSig} /></>)}
-        {preorder && <p className="small text-muted mt-2 mb-0">Nothing is on hand yet. The owner will review this new item.</p>}
+        {preorder && <p className="small text-muted mt-2 mb-0">Nothing is on hand yet. The new item goes straight into Products.</p>}
         <div className="d-flex justify-content-between mt-3">
           <button type="button" className="btn btn-outline-secondary btn-lg" disabled={busy} onClick={onCancel}>Back</button>
           <button type="button" className="btn btn-success btn-lg" disabled={!ready || busy} onClick={() => void save()}>{busy ? "Please wait…" : "Add"}</button>

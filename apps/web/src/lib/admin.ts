@@ -156,7 +156,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { id: "approvals", label: "For your approval", icon: "bi-inbox" },
       { id: "trips", label: "Transfers & releases", icon: "bi-truck" },
       { id: "resack", label: "Resack", icon: "bi-arrow-repeat" },
-      { id: "pasok", label: "Stock in & review", icon: "bi-box-arrow-in-down" },
+      { id: "pasok", label: "Stock in", icon: "bi-box-arrow-in-down" },
       { id: "bilangin", label: "Count", icon: "bi-clipboard-check" },
       { id: "ulat", label: "Reports & closing", icon: "bi-bar-chart-line" },
       { id: "drafts", label: "To finish", icon: "bi-hourglass-split" },

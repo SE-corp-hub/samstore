@@ -15,6 +15,7 @@ import { sendStep } from "../../lib/offlineQueue";
 import SignCapture, { type KargadorOption, type SignatureOut } from "./SignCapture";
 import { askText } from "../../lib/ask";
 import { printSlip, type Slip } from "../../lib/slip-print";
+import { getPrinterSettings } from "../../lib/printer-settings";
 
 interface Product { id: string; name: string; stockBaseUnit: string | null; stockBaseQuantity: number | null; stockConversionFamily: string | null; isActive?: boolean }
 interface Location { id: string; name: string; code: string | null; isActive: boolean }
@@ -60,6 +61,8 @@ export default function ResackPanel() {
   const [stock, setStock] = useState<Record<string, number>>({});
   const [storeName, setStoreName] = useState("");
   const [receipt, setReceipt] = useState<Slip | null>(null);
+  // "Print the receipt right after each transaction" (Printer settings on this phone).
+  useEffect(() => { if (receipt && getPrinterSettings().autoPrint) printSlip(receipt); }, [receipt]);
 
   useEffect(() => {
     (async () => {
@@ -161,11 +164,11 @@ export default function ResackPanel() {
   const started = jobs.filter((j) => j.status === "STARTED");
   const recent = jobs.filter((j) => j.status !== "STARTED").slice(0, 10);
   const reprint = (j: Job) => printSlip({
-    storeName: storeName || "SAM STORE", title: "RESACK RECEIPT (REPRINT)", reference: j.docNumber, when: new Date(j.startedAt).toLocaleString("en-PH"),
+    storeName: storeName || "SAM STORE", title: j.status === "STARTED" ? "RESACK (IN PROGRESS)" : "RESACK RECEIPT", reference: j.docNumber, when: new Date(j.startedAt).toLocaleString("en-PH"),
     lines: [{ label: "Store", value: here?.name ?? "" }, { label: "From", value: `${j.inputQty} × ${j.input.name} (${kg(j.inputGrams)} kg)` }],
     rows: j.outputs.map((o) => ({ name: o.product.name, qty: o.product.soldByWeight ? `${kg(o.quantity)} kg` : `${o.quantity} sacks` })),
-    totals: [{ label: "Out", value: `${kg(j.outputGrams ?? 0)} kg` }, { label: "Short", value: `${kg(j.lossGrams ?? 0)} kg` }],
-    signatures: j.kargador ? [{ role: "Porter", name: j.kargador.name }] : [], footer: "Reprint", widthMm: 58,
+    totals: j.status === "FINISHED" ? [{ label: "Out", value: `${kg(j.outputGrams ?? 0)} kg` }, { label: "Short", value: `${kg(j.lossGrams ?? 0)} kg` }] : [],
+    signatures: j.kargador ? [{ role: "Porter", name: j.kargador.name }] : [],
   });
 
   return (
@@ -192,7 +195,7 @@ export default function ResackPanel() {
         <div className="alert alert-success d-flex flex-wrap align-items-center justify-content-between gap-2">
           <strong>Resack saved{receipt.reference ? ` — ${receipt.reference}` : ""}.</strong>
           <span className="d-flex gap-2">
-            <button type="button" className="btn btn-dark" onClick={() => printSlip(receipt)}>Print receipt</button>
+            <button type="button" className="btn btn-dark btn-lg" onClick={() => printSlip(receipt)}><i className="bi bi-printer me-1"></i>Print receipt</button>
             <button type="button" className="btn btn-outline-secondary" onClick={() => setReceipt(null)}>Close</button>
           </span>
         </div>
@@ -213,6 +216,7 @@ export default function ResackPanel() {
                     <div className="small text-muted">{kg(j.inputGrams)} kg{j.kargador ? ` · ${j.kargador.name}` : ""} · {new Date(j.startedAt).toLocaleString("en-PH")}</div>
                   </div>
                   <div className="d-flex gap-2">
+                    <button className="btn btn-outline-dark" onClick={() => reprint(j)}><i className="bi bi-receipt me-1"></i>Receipt</button>
                     <button className="btn btn-outline-secondary" onClick={() => void cancelJob(j)}>Cancel</button>
                     <button className="btn btn-success" onClick={() => { setFinishing(j); setOuts([{ productId: "", amount: "" }]); }}>Finish</button>
                   </div>
@@ -231,7 +235,7 @@ export default function ResackPanel() {
                       {j.status === "FINISHED" && <div className="small">{kg(j.inputGrams)} kg → {kg(j.outputGrams ?? 0)} kg · short {kg(j.lossGrams ?? 0)} kg ({((j.lossBp ?? 0) / 100).toFixed(2)}%)</div>}
                     </div>
                     <div className="text-end">
-                      {j.status === "FINISHED" && <button type="button" className="btn btn-sm btn-outline-dark me-2" onClick={() => reprint(j)}>Reprint</button>}
+                      {j.status !== "CANCELLED" && <button type="button" className="btn btn-sm btn-outline-dark me-2" onClick={() => reprint(j)}><i className="bi bi-receipt me-1"></i>Receipt</button>}
                       {j.status === "CANCELLED" && <span className="badge text-bg-secondary">Cancelled</span>}
                       {j.varietyChange && <span className="badge text-bg-info ms-1">Variety change</span>}
                       {j.approvalId && <span className="badge text-bg-warning ms-1">To the owner</span>}

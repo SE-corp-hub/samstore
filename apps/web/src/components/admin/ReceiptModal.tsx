@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { API_URL } from "../../config";
 import { adminHeaders } from "../../lib/admin";
+import { printSlip, type Slip } from "../../lib/slip-print";
 
 // Printable receipt view (browser print). VAT display-only label per decision #2.
 
@@ -59,6 +60,36 @@ function useReceipt(orderId: string) {
     return () => { alive = false; };
   }, [orderId]);
   return { data, error, settings };
+}
+
+/** The receipt as a clean one-page slip. Printed through a hidden frame, one copy only. */
+function receiptSlip(d: ReceiptData, header: string | null | undefined, footer: string | null | undefined, showVat: boolean): Slip {
+  const pesos = (m: number) => `₱${(m / 100).toFixed(2)}`;
+  const totals: { label: string; value: string }[] = [{ label: "Subtotal", value: pesos(d.subtotalMinor) }];
+  if (d.deliveryFeeMinor > 0) totals.push({ label: "Delivery", value: pesos(d.deliveryFeeMinor) });
+  if (d.discountMinor > 0) totals.push({ label: "Discount", value: `-${pesos(d.discountMinor)}` });
+  totals.push({ label: "TOTAL", value: pesos(d.totalMinor) });
+  if (showVat && d.vat?.showOnReceipt && d.vat.enabled) {
+    totals.push({ label: "VATable Sales", value: pesos(d.vat.vatableMinor) }, { label: `VAT ${(d.vat.rateBp / 100).toFixed(d.vat.rateBp % 100 === 0 ? 0 : 2)}%`, value: pesos(d.vat.vatMinor) });
+    if (d.vat.vatExemptMinor > 0) totals.push({ label: "VAT-Exempt Sales", value: pesos(d.vat.vatExemptMinor) });
+  }
+  for (const p of d.payments) {
+    if (p.type === "refund") totals.push({ label: "Refund", value: pesos(p.amountMinor) });
+    else if (p.type !== "void") {
+      totals.push({ label: p.methodLabel ?? p.method, value: pesos(p.amountMinor) });
+      if (p.changeMinor > 0) totals.push({ label: "Change", value: pesos(p.changeMinor) });
+    }
+  }
+  if (d.tenders && d.tenders.outstandingMinor > 0) totals.push({ label: "Still due", value: pesos(d.tenders.outstandingMinor) });
+  return {
+    storeName: d.storeName, title: "RECEIPT", reference: d.orderNumber, when: new Date(d.createdAt).toLocaleString("en-PH"),
+    header: header || (d.vat?.tin ? `TIN ${d.vat.tin}` : null),
+    rows: d.items.map((i) => ({ name: i.productName, qty: `${i.quantity} × ${pesos(i.unitPriceMinor)} = ${pesos(i.lineTotalMinor)}` })),
+    totals,
+    signatures: d.signatureData ? [{ role: "Customer", name: d.customerName || "Customer", imageData: d.signatureData }] : [],
+    footer: footer || "Salamat po!",
+    copies: 1,
+  };
 }
 
 export default function ReceiptModal({ orderId, onClose }: { orderId: string; onClose: () => void }) {
@@ -192,7 +223,7 @@ export default function ReceiptModal({ orderId, onClose }: { orderId: string; on
             </div>
             <div className="modal-footer">
               <button className="btn btn-outline-secondary btn-sm" onClick={onClose}>Close</button>
-              <button className="btn btn-primary btn-sm" onClick={() => window.print()}>Print</button>
+              <button className="btn btn-primary btn-sm" disabled={!data} onClick={() => data && printSlip(receiptSlip(data, settings?.receiptHeader, settings?.receiptFooter, showVat))}><i className="bi bi-printer me-1"></i>Print (1 copy)</button>
             </div>
           </div>
         </div>

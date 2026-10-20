@@ -104,6 +104,13 @@ export class BentaController {
     }));
   }
 
+  /** GET /admin/stock-in?locationId= — recent manual stock-ins at a location (for the receipt button). */
+  @Get("stock-in")
+  async stockInList(@Req() req: Req_, @Query("locationId") locationId?: string, @Headers("x-store-id") h?: string) {
+    const { storeId, actor } = await this.ctx(req, h);
+    return unwrap(await this.benta.stockInList(storeId, actor, locationId));
+  }
+
   /** GET /admin/products/review — Susuriin: manual items waiting for the owner. */
   @Get("products/review")
   async review(@Req() req: Req_, @Headers("x-store-id") h?: string) {

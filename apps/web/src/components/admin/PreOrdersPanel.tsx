@@ -28,7 +28,9 @@ interface PosProduct {
   availableQuantity: number; category: { name: string } | null;
 }
 interface PosCustomer { id: string; name: string | null; email: string | null; phone: string | null; }
-interface CartLine { product: PosProduct; quantity: number; }
+interface CartLine { product: PosProduct; quantity: number; /** Manual price (centavos each) when it differs from the list price. */ price?: number; reason?: string }
+const unitOf = (l: CartLine) => l.price ?? l.product.priceMinor;
+const priceMissingReason = (l: CartLine) => l.price !== undefined && l.price !== l.product.priceMinor && (l.reason ?? "").trim().length < 3;
 
 const toPesos = (m: number) => `₱${(m / 100).toFixed(2)}`;
 const PRE_STATUS_BADGE: Record<string, string> = {
@@ -392,7 +394,7 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
   };
 
   // ── Build sub-tab: embedded POS product-selection flow (copied from PosPanel) ──
-  const buildSubtotal = buildCart.reduce((s, l) => s + l.product.priceMinor * l.quantity, 0);
+  const buildSubtotal = buildCart.reduce((s, l) => s + unitOf(l) * l.quantity, 0);
 
   const addProduct = (product: PosProduct) => {
     setError(null);
@@ -427,6 +429,7 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
   // Save the built cart as an ON_HOLD pre-order draft, then jump to the list.
   const savePreorder = async () => {
     if (buildCart.length === 0) { setError("Cart is empty"); return; }
+    if (buildCart.some(priceMissingReason)) { setError("Write a short reason for every price you changed."); return; }
     setBuildBusy(true); setError(null);
     try {
       const customer = await ensureCustomer();
@@ -434,7 +437,7 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
       const res = await fetch(`${API_URL}/admin/pos/preorder`, {
         method: "POST", headers: { "Content-Type": "application/json", ...adminHeaders() },
         body: JSON.stringify({
-          items: buildCart.map((l) => ({ productId: l.product.id, quantity: l.quantity })),
+          items: buildCart.map((l) => ({ productId: l.product.id, quantity: l.quantity, ...(l.price !== undefined && l.price !== l.product.priceMinor ? { unitPriceMinorOverride: l.price, priceOverrideReason: (l.reason ?? "").trim() } : {}) })),
           customerId: customer,
           startAt: undefined,
           dueAt: undefined,
@@ -696,14 +699,21 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
                     <div key={l.product.id} className="d-flex align-items-center gap-2 mb-1">
                       <div className="flex-grow-1 small">
                         <div className="fw-semibold">{l.product.name}</div>
-                        <div className="text-muted">{maybePrice(l.product.priceMinor)}</div>
+                        <div className="text-muted">list {maybePrice(l.product.priceMinor)}</div>
+                        <PesoInput className="form-control form-control-sm mt-1" aria-label={`Price of ${l.product.name}`} style={{ maxWidth: 120 }}
+                          value={l.price !== undefined ? String(l.price / 100) : ""} placeholder={(l.product.priceMinor / 100).toFixed(2)}
+                          onChange={(v) => { const m = v === "" ? undefined : Math.round(Number(v) * 100); const same = m === undefined || m === l.product.priceMinor; setBuildCart((c) => c.map((x) => (x.product.id === l.product.id ? { ...x, price: same ? undefined : m, reason: same ? undefined : x.reason } : x))); }} />
+                        {l.price !== undefined && l.price !== l.product.priceMinor && (
+                          <input className={`form-control form-control-sm mt-1 ${priceMissingReason(l) ? "is-invalid" : ""}`} placeholder="Why the price changed" maxLength={140} aria-label="Reason for the new price"
+                            value={l.reason ?? ""} onChange={(e) => setBuildCart((c) => c.map((x) => (x.product.id === l.product.id ? { ...x, reason: e.target.value } : x)))} />
+                        )}
                       </div>
                       <div className="input-group input-group-sm" style={{ width: 104 }}>
                         <button className="btn btn-outline-secondary" onClick={() => setQty(l.product.id, l.quantity - 1)}>-</button>
                         <input className="form-control text-center" type="number" min={1} value={l.quantity} onChange={(e) => { const v = parseInt(e.target.value, 10); if (v >= 1) setQty(l.product.id, v); }} />
                         <button className="btn btn-outline-secondary" onClick={() => setQty(l.product.id, l.quantity + 1)}>+</button>
                       </div>
-                      <div className="fw-semibold small" style={{ width: 66, textAlign: "right" }}>{maybePrice(l.product.priceMinor * l.quantity)}</div>
+                      <div className="fw-semibold small" style={{ width: 66, textAlign: "right" }}>{maybePrice(unitOf(l) * l.quantity)}</div>
                     </div>
                   ))}
                 </>

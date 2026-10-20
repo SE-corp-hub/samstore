@@ -165,7 +165,7 @@ test("M5: ₱100 at ₱52/kg = 1.923 kg for exactly ₱100; 1.25 kg = ₱65; Sto
   assert.equal(s2.ok && s2.value.locationId, fx.s2);
 });
 
-test("M5: a manual item sells at once, waits in Susuriin, and the owner confirms it", async () => {
+test("M5: a manual item sells at once and goes straight into Products (no owner review)", async () => {
   const fx = await fixture();
   const noSig = await svc.manualItem(fx.storeId, fx.staff1, { name: "Jasmine 25 kg", soldAs: "SACK", gramsPerSack: 25_000, priceMinor: 150_000, costMinor: 120_000, openingQty: 3 });
   assert.equal(noSig.ok, false);
@@ -177,21 +177,34 @@ test("M5: a manual item sells at once, waits in Susuriin, and the owner confirms
   if (!m.ok) return;
   assert.match(m.value.stockInDocNumber, /^IN-\d{6}$/);
   assert.equal(await onHand(fx, m.value.productId, fx.s1), 3);
+  assert.equal((await prisma.product.findUniqueOrThrow({ where: { id: m.value.productId } })).reviewStatus, "ACTIVE");
+  assert.equal(m.value.approvalId, null);
+  assert.equal(await prisma.approvalRequest.count({ where: { storeId: fx.storeId, kind: "MANUAL_ITEM" } }), 0, "no approval is asked");
   const sale = await svc.sell(fx.storeId, fx.staff1, { idempotencyKey: key(), lines: [{ productId: m.value.productId, quantity: 1 }], payment: { method: "cash" } });
   assert.equal(sale.ok && sale.value.totalMinor, 150_000, msg(sale));
-  const review = await svc.reviewList(fx.storeId);
-  assert.deepEqual(review.map((p) => [p.name, p.timesSold]), [["Jasmine 25 kg", 1]]);
-  const appr = await prisma.approvalRequest.findUniqueOrThrow({ where: { id: m.value.approvalId } });
-  assert.deepEqual([appr.kind, appr.status, appr.documentId], ["MANUAL_ITEM", "PENDING", m.value.productId]);
-  assert.match(appr.summary, /Jasmine 25 kg/);
-
-  const people = new PeopleService();
-  const staffTry = await people.decideApproval(fx.storeId, appr.id, fx.staff1, { decision: "APPROVE", pin: PIN });
-  assert.equal(staffTry.ok, false, "staff cannot confirm");
-  const ok = await people.decideApproval(fx.storeId, appr.id, fx.owner, { decision: "APPROVE", pin: PIN });
-  assert.equal(ok.ok, true, msg(ok));
-  assert.equal((await prisma.product.findUniqueOrThrow({ where: { id: m.value.productId } })).reviewStatus, "ACTIVE");
   assert.equal((await svc.reviewList(fx.storeId)).length, 0);
+});
+
+test("M5: a pre-order item can be added with a cost and a price and nothing on hand", async () => {
+  const fx = await fixture();
+  const m = await svc.manualItem(fx.storeId, fx.staff1, { name: "Dinorado 25 kg", soldAs: "SACK", gramsPerSack: 25_000, priceMinor: 180_000, costMinor: 150_000, noOpeningStock: true });
+  assert.equal(m.ok, true, msg(m));
+  if (!m.ok) return;
+  assert.equal(m.value.stockInDocNumber, "", "no stock-in was written");
+  assert.equal(await onHand(fx, m.value.productId, fx.s1), 0);
+  const p = await prisma.product.findUniqueOrThrow({ where: { id: m.value.productId } });
+  assert.deepEqual([p.priceMinor, p.costMinor, p.reviewStatus], [180_000, 150_000, "ACTIVE"]);
+});
+
+test("M5: recent stock-ins are listed with their lines (for the receipt)", async () => {
+  const fx = await fixture();
+  const r = await svc.stockIn(fx.storeId, fx.staff1, { lines: [{ productId: fx.sin25.id, quantity: 4, unitCostMinor: 120_000 }], supplierName: "Mang Ben", signatures: staffSig });
+  assert.equal(r.ok, true, msg(r));
+  const l = await svc.stockInList(fx.storeId, fx.staff1, undefined);
+  assert.equal(l.ok, true, msg(l));
+  if (!l.ok) return;
+  assert.equal(l.value.stockIns[0]?.supplierName, "Mang Ben");
+  assert.deepEqual(l.value.stockIns[0]?.lines.map((x) => [x.name, x.quantity, x.unitCostMinor]), [[fx.sin25.name ?? "", 4, 120_000]]);
 });
 
 test("M5: merging a manual item moves its stock into the real product by weight", async () => {
@@ -199,6 +212,7 @@ test("M5: merging a manual item moves its stock into the real product by weight"
   const m = await svc.manualItem(fx.storeId, fx.staff1, { name: "Sinandomeng 25kg (bago)", soldAs: "SACK", gramsPerSack: 25_000, priceMinor: 130_000, costMinor: 110_000, openingQty: 2, signatures: staffSig });
   assert.equal(m.ok, true, msg(m));
   if (!m.ok) return;
+  await prisma.product.update({ where: { id: m.value.productId }, data: { reviewStatus: "FOR_REVIEW" } }); // an older item still waiting from before
   const staff = await svc.merge(fx.storeId, fx.staff1, m.value.productId, fx.sin25.id);
   assert.equal(staff.ok, false, "staff cannot merge");
   const r = await svc.merge(fx.storeId, fx.owner, m.value.productId, fx.sin25.id);
@@ -207,7 +221,6 @@ test("M5: merging a manual item moves its stock into the real product by weight"
   assert.equal(await onHand(fx, m.value.productId, fx.s1), 0);
   const p = await prisma.product.findUniqueOrThrow({ where: { id: m.value.productId } });
   assert.deepEqual([p.reviewStatus, p.isActive, p.mergedIntoId], ["MERGED", false, fx.sin25.id]);
-  assert.equal((await prisma.approvalRequest.findUniqueOrThrow({ where: { id: m.value.approvalId } })).status, "APPROVED");
   const moves = await prisma.stockMovement.findMany({ where: { storeId: fx.storeId, documentType: "PRODUCT_MERGE" }, select: { type: true, delta: true } });
   assert.deepEqual(moves.map((x) => `${x.type}${x.delta}`).sort(), ["MERGE_IN2", "MERGE_OUT-2"]);
   const again = await svc.merge(fx.storeId, fx.owner, m.value.productId, fx.sin25.id);
