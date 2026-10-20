@@ -5,6 +5,7 @@
 //                     with optional line replacement (resume-edit), void restores stock.
 // Totals are always server-computed; stock mutations are atomic.
 
+import { coverShortage } from "../domain/buffer.js";
 import { isTracked } from "../domain/stock-tracking.js";
 import { prisma } from "../persistence/prisma-repositories.js";
 import { cacheBust, cacheKey } from "../persistence/ttl-cache.js";
@@ -481,6 +482,7 @@ export class PosService {
       if (localLines.length) await this.decrementStock(tx, storeId, localLines, { orderId: id, createdBy: actorId });
       // Lines served from another location leave that location at once (no release step).
       for (const l of remoteLines) {
+        await coverShortage(tx, storeId, { productId: l.productId, warehouseId: l.sourceLocationId!, needed: l.quantity, actorId, documentType: "SALE", documentId: id, reason: "sale" });
         await deductStock(tx, storeId, [{ productId: l.productId, quantity: l.quantity }], { type: "CONSUME", orderId: id, createdBy: actorId, warehouseId: l.sourceLocationId!, documentType: "SALE", documentId: id });
       }
     }, txOptions());

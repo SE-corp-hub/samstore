@@ -202,17 +202,17 @@ export class StoreReportService {
     owed: { productId: string; name: string; unit: string; quantity: number; valueMinor: number; oldestAt: string | null }[];
     surplus: { productId: string; name: string; unit: string; quantity: number }[];
     totals: { owedMinor: number; owedItems: number };
-    entries: { at: string; productName: string; unit: string; quantity: number; orderNumber: string | null; store: string | null; by: string | null }[];
+    entries: { at: string; productName: string; unit: string; quantity: number; orderNumber: string | null; store: string | null; by: string | null; what: string }[];
   }>> {
     if (!isOwner(actor)) return fail("forbidden", "The Buffer report is for the owner");
     const buf = await prisma.warehouse.findFirst({ where: { storeId, type: "BUFFER", isActive: true }, select: { id: true, name: true } });
     if (!buf) return { ok: true, value: { buffer: null, owed: [], surplus: [], totals: { owedMinor: 0, owedItems: 0 }, entries: [] } };
     const rows = await this.stockRows(storeId, buf.id, false);
     const moves = await prisma.stockMovement.findMany({
-      where: { storeId, warehouseId: buf.id, delta: { lt: 0 }, documentType: "SALE" }, orderBy: { createdAt: "desc" }, take: 150,
-      select: { createdAt: true, productId: true, delta: true, documentId: true, createdBy: true },
+      where: { storeId, warehouseId: buf.id, delta: { lt: 0 } }, orderBy: { createdAt: "desc" }, take: 150,
+      select: { createdAt: true, productId: true, delta: true, documentId: true, documentType: true, note: true, createdBy: true },
     });
-    const orders = new Map((await prisma.order.findMany({ where: { storeId, id: { in: [...new Set(moves.map((m) => m.documentId).filter((x): x is string => !!x))] } }, select: { id: true, orderNumber: true, sellingLocation: { select: { name: true } } } })).map((o) => [o.id, o]));
+    const orders = new Map((await prisma.order.findMany({ where: { storeId, id: { in: [...new Set(moves.filter((m) => m.documentType === "SALE").map((m) => m.documentId).filter((x): x is string => !!x))] } }, select: { id: true, orderNumber: true, sellingLocation: { select: { name: true } } } })).map((o) => [o.id, o]));
     const users = new Map((await prisma.user.findMany({ where: { id: { in: [...new Set(moves.map((m) => m.createdBy).filter((x): x is string => !!x))] } }, select: { id: true, name: true } })).map((u) => [u.id, u.name]));
     const prods = new Map((await prisma.product.findMany({ where: { storeId, id: { in: [...new Set(moves.map((m) => m.productId))] } }, select: productSelect })).map((x) => [x.id, x]));
     const oldest = new Map<string, Date>();
@@ -231,8 +231,8 @@ export class StoreReportService {
         entries: moves.slice(0, 40).map((m) => {
           const p = prods.get(m.productId);
           const loose = p ? isLooseP(p) : false;
-          const o = m.documentId ? orders.get(m.documentId) : undefined;
-          return { at: m.createdAt.toISOString(), productName: p?.name ?? "Item", unit: loose ? "kg" : "pcs", quantity: loose ? -m.delta / 1000 : -m.delta, orderNumber: o?.orderNumber ?? null, store: o?.sellingLocation?.name ?? null, by: m.createdBy ? users.get(m.createdBy) ?? null : null };
+          const o = m.documentId && m.documentType === "SALE" ? orders.get(m.documentId) : undefined;
+          return { at: m.createdAt.toISOString(), productName: p?.name ?? "Item", unit: loose ? "kg" : "pcs", quantity: loose ? -m.delta / 1000 : -m.delta, orderNumber: o?.orderNumber ?? null, store: o?.sellingLocation?.name ?? null, by: m.createdBy ? users.get(m.createdBy) ?? null : null, what: (m.note ?? "").replace(/^Buffer covered: /, "") || (m.documentType === "SALE" ? "sale" : "stock out") };
         }),
       },
     };

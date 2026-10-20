@@ -328,3 +328,15 @@ test("Customer return needs no signature: good goes back on the shelf, damaged d
   assert.equal(await prisma.approvalRequest.count({ where: { storeId: fx.storeId, kind: "REFUND" } }), 2);
   assert.equal((await flow.recentReturns(fx.storeId, fx.staff1)).length, 2);
 });
+
+test("Buffer store: a move that is short is covered by the Buffer instead of being refused", async () => {
+  const fx = await fixture({ s1: 0, s2: 2 });
+  const buffer = await prisma.warehouse.create({ data: { storeId: fx.storeId, name: "Buffer store", code: "BF", type: "BUFFER" } });
+  const flow = new TransferFlowService();
+  const r = await flow.moveNow(fx.storeId, fx.owner, { fromLocationId: fx.s2, toLocationId: fx.s1, productId: fx.productId, quantity: 5 });
+  assert.equal(r.ok, true, msg(r));
+  assert.deepEqual(await level(fx, fx.s2), { quantityOnHand: 0, quantityReserved: 0 }, "Store 2 gave what it had");
+  assert.deepEqual(await level(fx, fx.s1), { quantityOnHand: 5, quantityReserved: 0 });
+  const b = await prisma.stockLevel.findFirstOrThrow({ where: { storeId: fx.storeId, productId: fx.productId, warehouseId: buffer.id } });
+  assert.equal(b.quantityOnHand, -3, "the Buffer owes 3 until the stock is managed");
+});

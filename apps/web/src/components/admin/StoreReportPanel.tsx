@@ -25,7 +25,7 @@ interface StockData { location: { id: string; name: string }; rows: StockRow[]; 
 interface SalesTotals { count: number; totalMinor: number; cashMinor: number; gcashMinor: number; creditMinor: number; otherMinor: number; costMinor?: number; grossProfitMinor?: number }
 interface SalesData { location: { id: string; name: string }; from: string; to: string; sales: SalesTotals; cashInMinor: number; creditGivenMinor: number; creditCollectedMinor: number; items: { name: string; unit: string; quantity: number; salesMinor: number }[]; days: { date: string; count: number; totalMinor: number }[] }
 interface CompareData { from: string; to: string; stores: { location: { id: string; name: string; type: string }; sales: SalesTotals; cashInMinor: number; creditGivenMinor: number; creditCollectedMinor: number; stock: { items: number; low: number; empty: number; valueMinor: number } }[]; total: { salesMinor: number; count: number; grossProfitMinor: number; creditGivenMinor: number; stockValueMinor: number } }
-interface BufferData { buffer: { id: string; name: string } | null; owed: { productId: string; name: string; unit: string; quantity: number; valueMinor: number; oldestAt: string | null }[]; surplus: { productId: string; name: string; unit: string; quantity: number }[]; totals: { owedMinor: number; owedItems: number }; entries: { at: string; productName: string; unit: string; quantity: number; orderNumber: string | null; store: string | null; by: string | null }[] }
+interface BufferData { buffer: { id: string; name: string } | null; owed: { productId: string; name: string; unit: string; quantity: number; valueMinor: number; oldestAt: string | null }[]; surplus: { productId: string; name: string; unit: string; quantity: number }[]; totals: { owedMinor: number; owedItems: number }; entries: { at: string; productName: string; unit: string; quantity: number; orderNumber: string | null; store: string | null; by: string | null; what: string }[] }
 interface DaySection { location: { id: string; name: string }; locked: boolean; closedAt: string | null; cashCountedMinor: number | null; cashVarianceMinor: number | null; sales: { count: number; totalMinor: number; cashMinor: number; gcashMinor: number; utangMinor: number }; cash: { expectedMinor: number }; utang: { givenMinor: number; collectedMinor: number }; stockIn: { documents: number; units: number }; kilosByVariety: { variety: string; grams: number; salesMinor: number }[] }
 
 const qtyText = (r: StockRow) => (r.loose ? kgText(r.onHand) : `${r.onHand.toLocaleString("en-PH")} pcs`);
@@ -255,7 +255,7 @@ export default function StoreReportPanel({ role, onNavigate }: { role?: string; 
               <ul className="list-group">
                 {buffer.entries.map((e, i) => (
                   <li key={i} className="list-group-item small">
-                    <b>{e.quantity.toLocaleString("en-PH", { maximumFractionDigits: 3 })} {e.unit} {e.productName}</b>{e.store ? ` · sold at ${e.store}` : ""}
+                    <b>{e.quantity.toLocaleString("en-PH", { maximumFractionDigits: 3 })} {e.unit} {e.productName}</b>{e.store ? ` · sold at ${e.store}` : ` · ${e.what}`}
                     <div className="text-muted">{e.orderNumber ?? ""}{e.by ? ` · ${e.by}` : ""} · {new Date(e.at).toLocaleString()}</div>
                   </li>
                 ))}

@@ -13,6 +13,7 @@
 import type { ApiError } from "@sam-store/contracts";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../persistence/prisma-repositories.js";
+import { bufferIdOf, coverShortage } from "../domain/buffer.js";
 import { addForTrip, InsufficientStockError, releaseForTrip, type TripLeg } from "../domain/movements.js";
 import { gramsOf, planResack, ResackError, valueOf, type ResackPlan } from "../domain/resack.js";
 import { formatKilos } from "../domain/weight.js";
@@ -165,7 +166,8 @@ export class ResackService {
       await requireSignatures(tx, storeId, { documentType: "RESACK", documentId: job.id, step: "START" }, { kargador: !!data.kargadorId });
     }
     const level = await tx.stockLevel.findFirst({ where: { storeId, productId: data.input.id, warehouseId: data.locationId }, select: { id: true } });
-    if (!level) throw new StepError(conflict(`No ${data.input.name} is recorded at this location`));
+    if (!level && !(await bufferIdOf(tx, storeId))) throw new StepError(conflict(`No ${data.input.name} is recorded at this location`));
+    await coverShortage(tx, storeId, { productId: data.input.id, warehouseId: data.locationId, needed: data.inputQty, actorId: actor.userId, documentType: "RESACK", documentId: job.id, reason: `resack ${docNumber}` });
     await releaseForTrip(tx, this.leg(storeId, data.input.id, data.locationId, actor, job.id, docNumber), 0, data.inputQty, "RESACK_OUT");
     await tx.auditLog.create({
       data: { storeId, actorType: "USER", actorId: actor.userId, action: "resack.start", entityType: "ResackJob", entityId: job.id, after: { inputQty: data.inputQty, inputGrams: data.inputGrams } },

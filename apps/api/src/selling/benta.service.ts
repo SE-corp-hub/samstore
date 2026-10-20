@@ -24,7 +24,7 @@ import { cacheBust, cacheKey } from "../persistence/ttl-cache.js";
 import { PrismaOrderSequenceRepository } from "../persistence/prisma-repositories.js";
 import { randomId } from "../persistence/repositories.js";
 import { addForTrip, deductStock, InsufficientStockError, recordMovement, releaseForTrip, reserveForTrip, unreserveForTrip, type TripLeg } from "../domain/movements.js";
-import { deductWithBuffer } from "../domain/buffer.js";
+import { coverShortage, deductWithBuffer } from "../domain/buffer.js";
 import { formatOrderNumber } from "../domain/order-number.js";
 import { resolveLinePrice, PriceOverrideError } from "../domain/price-override.js";
 import { taxColumnsFor } from "../domain/tax-store.js";
@@ -393,6 +393,7 @@ export class BentaService {
             }
             // Rice taken from another store/warehouse leaves that place at once — no porter, no release step.
             for (const l of priced.filter((x) => x.sourceLocationId)) {
+              await coverShortage(tx, storeId, { productId: l.product.id, warehouseId: l.sourceLocationId!, needed: l.stockQty, actorId: actor.userId, documentType: "SALE", documentId: orderId, reason: `sale ${orderNumber}` });
               await deductStock(tx, storeId, [{ productId: l.product.id, quantity: l.stockQty }], { type: "CONSUME", orderId, createdBy: actor.userId, warehouseId: l.sourceLocationId!, documentType: "SALE", documentId: orderId });
             }
             if (method === "utang" && storeCustomerId) {

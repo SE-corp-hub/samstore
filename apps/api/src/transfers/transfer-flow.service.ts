@@ -14,6 +14,7 @@ import type { ApiError } from "@sam-store/contracts";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../persistence/prisma-repositories.js";
 import { recordCostIn, shelfCostFor } from "../domain/shelf-cost.js";
+import { coverShortage } from "../domain/buffer.js";
 import { addForTrip, deductStock, InsufficientStockError, releaseForTrip, reserveForTrip, transferStock, unreserveForTrip } from "../domain/movements.js";
 import {
   checkArrival, checkRelease, checkReturnBack, deliveryOutcome, readBack, receiveOutcome, returnOutcome,
@@ -434,6 +435,7 @@ export class TransferFlowService {
           select: { id: true },
         });
         await recordCostIn(tx, { storeId, productId: product.id, warehouseId: to.id }, qty, await shelfCostFor(tx, storeId, product.id, from.id));
+        if (from.type !== "BUFFER") await coverShortage(tx, storeId, { productId: product.id, warehouseId: from.id, needed: qty, actorId: actor.userId, documentType: "TRANSFER", documentId: t.id, reason: `move ${docNumber}` });
         await transferStock(tx, { storeId, productId: product.id, fromWarehouseId: from.id, toWarehouseId: to.id, quantity: qty, actorId: actor.userId, documentType: "TRANSFER", documentId: t.id, note: docNumber, sourceMayGoNegative: from.type === "BUFFER" });
         await tx.auditLog.create({ data: { storeId, actorType: "USER", actorId: actor.userId, action: "transfer.move", entityType: "StockTransfer", entityId: t.id, after: { quantity: qty, from: from.name, to: to.name } } });
         out = { id: t.id, docNumber };
@@ -479,6 +481,7 @@ export class TransferFlowService {
       },
       select: { id: true },
     });
+    await coverShortage(tx, input.storeId, { productId: input.productId, warehouseId: input.sourceLocationId, needed: input.quantity, actorId: input.actorId, documentType: "RELEASE", documentId: t.id, reason: `agent order ${docNumber}` });
     await deductStock(tx, input.storeId, [{ productId: input.productId, quantity: input.quantity }], { type: "CONSUME", orderId: input.orderId, createdBy: input.actorId, warehouseId: input.sourceLocationId, documentType: "RELEASE", documentId: t.id });
     return { id: t.id, docNumber };
   }
