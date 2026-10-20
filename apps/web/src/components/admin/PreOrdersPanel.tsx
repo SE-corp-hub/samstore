@@ -15,6 +15,7 @@ import { toast } from "../../lib/toast";
 import ReceiptModal from "./ReceiptModal";
 import { PesoInput } from "../NumberBoxes";
 import { NewItemForm } from "./BentaPanel";
+import PriceReason, { reasonOk } from "./PriceReason";
 import { buildText, openTextApp } from "../../lib/text-message";
 
 interface Preorder {
@@ -30,7 +31,7 @@ interface PosProduct {
 interface PosCustomer { id: string; name: string | null; email: string | null; phone: string | null; }
 interface CartLine { product: PosProduct; quantity: number; /** Manual price (centavos each) when it differs from the list price. */ price?: number; reason?: string }
 const unitOf = (l: CartLine) => l.price ?? l.product.priceMinor;
-const priceMissingReason = (l: CartLine) => l.price !== undefined && l.price !== l.product.priceMinor && (l.reason ?? "").trim().length < 3;
+const priceMissingReason = (l: CartLine) => l.price !== undefined && l.price !== l.product.priceMinor && !reasonOk(l.reason);
 
 const toPesos = (m: number) => `₱${(m / 100).toFixed(2)}`;
 const PRE_STATUS_BADGE: Record<string, string> = {
@@ -277,7 +278,7 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
   const editLinePrice = (l: EditLine) => editPrices[`${l.productId}|${l.variantId ?? ""}`] ?? l.unitPriceMinor;
   const editIsOverridden = (l: EditLine) => editLinePrice(l) !== catalogPriceFor(l.productId, l.variantId);
   const editOverriddenCount = editPre ? editPre.lines.filter(editIsOverridden).length : 0;
-  const editReasonMissing = editOverriddenCount > 0 && editReason.trim().length < 3;
+  const editReasonMissing = editOverriddenCount > 0 && !reasonOk(editReason);
 
   const setEditLinePrice = (l: EditLine, pesosText: string) => {
     const key = `${l.productId}|${l.variantId ?? ""}`;
@@ -437,7 +438,7 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
       const res = await fetch(`${API_URL}/admin/pos/preorder`, {
         method: "POST", headers: { "Content-Type": "application/json", ...adminHeaders() },
         body: JSON.stringify({
-          items: buildCart.map((l) => ({ productId: l.product.id, quantity: l.quantity, ...(l.price !== undefined && l.price !== l.product.priceMinor ? { unitPriceMinorOverride: l.price, priceOverrideReason: (l.reason ?? "").trim() } : {}) })),
+          items: buildCart.map((l) => ({ productId: l.product.id, quantity: l.quantity, ...(l.price !== undefined && l.price !== l.product.priceMinor ? { unitPriceMinorOverride: l.price, priceOverrideReason: l.reason } : {}) })),
           customerId: customer,
           startAt: undefined,
           dueAt: undefined,
@@ -704,8 +705,7 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
                           value={l.price !== undefined ? String(l.price / 100) : ""} placeholder={(l.product.priceMinor / 100).toFixed(2)}
                           onChange={(v) => { const m = v === "" ? undefined : Math.round(Number(v) * 100); const same = m === undefined || m === l.product.priceMinor; setBuildCart((c) => c.map((x) => (x.product.id === l.product.id ? { ...x, price: same ? undefined : m, reason: same ? undefined : x.reason } : x))); }} />
                         {l.price !== undefined && l.price !== l.product.priceMinor && (
-                          <input className={`form-control form-control-sm mt-1 ${priceMissingReason(l) ? "is-invalid" : ""}`} placeholder="Why the price changed" maxLength={140} aria-label="Reason for the new price"
-                            value={l.reason ?? ""} onChange={(e) => setBuildCart((c) => c.map((x) => (x.product.id === l.product.id ? { ...x, reason: e.target.value } : x)))} />
+                          <PriceReason className="form-select form-select-sm mt-1" invalid={priceMissingReason(l)} value={l.reason ?? ""} onChange={(v) => setBuildCart((c) => c.map((x) => (x.product.id === l.product.id ? { ...x, reason: v } : x)))} />
                         )}
                       </div>
                       <div className="input-group input-group-sm" style={{ width: 104 }}>
@@ -844,11 +844,7 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
                       <label className="form-label small mb-1" htmlFor="preEditPriceReason">
                         Reason for the price change{editReasonMissing ? " *" : ""}
                       </label>
-                      <input
-                        id="preEditPriceReason" className={`form-control form-control-sm ${editReasonMissing ? "is-invalid" : ""}`}
-                        maxLength={140} value={editReason} onChange={(e) => setEditReason(e.target.value)}
-                        placeholder={`e.g. price agreed with the customer (${editOverriddenCount} line(s) changed)`}
-                      />
+                      <PriceReason id="preEditPriceReason" className="form-select form-select-sm" invalid={editReasonMissing} value={editReason} onChange={setEditReason} />
                       <div className="invalid-feedback">A short reason is required when a price differs from the catalog.</div>
                     </div>
                   )}

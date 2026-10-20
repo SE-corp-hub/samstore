@@ -12,6 +12,7 @@ import { API_URL } from "../../config";
 import { adminHeaders } from "../../lib/admin";
 import { toast } from "../../lib/toast";
 import { sendStep } from "../../lib/offlineQueue";
+import StoreBar from "./StoreBar";
 import SignCapture, { type KargadorOption, type SignatureOut } from "./SignCapture";
 import { askText } from "../../lib/ask";
 import { printSlip, type Slip } from "../../lib/slip-print";
@@ -75,8 +76,9 @@ export default function ResackPanel() {
       const active = ((locs?.warehouses ?? []) as Location[]).filter((l) => l.isActive);
       setLocations(active);
       setHomeLocationId(me?.homeLocationId ?? null);
-      setLocationId(me?.homeLocationId ?? "");
-      setChosen(!!me?.homeLocationId);
+      // The store is pre-selected (own store, else the main one) and can be switched from the bar — the same as the owner.
+      setLocationId(me?.homeLocationId ?? (active.find((l) => (l as { isDefault?: boolean }).isDefault) ?? active[0])?.id ?? "");
+      setChosen(true);
       fetch(`${API_URL}/admin/settings`, { headers: adminHeaders() }).then((r) => (r.ok ? r.json() : null)).then((d) => setStoreName(d?.store?.name ?? "")).catch(() => {});
       setKargadors((ks?.kargadors ?? []) as KargadorOption[]);
       setProducts(((ps?.products ?? []) as Product[]).filter((p) => p.isActive !== false && weighed(p)));
@@ -175,21 +177,11 @@ export default function ResackPanel() {
     <div style={{ fontSize: 18 }}>
       <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
         <h1 className="h4 mb-0">Resack</h1>
-        {chosen && here && (homeLocationId ? <span className="badge text-bg-light border fs-6">{here.name}</span> : (
-          <button type="button" className="btn btn-outline-secondary" onClick={() => { setChosen(false); setLocationId(""); reset(); setReceipt(null); }}>Store: {here.name} · change</button>
-        ))}
       </div>
+      <StoreBar locations={locations} value={locationId} homeLocationId={homeLocationId} locked={!!(mode || finishing)}
+        lockedNote="Finish or go back from this resack to switch store." onPick={(id) => { setLocationId(id); reset(); setReceipt(null); }} />
       {error && <div className="alert alert-danger py-2" role="alert">{error}</div>}
       {products.length === 0 && <div className="alert alert-warning py-2">No rice with a weight set. In Products, set the size of each sack (e.g. 25 kg), or 1 g for loose rice.</div>}
-
-      {!chosen && (
-        <>
-          <h2 className="h5">Which store?</h2>
-          <div className="d-grid gap-2 mb-4" style={{ maxWidth: 420 }}>
-            {locations.map((l) => <button key={l.id} type="button" className="btn btn-outline-success btn-lg" onClick={() => { setLocationId(l.id); setChosen(true); }}>{l.code ? `${l.code} · ` : ""}{l.name}</button>)}
-          </div>
-        </>
-      )}
 
       {chosen && receipt && !mode && !finishing && (
         <div className="alert alert-success d-flex flex-wrap align-items-center justify-content-between gap-2">

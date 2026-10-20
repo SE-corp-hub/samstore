@@ -10,6 +10,7 @@ import { adminHeaders } from "../../lib/admin";
 import { toast } from "../../lib/toast";
 import { sendStep } from "../../lib/offlineQueue";
 import SignaturePad from "./SignaturePad";
+import StoreBar from "./StoreBar";
 import { printSlip, type Slip } from "../../lib/slip-print";
 import { getPrinterSettings } from "../../lib/printer-settings";
 import { NewItemForm } from "./BentaPanel";
@@ -52,8 +53,8 @@ export default function PasokPanel(_props: { role?: string; onNavigate?: (tab: s
     const active = ((locs?.warehouses ?? []) as Loc[]).filter((l) => l.isActive);
     setLocations(active);
     setHomeLocationId(me?.homeLocationId ?? null);
-    setLocationId((cur) => cur || me?.homeLocationId || "");
-    if (me?.homeLocationId) setChosen(true);
+    setLocationId((cur) => cur || me?.homeLocationId || ((locs?.warehouses ?? []) as (Loc & { isDefault?: boolean })[]).filter((l) => l.isActive).find((l) => l.isDefault)?.id || active[0]?.id || "");
+    setChosen(true);
     setProducts(((ps?.products ?? []) as Product[]).filter((p) => p.isActive !== false));
     setStoreName(st?.store?.name ?? "");
   }, []);
@@ -116,18 +117,9 @@ export default function PasokPanel(_props: { role?: string; onNavigate?: (tab: s
     <div style={{ fontSize: 18 }}>
       <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
         <h1 className="h4 mb-0">Stock in</h1>
-        {chosen && here && (homeLocationId ? <span className="badge text-bg-light border fs-6">{here.name}</span> : (
-          <button type="button" className="btn btn-outline-secondary" onClick={() => { setChosen(false); setLocationId(""); setAdding(false); setJustDone(null); }}>Store: {here.name} · change</button>
-        ))}
       </div>
-      {!chosen && (
-        <>
-          <h2 className="h5">Which store?</h2>
-          <div className="d-grid gap-2 mb-4" style={{ maxWidth: 420 }}>
-            {locations.map((l) => <button key={l.id} type="button" className="btn btn-outline-success btn-lg" onClick={() => { setLocationId(l.id); setChosen(true); }}>{l.code ? `${l.code} · ` : ""}{l.name}</button>)}
-          </div>
-        </>
-      )}
+      <StoreBar locations={locations} value={locationId} homeLocationId={homeLocationId} locked={adding || rows.some((r) => r.productId || r.amount)}
+        lockedNote="Receive or clear what you started to switch store." onPick={(id) => { setLocationId(id); setJustDone(null); }} />
       {chosen && adding && <NewItemForm preorder onCancel={() => setAdding(false)} onDone={addCreated} locationId={locationId} />}
       {chosen && !adding && (<>
       {error && <div className="alert alert-danger py-2" role="alert">{error}</div>}

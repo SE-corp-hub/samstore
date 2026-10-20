@@ -19,6 +19,8 @@ import { photoToJpeg } from "../../lib/photo";
 import NumPad from "./NumPad";
 import SignaturePad from "./SignaturePad";
 import QuickCount from "./QuickCount";
+import StoreBar from "./StoreBar";
+import PriceReason, { reasonOk } from "./PriceReason";
 import LocationPicker from "../LocationPicker";
 import { PesoInput } from "../NumberBoxes";
 import { buildText, openTextApp } from "../../lib/text-message";
@@ -325,25 +327,8 @@ export default function BentaPanel() {
           <i className="bi bi-pause-circle me-1"></i>Held{holds.filter((h) => h.locationId === locationId).length > 0 ? ` (${holds.filter((h) => h.locationId === locationId).length})` : ""}
         </button>
       </div>
-      <div className="mb-3">
-        <div className="small text-muted mb-1">Selling at</div>
-        {homeLocationId ? (
-          <div><span className="badge text-bg-dark fs-6">{here?.name}</span> <span className="small text-muted ms-1">your store, set by the owner</span></div>
-        ) : (
-          <>
-            <div className="d-flex flex-wrap gap-2" role="group" aria-label="Store">
-              {locations.map((l) => (
-                <button key={l.id} type="button" disabled={cart.length > 0 && l.id !== locationId}
-                  className={`btn btn-lg ${l.id === locationId ? "btn-dark" : "btn-outline-dark"}`}
-                  onClick={() => { if (l.id !== locationId) { reset(); void loadCatalog(l.id); } }}>
-                  {l.code ? `${l.code} · ` : ""}{l.name}
-                </button>
-              ))}
-            </div>
-            {cart.length > 0 && <div className="small text-muted mt-1">To switch store, hold or clear this sale first.</div>}
-          </>
-        )}
-      </div>
+      <StoreBar label="Selling at" locations={locations} value={locationId} homeLocationId={homeLocationId} locked={cart.length > 0}
+        lockedNote="To switch store, hold or clear this sale first." onPick={(id) => { reset(); void loadCatalog(id); }} />
       {showHeld && (
         <div className="card mb-3"><div className="card-body">
           <h2 className="h6">Held sales at {here?.name}</h2>
@@ -444,7 +429,7 @@ export default function BentaPanel() {
         const short = over && from !== locationId; // the counter itself may sell below zero
         const belowZero = over && from === locationId;
         const changed = editing.price !== undefined && editing.price !== it.priceMinor;
-        const reasonOk = !changed || (editing.reason ?? "").trim().length >= 3;
+        const reasonGiven = !changed || reasonOk(editing.reason);
         return (
           <div className="card border-success" style={{ maxWidth: 520 }}>
             <div className="card-body">
@@ -467,8 +452,7 @@ export default function BentaPanel() {
                 <PesoInput id="bt-price" className="form-control form-control-lg" value={editing.price !== undefined ? String(editing.price / 100) : ""} placeholder={(it.priceMinor / 100).toFixed(2)}
                   onChange={(v) => { const m = v === "" ? undefined : toMinor(v); setEditing({ ...editing, price: m === undefined || m === it.priceMinor ? undefined : m, reason: m === undefined || m === it.priceMinor ? undefined : editing.reason }); }} />
                 {changed && (
-                  <input className="form-control mt-2" aria-label="Reason for the new price" placeholder="Why the price changed (e.g. regular customer, damaged sack)" maxLength={140}
-                    value={editing.reason ?? ""} onChange={(e) => setEditing({ ...editing, reason: e.target.value })} />
+                  <PriceReason className="form-select mt-2" value={editing.reason ?? ""} onChange={(v) => setEditing({ ...editing, reason: v })} />
                 )}
               </div>
               {it.tracked && (
@@ -493,7 +477,7 @@ export default function BentaPanel() {
               )}
               <div className="d-flex justify-content-between mt-3">
                 <button type="button" className="btn btn-outline-secondary btn-lg" onClick={() => { setEditing(null); setEditIdx(null); }}>Back</button>
-                <button type="button" className="btn btn-success btn-lg" disabled={c.totalMinor <= 0 || short || !reasonOk || (editing.mode === "PIECE" && !Number.isInteger(c.units))}
+                <button type="button" className="btn btn-success btn-lg" disabled={c.totalMinor <= 0 || short || !reasonGiven || (editing.mode === "PIECE" && !Number.isInteger(c.units))}
                   onClick={() => { setCart(editIdx === null ? [...cart, editing] : cart.map((x, j) => (j === editIdx ? editing : x))); setEditing(null); setEditIdx(null); setSearch(""); }}>{editIdx === null ? "Add" : "Save"}</button>
               </div>
             </div>
