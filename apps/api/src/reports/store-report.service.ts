@@ -23,17 +23,23 @@ function valueOf(loose: boolean, qty: number, unitMinor: number): number {
   return loose ? Math.round((qty * unitMinor) / 1000) : qty * unitMinor;
 }
 
+type SalesTotalsOut = { count: number; totalMinor: number; cashMinor: number; gcashMinor: number; creditMinor: number; otherMinor: number; costMinor?: number; grossProfitMinor?: number };
+type CompareRow = {
+  location: { id: string; name: string; type: string }; sales: SalesTotalsOut; cashInMinor: number; creditGivenMinor: number; creditCollectedMinor: number;
+  stock: { items: number; low: number; empty: number; valueMinor: number };
+};
+
 export class StoreReportService {
   /** The places the actor may look at. */
   private async places(storeId: string, actor: Actor, locationId: string | undefined) {
     const all = await prisma.warehouse.findMany({ where: { storeId, isActive: true }, select: { id: true, name: true, code: true, type: true }, orderBy: [{ isDefault: "desc" }, { name: "asc" }] });
     const wanted = locationId ? all.filter((l) => l.id === locationId) : isOwner(actor) ? all : all.filter((l) => l.id === actor.homeLocationId);
-    if (wanted.length === 0) return { error: fail("validation", "Choose a store") } as const;
+    if (wanted.length === 0) return { res: fail("validation", "Choose a store"), wanted: null };
     for (const l of wanted) {
       const refusal = locationRefusal(actor, l.id);
-      if (refusal) return { error: fail("forbidden", refusal) } as const;
+      if (refusal) return { res: fail("forbidden", refusal), wanted: null };
     }
-    return { all, wanted } as const;
+    return { res: null, wanted };
   }
 
   private range(from: string | undefined, to: string | undefined) {
@@ -77,7 +83,7 @@ export class StoreReportService {
     totals: { items: number; low: number; empty: number; valueMinor: number; costValueMinor?: number };
   }>> {
     const p = await this.places(storeId, actor, input.locationId ?? actor.homeLocationId ?? undefined);
-    if ("error" in p) return p.error;
+    if (p.res) return p.res;
     const loc = p.wanted[0]!;
     const owner = isOwner(actor);
     const rows = await this.stockRows(storeId, loc.id, owner);
@@ -148,7 +154,7 @@ export class StoreReportService {
     try {
       const r = this.range(input.from, input.to);
       const p = await this.places(storeId, actor, input.locationId ?? actor.homeLocationId ?? undefined);
-      if ("error" in p) return p.error;
+      if (p.res) return p.res;
       const loc = p.wanted[0]!;
       const value = await this.salesOf(storeId, loc.id, r.start, r.end, isOwner(actor));
       return { ok: true as const, value: { location: { id: loc.id, name: loc.name }, from: r.from, to: r.to, ...value } };
@@ -165,8 +171,8 @@ export class StoreReportService {
       if (!isOwner(actor)) return fail("forbidden", "Comparing stores is for the owner");
       const r = this.range(input.from, input.to);
       const p = await this.places(storeId, actor, undefined);
-      if ("error" in p) return p.error;
-      const stores = [];
+      if (p.res) return p.res;
+      const stores: CompareRow[] = [];
       // One store at a time: the database pool is small.
       for (const l of p.wanted) {
         const s = await this.salesOf(storeId, l.id, r.start, r.end, true);
