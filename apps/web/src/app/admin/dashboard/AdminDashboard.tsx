@@ -13,7 +13,7 @@ import QueueBadge from "../../../components/admin/QueueBadge";
 import StaffHome from "../../../components/admin/StaffHome";
 
 /** Rice Ops M10: the store screens get the large, high-contrast look (globals.css .rice-ui). */
-const RICE_TABS = new Set(["pos", "benta", "utang", "utangrice", "agentorders", "agent", "approvals", "moves", "returns", "resack", "pasok", "bilangin", "ulat", "drafts", "kargadors"]);
+const RICE_TABS = new Set(["pos", "benta", "utang", "utangrice", "agentorders", "agent", "approvals", "moves", "returns", "resack", "pasok", "bilangin", "storereport", "ulat", "drafts", "kargadors"]);
 // The landing panel stays eager (it is the first paint); every other panel loads when
 // its tab opens. Shipping all 22 at once cost ~95 kB of route JS for one visible screen,
 // and dragged jsbarcode/qrcode (used by two panels) into the initial payload.
@@ -64,6 +64,7 @@ const UtangRicePanel = panel(() => import("../../../components/admin/UtangRicePa
 const AgentPanel = panel(() => import("../../../components/admin/AgentPanel"));
 const AgentOrdersPanel = panel(() => import("../../../components/admin/AgentOrdersPanel"));
 const BilanginPanel = panel(() => import("../../../components/admin/BilanginPanel"));
+const StoreReportPanel = panel(() => import("../../../components/admin/StoreReportPanel"));
 const UlatPanel = panel(() => import("../../../components/admin/UlatPanel"));
 
 /**
@@ -294,6 +295,7 @@ case "erp": return <ErpPanel />;
       case "agent": return <AgentPanel />;
       case "agentorders": return <AgentOrdersPanel />;
       case "bilangin": return <BilanginPanel role={role} />;
+      case "storereport": return <StoreReportPanel role={role} onNavigate={setTab} />;
       case "ulat": return <UlatPanel role={role} />;
       case "stores": return <StoresPanel />;
       default: return <OrdersPanel />;

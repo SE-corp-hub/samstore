@@ -11,6 +11,7 @@ import { requireUser, resolveTenant, TENANT_ROLES } from "../auth/tenant-context
 import { loadActor } from "../people/people.service.js";
 import { signaturesFrom } from "../people/signature-input.js";
 import { RiceReportsService, watchStock } from "./rice-reports.service.js";
+import { StoreReportService } from "./store-report.service.js";
 
 function statusFor(error: ApiError): HttpStatus {
   switch (error.type) {
@@ -36,6 +37,7 @@ const str = (v: unknown): string | undefined => (typeof v === "string" ? v : und
 @UseInterceptors(IdempotencyInterceptor)
 export class RiceReportsController {
   private readonly reports = new RiceReportsService();
+  private readonly storeReports = new StoreReportService();
 
   private async ctx(req: Req_, h: string | undefined) {
     const user = req.user;
@@ -151,5 +153,25 @@ export class RiceReportsController {
   async alerts(@Req() req: Req_, @Headers("x-store-id") h?: string) {
     const { storeId, actor } = await this.ctx(req, h);
     return unwrap(await this.reports.alerts(storeId, actor));
+  }
+  /** GET /admin/rice/store-stock?locationId= — what is left at one store, with the selling price and its value. */
+  @Get("store-stock")
+  async storeStock(@Req() req: Req_, @Query("locationId") locationId?: string, @Headers("x-store-id") h?: string) {
+    const { storeId, actor } = await this.ctx(req, h);
+    return unwrap(await this.storeReports.stockLeft(storeId, actor, { locationId }));
+  }
+
+  /** GET /admin/rice/store-sales?locationId=&from=YYYY-MM-DD&to=YYYY-MM-DD — one store's sales. */
+  @Get("store-sales")
+  async storeSales(@Req() req: Req_, @Query("locationId") locationId?: string, @Query("from") from?: string, @Query("to") to?: string, @Headers("x-store-id") h?: string) {
+    const { storeId, actor } = await this.ctx(req, h);
+    return unwrap(await this.storeReports.sales(storeId, actor, { locationId, from, to }));
+  }
+
+  /** GET /admin/rice/store-compare?from=&to= — every store side by side (owner). */
+  @Get("store-compare")
+  async storeCompare(@Req() req: Req_, @Query("from") from?: string, @Query("to") to?: string, @Headers("x-store-id") h?: string) {
+    const { storeId, actor } = await this.ctx(req, h);
+    return unwrap(await this.storeReports.compare(storeId, actor, { from, to }));
   }
 }
