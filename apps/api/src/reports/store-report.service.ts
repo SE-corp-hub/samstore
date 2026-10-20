@@ -24,6 +24,7 @@ function valueOf(loose: boolean, qty: number, unitMinor: number): number {
 }
 
 type SalesTotalsOut = { count: number; totalMinor: number; cashMinor: number; gcashMinor: number; creditMinor: number; otherMinor: number; costMinor?: number; grossProfitMinor?: number };
+type RecordRow = { at: string; kind: "SALE" | "STOCK" | "MONEY"; title: string; detail: string; store: string | null; docNumber: string | null; amountMinor: number | null; qtyText: string | null; balanceText: string | null; by: string | null };
 type CompareRow = {
   location: { id: string; name: string; type: string }; sales: SalesTotalsOut; cashInMinor: number; creditGivenMinor: number; creditCollectedMinor: number;
   stock: { items: number; low: number; empty: number; valueMinor: number };
@@ -236,5 +237,98 @@ export class StoreReportService {
         }),
       },
     };
+  }
+  // ─────────────────────────── All records: every transaction, one list ───────────────────────────
+
+  async records(storeId: string, actor: Actor, input: { locationId?: string; from?: string; to?: string; productId?: string; kind?: string }): Promise<StoreReportResult<{
+    from: string; to: string; truncated: boolean;
+    records: RecordRow[];
+  }>> {
+    try {
+      const r = this.range(input.from, input.to);
+      const p = await this.places(storeId, actor, input.locationId || (isOwner(actor) ? undefined : actor.homeLocationId ?? undefined));
+      if (p.res) return p.res;
+      const ids = p.wanted.map((l) => l.id);
+      const names = new Map(p.wanted.map((l) => [l.id, l.name]));
+      const range = { gte: r.start, lt: r.end };
+      const kind = input.kind === "sales" || input.kind === "stock" || input.kind === "money" ? input.kind : "all";
+      const LIMIT = 250;
+
+      const out: RecordRow[] = [];
+
+      if (kind === "all" || kind === "sales") {
+        const orders = await prisma.order.findMany({
+          where: { storeId, sellingLocationId: { in: ids }, status: { in: ["COMPLETED", "CANCELLED"] }, OR: [{ occurredAt: range }, { occurredAt: null, createdAt: range }], ...(input.productId ? { items: { some: { productId: input.productId } } } : {}) },
+          orderBy: { createdAt: "desc" }, take: LIMIT,
+          select: { id: true, orderNumber: true, status: true, source: true, totalMinor: true, paymentMethod: true, customerName: true, occurredAt: true, createdAt: true, sellingLocationId: true, items: { select: { productName: true, quantity: true, grams: true, soldBy: true } } },
+        });
+        for (const o of orders) {
+          const what = o.items.map((i) => (i.soldBy === "PIECE" || !i.grams ? `${i.quantity} × ${i.productName}` : `${i.grams / 1000} kg ${i.productName}`)).join(", ");
+          const pay = o.paymentMethod === "credit" ? "credit" : o.paymentMethod ?? "";
+          out.push({
+            at: (o.occurredAt ?? o.createdAt).toISOString(), kind: "SALE", title: o.status === "CANCELLED" ? "Sale cancelled" : "Sale",
+            detail: `${what}${o.customerName && o.customerName !== "Walk-in" ? ` · ${o.customerName}` : ""}${pay ? ` · ${pay}` : ""}`,
+            store: o.sellingLocationId ? names.get(o.sellingLocationId) ?? null : null, docNumber: o.orderNumber, amountMinor: o.totalMinor, qtyText: null, balanceText: null, by: null,
+          });
+        }
+      }
+
+      if (kind === "all" || kind === "money") {
+        const pays = await prisma.payment.findMany({
+          where: { storeId, type: { in: ["payment", "refund"] }, orderId: null, receivedAt: range, locationId: { in: ids } },
+          orderBy: { receivedAt: "desc" }, take: LIMIT, select: { receivedAt: true, amountMinor: true, method: true, type: true, note: true, locationId: true, createdBy: true },
+        });
+        const who = new Map((await prisma.user.findMany({ where: { id: { in: [...new Set(pays.map((x) => x.createdBy).filter((x): x is string => !!x))] } }, select: { id: true, name: true } })).map((u) => [u.id, u.name]));
+        for (const x of pays) {
+          out.push({
+            at: x.receivedAt.toISOString(), kind: "MONEY", title: x.type === "refund" ? "Refund" : "Credit payment received", detail: `${x.method}${x.note ? ` · ${x.note}` : ""}`,
+            store: x.locationId ? names.get(x.locationId) ?? null : null, docNumber: null, amountMinor: x.amountMinor, qtyText: null, balanceText: null, by: x.createdBy ? who.get(x.createdBy) ?? null : null,
+          });
+        }
+      }
+
+      if (kind === "all" || kind === "stock") {
+        const moves = await prisma.stockMovement.findMany({
+          where: { storeId, warehouseId: { in: ids }, createdAt: range, type: { notIn: ["RESERVE", "RELEASE_RESERVATION"] }, ...(input.productId ? { productId: input.productId } : {}) },
+          orderBy: { createdAt: "desc" }, take: LIMIT,
+          select: { createdAt: true, productId: true, warehouseId: true, delta: true, type: true, note: true, createdBy: true, balanceAfter: true, documentType: true, documentId: true },
+        });
+        const idsOf = (t: string) => [...new Set(moves.filter((m) => m.documentType === t).map((m) => m.documentId).filter((x): x is string => !!x))];
+        const [prods, trs, ins, rsk, rets, ords, users] = await Promise.all([
+          prisma.product.findMany({ where: { storeId, id: { in: [...new Set(moves.map((m) => m.productId))] } }, select: productSelect }),
+          prisma.stockTransfer.findMany({ where: { storeId, id: { in: idsOf("TRANSFER").concat(idsOf("RELEASE")) } }, select: { id: true, docNumber: true } }),
+          prisma.stockIn.findMany({ where: { storeId, id: { in: idsOf("STOCK_IN") } }, select: { id: true, docNumber: true } }),
+          prisma.resackJob.findMany({ where: { storeId, id: { in: idsOf("RESACK") } }, select: { id: true, docNumber: true } }),
+          prisma.stockReturn.findMany({ where: { storeId, id: { in: idsOf("RETURN") } }, select: { id: true, docNumber: true } }),
+          prisma.order.findMany({ where: { storeId, id: { in: idsOf("SALE") } }, select: { id: true, orderNumber: true } }),
+          prisma.user.findMany({ where: { id: { in: [...new Set(moves.map((m) => m.createdBy).filter((x): x is string => !!x))] } }, select: { id: true, name: true } }),
+        ]);
+        const pBy = new Map(prods.map((x) => [x.id, x]));
+        const docBy = new Map<string, string>([...trs.map((x) => [x.id, x.docNumber ?? ""] as const), ...ins.map((x) => [x.id, x.docNumber] as const), ...rsk.map((x) => [x.id, x.docNumber] as const), ...rets.map((x) => [x.id, x.docNumber] as const), ...ords.map((x) => [x.id, x.orderNumber] as const)]);
+        const uBy = new Map(users.map((u) => [u.id, u.name]));
+        const LABEL: Record<string, string> = {
+          CONSUME: "Sold / used", STOCK_IN: "Stock in", TRANSFER_OUT: "Moved out", TRANSFER_IN: "Moved in", RECEIVE_IN: "Moved in", RELEASE_OUT: "Taken out",
+          RESACK_OUT: "Resack: sack opened", RESACK_IN: "Resack: packs made", RESACK_RETURN: "Resack cancelled", RETURN_IN: "Customer return", COUNT_ADJUST: "Count correction",
+          ADJUST: "Adjustment", MERGE_IN: "Merged item", MERGE_OUT: "Merged item", CONVERSION_IN: "Conversion in", CONVERSION_OUT: "Conversion out", VOID_RESTORE: "Sale cancelled, stock back", RELEASE: "Stock back",
+        };
+        for (const m of moves) {
+          const prod = pBy.get(m.productId);
+          const loose = prod ? isLooseP(prod) : false;
+          const fmt = (n: number) => (loose ? `${(n / 1000).toLocaleString("en-PH", { maximumFractionDigits: 3 })} kg` : `${n.toLocaleString("en-PH")} pcs`);
+          out.push({
+            at: m.createdAt.toISOString(), kind: "STOCK", title: LABEL[m.type] ?? m.type.replace(/_/g, " ").toLowerCase(),
+            detail: `${prod?.name ?? "Item"}${m.note && !/^[A-Z]{2,3}-\d+$/.test(m.note) ? ` · ${m.note}` : ""}`,
+            store: m.warehouseId ? names.get(m.warehouseId) ?? null : null, docNumber: m.documentId ? docBy.get(m.documentId) ?? null : null, amountMinor: null,
+            qtyText: `${m.delta > 0 ? "+" : "−"}${fmt(Math.abs(m.delta))}`, balanceText: m.balanceAfter === null ? null : `now ${fmt(m.balanceAfter)}`, by: m.createdBy ? uBy.get(m.createdBy) ?? null : null,
+          });
+        }
+      }
+
+      out.sort((a, b) => (a.at < b.at ? 1 : -1));
+      return { ok: true, value: { from: r.from, to: r.to, truncated: out.length > LIMIT, records: out.slice(0, LIMIT) } };
+    } catch (e) {
+      if (e instanceof ReportError) return fail("validation", e.message);
+      throw e;
+    }
   }
 }

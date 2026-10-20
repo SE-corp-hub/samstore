@@ -18,7 +18,7 @@ const today = () => new Date(Date.now() + 8 * 3_600_000).toISOString().slice(0, 
 const kgText = (g: number) => `${(g / 1000).toLocaleString("en-PH", { maximumFractionDigits: 3 })} kg`;
 
 interface Place { id: string; name: string; code: string | null; isActive: boolean; type?: string }
-type Tab = "stock" | "sales" | "compare" | "day" | "buffer";
+type Tab = "stock" | "sales" | "records" | "compare" | "day" | "buffer";
 
 interface StockRow { productId: string; name: string; loose: boolean; unit: string; onHand: number; reserved: number; available: number; flag: "ZERO" | "LOW" | "OK"; unitPriceMinor: number; valueMinor: number; costValueMinor?: number }
 interface StockData { location: { id: string; name: string }; rows: StockRow[]; totals: { items: number; low: number; empty: number; valueMinor: number; costValueMinor?: number } }
@@ -26,6 +26,7 @@ interface SalesTotals { count: number; totalMinor: number; cashMinor: number; gc
 interface SalesData { location: { id: string; name: string }; from: string; to: string; sales: SalesTotals; cashInMinor: number; creditGivenMinor: number; creditCollectedMinor: number; items: { name: string; unit: string; quantity: number; salesMinor: number }[]; days: { date: string; count: number; totalMinor: number }[] }
 interface CompareData { from: string; to: string; stores: { location: { id: string; name: string; type: string }; sales: SalesTotals; cashInMinor: number; creditGivenMinor: number; creditCollectedMinor: number; stock: { items: number; low: number; empty: number; valueMinor: number } }[]; total: { salesMinor: number; count: number; grossProfitMinor: number; creditGivenMinor: number; stockValueMinor: number } }
 interface BufferData { buffer: { id: string; name: string } | null; owed: { productId: string; name: string; unit: string; quantity: number; valueMinor: number; oldestAt: string | null }[]; surplus: { productId: string; name: string; unit: string; quantity: number }[]; totals: { owedMinor: number; owedItems: number }; entries: { at: string; productName: string; unit: string; quantity: number; orderNumber: string | null; store: string | null; by: string | null; what: string }[] }
+interface RecordRow { at: string; kind: "SALE" | "STOCK" | "MONEY"; title: string; detail: string; store: string | null; docNumber: string | null; amountMinor: number | null; qtyText: string | null; balanceText: string | null; by: string | null }
 interface DaySection { location: { id: string; name: string }; locked: boolean; closedAt: string | null; cashCountedMinor: number | null; cashVarianceMinor: number | null; sales: { count: number; totalMinor: number; cashMinor: number; gcashMinor: number; utangMinor: number }; cash: { expectedMinor: number }; utang: { givenMinor: number; collectedMinor: number }; stockIn: { documents: number; units: number }; kilosByVariety: { variety: string; grams: number; salesMinor: number }[] }
 
 const qtyText = (r: StockRow) => (r.loose ? kgText(r.onHand) : `${r.onHand.toLocaleString("en-PH")} pcs`);
@@ -49,6 +50,11 @@ export default function StoreReportPanel({ role, onNavigate }: { role?: string; 
   const [compare, setCompare] = useState<CompareData | null>(null);
   const [day, setDay] = useState<DaySection | null>(null);
   const [buffer, setBuffer] = useState<BufferData | null>(null);
+  const [records, setRecords] = useState<{ records: RecordRow[]; truncated: boolean } | null>(null);
+  const [kind, setKind] = useState<"all" | "sales" | "stock" | "money">("all");
+  const [productId, setProductId] = useState("");
+  const [allStores, setAllStores] = useState(false);
+  const [products, setProducts] = useState<{ id: string; name: string }[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -62,6 +68,8 @@ export default function StoreReportPanel({ role, onNavigate }: { role?: string; 
       setPlaces(active);
       setHome(me?.homeLocationId ?? null);
       setLocationId(me?.homeLocationId ?? active[0]?.id ?? "");
+      const ps = await fetch(`${API_URL}/admin/products`, { headers: adminHeaders() }).then((r) => (r.ok ? r.json() : null));
+      setProducts(((ps?.products ?? ps?.items ?? []) as { id: string; name: string }[]).map((p) => ({ id: p.id, name: p.name })));
     })().catch(() => setError("Could not load the stores"));
   }, []);
 
@@ -78,6 +86,11 @@ export default function StoreReportPanel({ role, onNavigate }: { role?: string; 
         const r = await getJson<SalesData>(`/admin/rice/store-sales?locationId=${locationId}&from=${from}&to=${to}`);
         if (!r.ok) throw new Error(r.data?.errors?.join(", ") ?? r.data?.message ?? "Could not load the sales");
         setSales(r.data);
+      } else if (tab === "records") {
+        const q = new URLSearchParams({ from, to, kind, ...(productId ? { productId } : {}), ...(!allStores && locationId ? { locationId } : {}) });
+        const r = await getJson<{ records: RecordRow[]; truncated: boolean }>(`/admin/rice/store-records?${q}`);
+        if (!r.ok) throw new Error(r.data?.errors?.join(", ") ?? r.data?.message ?? "Could not load the records");
+        setRecords(r.data);
       } else if (tab === "buffer") {
         const r = await getJson<BufferData>(`/admin/rice/store-buffer`);
         if (!r.ok) throw new Error(r.data?.errors?.join(", ") ?? r.data?.message ?? "Could not load the Buffer store");
@@ -97,7 +110,7 @@ export default function StoreReportPanel({ role, onNavigate }: { role?: string; 
     } finally {
       setLoading(false);
     }
-  }, [tab, locationId, from, to]);
+  }, [tab, locationId, from, to, kind, productId, allStores, owner]);
   useEffect(() => { void load(); }, [load]);
 
   const placeName = useMemo(() => places.find((p) => p.id === locationId)?.name ?? "", [places, locationId]);
@@ -132,9 +145,9 @@ export default function StoreReportPanel({ role, onNavigate }: { role?: string; 
     });
   };
 
-  const tabs: [Tab, string][] = [["stock", "Stock left"], ["sales", "Sales"], ...(owner ? ([["compare", "Compare stores"]] as [Tab, string][]) : []), ["day", "End of day"]];
+  const tabs: [Tab, string][] = [["stock", "Stock left"], ["sales", "Sales"], ["records", "All records"], ...(owner ? ([["compare", "Compare stores"]] as [Tab, string][]) : []), ["day", "End of day"]];
   const single = tab !== "compare" && tab !== "buffer";
-  const range = tab === "sales" || tab === "compare";
+  const range = tab === "sales" || tab === "compare" || tab === "records";
 
   return (
     <div className="container-fluid py-3" style={{ maxWidth: 900 }}>
@@ -143,6 +156,20 @@ export default function StoreReportPanel({ role, onNavigate }: { role?: string; 
         {tabs.map(([k, label]) => <li key={k} className="nav-item"><button className={`nav-link text-nowrap ${tab === k ? "active" : ""}`} onClick={() => setTab(k)}>{label}</button></li>)}
       </ul>
       {single && <StoreBar label="Store" locations={places} value={locationId} homeLocationId={home} onPick={setLocationId} />}
+      {tab === "records" && (
+        <div className="mb-3">
+          <div className="d-flex flex-wrap gap-2 mb-2">
+            {([["all", "Everything"], ["sales", "Sales"], ["stock", "Stock"], ["money", "Money in"]] as const).map(([k, label]) => (
+              <button key={k} type="button" className={`btn ${kind === k ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setKind(k)}>{label}</button>
+            ))}
+            {owner && <button type="button" className={`btn ${allStores ? "btn-primary" : "btn-outline-primary"}`} onClick={() => setAllStores(!allStores)}>{allStores ? "All stores" : "One store"}</button>}
+          </div>
+          <select className="form-select" aria-label="Item" value={productId} onChange={(e) => setProductId(e.target.value)}>
+            <option value="">All items</option>
+            {products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        </div>
+      )}
       {(range || tab === "day") && (
         <div className="d-flex flex-wrap gap-2 align-items-end mb-3">
           <div><label className="form-label small mb-1" htmlFor="sr-from">{range ? "From" : "Day"}</label><input id="sr-from" type="date" className="form-control" value={from} max={today()} onChange={(e) => { setFrom(e.target.value); if (tab === "day" || e.target.value > to) setTo(e.target.value); }} /></div>
@@ -203,6 +230,34 @@ export default function StoreReportPanel({ role, onNavigate }: { role?: string; 
             <table className="table table-sm"><tbody>{sales.days.map((d) => <tr key={d.date}><td>{d.date}</td><td className="text-end">{d.count} sales</td><td className="text-end">{peso(d.totalMinor)}</td></tr>)}</tbody></table></>)}
           <button type="button" className="btn btn-outline-dark" onClick={printSales} disabled={!sales.sales.count}>Print</button>
         </>
+      )}
+
+      {tab === "records" && records && (
+        records.records.length === 0 ? <p className="text-muted">No records in this period.</p> : (
+          <>
+            {records.truncated && <div className="alert alert-info py-2 small">Showing the latest {records.records.length}. Narrow the dates or pick an item to see the rest.</div>}
+            {(() => {
+              const byDay = new Map<string, RecordRow[]>();
+              for (const r of records.records) { const d = new Date(new Date(r.at).getTime() + 8 * 3_600_000).toISOString().slice(0, 10); byDay.set(d, [...(byDay.get(d) ?? []), r]); }
+              return [...byDay.entries()].map(([d, rows]) => (
+                <div key={d} className="mb-3">
+                  <div className="fw-semibold border-bottom mb-1">{d}</div>
+                  <ul className="list-unstyled mb-0">
+                    {rows.map((r, i) => (
+                      <li key={i} className="py-1 border-bottom small">
+                        <div className="d-flex justify-content-between gap-2">
+                          <span><span className={`badge me-1 ${r.kind === "SALE" ? "text-bg-success" : r.kind === "MONEY" ? "text-bg-primary" : "text-bg-secondary"}`}>{r.title}</span>{r.detail}</span>
+                          <span className="text-end text-nowrap fw-semibold">{r.amountMinor !== null ? peso(r.amountMinor) : r.qtyText}</span>
+                        </div>
+                        <div className="text-muted">{new Date(r.at).toLocaleTimeString("en-PH", { hour: "2-digit", minute: "2-digit" })}{r.store ? ` · ${r.store}` : ""}{r.docNumber ? ` · ${r.docNumber}` : ""}{r.by ? ` · ${r.by}` : ""}{r.balanceText ? ` · ${r.balanceText}` : ""}</div>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ));
+            })()}
+          </>
+        )
       )}
 
       {tab === "compare" && compare && (

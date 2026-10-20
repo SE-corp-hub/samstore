@@ -180,4 +180,10 @@ export class RiceReportsController {
     const { storeId, actor } = await this.ctx(req, h);
     return unwrap(await this.storeReports.buffer(storeId, actor));
   }
+  /** GET /admin/rice/store-records?locationId=&from=&to=&productId=&kind=all|sales|stock|money — every transaction, newest first. */
+  @Get("store-records")
+  async storeRecords(@Req() req: Req_, @Query("locationId") locationId?: string, @Query("from") from?: string, @Query("to") to?: string, @Query("productId") productId?: string, @Query("kind") kind?: string, @Headers("x-store-id") h?: string) {
+    const { storeId, actor } = await this.ctx(req, h);
+    return unwrap(await this.storeReports.records(storeId, actor, { locationId, from, to, productId, kind }));
+  }
 }
