@@ -90,11 +90,16 @@ interface BtServer { connected: boolean; getPrimaryServices(): Promise<BtService
 interface BtDevice { name?: string; gatt?: { connected: boolean; connect(): Promise<BtServer> }; addEventListener(t: string, f: () => void): void }
 interface BtApi { requestDevice(o: unknown): Promise<BtDevice>; getDevices?: () => Promise<BtDevice[]> }
 
-// Services that common BLE receipt printers use for printing.
+// Services that common BLE receipt printers use for printing (Chrome only lets a page use the ones it lists here).
+const short = (n: number) => `0000${n.toString(16).padStart(4, "0")}-0000-1000-8000-00805f9b34fb`;
 const SERVICES = [
-  "000018f0-0000-1000-8000-00805f9b34fb", "0000ff00-0000-1000-8000-00805f9b34fb", "0000ffe0-0000-1000-8000-00805f9b34fb",
-  "49535343-fe7d-4ae5-8fa9-9fafd205e455", "e7810a71-73ae-499d-8c15-faa9aef0c3f2", "0000fee7-0000-1000-8000-00805f9b34fb",
-  "0000ae30-0000-1000-8000-00805f9b34fb", "00001101-0000-1000-8000-00805f9b34fb", "0000fff0-0000-1000-8000-00805f9b34fb",
+  ...[0x18f0, 0xfee7, 0xae30, 0xae00, 0x1101, 0x1800, 0x1801, 0x180a, 0x180f].map(short),
+  ...Array.from({ length: 16 }, (_, i) => short(0xff00 + i)),
+  ...Array.from({ length: 8 }, (_, i) => short(0xfff0 + i)),
+  ...Array.from({ length: 8 }, (_, i) => short(0xffe0 + i)),
+  ...Array.from({ length: 8 }, (_, i) => short(0xfe00 + i)),
+  "49535343-fe7d-4ae5-8fa9-9fafd205e455", "e7810a71-73ae-499d-8c15-faa9aef0c3f2", "00001101-0000-1000-8000-00805f9b34fb",
+  "6e400001-b5a3-f393-e0a9-e50e24dcca9e", "0000ffff-0000-1000-8000-00805f9b34fb",
 ];
 
 const api = (): BtApi | null => (typeof navigator !== "undefined" ? ((navigator as unknown as { bluetooth?: BtApi }).bluetooth ?? null) : null);
@@ -147,4 +152,46 @@ export async function printViaBluetooth(s: Slip, widthMm: 58 | 80): Promise<void
     else await ch.writeValue(part);
     await sleep(15);
   }
+}
+
+/** Look at a printer and say what it is: name, services and what each can do. Used by "Check my printer". */
+export async function diagnosePrinter(): Promise<string> {
+  const bt = api();
+  if (!bt) return "This browser cannot use Bluetooth. Use Chrome.";
+  const out: string[] = [`Checked ${new Date().toLocaleString("en-PH")}`];
+  let d: BtDevice;
+  try {
+    d = await bt.requestDevice({ acceptAllDevices: true, optionalServices: SERVICES });
+  } catch (e) {
+    return `${out[0]}\nNo printer was chosen, or none showed in the list: ${e instanceof Error ? e.message : e}\n` +
+      "If your printer never appears in Chrome's list while it is on and close, it is probably the older kind of Bluetooth (classic) that Chrome cannot use.";
+  }
+  out.push(`Device name: ${d.name || "(no name)"}`);
+  try {
+    const server = await d.gatt!.connect();
+    const services = await server.getPrimaryServices();
+    out.push(`Connected. Services found: ${services.length}`);
+    let writable = 0;
+    for (const svc of services) {
+      out.push(`- service ${(svc as unknown as { uuid?: string }).uuid ?? "?"}`);
+      for (const ch of await svc.getCharacteristics()) {
+        const c = ch as unknown as { uuid?: string; properties: Record<string, boolean> };
+        const flags = Object.entries(c.properties).filter(([, v]) => v).map(([k]) => k).join(", ");
+        if (c.properties.write || c.properties.writeWithoutResponse) writable++;
+        out.push(`    characteristic ${c.uuid ?? "?"}: ${flags}`);
+      }
+    }
+    out.push(writable > 0 ? `RESULT: usable — ${writable} writable characteristic(s). Direct printing should work.` : "RESULT: connected, but nothing to write to was found. Send this report to Claude.");
+    device = d;
+    writer = await findWriter(d).catch(() => null);
+  } catch (e) {
+    out.push(`Could not read the printer: ${e instanceof Error ? e.message : e}`);
+    out.push("RESULT: not usable directly. Send this report to Claude.");
+  }
+  return out.join("\n");
+}
+
+/** One short line, to prove the printer answers. */
+export async function printTestLine(widthMm: 58 | 80): Promise<void> {
+  await printViaBluetooth({ storeName: "SAM STORE", title: "PRINTER TEST", rows: [{ name: "If you can read this", qty: "OK" }], footer: "Direct print works" }, widthMm);
 }

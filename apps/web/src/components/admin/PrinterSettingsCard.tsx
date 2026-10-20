@@ -7,12 +7,14 @@ import { useEffect, useState } from "react";
 import { cleanPrinterSettings, DEFAULT_PRINTER, getPrinterSettings, savePrinterSettings, type PrinterSettings } from "../../lib/printer-settings";
 import { printSlip } from "../../lib/slip-print";
 import { toast } from "../../lib/toast";
-import { bluetoothSupported, connectPrinter, connectedPrinterName } from "../../lib/bt-print";
+import { bluetoothSupported, connectPrinter, connectedPrinterName, diagnosePrinter, printTestLine } from "../../lib/bt-print";
 
 export default function PrinterSettingsCard({ storeName }: { storeName?: string }) {
   const [p, setP] = useState<PrinterSettings>(DEFAULT_PRINTER);
   const [btOk, setBtOk] = useState(false);
   const [btName, setBtName] = useState<string | null>(null);
+  const [report, setReport] = useState("");
+  const [checking, setChecking] = useState(false);
   useEffect(() => { setP(getPrinterSettings()); setBtOk(bluetoothSupported()); setBtName(connectedPrinterName()); }, []);
   const set = (patch: Partial<PrinterSettings>) => { const next = cleanPrinterSettings({ ...p, ...patch }); setP({ ...p, ...patch }); savePrinterSettings(next); };
 
@@ -47,6 +49,22 @@ export default function PrinterSettingsCard({ storeName }: { storeName?: string 
                 catch (e) { toast(e instanceof Error && e.name === "NotFoundError" ? "No printer was chosen" : `Could not connect: ${e instanceof Error ? e.message : "error"}`, "danger"); }
               }}><i className="bi bi-bluetooth me-1"></i>Connect printer</button>
               <span className="small text-muted">{btName ? `Connected: ${btName}` : "Not connected yet. Turn the printer on and press Connect."}</span>
+            </div>
+          )}
+          {btOk && (
+            <div className="mt-2">
+              <button type="button" className="btn btn-outline-secondary btn-sm" disabled={checking} onClick={async () => { setChecking(true); setReport(await diagnosePrinter()); setBtName(connectedPrinterName()); setChecking(false); }}>
+                <i className="bi bi-search me-1"></i>{checking ? "Checking…" : "Check my printer"}
+              </button>
+              <button type="button" className="btn btn-outline-secondary btn-sm ms-2" onClick={async () => { try { await printTestLine(p.widthMm); toast("Sent to the printer"); } catch (e) { toast(`Did not print: ${e instanceof Error ? e.message : "error"}`, "danger"); } }}>
+                <i className="bi bi-printer me-1"></i>Print a test line
+              </button>
+              {report && (
+                <>
+                  <textarea className="form-control form-control-sm mt-2" rows={8} readOnly value={report} aria-label="Printer report" />
+                  <button type="button" className="btn btn-link btn-sm px-0" onClick={() => { void navigator.clipboard?.writeText(report).then(() => toast("Copied")).catch(() => {}); }}>Copy the report</button>
+                </>
+              )}
             </div>
           )}
           <div className="small text-muted mt-2">Works with printers that use Bluetooth Low Energy. If yours does not connect or print, switch this off and the normal print window is used.</div>
