@@ -116,17 +116,12 @@ test("M7: the agent sees each status change — Naghihintay → Aprubado → Nas
 
   const ok = await svc.approve(fx.storeId, fx.staff1, o.id, {});
   assert.equal(ok.ok, true, msg(ok));
-  assert.equal(await statusOf(fx, o.id), "APRUBADO");
-  assert.deepEqual(await level(fx, fx.s1), { quantityOnHand: 2, quantityReserved: 2 }, "held at Store 1");
-  const tripId = ok.ok ? ok.value.releases[0]!.id : "";
-
-  const rel = await flow.release(fx.storeId, fx.staff1, tripId, { quantity: 2, kargadorId: fx.kargadorId, signatures: sigs(fx.kargadorId) });
-  assert.equal(rel.ok, true, msg(rel));
+  assert.deepEqual(await level(fx, fx.s1), { quantityOnHand: 0, quantityReserved: 0 }, "the rice left Store 1 when it was approved");
   assert.equal(await statusOf(fx, o.id), "NAILABAS");
   const early = await svc.pay(fx.storeId, fx.staff1, o.id, { method: "cash" });
   assert.match(msg(early), /Not everything is delivered yet/);
 
-  const del = await flow.deliver(fx.storeId, fx.staff1, tripId, { quantity: 2, signatures: [...sigs(fx.kargadorId), { signerKind: "CUSTOMER", signerName: "Rosa", imagePng: PNG }] });
+  const del = await svc.markDelivered(fx.storeId, fx.staff1, o.id);
   assert.equal(del.ok, true, msg(del));
   assert.equal(await statusOf(fx, o.id), "NAIHATID");
   const paid = await svc.pay(fx.storeId, fx.staff1, o.id, { method: "cash", tenderedMinor: 300_000 });
@@ -175,30 +170,39 @@ test("M7: approval can take the rice from the warehouse; short stock says where 
   const item = big.lines[0]!;
   const fromWh = await svc.approve(fx.storeId, fx.staff1, big.id, { sources: [{ itemId: item.id, sourceLocationId: fx.wh }] });
   assert.equal(fromWh.ok, true, msg(fromWh));
-  assert.deepEqual(await level(fx, fx.wh), { quantityOnHand: 20, quantityReserved: 6 }, "held at the warehouse");
-  // It is on the warehouse's Ilabas list, not Store 1's.
-  assert.equal((await flow.list(fx.storeId, fx.whStaff, "ilabas")).some((t) => t.id === (fromWh.ok ? fromWh.value.releases[0]!.id : "")), true);
+  assert.deepEqual(await level(fx, fx.wh), { quantityOnHand: 14, quantityReserved: 0 }, "taken from the warehouse at once");
+  assert.deepEqual(await level(fx, fx.s1), { quantityOnHand: 2, quantityReserved: 0 }, "Store 1 untouched");
 });
 
-test("M7: the customer pays for what was delivered — a partial delivery raises no refund", async () => {
+test("M7: Not delivered puts the rice back and closes the order", async () => {
+  const fx = await fixture();
+  const o = await order(fx, 2);
+  assert.equal((await svc.approve(fx.storeId, fx.staff1, o.id, {})).ok, true);
+  assert.deepEqual(await level(fx, fx.s1), { quantityOnHand: 0, quantityReserved: 0 });
+  assert.match(msg(await svc.markNotDelivered(fx.storeId, fx.staff1, o.id, "")), /Why was it not delivered/);
+  const back = await svc.markNotDelivered(fx.storeId, fx.staff1, o.id, "customer was not home");
+  assert.equal(back.ok, true, msg(back));
+  assert.deepEqual(await level(fx, fx.s1), { quantityOnHand: 2, quantityReserved: 0 }, "the rice is back on the shelf");
+  assert.equal(await statusOf(fx, o.id), "KINANSELA");
+  assert.equal((await svc.markDelivered(fx.storeId, fx.staff1, o.id)).ok, false, "closed once");
+});
+
+test("M7: the customer pays after delivery, on credit within the limit", async () => {
   const fx = await fixture();
   setSmsProviderForTests(new MockSmsProvider());
   const o = await order(fx, 2);
-  const ok = await svc.approve(fx.storeId, fx.staff1, o.id, {});
-  const tripId = ok.ok ? ok.value.releases[0]!.id : "";
-  assert.equal((await flow.release(fx.storeId, fx.staff1, tripId, { quantity: 2, kargadorId: fx.kargadorId, signatures: sigs(fx.kargadorId) })).ok, true);
-  const del = await flow.deliver(fx.storeId, fx.staff1, tripId, { quantity: 1, note: "isang sako lang ang kinuha", signatures: sigs(fx.kargadorId) });
+  assert.equal((await svc.approve(fx.storeId, fx.staff1, o.id, {})).ok, true);
+  const del = await svc.markDelivered(fx.storeId, fx.staff1, o.id);
   assert.equal(del.ok, true, msg(del));
-  assert.equal(await prisma.approvalRequest.count({ where: { storeId: fx.storeId, kind: "REFUND" } }), 0, "nothing was paid, so nothing to refund");
   // Utang needs a limit first.
   const noLimit = await svc.pay(fx.storeId, fx.staff1, o.id, { method: "utang", signatures: [{ signerKind: "CUSTOMER", signerName: "Rosa", imagePng: PNG }] });
   assert.match(msg(noLimit), /has no credit limit yet/);
-  await prisma.storeCustomer.update({ where: { id: o.storeCustomerId }, data: { creditApproved: true, creditLimitMinor: 500_000 } });
+  await prisma.storeCustomer.update({ where: { id: o.storeCustomerId }, data: { creditApproved: true, creditLimitMinor: 900_000 } });
   const paid = await svc.pay(fx.storeId, fx.staff1, o.id, { method: "utang", signatures: [{ signerKind: "CUSTOMER", signerName: "Rosa", imagePng: PNG }] });
   assert.equal(paid.ok, true, msg(paid));
-  assert.equal(paid.ok && paid.value.dueMinor, 130_000, "one sack delivered, one sack charged");
-  assert.equal((await prisma.storeCustomer.findUniqueOrThrow({ where: { id: o.storeCustomerId } })).creditBalanceMinor, 130_000);
-  assert.match((await prisma.smsMessage.findFirstOrThrow({ where: { storeId: fx.storeId, documentId: o.id } })).text, /Utang ngayon: P1,300 .*Kabuuang utang: P1,300/);
+  assert.equal(paid.ok && paid.value.dueMinor, 260_000, "both sacks delivered and charged");
+  assert.equal((await prisma.storeCustomer.findUniqueOrThrow({ where: { id: o.storeCustomerId } })).creditBalanceMinor, 260_000);
+  assert.match((await prisma.smsMessage.findFirstOrThrow({ where: { storeId: fx.storeId, documentId: o.id } })).text, /Utang ngayon: P2,600 .*Kabuuang utang: P2,600/);
 });
 
 test("M7: one order per key — a double-tap by the agent makes one order", async () => {

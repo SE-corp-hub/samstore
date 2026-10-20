@@ -110,4 +110,24 @@ export class TransferFlowController {
       reason: str(body?.reason), orderId: str(body?.orderId), kargadorId: str(body?.kargadorId), signatures: signaturesFrom(body?.signatures),
     }));
   }
+  /** POST /admin/moves — one-step move: { fromLocationId, toLocationId, productId, quantity, note? } */
+  @Post("moves")
+  async move(@Req() req: Req_, @Body() body: Record<string, unknown>, @Headers("x-store-id") h?: string) {
+    const { storeId, actor } = await this.ctx(req, h, TENANT_ROLES.ADMIN);
+    return unwrap(await this.flow.moveNow(storeId, actor, { fromLocationId: str(body?.fromLocationId), toLocationId: str(body?.toLocationId), productId: str(body?.productId), quantity: body?.quantity, note: str(body?.note) }));
+  }
+
+  /** GET /admin/moves?locationId= — recent moves. */
+  @Get("moves")
+  async moves(@Req() req: Req_, @Query("locationId") locationId?: string, @Headers("x-store-id") h?: string) {
+    const { storeId, actor } = await this.ctx(req, h, TENANT_ROLES.ADMIN);
+    return { moves: await this.flow.recentMoves(storeId, actor, locationId) };
+  }
+
+  /** GET /admin/returns?locationId= — recent customer returns. */
+  @Get("returns")
+  async returns(@Req() req: Req_, @Query("locationId") locationId?: string, @Headers("x-store-id") h?: string) {
+    const { storeId, actor } = await this.ctx(req, h, TENANT_ROLES.ADMIN);
+    return { returns: await this.flow.recentReturns(storeId, actor, locationId) };
+  }
 }

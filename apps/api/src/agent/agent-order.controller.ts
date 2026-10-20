@@ -107,4 +107,17 @@ export class AgentOrderController {
     const { storeId, actor } = await this.staff(req, h);
     return unwrap(await this.orders.pay(storeId, actor, id, { method: str(body?.method), tenderedMinor: body?.tenderedMinor, reference: str(body?.reference), signatures: signaturesFrom(body?.signatures) }));
   }
+  /** POST /admin/agent-orders/:id/delivered */
+  @Post("agent-orders/:id/delivered")
+  async delivered(@Req() req: Req_, @Param("id") id: string, @Headers("x-store-id") h?: string) {
+    const { storeId, actor } = await this.staff(req, h);
+    return unwrap(await this.orders.markDelivered(storeId, actor, id));
+  }
+
+  /** POST /admin/agent-orders/:id/not-delivered — { reason } */
+  @Post("agent-orders/:id/not-delivered")
+  async notDelivered(@Req() req: Req_, @Param("id") id: string, @Body() body: Record<string, unknown>, @Headers("x-store-id") h?: string) {
+    const { storeId, actor } = await this.staff(req, h);
+    return unwrap(await this.orders.markNotDelivered(storeId, actor, id, str(body?.reason)));
+  }
 }

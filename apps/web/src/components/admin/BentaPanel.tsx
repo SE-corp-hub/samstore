@@ -300,7 +300,6 @@ export default function BentaPanel() {
             }}><i className="bi bi-chat-dots me-1"></i>Text customer</button>
           </div></div>
         )}
-        {last.releases.length > 0 && <div className="alert alert-info">Will be released from another location: {last.releases.map((r) => r.docNumber).join(", ")}</div>}
         {checking ? (
           <QuickCount productId={checking.productId} name={checking.name} loose={!!byId.get(checking.productId)?.loose} locationId={locationId}
             onCancel={() => { setLast({ ...last, zeroCheck: last.zeroCheck.filter((z) => z.productId !== checking.productId) }); setChecking(null); }}

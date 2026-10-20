@@ -218,7 +218,7 @@ export class AgentOrderService {
     return o;
   }
 
-  /** Aprubahan: each line is held where it will come from (default: the preferred store). */
+  /** Aprubahan: the rice leaves the chosen store at once (default: the preferred store). */
   async approve(storeId: string, actor: Actor, id: string, input: { sources?: { itemId?: string; sourceLocationId?: string }[] }) {
     return this.run(async () => {
       const o = await this.loadForStaff(storeId, actor, id);
@@ -238,7 +238,7 @@ export class AgentOrderService {
             const src = chosen.get(i.id) || o.sellingLocationId!;
             at.failing = { productId: i.productId, sourceId: src };
             await tx.orderItem.update({ where: { id: i.id }, data: { sourceLocationId: src === o.sellingLocationId ? null : src } });
-            releases.push(await this.flow.createOrderRelease(tx, { storeId, orderId: id, productId: i.productId, quantity: i.quantity, sourceLocationId: src, sellingLocationId: o.sellingLocationId!, customerName: o.customerName, actorId: actor.userId }));
+            releases.push(await this.flow.takeForOrder(tx, { storeId, orderId: id, productId: i.productId, quantity: i.quantity, sourceLocationId: src, sellingLocationId: o.sellingLocationId!, customerName: o.customerName, actorId: actor.userId }));
           }
           await tx.orderStatusHistory.create({ data: { orderId: id, storeId, fromStatus: "RECEIVED", toStatus: "CONFIRMED", actorType: "staff", actorId: actor.userId, reason: "Agent order approved" } });
           await tx.auditLog.create({ data: { storeId, actorType: "USER", actorId: actor.userId, action: "agent_order.approve", entityType: "Order", entityId: id, after: { releases: releases.map((r) => r.docNumber) } } });
@@ -251,6 +251,32 @@ export class AgentOrderService {
       }
       await cacheBust(cacheKey("orders", storeId));
       return { ...this.view(await prisma.order.findFirstOrThrow({ where: { id, storeId }, include: orderInclude })), releases };
+    });
+  }
+
+  /** Delivered: the rice reached the customer — payment can be taken. */
+  async markDelivered(storeId: string, actor: Actor, id: string) {
+    return this.run(async () => {
+      await this.loadForStaff(storeId, actor, id);
+      const r = await this.flow.settleOrderDelivery(storeId, actor, id, true);
+      if (!r.ok) throw new StepError(r);
+      await cacheBust(cacheKey("orders", storeId));
+      return this.view(await prisma.order.findFirstOrThrow({ where: { id, storeId }, include: orderInclude }));
+    });
+  }
+
+  /** Not delivered: the rice goes back on the shelf it left, and the order closes. */
+  async markNotDelivered(storeId: string, actor: Actor, id: string, reason: string | undefined) {
+    return this.run(async () => {
+      await this.loadForStaff(storeId, actor, id);
+      const r = await this.flow.settleOrderDelivery(storeId, actor, id, false, reason);
+      if (!r.ok) throw new StepError(r);
+      await prisma.$transaction(async (tx) => {
+        const c = await tx.order.updateMany({ where: { id, storeId, status: "CONFIRMED" }, data: { status: "CANCELLED", paymentStatus: "CANCELLED_REFUND" } });
+        if (c.count > 0) await tx.orderStatusHistory.create({ data: { orderId: id, storeId, fromStatus: "CONFIRMED", toStatus: "CANCELLED", actorType: "staff", actorId: actor.userId, reason: `Not delivered: ${reason?.trim() ?? ""}` } });
+      });
+      await cacheBust(cacheKey("orders", storeId));
+      return this.view(await prisma.order.findFirstOrThrow({ where: { id, storeId }, include: orderInclude }));
     });
   }
 

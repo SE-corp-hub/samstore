@@ -34,7 +34,6 @@ import { CreditService } from "../credit/credit.service.js";
 import { queueSms } from "../sms/sms.service.js";
 import { wakeOutbox } from "../notifications/outbox.service.js";
 import { prepareTenders, writeTenders } from "../payments/tenders.js";
-import { TransferFlowService } from "../transfers/transfer-flow.service.js";
 import {
   captureSignatures, locationRefusal, nextDocNumber, registerApprovalHandler, requestApproval, requireSignatures, signatureErrorResult,
   type Actor, type SignatureInput,
@@ -120,7 +119,6 @@ registerApprovalHandler("MANUAL_ITEM", async (tx, a) => {
 });
 
 const credit = new CreditService();
-const flowSvc = new TransferFlowService();
 
 // Utang over the limit: the owner decides in Para sa iyo. Approve → the held rice leaves the
 // shelf, the utang is posted past the limit, the text goes out. Decline → the hold is dropped.
@@ -140,9 +138,8 @@ registerApprovalHandler("UTANG_OVER_LIMIT", async (tx, a) => {
     if (!i.sourceLocationId) {
       await releaseForTrip(tx, leg(i.productId, order.sellingLocationId), i.quantity, i.quantity, "CONSUME");
     } else {
-      // From another location: the sale's hold becomes that location's Ilabas trip.
-      await unreserveForTrip(tx, leg(i.productId, i.sourceLocationId), i.quantity);
-      await flowSvc.createOrderRelease(tx, { storeId: a.storeId, orderId: order.id, productId: i.productId, quantity: i.quantity, sourceLocationId: i.sourceLocationId, sellingLocationId: order.sellingLocationId, customerName: order.customerName, actorId: a.decidedById });
+      // From another location: the hold is released and the stock leaves that place now.
+      await releaseForTrip(tx, leg(i.productId, i.sourceLocationId), i.quantity, i.quantity, "CONSUME");
     }
   }
   await tx.payment.create({ data: { orderId: order.id, storeId: a.storeId, method: "credit", amountMinor: order.totalMinor, type: "payment", note: "Credit (approved by the owner)", createdBy: a.decidedById } });
@@ -158,7 +155,6 @@ registerApprovalHandler("UTANG_OVER_LIMIT", async (tx, a) => {
 
 export class BentaService {
   private readonly sequences = new PrismaOrderSequenceRepository();
-  private readonly flow = new TransferFlowService();
 
   private async run<T>(fn: () => Promise<T>): Promise<BentaResult<T>> {
     try {
@@ -393,10 +389,9 @@ export class BentaService {
             for (const l of local) {
               await deductStock(tx, storeId, [{ productId: l.product.id, quantity: l.stockQty }], { type: "CONSUME", orderId, createdBy: actor.userId, warehouseId: loc.id, documentType: "SALE", documentId: orderId, allowBelowZero: true });
             }
+            // Rice taken from another store/warehouse leaves that place at once — no porter, no release step.
             for (const l of priced.filter((x) => x.sourceLocationId)) {
-              releases.push(await this.flow.createOrderRelease(tx, {
-                storeId, orderId, productId: l.product.id, quantity: l.stockQty, sourceLocationId: l.sourceLocationId!, sellingLocationId: loc.id, customerName, actorId: actor.userId,
-              }));
+              await deductStock(tx, storeId, [{ productId: l.product.id, quantity: l.stockQty }], { type: "CONSUME", orderId, createdBy: actor.userId, warehouseId: l.sourceLocationId!, documentType: "SALE", documentId: orderId });
             }
             if (method === "utang" && storeCustomerId) {
               // The text carries the balance this transaction just wrote.

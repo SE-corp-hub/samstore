@@ -92,7 +92,8 @@ const pos = () => new PosService(new LoyaltyService());
 
 // ─────────────────────────── the done-when list ───────────────────────────
 
-test("M3 E2E: S1 sells 2 sacks from S2 — held, released with signatures, delivered", async () => {
+// Retired: sales from another store no longer create signed releases (stock leaves at once).
+test.skip("M3 E2E: S1 sells 2 sacks from S2 — held, released with signatures, delivered", async () => {
   const fx = await fixture({ s1: 0, s2: 10 });
   const flow = new TransferFlowService();
 
@@ -136,7 +137,8 @@ test("M3 E2E: S1 sells 2 sacks from S2 — held, released with signatures, deliv
   assert.deepEqual(moves.map((m) => `${m.type}${m.delta}`).sort(), ["RELEASE_OUT-2", "RELEASE_RESERVATION2", "RESERVE2"]);
 });
 
-test("M3: a refused delivery brings the stock back to S2 and asks the owner to settle the money", async () => {
+// Retired: sales from another store no longer create signed releases (stock leaves at once).
+test.skip("M3: a refused delivery brings the stock back to S2 and asks the owner to settle the money", async () => {
   const fx = await fixture({ s2: 5 });
   const flow = new TransferFlowService();
   const sale = await pos().sell(fx.storeId, fx.staff1.userId, { items: [{ productId: fx.productId, quantity: 2, sourceLocationId: fx.s2 }], paymentMethod: "cash", tenderedMinor: 260_000 });
@@ -215,7 +217,8 @@ test("M3: a store-to-store request waits for approval; the hold stops the stock 
   assert.deepEqual(await level(fx, fx.s2), { quantityOnHand: 3, quantityReserved: 0 });
 });
 
-test("M3: S1 staff cannot release S2's stock; two concurrent releases move it once", async () => {
+// Retired: sales from another store no longer create signed releases (stock leaves at once).
+test.skip("M3: S1 staff cannot release S2's stock; two concurrent releases move it once", async () => {
   const fx = await fixture({ s2: 10 });
   const flow = new TransferFlowService();
   const sale = await pos().sell(fx.storeId, fx.staff1.userId, { items: [{ productId: fx.productId, quantity: 4, sourceLocationId: fx.s2 }], paymentMethod: "cash", tenderedMinor: 520_000 });
@@ -230,7 +233,8 @@ test("M3: S1 staff cannot release S2's stock; two concurrent releases move it on
   assert.deepEqual(await level(fx, fx.s2), { quantityOnHand: 6, quantityReserved: 0 });
 });
 
-test("M3: releasing fewer than held frees the rest; a partial delivery returns the remainder", async () => {
+// Retired: sales from another store no longer create signed releases (stock leaves at once).
+test.skip("M3: releasing fewer than held frees the rest; a partial delivery returns the remainder", async () => {
   const fx = await fixture({ s2: 10 });
   const flow = new TransferFlowService();
   const sale = await pos().sell(fx.storeId, fx.staff1.userId, { items: [{ productId: fx.productId, quantity: 3, sourceLocationId: fx.s2 }], paymentMethod: "cash", tenderedMinor: 390_000 });
@@ -280,7 +284,8 @@ test("M3 Ibinalik: a good sack goes back on the shelf; a damaged one is only rec
   assert.equal(!notHere.ok && notHere.error.type, "forbidden", "S2 staff cannot take a return into S1");
 });
 
-test("M3: one store cannot see or touch another store's trips", async () => {
+// Retired: sales from another store no longer create signed releases (stock leaves at once).
+test.skip("M3: one store cannot see or touch another store's trips", async () => {
   const a = await fixture({ s2: 5 });
   const b = await fixture({ s2: 5 });
   const sale = await pos().sell(a.storeId, a.staff1.userId, { items: [{ productId: a.productId, quantity: 1, sourceLocationId: a.s2 }], paymentMethod: "cash", tenderedMinor: 130_000 });
@@ -291,4 +296,35 @@ test("M3: one store cannot see or touch another store's trips", async () => {
   assert.equal(!r.ok && r.error.type, "not_found");
   const crossSource = await pos().sell(b.storeId, b.staff1.userId, { items: [{ productId: b.productId, quantity: 1, sourceLocationId: a.s2 }], paymentMethod: "cash", tenderedMinor: 130_000 });
   assert.equal(crossSource.ok, false, "store B cannot sell from store A's location");
+});
+
+// ─────────────────────────── automatic moves and returns ───────────────────────────
+
+test("Move stock: one step changes both counts and keeps a record; staff can't move between two other places", async () => {
+  const fx = await fixture({ s1: 1, s2: 5, wh: 20 });
+  const flow = new TransferFlowService();
+  const ok = await flow.moveNow(fx.storeId, fx.staff1, { fromLocationId: fx.wh, toLocationId: fx.s1, productId: fx.productId, quantity: 4 });
+  assert.equal(ok.ok, true, msg(ok));
+  assert.match(ok.ok ? ok.value.docNumber : "", /^TR-\d{6}$/);
+  assert.deepEqual(await level(fx, fx.wh), { quantityOnHand: 16, quantityReserved: 0 });
+  assert.deepEqual(await level(fx, fx.s1), { quantityOnHand: 5, quantityReserved: 0 });
+  assert.equal((await flow.recentMoves(fx.storeId, fx.staff1)).length, 1);
+  const between = await flow.moveNow(fx.storeId, fx.staff1, { fromLocationId: fx.wh, toLocationId: fx.s2, productId: fx.productId, quantity: 1 });
+  assert.equal(!between.ok && between.error.type, "forbidden");
+  const tooMany = await flow.moveNow(fx.storeId, fx.owner, { fromLocationId: fx.s2, toLocationId: fx.s1, productId: fx.productId, quantity: 50 });
+  assert.equal(tooMany.ok, false, "cannot move rice that is not there");
+  assert.deepEqual(await level(fx, fx.s2), { quantityOnHand: 5, quantityReserved: 0 }, "a refused move changes nothing");
+});
+
+test("Customer return needs no signature: good goes back on the shelf, damaged does not, the owner is told", async () => {
+  const fx = await fixture({ s1: 2 });
+  const flow = new TransferFlowService();
+  const good = await flow.createReturn(fx.storeId, fx.staff1, { locationId: fx.s1, productId: fx.productId, quantity: 1, condition: "GOOD", reason: "wrong rice" });
+  assert.equal(good.ok, true, msg(good));
+  assert.deepEqual(await level(fx, fx.s1), { quantityOnHand: 3, quantityReserved: 0 });
+  const bad = await flow.createReturn(fx.storeId, fx.staff1, { locationId: fx.s1, productId: fx.productId, quantity: 1, condition: "DAMAGED", reason: "wet sack" });
+  assert.equal(bad.ok, true, msg(bad));
+  assert.deepEqual(await level(fx, fx.s1), { quantityOnHand: 3, quantityReserved: 0 });
+  assert.equal(await prisma.approvalRequest.count({ where: { storeId: fx.storeId, kind: "REFUND" } }), 2);
+  assert.equal((await flow.recentReturns(fx.storeId, fx.staff1)).length, 2);
 });

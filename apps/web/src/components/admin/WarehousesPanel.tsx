@@ -149,16 +149,16 @@ export default function WarehousesPanel() {
     e.preventDefault();
     setRequesting(true);
     setError(null);
-    const { ok, data } = await call(`${API_URL}/admin/transfers`, "POST", {
-      fromWarehouseId: transfer.from,
-      toWarehouseId: transfer.to,
+    const { ok, data } = await call(`${API_URL}/admin/moves`, "POST", {
+      fromLocationId: transfer.from,
+      toLocationId: transfer.to,
       productId: transfer.productId,
       quantity: parseInt(transfer.quantity, 10),
-      reason: transfer.reason || undefined,
+      note: transfer.reason || undefined,
     });
     setRequesting(false);
-    if (!ok) { setError(errorText(data, "Could not request the transfer")); return; }
-    toast("Transfer requested");
+    if (!ok) { setError(errorText(data, "Could not move the stock")); return; }
+    toast("Moved — both counts changed");
     setTransfer({ from: "", to: "", productId: "", quantity: "", reason: "" });
     await load();
   };
@@ -241,7 +241,7 @@ export default function WarehousesPanel() {
         <div className="col-lg-7">
           <form onSubmit={request} className="card h-100">
             <div className="card-body">
-              <h2 className="h6 card-title">Request a transfer</h2>
+              <h2 className="h6 card-title">Move stock now</h2>
               <div className="row g-2">
                 <div className="col-md-6">
                   <label className="form-label small mb-1" htmlFor="tr-from">From</label>
@@ -273,7 +273,7 @@ export default function WarehousesPanel() {
                   <input id="tr-reason" className="form-control form-control-sm" placeholder="e.g. restock for the weekend" value={transfer.reason} onChange={(e) => setTransfer({ ...transfer, reason: e.target.value })} />
                 </div>
                 <div className="col-md-4 d-flex align-items-end">
-                  <button className="btn btn-primary btn-sm w-100" type="submit" disabled={requesting || active.length < 2}>{requesting ? "Requesting…" : "Request transfer"}</button>
+                  <button className="btn btn-primary btn-sm w-100" type="submit" disabled={requesting || active.length < 2}>{requesting ? "Moving…" : "Move now"}</button>
                 </div>
               </div>
             </div>
@@ -324,7 +324,7 @@ export default function WarehousesPanel() {
 
         <div className="col-lg-7">
           <div className="card h-100"><div className="card-body">
-            <h2 className="h6 card-title">Transfers</h2>
+            <h2 className="h6 card-title">Moves</h2>
             {receiving && (
               <SignCapture
                 sentence={`Tatanggapin: ${receiving.quantity} × ${receiving.product.name}, mula ${label(receiving.fromWarehouse)} papuntang ${label(receiving.toWarehouse)}.`}
@@ -348,12 +348,6 @@ export default function WarehousesPanel() {
                         <td className="text-end">{t.quantity}</td>
                         <td><span className={`badge ${STATUS_BADGE[t.status] ?? "text-bg-secondary"}`}>{t.status}</span></td>
                         <td className="text-end text-nowrap">
-                          {t.status === "REQUESTED" && (
-                            <button type="button" className="btn btn-sm btn-outline-success me-1" onClick={() => void act(t, "approve", "Transfer approved")}>Approve</button>
-                          )}
-                          {t.status === "APPROVED" && t.kind !== "ORDER_RELEASE" && (
-                            <button type="button" className="btn btn-sm btn-outline-primary me-1" title="Owner: move it in one step (both ends at once). Staff use Transfers & releases." onClick={() => setReceiving(t)}>Move now</button>
-                          )}
                           {(t.status === "REQUESTED" || t.status === "APPROVED") && t.kind !== "ORDER_RELEASE" && (
                             <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => void act(t, "cancel", "Transfer cancelled")}>Cancel</button>
                           )}

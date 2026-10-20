@@ -154,7 +154,8 @@ export const NAV_GROUPS: NavGroup[] = [
       { id: "agentorders", label: "Agent orders", icon: "bi-person-lines-fill" },
       { id: "agent", label: "New order (agent)", icon: "bi-phone" },
       { id: "approvals", label: "For your approval", icon: "bi-inbox" },
-      { id: "trips", label: "Transfers & releases", icon: "bi-truck" },
+      { id: "moves", label: "Move stock", icon: "bi-arrow-left-right" },
+      { id: "returns", label: "Customer returns", icon: "bi-arrow-return-left" },
       { id: "resack", label: "Resack", icon: "bi-arrow-repeat" },
       { id: "pasok", label: "Stock in", icon: "bi-box-arrow-in-down" },
       { id: "bilangin", label: "Count", icon: "bi-clipboard-check" },
@@ -215,12 +216,12 @@ export function navItemFor(id: string): NavItem | undefined {
 export const TABS_BY_ROLE: Record<string, string[]> = {
   // M7: OWNER is the tenant (store membership) role; STORE_OWNER is the legacy global
   // role — both are store owners and must see the same surface.
-  STORE_OWNER: ["overview", "pos", "preorders", "orders", "utang", "products", "inventory", "expenses", "purchases", "team", "customers", "vouchers", "crm", "erp", "analytics", "reports", "settings", "storelink", "warehouses", "approvals", "trips", "resack", "drafts", "kargadors", "benta", "posold", "utangold", "pasok", "utangrice", "agentorders", "bilangin", "ulat"],
-  OWNER: ["overview", "pos", "preorders", "orders", "utang", "products", "inventory", "expenses", "purchases", "team", "customers", "vouchers", "crm", "erp", "analytics", "reports", "settings", "storelink", "warehouses", "approvals", "trips", "resack", "drafts", "kargadors", "benta", "posold", "utangold", "pasok", "utangrice", "agentorders", "bilangin", "ulat"],
+  STORE_OWNER: ["overview", "pos", "preorders", "orders", "utang", "products", "inventory", "expenses", "purchases", "team", "customers", "vouchers", "crm", "erp", "analytics", "reports", "settings", "storelink", "warehouses", "approvals", "moves", "returns", "resack", "drafts", "kargadors", "benta", "posold", "utangold", "pasok", "utangrice", "agentorders", "bilangin", "ulat"],
+  OWNER: ["overview", "pos", "preorders", "orders", "utang", "products", "inventory", "expenses", "purchases", "team", "customers", "vouchers", "crm", "erp", "analytics", "reports", "settings", "storelink", "warehouses", "approvals", "moves", "returns", "resack", "drafts", "kargadors", "benta", "posold", "utangold", "pasok", "utangrice", "agentorders", "bilangin", "ulat"],
   // Platform operators manage tenants/access and monitor the platform; daily POS/catalog tabs belong to store roles.
   PLATFORM_ADMIN: ["overview", "stores", "useraccess", "maintenance", "analytics", "reports", "settings"],
-  MANAGER: ["overview", "pos", "preorders", "orders", "utang", "products", "inventory", "expenses", "purchases", "team", "customers", "vouchers", "crm", "erp", "analytics", "reports", "settings", "warehouses", "approvals", "trips", "resack", "drafts", "kargadors", "benta", "posold", "utangold", "pasok", "utangrice", "agentorders", "bilangin", "ulat"],
-  STAFF: ["overview", "pos", "preorders", "orders", "utang", "products", "inventory", "expenses", "purchases", "customers", "reports", "countersettings", "trips", "resack", "drafts", "kargadors", "benta", "pasok", "utangrice", "agentorders", "bilangin", "ulat"],
+  MANAGER: ["overview", "pos", "preorders", "orders", "utang", "products", "inventory", "expenses", "purchases", "team", "customers", "vouchers", "crm", "erp", "analytics", "reports", "settings", "warehouses", "approvals", "moves", "returns", "resack", "drafts", "kargadors", "benta", "posold", "utangold", "pasok", "utangrice", "agentorders", "bilangin", "ulat"],
+  STAFF: ["overview", "pos", "preorders", "orders", "utang", "products", "inventory", "expenses", "purchases", "customers", "reports", "countersettings", "moves", "returns", "resack", "drafts", "kargadors", "benta", "pasok", "utangrice", "agentorders", "bilangin", "ulat"],
   SALES_AGENT: ["agent", "overview", "orders", "customers", "crm", "reports"],
   DELIVERY: [],
 };

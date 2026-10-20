@@ -10,7 +10,6 @@ import { prisma } from "../persistence/prisma-repositories.js";
 import { cacheBust, cacheKey } from "../persistence/ttl-cache.js";
 import { deductStock, restoreStock as restoreStockLedger } from "../domain/movements.js";
 import { pickDeductionLevel } from "../domain/stock-location.js";
-import { TransferFlowService } from "../transfers/transfer-flow.service.js";
 import { RegisterService } from "../registers/register.service.js";
 import { PrismaOrderSequenceRepository } from "../persistence/prisma-repositories.js";
 import { computeOrderTotals } from "../domain/pricing.js";
@@ -48,7 +47,6 @@ export interface LoadedLine {
 export class PosService {
   private readonly sequences = new PrismaOrderSequenceRepository();
   private readonly credit = new CreditService();
-  private readonly flow = new TransferFlowService();
 
   constructor(private readonly loyalty: LoyaltyService, private readonly registers: RegisterService = new RegisterService()) {}
 
@@ -481,14 +479,9 @@ export class PosService {
         creditTerms: { startAt: input.startAt, dueAt: input.dueAt },
       });
       if (localLines.length) await this.decrementStock(tx, storeId, localLines, { orderId: id, createdBy: actorId });
-      // Rice Ops M3: lines served from another location are held there and wait on its
-      // Ilabas list; stock leaves that location only at the signed release.
+      // Lines served from another location leave that location at once (no release step).
       for (const l of remoteLines) {
-        releases.push(await this.flow.createOrderRelease(tx, {
-          storeId, orderId: id, productId: l.productId, quantity: l.quantity,
-          sourceLocationId: l.sourceLocationId!, sellingLocationId: sellingLocation!.id,
-          customerName: displayName, actorId,
-        }));
+        await deductStock(tx, storeId, [{ productId: l.productId, quantity: l.quantity }], { type: "CONSUME", orderId: id, createdBy: actorId, warehouseId: l.sourceLocationId!, documentType: "SALE", documentId: id });
       }
     }, txOptions());
 

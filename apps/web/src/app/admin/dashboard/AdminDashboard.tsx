@@ -13,7 +13,7 @@ import QueueBadge from "../../../components/admin/QueueBadge";
 import StaffHome from "../../../components/admin/StaffHome";
 
 /** Rice Ops M10: the store screens get the large, high-contrast look (globals.css .rice-ui). */
-const RICE_TABS = new Set(["pos", "benta", "utang", "utangrice", "agentorders", "agent", "approvals", "trips", "resack", "pasok", "bilangin", "ulat", "drafts", "kargadors"]);
+const RICE_TABS = new Set(["pos", "benta", "utang", "utangrice", "agentorders", "agent", "approvals", "moves", "returns", "resack", "pasok", "bilangin", "ulat", "drafts", "kargadors"]);
 // The landing panel stays eager (it is the first paint); every other panel loads when
 // its tab opens. Shipping all 22 at once cost ~95 kB of route JS for one visible screen,
 // and dragged jsbarcode/qrcode (used by two panels) into the initial payload.
@@ -55,7 +55,8 @@ const ReportsPanel = panel(() => import("../../../components/admin/ReportsPanel"
 const ApprovalsPanel = panel(() => import("../../../components/admin/ApprovalsPanel"));
 const DraftsPanel = panel(() => import("../../../components/admin/DraftsPanel"));
 const KargadorsPanel = panel(() => import("../../../components/admin/KargadorsPanel"));
-const TripsPanel = panel(() => import("../../../components/admin/TripsPanel"));
+const MovePanel = panel(() => import("../../../components/admin/MovePanel"));
+const ReturnsPanel = panel(() => import("../../../components/admin/ReturnsPanel"));
 const ResackPanel = panel(() => import("../../../components/admin/ResackPanel"));
 const BentaPanel = panel(() => import("../../../components/admin/BentaPanel"));
 const PasokPanel = panel(() => import("../../../components/admin/PasokPanel"));
@@ -284,7 +285,8 @@ case "erp": return <ErpPanel />;
       case "approvals": return <ApprovalsPanel />;
       case "drafts": return <DraftsPanel />;
       case "kargadors": return <KargadorsPanel />;
-      case "trips": return <TripsPanel />;
+      case "moves": return <MovePanel />;
+      case "returns": return <ReturnsPanel />;
       case "resack": return <ResackPanel />;
       case "benta": return <BentaPanel />;
       case "pasok": return <PasokPanel role={role} />;

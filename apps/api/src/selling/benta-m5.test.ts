@@ -279,7 +279,7 @@ test("M5: utang needs a customer on the list and their signature; GCash needs a 
   assert.equal((await prisma.payment.findFirstOrThrow({ where: { orderId: gcash.ok ? gcash.value.orderId : "" } })).method, "gcash");
 });
 
-test("M5: the counter sells even when the count is short (it goes below zero); Kunin sa ibang tindahan still holds stock there", async () => {
+test("M5: the counter sells even when the count is short (it goes below zero); taking from another store leaves that store at once", async () => {
   const fx = await fixture();
   const short = await svc.sell(fx.storeId, fx.staff1, { idempotencyKey: key(), lines: [{ productId: fx.sin25.id, quantity: 11 }], payment: { method: "cash" } });
   assert.equal(short.ok, true, msg(short));
@@ -289,10 +289,10 @@ test("M5: the counter sells even when the count is short (it goes below zero); K
 
   const r = await svc.sell(fx.storeId, fx.staff1, { idempotencyKey: key(), lines: [{ productId: fx.sin25.id, quantity: 2, sourceLocationId: fx.s2 }], payment: { method: "cash" } });
   assert.equal(r.ok, true, msg(r));
-  assert.match(r.ok ? r.value.releases[0]!.docNumber : "", /^REL-\d{6}$/);
+  assert.deepEqual(r.ok ? r.value.releases : null, [], "no release step any more");
   const s2 = await prisma.stockLevel.findFirstOrThrow({ where: { storeId: fx.storeId, productId: fx.sin25.id, warehouseId: fx.s2 } });
-  assert.deepEqual([s2.quantityOnHand, s2.quantityReserved], [5, 2], "held at Store 2 until its Ilabas");
-  assert.equal(await onHand(fx, fx.sin25.id, fx.s1), -1, "Store 1's own stock untouched by the held sale");
+  assert.deepEqual([s2.quantityOnHand, s2.quantityReserved], [3, 0], "taken from Store 2 at once");
+  assert.equal(await onHand(fx, fx.sin25.id, fx.s1), -1, "Store 1's own stock untouched");
 });
 
 test("M5: staff sell only at their own location; another store's product is not found", async () => {

@@ -14,7 +14,7 @@ import type { ApiError } from "@sam-store/contracts";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../persistence/prisma-repositories.js";
 import { recordCostIn, shelfCostFor } from "../domain/shelf-cost.js";
-import { addForTrip, InsufficientStockError, releaseForTrip, reserveForTrip, unreserveForTrip } from "../domain/movements.js";
+import { addForTrip, deductStock, InsufficientStockError, releaseForTrip, reserveForTrip, transferStock, unreserveForTrip } from "../domain/movements.js";
 import {
   checkArrival, checkRelease, checkReturnBack, deliveryOutcome, readBack, receiveOutcome, returnOutcome,
 } from "../domain/transfer-flow.js";
@@ -385,8 +385,6 @@ export class TransferFlowService {
           data: { storeId, docNumber, orderId: order?.id ?? null, locationId: location.id, productId: product.id, quantity: qty, condition: input.condition as "GOOD" | "DAMAGED", reason, kargadorId: kargador?.id ?? null, createdById: actor.userId },
           select: { id: true },
         });
-        await captureSignatures(tx, storeId, actor, { documentType: "RETURN", documentId: r.id, step: "RECEIVE", locationId: location.id }, input.signatures);
-        await requireSignatures(tx, storeId, { documentType: "RETURN", documentId: r.id, step: "RECEIVE" }, { kargador: !!kargador });
         if (input.condition === "GOOD") {
           await addForTrip(tx, { storeId, productId: product.id, warehouseId: location.id, actorId: actor.userId, documentType: "RETURN", documentId: r.id, note: docNumber }, qty, "RETURN_IN");
         }
@@ -401,6 +399,116 @@ export class TransferFlowService {
       });
       return out;
     }, product.name, location.name);
+  }
+
+  // ─────────────────────────── One-step move (no trip, no signatures) ───────────────────────────
+
+  /** Move rice between two locations now: both counts change, a numbered record is kept. */
+  async moveNow(
+    storeId: string, actor: Actor,
+    input: { fromLocationId?: string; toLocationId?: string; productId?: string; quantity?: unknown; note?: string },
+  ): Promise<FlowResult<{ id: string; docNumber: string }>> {
+    const qty = input.quantity;
+    if (typeof qty !== "number" || !Number.isInteger(qty) || qty < 1) return invalid("Enter how many to move (1 or more)");
+    if (!input.fromLocationId || !input.toLocationId) return invalid("Choose where it comes from and where it goes");
+    if (input.fromLocationId === input.toLocationId) return invalid("Pick two different places");
+    const places = await prisma.warehouse.findMany({ where: { storeId, isActive: true, id: { in: [input.fromLocationId, input.toLocationId] } }, select: { id: true, name: true, code: true } });
+    const from = places.find((w) => w.id === input.fromLocationId);
+    const to = places.find((w) => w.id === input.toLocationId);
+    if (!from || !to) return invalid("Unknown place");
+    // Staff may move rice out of, or into, their own store — not between two other places.
+    if (locationRefusal(actor, from.id) && locationRefusal(actor, to.id)) return forbidden(locationRefusal(actor, from.id) ?? "Not your store");
+    const product = input.productId ? await prisma.product.findFirst({ where: { id: input.productId, storeId }, select: { id: true, name: true } }) : null;
+    if (!product) return invalid("Unknown product");
+    return this.step(async () => {
+      let out = { id: "", docNumber: "" };
+      await prisma.$transaction(async (tx) => {
+        const docNumber = await nextDocNumber(tx, storeId, "TR");
+        const now = new Date();
+        const t = await tx.stockTransfer.create({
+          data: {
+            storeId, kind: "RESTOCK", docNumber, fromWarehouseId: from.id, toWarehouseId: to.id, productId: product.id, quantity: qty, status: "COMPLETED",
+            requestedById: actor.userId, approvedById: actor.userId, releasedQty: qty, receivedQty: qty, releasedAt: now, receivedAt: now, releasedById: actor.userId, receivedById: actor.userId, completedAt: now,
+            reason: input.note?.trim().slice(0, 200) || "Moved",
+          },
+          select: { id: true },
+        });
+        await recordCostIn(tx, { storeId, productId: product.id, warehouseId: to.id }, qty, await shelfCostFor(tx, storeId, product.id, from.id));
+        await transferStock(tx, { storeId, productId: product.id, fromWarehouseId: from.id, toWarehouseId: to.id, quantity: qty, actorId: actor.userId, documentType: "TRANSFER", documentId: t.id, note: docNumber });
+        await tx.auditLog.create({ data: { storeId, actorType: "USER", actorId: actor.userId, action: "transfer.move", entityType: "StockTransfer", entityId: t.id, after: { quantity: qty, from: from.name, to: to.name } } });
+        out = { id: t.id, docNumber };
+      }, txOptions());
+      return out;
+    }, product.name, from.name);
+  }
+
+  /** Recent one-step moves (newest first). */
+  async recentMoves(storeId: string, actor: Actor, locationId?: string) {
+    const rows = await prisma.stockTransfer.findMany({
+      where: { storeId, kind: "RESTOCK", status: "COMPLETED", ...(locationId ? { OR: [{ fromWarehouseId: locationId }, { toWarehouseId: locationId }] } : {}) },
+      orderBy: { createdAt: "desc" }, take: 30, include: tripInclude,
+    });
+    return rows.map((t) => ({ id: t.id, docNumber: t.docNumber, productName: t.product.name, quantity: t.quantity, from: t.fromWarehouse.name, to: t.toWarehouse.name, note: t.reason, at: t.completedAt ?? t.createdAt }));
+  }
+
+  /** Recent customer returns (newest first). */
+  async recentReturns(storeId: string, actor: Actor, locationId?: string) {
+    const rows = await prisma.stockReturn.findMany({
+      where: { storeId, ...(locationId ? { locationId } : {}) }, orderBy: { createdAt: "desc" }, take: 30,
+      include: { product: { select: { name: true } }, location: { select: { name: true } }, order: { select: { orderNumber: true } } },
+    });
+    return rows.map((r) => ({ id: r.id, docNumber: r.docNumber, productName: r.product.name, quantity: r.quantity, condition: r.condition, reason: r.reason, locationName: r.location.name, orderNumber: r.order?.orderNumber ?? null, at: r.createdAt }));
+  }
+
+  // ─────────────────────────── Agent order: stock leaves at approval ───────────────────────────
+
+  /** Inside the approve transaction: take the rice from `sourceLocationId` now and keep a record of it. */
+  async takeForOrder(
+    tx: Tx,
+    input: { storeId: string; orderId: string; productId: string; quantity: number; sourceLocationId: string; sellingLocationId: string; customerName: string; actorId: string },
+  ): Promise<{ id: string; docNumber: string }> {
+    const docNumber = await nextDocNumber(tx, input.storeId, "REL");
+    const now = new Date();
+    const t = await tx.stockTransfer.create({
+      data: {
+        storeId: input.storeId, kind: "ORDER_RELEASE", docNumber, orderId: input.orderId,
+        fromWarehouseId: input.sourceLocationId, toWarehouseId: input.sellingLocationId,
+        productId: input.productId, quantity: input.quantity, status: "IN_TRANSIT",
+        requestedById: input.actorId, approvedById: input.actorId, releasedQty: input.quantity, releasedAt: now, releasedById: input.actorId,
+        customerName: input.customerName.slice(0, 80) || null, reason: "Agent order",
+      },
+      select: { id: true },
+    });
+    await deductStock(tx, input.storeId, [{ productId: input.productId, quantity: input.quantity }], { type: "CONSUME", orderId: input.orderId, createdBy: input.actorId, warehouseId: input.sourceLocationId, documentType: "RELEASE", documentId: t.id });
+    return { id: t.id, docNumber };
+  }
+
+  /** Delivered (all of it) or Not delivered (the stock goes back where it came from). */
+  async settleOrderDelivery(storeId: string, actor: Actor, orderId: string, delivered: boolean, note?: string): Promise<FlowResult<{ orderId: string; delivered: boolean }>> {
+    const order = await prisma.order.findFirst({ where: { id: orderId, storeId, source: "AGENT" }, select: { id: true, sellingLocationId: true, status: true } });
+    if (!order || !order.sellingLocationId) return notFound("Order not found");
+    const refusal = locationRefusal(actor, order.sellingLocationId);
+    if (refusal) return forbidden(refusal);
+    if (order.status !== "CONFIRMED") return conflict("This order is not waiting for delivery");
+    const why = note?.trim() ?? "";
+    if (!delivered && why.length < 3) return invalid("Why was it not delivered? Enter the reason.");
+    return this.step(async () => {
+      await prisma.$transaction(async (tx) => {
+        const trips = await tx.stockTransfer.findMany({ where: { storeId, orderId, kind: "ORDER_RELEASE", status: "IN_TRANSIT" } });
+        if (trips.length === 0) throw new StepError(conflict("Already marked — refresh the page"));
+        for (const t of trips) {
+          await this.claim(tx, storeId, t.id, ["IN_TRANSIT"], {
+            status: "COMPLETED", deliveredQty: delivered ? (t.releasedQty ?? t.quantity) : 0, receivedAt: new Date(), receivedById: actor.userId,
+            completedAt: new Date(), deliveryNote: why || null, ...(delivered ? {} : { returnedQty: t.releasedQty ?? t.quantity }),
+          });
+          if (!delivered) {
+            await addForTrip(tx, { storeId, productId: t.productId, warehouseId: t.fromWarehouseId, actorId: actor.userId, documentType: "RELEASE", documentId: t.id, note: `not delivered: ${why}` }, t.releasedQty ?? t.quantity, "RETURN_IN");
+          }
+        }
+        await tx.auditLog.create({ data: { storeId, actorType: "USER", actorId: actor.userId, action: delivered ? "agent_order.delivered" : "agent_order.not_delivered", entityType: "Order", entityId: orderId, after: { note: why || null } } });
+      }, txOptions());
+      return { orderId, delivered };
+    }, "rice", "the store");
   }
 
   /** The sentence the phone reads back before signing a step. */

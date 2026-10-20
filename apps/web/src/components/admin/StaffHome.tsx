@@ -6,7 +6,7 @@
 
 import { allowedTabs, navItemFor } from "../../lib/admin";
 
-const DAILY = ["pos", "preorders", "resack", "utang", "orders", "trips"];
+const DAILY = ["pos", "preorders", "resack", "utang", "orders", "moves", "returns"];
 // Stock screens are always in view (not hidden under "Other screens").
 const STOCK = ["pasok", "bilangin", "inventory", "products"];
 const OTHER = ["agentorders", "drafts", "kargadors", "ulat", "customers", "expenses", "purchases", "reports", "countersettings", "overview"];

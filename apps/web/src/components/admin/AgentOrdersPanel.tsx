@@ -3,7 +3,7 @@
 // Rice Ops M7 — the store's side of agent orders.
 //   Waiting     — Approve (choose where each line comes from; it is held there and
 //                 appears on that location's Release list) or Decline with a reason.
-//   In progress — approved orders moving through Release → Delivered (Transfers & releases);
+//   In progress — approved orders waiting for Delivered / Not delivered;
 //                 once delivered, Take payment: cash, GCash or credit for what was delivered.
 //   Done        — paid, declined or cancelled (last 30 days).
 
@@ -59,7 +59,23 @@ export default function AgentOrdersPanel() {
     setError(null);
     const r = await post(`/admin/agent-orders/${o.id}/approve`, { sources: o.lines.map((l) => ({ itemId: l.id, sourceLocationId: sources[l.id] || o.location?.id })) });
     if (!r.ok) { setError(errText(r.data, "Not approved")); return; }
-    toast(`Approved ${o.orderNumber} — now on the Release list`);
+    toast(`Approved ${o.orderNumber} — the rice left the store. Tap Delivered when it arrives.`);
+    await load();
+  };
+  const delivered = async (o: Order) => {
+    setError(null);
+    const r = await post(`/admin/agent-orders/${o.id}/delivered`, {});
+    if (!r.ok) { setError(errText(r.data, "Not saved")); return; }
+    toast("Delivered — you can take payment now");
+    await load();
+  };
+  const notDelivered = async (o: Order) => {
+    const reason = await askText(`Why was ${o.customerName}'s order not delivered? The rice goes back on the shelf.`, { ok: "Not delivered", danger: true });
+    if (!reason) return;
+    setError(null);
+    const r = await post(`/admin/agent-orders/${o.id}/not-delivered`, { reason });
+    if (!r.ok) { setError(errText(r.data, "Not saved")); return; }
+    toast("Not delivered — the rice is back in stock");
     await load();
   };
   const decline = async (o: Order) => {
@@ -108,7 +124,7 @@ export default function AgentOrdersPanel() {
                     )}
                     {view !== "waiting" && (() => {
                       const t = o.trips.find((x) => x.productId === l.productId);
-                      return t ? <span className="small text-muted">{t.docNumber} · {t.status === "APPROVED" ? "waiting for release" : t.status === "IN_TRANSIT" ? "on the way" : t.deliveredQty !== null ? `delivered ${t.deliveredQty}` : t.status}</span> : null;
+                      return t ? <span className="small text-muted">{t.docNumber} · {t.deliveredQty === null ? "on the way" : t.deliveredQty > 0 ? "delivered" : "not delivered"}</span> : null;
                     })()}
                   </li>
                 ))}
@@ -122,7 +138,12 @@ export default function AgentOrdersPanel() {
                   </div>
                 )}
                 {view === "active" && o.readyToPay && <button type="button" className="btn btn-success btn-lg" onClick={() => setPaying(o)}>Take payment</button>}
-                {view === "active" && !o.readyToPay && <span className="small text-muted">Release and Delivered are in “Transfers & releases”</span>}
+                {view === "active" && !o.readyToPay && (
+                  <div className="d-flex gap-2">
+                    <button type="button" className="btn btn-outline-danger btn-lg" onClick={() => void notDelivered(o)}>Not delivered</button>
+                    <button type="button" className="btn btn-success btn-lg" onClick={() => void delivered(o)}>Delivered</button>
+                  </div>
+                )}
                 {o.declineReason && <span className="text-danger small">Declined: {o.declineReason}</span>}
               </div>
             </div>
