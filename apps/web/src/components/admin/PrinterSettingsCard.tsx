@@ -7,10 +7,13 @@ import { useEffect, useState } from "react";
 import { cleanPrinterSettings, DEFAULT_PRINTER, getPrinterSettings, savePrinterSettings, type PrinterSettings } from "../../lib/printer-settings";
 import { printSlip } from "../../lib/slip-print";
 import { toast } from "../../lib/toast";
+import { bluetoothSupported, connectPrinter, connectedPrinterName } from "../../lib/bt-print";
 
 export default function PrinterSettingsCard({ storeName }: { storeName?: string }) {
   const [p, setP] = useState<PrinterSettings>(DEFAULT_PRINTER);
-  useEffect(() => { setP(getPrinterSettings()); }, []);
+  const [btOk, setBtOk] = useState(false);
+  const [btName, setBtName] = useState<string | null>(null);
+  useEffect(() => { setP(getPrinterSettings()); setBtOk(bluetoothSupported()); setBtName(connectedPrinterName()); }, []);
   const set = (patch: Partial<PrinterSettings>) => { const next = cleanPrinterSettings({ ...p, ...patch }); setP({ ...p, ...patch }); savePrinterSettings(next); };
 
   return (
@@ -30,6 +33,23 @@ export default function PrinterSettingsCard({ storeName }: { storeName?: string 
         <div className="form-check form-switch mb-3">
           <input className="form-check-input" type="checkbox" id="pr-copies" checked={p.copies === 2} onChange={(e) => set({ copies: e.target.checked ? 2 : 1 })} />
           <label className="form-check-label" htmlFor="pr-copies">Two copies (customer and store)</label>
+        </div>
+        <div className="border rounded p-2 mb-3">
+          <div className="form-check form-switch mb-2">
+            <input className="form-check-input" type="checkbox" id="pr-bt" checked={p.bluetooth} disabled={!btOk} onChange={(e) => set({ bluetooth: e.target.checked })} />
+            <label className="form-check-label" htmlFor="pr-bt">Print straight to my Bluetooth printer (no print window)</label>
+          </div>
+          {!btOk && <div className="small text-danger">This browser cannot print straight to Bluetooth. Use Chrome.</div>}
+          {btOk && (
+            <div className="d-flex flex-wrap align-items-center gap-2">
+              <button type="button" className="btn btn-outline-dark" onClick={async () => {
+                try { const name = await connectPrinter(); setBtName(name); toast(`Connected: ${name}`); set({ bluetooth: true }); }
+                catch (e) { toast(e instanceof Error && e.name === "NotFoundError" ? "No printer was chosen" : `Could not connect: ${e instanceof Error ? e.message : "error"}`, "danger"); }
+              }}><i className="bi bi-bluetooth me-1"></i>Connect printer</button>
+              <span className="small text-muted">{btName ? `Connected: ${btName}` : "Not connected yet. Turn the printer on and press Connect."}</span>
+            </div>
+          )}
+          <div className="small text-muted mt-2">Works with printers that use Bluetooth Low Energy. If yours does not connect or print, switch this off and the normal print window is used.</div>
         </div>
         <label className="form-label" htmlFor="pr-header">Line under the store name (address, phone)</label>
         <input id="pr-header" className="form-control mb-2" maxLength={80} value={p.header} onChange={(e) => set({ header: e.target.value })} />

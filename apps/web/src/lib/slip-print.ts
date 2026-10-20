@@ -3,6 +3,8 @@
 // The HTML builder is pure so its escaping and layout are unit-tested.
 
 import { getPrinterSettings } from "./printer-settings";
+import { printViaBluetooth } from "./bt-print";
+import { toast } from "./toast";
 
 export interface SlipLine { label: string; value: string }
 export interface SlipRow { name: string; qty: string; note?: string }
@@ -62,6 +64,19 @@ ${s.footer ? `<hr><div class="c">${esc(s.footer)}</div>` : ""}
 export function printSlip(s: Slip): void {
   const cfg = getPrinterSettings();
   s = { ...s, widthMm: s.widthMm ?? cfg.widthMm, header: s.header ?? (cfg.header || null), footer: cfg.footer || s.footer, copies: s.copies ?? cfg.copies };
+  if (cfg.bluetooth) {
+    // Straight to the Bluetooth printer. If that fails, fall back to the normal print window so a receipt is never lost.
+    const slip = s;
+    printViaBluetooth(slip, slip.widthMm ?? 58).catch((e) => {
+      toast(`Bluetooth print did not work (${e instanceof Error ? e.message : "error"}) — using the print window`, "danger");
+      browserPrint(slip);
+    });
+    return;
+  }
+  browserPrint(s);
+}
+
+function browserPrint(s: Slip): void {
   const frame = document.createElement("iframe");
   frame.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0";
   document.body.appendChild(frame);

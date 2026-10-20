@@ -7,9 +7,10 @@ export interface PrinterSettings {
   copies: 1 | 2;         // 2 = a copy for the customer and one for the store
   header: string;        // a line under the store name (address, phone)
   footer: string;        // replaces "Salamat po!" when filled in
+  bluetooth: boolean;    // print straight to a Bluetooth (BLE) printer, no print window
 }
 
-export const DEFAULT_PRINTER: PrinterSettings = { widthMm: 58, autoPrint: false, copies: 1, header: "", footer: "" };
+export const DEFAULT_PRINTER: PrinterSettings = { widthMm: 58, autoPrint: false, copies: 1, header: "", footer: "", bluetooth: false };
 
 const KEY = "samstore-printer";
 
@@ -23,6 +24,7 @@ export function cleanPrinterSettings(raw: unknown): PrinterSettings {
     copies: r.copies === 2 ? 2 : 1,
     header: text(r.header),
     footer: text(r.footer),
+    bluetooth: r.bluetooth === true,
   };
 }
 
