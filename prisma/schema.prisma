@@ -2206,3 +2206,26 @@ model PriceHistory {
 
   @@index([storeId, productId, createdAt])
 }
+
+// Store payable: what a store owes the main store for rice that left without a record (found by a count),
+// at the main store's cost price. Charges add, payments take away; a mistake is undone with a reversal.
+model StorePayableEntry {
+  id               String   @id @default(cuid())
+  storeId          String
+  docNumber        String // SP-000001
+  locationId       String // the store that owes
+  kind             String // CHARGE | PAYMENT | REVERSAL
+  amountMinor      Int // signed: + owes more, − paid / reduced
+  productId        String?
+  quantity         Int? // stock units (loose rice: grams)
+  unitCostMinor    Int? // cost at the time (loose rice: per kilo)
+  sourceLocationId String? // the store the rice was taken from
+  sourceLineId     String?  @unique // the count line this charge came from (so it is charged once)
+  reversesId       String?  @unique // the entry this one undoes
+  note             String?
+  createdById      String
+  createdAt        DateTime @default(now())
+
+  @@unique([storeId, docNumber])
+  @@index([storeId, locationId, createdAt])
+}

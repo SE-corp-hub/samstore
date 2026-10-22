@@ -28,6 +28,7 @@ type RecordRow = { at: string; kind: "SALE" | "STOCK" | "MONEY"; title: string; 
 type CompareRow = {
   location: { id: string; name: string; type: string }; sales: SalesTotalsOut; cashInMinor: number; creditGivenMinor: number; creditCollectedMinor: number;
   stock: { items: number; low: number; empty: number; valueMinor: number };
+  owesMinor: number;
 };
 
 export class StoreReportService {
@@ -174,6 +175,7 @@ export class StoreReportService {
       const p = await this.places(storeId, actor, undefined);
       if (p.res) return p.res;
       const stores: CompareRow[] = [];
+      const owes = new Map((await prisma.storePayableEntry.groupBy({ by: ["locationId"], where: { storeId }, _sum: { amountMinor: true } })).map((x) => [x.locationId, x._sum.amountMinor ?? 0]));
       // One store at a time: the database pool is small.
       for (const l of p.wanted.filter((x) => x.type !== "BUFFER")) {
         const s = await this.salesOf(storeId, l.id, r.start, r.end, true);
@@ -181,6 +183,7 @@ export class StoreReportService {
         stores.push({
           location: { id: l.id, name: l.name, type: l.type }, sales: s.sales, cashInMinor: s.cashInMinor, creditGivenMinor: s.creditGivenMinor, creditCollectedMinor: s.creditCollectedMinor,
           stock: { items: stock.length, low: stock.filter((x) => x.flag === "LOW").length, empty: stock.filter((x) => x.flag === "ZERO").length, valueMinor: stock.reduce((a, x) => a + x.valueMinor, 0) },
+          owesMinor: owes.get(l.id) ?? 0,
         });
       }
       const sum = (f: (x: (typeof stores)[number]) => number) => stores.reduce((a, x) => a + f(x), 0);
@@ -188,7 +191,7 @@ export class StoreReportService {
         ok: true as const,
         value: {
           from: r.from, to: r.to, stores,
-          total: { salesMinor: sum((x) => x.sales.totalMinor), count: sum((x) => x.sales.count), grossProfitMinor: sum((x) => x.sales.grossProfitMinor ?? 0), creditGivenMinor: sum((x) => x.creditGivenMinor), stockValueMinor: sum((x) => x.stock.valueMinor) },
+          total: { salesMinor: sum((x) => x.sales.totalMinor), count: sum((x) => x.sales.count), grossProfitMinor: sum((x) => x.sales.grossProfitMinor ?? 0), creditGivenMinor: sum((x) => x.creditGivenMinor), stockValueMinor: sum((x) => x.stock.valueMinor), owesMinor: sum((x) => x.owesMinor) },
         },
       };
     } catch (e) {

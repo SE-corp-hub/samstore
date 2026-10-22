@@ -152,7 +152,7 @@ export function checkPhotoImage(dataUrl: unknown): { ok: true; sha256: string } 
 // ─────────────────────────────── Numbering ───────────────────────────────
 
 /** Document number prefixes, one counter each (StoreCounter kind "DOC_<prefix>"). */
-export const DOC_PREFIXES = ["REL", "TR", "RSK", "CNT", "WO", "RET", "IN", "SLP"] as const;
+export const DOC_PREFIXES = ["REL", "TR", "RSK", "CNT", "WO", "RET", "IN", "SLP", "SP"] as const;
 export type DocPrefix = (typeof DOC_PREFIXES)[number];
 
 export function formatDocNumber(prefix: DocPrefix, n: number): string {

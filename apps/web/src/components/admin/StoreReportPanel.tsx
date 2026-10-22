@@ -24,7 +24,7 @@ interface StockRow { productId: string; name: string; loose: boolean; unit: stri
 interface StockData { location: { id: string; name: string }; rows: StockRow[]; totals: { items: number; low: number; empty: number; valueMinor: number; costValueMinor?: number } }
 interface SalesTotals { count: number; totalMinor: number; cashMinor: number; gcashMinor: number; creditMinor: number; otherMinor: number; costMinor?: number; grossProfitMinor?: number }
 interface SalesData { location: { id: string; name: string }; from: string; to: string; sales: SalesTotals; cashInMinor: number; creditGivenMinor: number; creditCollectedMinor: number; items: { name: string; unit: string; quantity: number; salesMinor: number }[]; days: { date: string; count: number; totalMinor: number }[] }
-interface CompareData { from: string; to: string; stores: { location: { id: string; name: string; type: string }; sales: SalesTotals; cashInMinor: number; creditGivenMinor: number; creditCollectedMinor: number; stock: { items: number; low: number; empty: number; valueMinor: number } }[]; total: { salesMinor: number; count: number; grossProfitMinor: number; creditGivenMinor: number; stockValueMinor: number } }
+interface CompareData { from: string; to: string; stores: { location: { id: string; name: string; type: string }; sales: SalesTotals; cashInMinor: number; creditGivenMinor: number; creditCollectedMinor: number; stock: { items: number; low: number; empty: number; valueMinor: number }; owesMinor: number }[]; total: { salesMinor: number; count: number; grossProfitMinor: number; creditGivenMinor: number; stockValueMinor: number; owesMinor: number } }
 interface BufferData { buffer: { id: string; name: string } | null; owed: { productId: string; name: string; unit: string; quantity: number; valueMinor: number; oldestAt: string | null }[]; surplus: { productId: string; name: string; unit: string; quantity: number }[]; totals: { owedMinor: number; owedItems: number }; entries: { at: string; productName: string; unit: string; quantity: number; orderNumber: string | null; store: string | null; by: string | null; what: string }[] }
 interface RecordRow { at: string; kind: "SALE" | "STOCK" | "MONEY"; title: string; detail: string; store: string | null; docNumber: string | null; amountMinor: number | null; qtyText: string | null; balanceText: string | null; by: string | null }
 interface DaySection { location: { id: string; name: string }; locked: boolean; closedAt: string | null; cashCountedMinor: number | null; cashVarianceMinor: number | null; sales: { count: number; totalMinor: number; cashMinor: number; gcashMinor: number; utangMinor: number }; cash: { expectedMinor: number }; utang: { givenMinor: number; collectedMinor: number }; stockIn: { documents: number; units: number }; kilosByVariety: { variety: string; grams: number; salesMinor: number }[] }
@@ -50,6 +50,7 @@ export default function StoreReportPanel({ role, onNavigate }: { role?: string; 
   const [compare, setCompare] = useState<CompareData | null>(null);
   const [day, setDay] = useState<DaySection | null>(null);
   const [buffer, setBuffer] = useState<BufferData | null>(null);
+  const [owesMap, setOwesMap] = useState<Record<string, number>>({});
   const [records, setRecords] = useState<{ records: RecordRow[]; truncated: boolean } | null>(null);
   const [kind, setKind] = useState<"all" | "sales" | "stock" | "money">("all");
   const [productId, setProductId] = useState("");
@@ -103,7 +104,11 @@ export default function StoreReportPanel({ role, onNavigate }: { role?: string; 
         const r = await getJson<{ sections: DaySection[] }>(`/admin/rice/daily?date=${from}&locationId=${locationId}`);
         if (!r.ok) throw new Error(r.data?.errors?.join(", ") ?? r.data?.message ?? "Could not load the day");
         setDay(r.data?.sections?.[0] ?? null);
-        if (owner) { const b = await getJson<BufferData>(`/admin/rice/store-buffer`); setBuffer(b.ok ? b.data : null); }
+        if (owner) {
+          const b = await getJson<BufferData>(`/admin/rice/store-buffer`); setBuffer(b.ok ? b.data : null);
+          const pay = await getJson<{ stores: { id: string; owesMinor: number }[] }>(`/admin/payable/summary`);
+          setOwesMap(pay.ok && pay.data ? Object.fromEntries(pay.data.stores.map((x) => [x.id, x.owesMinor])) : {});
+        }
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Load failed");
@@ -264,7 +269,7 @@ export default function StoreReportPanel({ role, onNavigate }: { role?: string; 
         <>
           <div className="table-responsive">
             <table className="table table-sm align-middle">
-              <thead><tr><th>Store</th><th className="text-end">Sales</th><th className="text-end">Cash</th><th className="text-end">Credit</th><th className="text-end">Profit</th><th className="text-end">Stock worth</th><th className="text-end">Low/out</th></tr></thead>
+              <thead><tr><th>Store</th><th className="text-end">Sales</th><th className="text-end">Cash</th><th className="text-end">Credit</th><th className="text-end">Profit</th><th className="text-end">Stock worth</th><th className="text-end">Low/out</th><th className="text-end">Owes main store</th></tr></thead>
               <tbody>
                 {compare.stores.map((s) => (
                   <tr key={s.location.id}>
@@ -275,13 +280,15 @@ export default function StoreReportPanel({ role, onNavigate }: { role?: string; 
                     <td className="text-end">{peso(s.sales.grossProfitMinor ?? 0)}</td>
                     <td className="text-end">{peso(s.stock.valueMinor)}</td>
                     <td className="text-end">{s.stock.low}/{s.stock.empty}</td>
+                    <td className={`text-end ${s.owesMinor > 0 ? "text-danger fw-semibold" : ""}`}>{s.owesMinor !== 0 ? peso(s.owesMinor) : ""}</td>
                   </tr>
                 ))}
               </tbody>
-              <tfoot><tr className="fw-bold"><td>All stores</td><td className="text-end">{peso(compare.total.salesMinor)}</td><td /><td className="text-end">{peso(compare.total.creditGivenMinor)}</td><td className="text-end">{peso(compare.total.grossProfitMinor)}</td><td className="text-end">{peso(compare.total.stockValueMinor)}</td><td /></tr></tfoot>
+              <tfoot><tr className="fw-bold"><td>All stores</td><td className="text-end">{peso(compare.total.salesMinor)}</td><td /><td className="text-end">{peso(compare.total.creditGivenMinor)}</td><td className="text-end">{peso(compare.total.grossProfitMinor)}</td><td className="text-end">{peso(compare.total.stockValueMinor)}</td><td /><td className="text-end">{compare.total.owesMinor !== 0 ? peso(compare.total.owesMinor) : ""}</td></tr></tfoot>
             </table>
           </div>
-          <p className="small text-muted">Credit here is what was given in the period. Pick a store in Sales for the detail.</p>
+          <p className="small text-muted">Credit here is what was given in the period. &quot;Owes main store&quot; is the Store payable balance. Pick a store in Sales for the detail.</p>
+          {onNavigate && <button type="button" className="btn btn-outline-primary btn-sm" onClick={() => onNavigate("payable")}>Open Store payable</button>}
         </>
       )}
 
@@ -330,6 +337,7 @@ export default function StoreReportPanel({ role, onNavigate }: { role?: string; 
               <li>Credit collected: {peso(day.utang.collectedMinor)}</li>
               <li>Cash expected in the drawer: <b>{peso(day.cash.expectedMinor)}</b>{day.cashCountedMinor !== null && <> · counted {peso(day.cashCountedMinor)} ({(day.cashVarianceMinor ?? 0) === 0 ? "matches" : `off by ${peso(day.cashVarianceMinor ?? 0)}`})</>}</li>
               <li>Stock in today: {day.stockIn.documents} document(s)</li>
+              {(owesMap[locationId] ?? 0) > 0 && <li className="text-danger fw-semibold">Owes the main store: {peso(owesMap[locationId] ?? 0)} (Store payable)</li>}
               {buffer?.buffer && buffer.totals.owedItems > 0 && <li className="text-warning-emphasis">Buffer still to fix: {buffer.totals.owedItems} item(s), about {peso(buffer.totals.owedMinor)}</li>}
               {day.kilosByVariety.map((v) => <li key={v.variety} className="small text-muted">{v.variety}: {kgText(v.grams)} · {peso(v.salesMinor)}</li>)}
             </ul>

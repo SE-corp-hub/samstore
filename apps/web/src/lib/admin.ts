@@ -160,6 +160,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { id: "pasok", label: "Stock in", icon: "bi-box-arrow-in-down" },
       { id: "bilangin", label: "Count", icon: "bi-clipboard-check" },
       { id: "storereport", label: "Store report", icon: "bi-shop" },
+      { id: "payable", label: "Store payable", icon: "bi-cash-coin" },
       { id: "ulat", label: "Reports & closing", icon: "bi-bar-chart-line" },
       { id: "drafts", label: "To finish", icon: "bi-hourglass-split" },
       { id: "kargadors", label: "Porters", icon: "bi-person-walking" },
@@ -217,11 +218,11 @@ export function navItemFor(id: string): NavItem | undefined {
 export const TABS_BY_ROLE: Record<string, string[]> = {
   // M7: OWNER is the tenant (store membership) role; STORE_OWNER is the legacy global
   // role — both are store owners and must see the same surface.
-  STORE_OWNER: ["overview", "pos", "preorders", "orders", "utang", "products", "inventory", "expenses", "purchases", "team", "customers", "vouchers", "crm", "erp", "analytics", "reports", "settings", "storelink", "warehouses", "approvals", "moves", "returns", "resack", "drafts", "kargadors", "benta", "posold", "utangold", "pasok", "utangrice", "agentorders", "bilangin", "storereport", "ulat"],
-  OWNER: ["overview", "pos", "preorders", "orders", "utang", "products", "inventory", "expenses", "purchases", "team", "customers", "vouchers", "crm", "erp", "analytics", "reports", "settings", "storelink", "warehouses", "approvals", "moves", "returns", "resack", "drafts", "kargadors", "benta", "posold", "utangold", "pasok", "utangrice", "agentorders", "bilangin", "storereport", "ulat"],
+  STORE_OWNER: ["overview", "pos", "preorders", "orders", "utang", "products", "inventory", "expenses", "purchases", "team", "customers", "vouchers", "crm", "erp", "analytics", "reports", "settings", "storelink", "warehouses", "approvals", "moves", "returns", "resack", "drafts", "kargadors", "benta", "posold", "utangold", "pasok", "utangrice", "agentorders", "bilangin", "storereport", "payable", "ulat"],
+  OWNER: ["overview", "pos", "preorders", "orders", "utang", "products", "inventory", "expenses", "purchases", "team", "customers", "vouchers", "crm", "erp", "analytics", "reports", "settings", "storelink", "warehouses", "approvals", "moves", "returns", "resack", "drafts", "kargadors", "benta", "posold", "utangold", "pasok", "utangrice", "agentorders", "bilangin", "storereport", "payable", "ulat"],
   // Platform operators manage tenants/access and monitor the platform; daily POS/catalog tabs belong to store roles.
   PLATFORM_ADMIN: ["overview", "stores", "useraccess", "maintenance", "analytics", "reports", "settings"],
-  MANAGER: ["overview", "pos", "preorders", "orders", "utang", "products", "inventory", "expenses", "purchases", "team", "customers", "vouchers", "crm", "erp", "analytics", "reports", "settings", "warehouses", "approvals", "moves", "returns", "resack", "drafts", "kargadors", "benta", "posold", "utangold", "pasok", "utangrice", "agentorders", "bilangin", "storereport", "ulat"],
+  MANAGER: ["overview", "pos", "preorders", "orders", "utang", "products", "inventory", "expenses", "purchases", "team", "customers", "vouchers", "crm", "erp", "analytics", "reports", "settings", "warehouses", "approvals", "moves", "returns", "resack", "drafts", "kargadors", "benta", "posold", "utangold", "pasok", "utangrice", "agentorders", "bilangin", "storereport", "payable", "ulat"],
   STAFF: ["overview", "pos", "preorders", "orders", "utang", "products", "inventory", "expenses", "purchases", "customers", "reports", "countersettings", "moves", "returns", "resack", "drafts", "kargadors", "benta", "pasok", "utangrice", "agentorders", "bilangin", "storereport", "ulat"],
   SALES_AGENT: ["agent", "overview", "orders", "customers", "crm", "reports"],
   DELIVERY: [],
