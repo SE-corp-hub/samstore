@@ -16,6 +16,7 @@ import { photoToJpeg } from "../../lib/photo";
 import SignaturePad from "./SignaturePad";
 import { askConfirm } from "../../lib/ask";
 import { printSlip } from "../../lib/slip-print";
+import { getPrinterSettings } from "../../lib/printer-settings";
 
 interface Loc { id: string; name: string; code: string | null; isActive: boolean }
 export interface CountRow { id: string; docNumber: string; kind: string; status: string; location: string; locationId: string; lines: number; startedAt: string; kulangValueMinor: number; sobraValueMinor: number }
@@ -158,10 +159,11 @@ export function CountSheet({ count, owner, onClose, onReload }: { count: CountDe
   const [onlyLeft, setOnlyLeft] = useState(false);
   const [result, setResult] = useState<string | null>(null); // shown after submitting
   const [storeName, setStoreName] = useState("");
+  const [printNow, setPrintNow] = useState(false);
   useEffect(() => { void fetch(`${API_URL}/admin/settings`, { headers: adminHeaders() }).then((r) => (r.ok ? r.json() : null)).then((d) => setStoreName(d?.store?.name ?? "")).catch(() => {}); }, []);
   const shown = count.lines.filter((l) => (!find.trim() || l.name.toLowerCase().includes(find.trim().toLowerCase())) && (!onlyLeft || (values[l.productId] ?? "") === ""));
   const printSheet = () => printSlip({
-    storeName: storeName || "SAM STORE", title: editable ? "COUNT SHEET" : "COUNT RESULT", reference: count.docNumber, when: new Date().toLocaleString("en-PH"),
+    storeName: storeName || "SAM STORE", title: result ? "COUNT SUBMITTED" : editable ? "COUNT SHEET" : "COUNT RESULT", reference: count.docNumber, when: new Date().toLocaleString("en-PH"),
     lines: [{ label: "Store", value: count.location }],
     rows: count.lines.map((l) => ({
       name: l.name,
@@ -171,6 +173,8 @@ export function CountSheet({ count, owner, onClose, onReload }: { count: CountDe
     totals: editable ? [] : [{ label: "Short", value: peso(count.kulangValueMinor) }, { label: "Over", value: peso(count.sobraValueMinor) }],
     signatures: [{ role: "Counted by", name: "" }], widthMm: 58,
   });
+
+  useEffect(() => { if (printNow && result) { setPrintNow(false); if (getPrinterSettings().autoPrint) printSheet(); } }); // eslint-disable-line react-hooks/exhaustive-deps
 
   const save = async (submit: boolean) => {
     setBusy(true); setError(null);
@@ -185,6 +189,7 @@ export function CountSheet({ count, owner, onClose, onReload }: { count: CountDe
       toast(r.data?.status === "APPROVED" ? "Count posted" : "Submitted — waiting for the owner");
       setBusy(false);
       setResult(r.data?.status === "APPROVED" ? "Count posted. The stock now matches what you counted." : "Submitted. The owner will check it, then the differences are posted.");
+      setPrintNow(true);
       return;
     }
     setBusy(false);
@@ -203,7 +208,7 @@ export function CountSheet({ count, owner, onClose, onReload }: { count: CountDe
       <div style={{ maxWidth: 720 }}>
         <div className="alert alert-success"><strong>{count.docNumber}</strong> — {result}<div className="mt-1">You counted {done} of {count.lines.length} items.</div></div>
         <div className="d-flex gap-2">
-          <button type="button" className="btn btn-dark btn-lg" onClick={printSheet}>Print count sheet</button>
+          <button type="button" className="btn btn-dark btn-lg" onClick={printSheet}><i className="bi bi-printer me-1"></i>Print count slip</button>
           <button type="button" className="btn btn-outline-secondary btn-lg" onClick={onClose}>← Counts</button>
         </div>
       </div>

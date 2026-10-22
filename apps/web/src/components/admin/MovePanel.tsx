@@ -8,6 +8,8 @@ import { API_URL } from "../../config";
 import { adminHeaders } from "../../lib/admin";
 import { toast } from "../../lib/toast";
 import { sendStep } from "../../lib/offlineQueue";
+import { printSlip, type Slip } from "../../lib/slip-print";
+import { getPrinterSettings } from "../../lib/printer-settings";
 import StoreBar from "./StoreBar";
 
 interface Place { id: string; name: string; code: string | null; isActive: boolean }
@@ -27,6 +29,16 @@ export default function MovePanel() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [rows, setRows] = useState<MoveRow[]>([]);
+  const [storeName, setStoreName] = useState("");
+  const [receipt, setReceipt] = useState<Slip | null>(null);
+  useEffect(() => { void fetch(`${API_URL}/admin/settings`, { headers: adminHeaders() }).then((r) => (r.ok ? r.json() : null)).then((d) => setStoreName(d?.store?.name ?? "")).catch(() => {}); }, []);
+  useEffect(() => { if (receipt && getPrinterSettings().autoPrint) printSlip(receipt); }, [receipt]);
+  const slipOf = (m: MoveRow): Slip => ({
+    storeName: storeName || "SAM STORE", title: "MOVE STOCK RECEIPT", reference: m.docNumber, when: new Date(m.at).toLocaleString("en-PH"),
+    lines: [{ label: "From", value: m.from }, { label: "To", value: m.to }],
+    rows: [{ name: m.productName, qty: String(m.quantity) }],
+    signatures: [{ role: "Moved by", name: "" }, { role: "Received by", name: "" }], widthMm: 58,
+  });
 
   const loadRows = useCallback(async () => {
     const r = await fetch(`${API_URL}/admin/moves`, { headers: adminHeaders() });
@@ -64,6 +76,12 @@ export default function MovePanel() {
     const d = r.data as Body | null;
     if (!r.ok) { setError(d?.errors?.join(", ") ?? d?.message ?? "The move did not go through"); return; }
     toast(`Moved ${n} — ${d?.docNumber ?? "done"}`);
+    setReceipt({
+      storeName: storeName || "SAM STORE", title: "MOVE STOCK RECEIPT", reference: d?.docNumber ?? null, when: new Date().toLocaleString("en-PH"),
+      lines: [{ label: "From", value: fromName ?? "" }, { label: "To", value: toName ?? "" }],
+      rows: [{ name: products.find((p) => p.id === productId)?.name ?? "", qty: String(n) }],
+      signatures: [{ role: "Moved by", name: "" }, { role: "Received by", name: "" }], widthMm: 58,
+    });
     setQty("1"); setNote(""); setProductId("");
     void loadRows();
   };
@@ -96,13 +114,23 @@ export default function MovePanel() {
       {ready && <div className="alert alert-light border py-2">Move {n} × {products.find((p) => p.id === productId)?.name} from <b>{fromName}</b> to <b>{toName}</b>. Both counts change now.</div>}
       <button type="button" className="btn btn-success btn-lg w-100 mb-4" disabled={!ready || busy} onClick={() => void submit()}>{busy ? "Moving…" : "Move now"}</button>
 
+      {receipt && (
+        <div className="alert alert-success d-flex flex-wrap align-items-center gap-2">
+          <span className="me-auto">Moved — {receipt.reference}</span>
+          <button type="button" className="btn btn-dark" onClick={() => printSlip(receipt)}><i className="bi bi-printer me-1"></i>Print receipt</button>
+          <button type="button" className="btn btn-outline-secondary" onClick={() => setReceipt(null)}>Close</button>
+        </div>
+      )}
       <h6>Recent moves</h6>
       {rows.length === 0 ? <p className="text-muted small">None yet.</p> : (
         <ul className="list-group">
           {rows.map((m) => (
             <li key={m.id} className="list-group-item small">
               <b>{m.quantity} × {m.productName}</b> · {m.from} → {m.to}
-              <div className="text-muted">{m.docNumber} · {new Date(m.at).toLocaleString()}{m.note && m.note !== "Moved" ? ` · ${m.note}` : ""}</div>
+              <div className="d-flex align-items-center gap-2">
+                <div className="text-muted me-auto">{m.docNumber} · {new Date(m.at).toLocaleString()}{m.note && m.note !== "Moved" ? ` · ${m.note}` : ""}</div>
+                <button type="button" className="btn btn-outline-dark btn-sm text-nowrap" onClick={() => printSlip(slipOf(m))}><i className="bi bi-receipt me-1"></i>Receipt</button>
+              </div>
             </li>
           ))}
         </ul>
