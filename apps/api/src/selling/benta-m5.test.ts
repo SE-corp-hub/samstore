@@ -45,6 +45,7 @@ after(async () => {
       await prisma.payment.deleteMany({ where: { orderId: { in: orderIds } } });
     }
     await prisma.creditEntry.deleteMany({ where });
+    await prisma.storePayableEntry.deleteMany({ where });
     await prisma.stockMovement.deleteMany({ where });
     await prisma.order.deleteMany({ where });
     await prisma.storeCustomer.deleteMany({ where });
@@ -334,4 +335,22 @@ test("Buffer store: a short sale is covered from the Buffer (the store stays at 
   assert.equal(level.quantityOnHand, -3, "the Buffer covers the rest and is now 3 short (to fix)");
   const enough = await svc.sell(fx.storeId, fx.owner, { idempotencyKey: key(), locationId: buffer.id, lines: [{ productId: fx.sin25.id, quantity: 1 }], payment: { method: "cash" } });
   assert.equal(enough.ok, false, "the Buffer is not a place to sell");
+});
+
+test("Consignment store: each sale at Store 2 charges Store 1's cost; a sale at the main store is never charged", async () => {
+  const fx = await fixture();
+  await prisma.warehouse.update({ where: { id: fx.s2 }, data: { consignment: true } });
+  // Sell 2 sacks at Store 2 (price 1,300.00, Store 1 cost 1,100.00).
+  const r = await svc.sell(fx.storeId, fx.staff2, { idempotencyKey: key(), lines: [{ productId: fx.sin25.id, quantity: 2 }], payment: { method: "cash" } });
+  assert.equal(r.ok, true, msg(r));
+  if (!r.ok) return;
+  const charges = await prisma.storePayableEntry.findMany({ where: { storeId: fx.storeId, locationId: fx.s2, orderId: r.value.orderId } });
+  assert.equal(charges.length, 1);
+  assert.equal(charges[0]!.kind, "CHARGE");
+  assert.equal(charges[0]!.amountMinor, 220_000, "2 sacks at Store 1's cost, not the selling price");
+  assert.deepEqual(r.value.belowCost, [], "sold above cost: no warning");
+  // A sale at Store 1 (the main store) is never charged.
+  const own = await svc.sell(fx.storeId, fx.staff1, { idempotencyKey: key(), lines: [{ productId: fx.sin25.id, quantity: 1 }], payment: { method: "cash" } });
+  assert.equal(own.ok, true, msg(own));
+  assert.equal(await prisma.storePayableEntry.count({ where: { storeId: fx.storeId } }), 1, "only the Store 2 sale was charged");
 });
