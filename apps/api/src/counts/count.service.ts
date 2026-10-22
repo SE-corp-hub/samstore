@@ -50,12 +50,12 @@ const OWNERS = ["OWNER", "MANAGER", "STORE_OWNER", "PLATFORM_ADMIN"];
 const productSelect = { id: true, name: true, stockBaseUnit: true, stockBaseQuantity: true, costMinor: true, variety: true } as const;
 type P = Prisma.ProductGetPayload<{ select: typeof productSelect }>;
 
-interface ReportLine {
+export interface ReportLine {
   productId: string; name: string; loose: boolean; countedQty: number; expectedQty: number; firstCountedQty: number | null;
   varianceQty: number; varianceValueMinor: number; explainedQty: number; verdict: string; reason: string | null; reasonLabel: string | null; note: string | null; countedBy: string | null;
   since: { from: { docNumber: string; countedQty: number; countedAt: Date } | null; buckets: Record<string, number>; ledgerShouldBe: number } | null;
 }
-interface ReportDifference {
+export interface ReportDifference {
   docNumber: string; postedAt: Date | null; location: string; item: string; loose: boolean; countedQty: number | null; expectedQty: number | null; varianceQty: number;
   varianceValueMinor: number; reason: string | null; reasonLabel: string | null; note: string | null; countedBy: string | null;
 }
