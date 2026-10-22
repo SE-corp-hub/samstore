@@ -13,6 +13,7 @@ import { isLooseP } from "../domain/counting.js";
 import { nextDocNumber, type Actor } from "../people/people.service.js";
 import { txOptions } from "../persistence/tx-options.js";
 import { chargeAmount } from "./charges.js";
+import { varietyOf } from "../domain/resack.js";
 
 export type PayableResult<T> = { ok: true; value: T } | { ok: false; error: ApiError };
 const invalid = (m: string) => ({ ok: false as const, error: { type: "validation" as const, errors: [m] } });
@@ -27,7 +28,7 @@ class StepError extends Error {
 }
 
 const OWNERS = ["OWNER", "MANAGER", "STORE_OWNER", "PLATFORM_ADMIN"];
-const productSelect = { id: true, name: true, stockBaseUnit: true, stockBaseQuantity: true } as const;
+const productSelect = { id: true, name: true, variety: true, priceMinor: true, stockBaseUnit: true, stockBaseQuantity: true } as const;
 
 export class PayableService {
   private async run<T>(actor: Actor, fn: () => Promise<T>): Promise<PayableResult<T>> {
@@ -184,6 +185,55 @@ export class PayableService {
     });
   }
 
+  /** What the rice that left a store since its last sales report is worth at selling price. */
+  private async expectedSales(storeId: string, locationId: string) {
+    const last = await prisma.storeSalesReport.findFirst({ where: { storeId, locationId }, orderBy: { createdAt: "desc" } });
+    const toAt = new Date();
+    const first = last ? null : await prisma.storePayableEntry.findFirst({ where: { storeId, locationId, kind: "CHARGE" }, orderBy: { createdAt: "asc" }, select: { createdAt: true } });
+    const fromAt = last?.toAt ?? first?.createdAt ?? new Date(toAt.getTime() - 7 * 24 * 3600 * 1000);
+    const rows = await prisma.storePayableEntry.findMany({ where: { storeId, locationId, kind: { in: ["CHARGE", "REVERSAL"] }, productId: { not: null }, createdAt: { gt: fromAt, lte: toAt } }, select: { kind: true, productId: true, quantity: true } });
+    const net = new Map<string, number>();
+    for (const r of rows) net.set(r.productId!, (net.get(r.productId!) ?? 0) + (r.kind === "CHARGE" ? 1 : -1) * (r.quantity ?? 0));
+    const ids = [...net.keys()];
+    const prods = new Map((await prisma.product.findMany({ where: { storeId, id: { in: ids } }, select: productSelect })).map((p) => [p.id, p]));
+    const prices = new Map((await prisma.locationPrice.findMany({ where: { storeId, warehouseId: locationId, productId: { in: ids } }, select: { productId: true, priceMinor: true } })).map((x) => [x.productId, x.priceMinor]));
+    let expected = 0;
+    for (const [pid, q] of net) {
+      const p = prods.get(pid);
+      if (!p || q <= 0) continue;
+      expected += chargeAmount(isLooseP(p), q, prices.get(pid) ?? p.priceMinor);
+    }
+    return { fromAt, toAt, expectedMinor: expected };
+  }
+
+  /** The weekly sales check: what the store says it collected against what the rice that left is worth. */
+  async salesCheck(storeId: string, actor: Actor, locationId: string | undefined) {
+    return this.run(actor, async () => {
+      const store = (await this.stores(storeId)).find((s) => s.id === locationId);
+      if (!store) throw new StepError(invalid("Choose a store"));
+      const now = await this.expectedSales(storeId, store.id);
+      const recent = await prisma.storeSalesReport.findMany({ where: { storeId, locationId: store.id }, orderBy: { createdAt: "desc" }, take: 10 });
+      return { store: { id: store.id, name: store.name }, ...now, recent: recent.map((r) => ({ id: r.id, fromAt: r.fromAt, toAt: r.toAt, reportedMinor: r.reportedMinor, expectedMinor: r.expectedMinor, differenceMinor: r.reportedMinor - r.expectedMinor, note: r.note })) };
+    });
+  }
+
+  /** The store says how much it collected for the period. */
+  async reportSales(storeId: string, actor: Actor, input: { locationId?: string; reportedMinor?: unknown; note?: string }) {
+    return this.run(actor, async () => {
+      const amount = input.reportedMinor;
+      if (typeof amount !== "number" || !Number.isInteger(amount) || amount < 0) throw new StepError(invalid("Enter the amount collected"));
+      const store = (await this.stores(storeId)).find((s) => s.id === input.locationId);
+      if (!store) throw new StepError(invalid("Choose a store"));
+      const now = await this.expectedSales(storeId, store.id);
+      const r = await prisma.storeSalesReport.create({
+        data: { storeId, locationId: store.id, reportedMinor: amount, expectedMinor: now.expectedMinor, fromAt: now.fromAt, toAt: now.toAt, note: input.note?.trim().slice(0, 200) || null, createdById: actor.userId },
+        select: { id: true },
+      });
+      await prisma.auditLog.create({ data: { storeId, actorType: "USER", actorId: actor.userId, action: "payable.sales_report", entityType: "StoreSalesReport", entityId: r.id, after: { locationId: store.id, reportedMinor: amount, expectedMinor: now.expectedMinor } } });
+      return { id: r.id, differenceMinor: amount - now.expectedMinor };
+    });
+  }
+
   /** Undo a charge or a payment that was a mistake: an opposite entry, with the reason. */
   async reverse(storeId: string, actor: Actor, id: string, reason: string | undefined) {
     return this.run(actor, async () => {
@@ -219,13 +269,13 @@ export class PayableService {
     return this.run(actor, async () => {
       const store = (await this.stores(storeId)).find((s) => s.id === locationId);
       if (!store) throw new StepError(invalid("Choose a store"));
-      const moves = await prisma.stockMovement.groupBy({ by: ["productId", "type"], where: { storeId, warehouseId: store.id }, _sum: { delta: true } });
+      const moves = await prisma.stockMovement.groupBy({ by: ["productId", "type", "documentType"], where: { storeId, warehouseId: store.id }, _sum: { delta: true } });
       const levels = await prisma.stockLevel.findMany({ where: { storeId, warehouseId: store.id }, select: { productId: true, quantityOnHand: true } });
       const ids = [...new Set([...moves.map((m) => m.productId), ...levels.map((l) => l.productId)])];
       const prods = new Map((await prisma.product.findMany({ where: { storeId, id: { in: ids } }, select: productSelect })).map((p) => [p.id, p]));
       const charges = await prisma.storePayableEntry.groupBy({ by: ["productId"], where: { storeId, locationId: store.id, kind: { in: ["CHARGE", "REVERSAL"] }, productId: { not: null } }, _sum: { amountMinor: true } });
       const owed = new Map(charges.map((c) => [c.productId!, c._sum.amountMinor ?? 0]));
-      const at = (pid: string, types: string[]) => moves.filter((m) => m.productId === pid && types.includes(m.type)).reduce((a, m) => a + (m._sum.delta ?? 0), 0);
+      const at = (pid: string, types: string[], resack = false) => moves.filter((m) => m.productId === pid && types.includes(m.type) && (m.documentType === "COUNT_RESACK") === resack).reduce((a, m) => a + (m._sum.delta ?? 0), 0);
       const rows = ids.map((pid) => {
         const p = prods.get(pid);
         const supplied = at(pid, ["TRANSFER_IN", "RECEIVE_IN", "STOCK_IN", "RECEIPT"]);
@@ -233,10 +283,22 @@ export class PayableService {
         const returned = at(pid, ["RETURN_IN", "VOID_RESTORE"]);
         const movedBack = Math.abs(at(pid, ["TRANSFER_OUT"]));
         const countFix = at(pid, ["COUNT_ADJUST", "ADJUST"]);
+        const resack = at(pid, ["COUNT_ADJUST"], true);
         const onHand = levels.find((l) => l.productId === pid)?.quantityOnHand ?? 0;
-        return { productId: pid, name: p?.name ?? "", loose: p ? isLooseP(p) : false, supplied, sold, returned, movedBack, countFix, onHand, costOwedMinor: owed.get(pid) ?? 0 };
+        return { productId: pid, name: p?.name ?? "", loose: p ? isLooseP(p) : false, supplied, sold, returned, movedBack, countFix, resack, onHand, costOwedMinor: owed.get(pid) ?? 0 };
       }).filter((r) => r.supplied || r.sold || r.onHand || r.countFix).sort((a, b) => a.name.localeCompare(b.name));
-      return { store: { id: store.id, name: store.name }, rows };
+      // The same, added up in kilos per rice variety: sacks, bags and loose kilos together.
+      const varieties = new Map<string, { variety: string; suppliedG: number; soldG: number; returnedG: number; movedBackG: number; countFixG: number; onHandG: number }>();
+      for (const r of rows) {
+        const p = prods.get(r.productId);
+        if (!p || (p.stockBaseUnit ?? "").toLowerCase() !== "g" || !p.stockBaseQuantity) continue;
+        const g = p.stockBaseQuantity;
+        const key = varietyOf(p);
+        const v = varieties.get(key) ?? { variety: key, suppliedG: 0, soldG: 0, returnedG: 0, movedBackG: 0, countFixG: 0, onHandG: 0 };
+        v.suppliedG += r.supplied * g; v.soldG += r.sold * g; v.returnedG += r.returned * g; v.movedBackG += r.movedBack * g; v.countFixG += r.countFix * g; v.onHandG += r.onHand * g;
+        varieties.set(key, v);
+      }
+      return { store: { id: store.id, name: store.name }, rows, varieties: [...varieties.values()].sort((a, b) => a.variety.localeCompare(b.variety)) };
     });
   }
 

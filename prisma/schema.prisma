@@ -2231,3 +2231,19 @@ model StorePayableEntry {
   @@unique([storeId, docNumber])
   @@index([storeId, locationId, createdAt])
 }
+
+/// What a store without a POS says it collected in a period, kept next to what the rice that left is worth at selling price.
+model StoreSalesReport {
+  id            String   @id @default(cuid())
+  storeId       String
+  locationId    String
+  reportedMinor Int
+  expectedMinor Int
+  fromAt        DateTime
+  toAt          DateTime
+  note          String?
+  createdById   String
+  createdAt     DateTime @default(now())
+
+  @@index([storeId, locationId, createdAt])
+}

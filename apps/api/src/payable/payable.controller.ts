@@ -74,6 +74,20 @@ export class PayableController {
     return unwrap(await this.payable.chargeManual(storeId, actor, { locationId: str(body?.locationId), sourceLocationId: str(body?.sourceLocationId), productId: str(body?.productId), quantity: body?.quantity, note: str(body?.note) }));
   }
 
+  /** GET /admin/payable/sales-check?locationId= — expected sales at selling price since the last report. */
+  @Get("sales-check")
+  async salesCheck(@Req() req: Req_, @Query("locationId") locationId?: string, @Headers("x-store-id") h?: string) {
+    const { storeId, actor } = await this.ctx(req, h);
+    return unwrap(await this.payable.salesCheck(storeId, actor, locationId));
+  }
+
+  /** POST /admin/payable/sales-report — { locationId, reportedMinor, note? } */
+  @Post("sales-report")
+  async salesReport(@Req() req: Req_, @Body() body: Record<string, unknown>, @Headers("x-store-id") h?: string) {
+    const { storeId, actor } = await this.ctx(req, h);
+    return unwrap(await this.payable.reportSales(storeId, actor, { locationId: str(body?.locationId), reportedMinor: body?.reportedMinor, note: str(body?.note) }));
+  }
+
   /** POST /admin/payable/payment — { locationId, amountMinor, note? } */
   @Post("payment")
   async payment(@Req() req: Req_, @Body() body: Record<string, unknown>, @Headers("x-store-id") h?: string) {

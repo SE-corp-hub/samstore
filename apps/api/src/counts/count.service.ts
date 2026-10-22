@@ -9,6 +9,7 @@
 //   Write-off: reason, optional photo, staff signs; the stock moves; over 1% → the owner.
 
 import { chargeCountShort } from "../payable/charges.js";
+import { autoResackFromCount } from "../payable/count-resack.js";
 import type { ApiError } from "@sam-store/contracts";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../persistence/prisma-repositories.js";
@@ -36,7 +37,7 @@ const forbidden = (m: string) => ({ ok: false as const, error: { type: "forbidde
 const notFound = (m = "Count not found") => ({ ok: false as const, error: { type: "not_found" as const, message: m } });
 
 const OWNERS = ["OWNER", "MANAGER", "STORE_OWNER", "PLATFORM_ADMIN"];
-const productSelect = { id: true, name: true, stockBaseUnit: true, stockBaseQuantity: true, costMinor: true } as const;
+const productSelect = { id: true, name: true, stockBaseUnit: true, stockBaseQuantity: true, costMinor: true, variety: true } as const;
 type P = Prisma.ProductGetPayload<{ select: typeof productSelect }>;
 
 const qtyText = (p: P, qty: number) => (isLooseP(p) ? formatKilos(qty) : `${qty}`);
@@ -44,9 +45,11 @@ const qtyText = (p: P, qty: number) => (isLooseP(p) ? formatKilos(qty) : `${qty}
 /** Post every counted line's difference as COUNT_ADJUST, inside the caller's transaction. */
 async function postCount(tx: Tx, storeId: string, countId: string, decidedById: string) {
   const count = await tx.stockCount.findUniqueOrThrow({ where: { id: countId }, include: { lines: { include: { product: { select: productSelect } } } } });
+  // A consignment store opens sacks without recording it: record the resack first, then post only what is left over.
+  const opened = await autoResackFromCount(tx, { storeId, locationId: count.locationId, countId: count.id, countDoc: count.docNumber, actorId: decidedById, lines: count.lines });
   for (const l of count.lines) {
     if (l.countedQty === null || l.expectedQty === null) continue;
-    const delta = l.countedQty - l.expectedQty;
+    const delta = l.countedQty - l.expectedQty - (opened.get(l.productId) ?? 0);
     if (delta !== 0) {
       const leg: TripLeg = { storeId, productId: l.productId, warehouseId: count.locationId, actorId: decidedById, documentType: "COUNT", documentId: count.id, note: `Bilang ${count.docNumber}` };
       try {

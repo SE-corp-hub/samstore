@@ -41,7 +41,15 @@ export default function PayablePanel() {
   const [payAmount, setPayAmount] = useState("");
   const [payNote, setPayNote] = useState("");
   const [adding, setAdding] = useState(false);
-  const [recon, setRecon] = useState<{ store: { name: string }; rows: { productId: string; name: string; loose: boolean; supplied: number; sold: number; returned: number; movedBack: number; countFix: number; onHand: number; costOwedMinor: number }[] } | null>(null);
+  const [recon, setRecon] = useState<{ store: { name: string }; rows: { productId: string; name: string; loose: boolean; supplied: number; sold: number; returned: number; movedBack: number; countFix: number; resack: number; onHand: number; costOwedMinor: number }[]; varieties?: { variety: string; suppliedG: number; soldG: number; returnedG: number; movedBackG: number; countFixG: number; onHandG: number }[] } | null>(null);
+  const [sales, setSales] = useState<{ store: { id: string; name: string }; fromAt: string; expectedMinor: number; recent: { id: string; toAt: string; reportedMinor: number; expectedMinor: number; differenceMinor: number }[] } | null>(null);
+  const [salesAmt, setSalesAmt] = useState("");
+  const openSales = async (s: Bal) => {
+    const r = await call(`/admin/payable/sales-check?locationId=${encodeURIComponent(s.id)}`, "GET");
+    if (!r.ok) { setError(errText(r.data, "Could not load the sales check")); return; }
+    setSalesAmt("");
+    setSales(r.data as unknown as NonNullable<typeof sales>);
+  };
   const checkShelf = async (s: Bal) => {
     const r = await call(`/admin/payable/reconcile?locationId=${encodeURIComponent(s.id)}`, "GET");
     if (!r.ok) { setError(errText(r.data, "Could not check the shelf")); return; }
@@ -125,6 +133,7 @@ export default function PayablePanel() {
                 <button type="button" className="btn btn-success" disabled={s.owesMinor <= 0} onClick={() => { setPaying(s); setPayAmount(""); setPayNote(""); }}>Record payment</button>
                 <button type="button" className="btn btn-outline-dark" onClick={() => void statement(s)}>Print statement</button>
                 <button type="button" className="btn btn-outline-dark" onClick={() => void checkShelf(s)}>Check shelf</button>
+                {s.consignment && <button type="button" className="btn btn-outline-dark" onClick={() => void openSales(s)}>Weekly sales total</button>}
               </div>
             </div>
           </div>
@@ -136,12 +145,43 @@ export default function PayablePanel() {
         <div className="border rounded p-3 mb-3">
           <div className="d-flex justify-content-between mb-2"><div className="fw-semibold">{recon.store.name}: supplied − sold − returned − moved back ± count = on shelf</div><button type="button" className="btn btn-sm btn-outline-secondary" onClick={() => setRecon(null)}>Close</button></div>
           <div className="table-responsive"><table className="table table-sm mb-0">
-            <thead><tr><th>Item</th><th className="text-end">Supplied</th><th className="text-end">Sold</th><th className="text-end">Returned</th><th className="text-end">Moved back</th><th className="text-end">Count fix</th><th className="text-end">On shelf</th><th className="text-end">Cost owed</th></tr></thead>
+            <thead><tr><th>Item</th><th className="text-end">Supplied</th><th className="text-end">Sold</th><th className="text-end">Returned</th><th className="text-end">Moved back</th><th className="text-end">Resack from count</th><th className="text-end">Count fix</th><th className="text-end">On shelf</th><th className="text-end">Cost owed</th></tr></thead>
             <tbody>{recon.rows.map((r) => {
               const f = (n: number) => (r.loose ? `${(n / 1000).toLocaleString(undefined, { maximumFractionDigits: 3 })} kg` : n.toLocaleString());
-              return <tr key={r.productId}><td>{r.name}</td><td className="text-end">{f(r.supplied)}</td><td className="text-end">{f(r.sold)}</td><td className="text-end">{f(r.returned)}</td><td className="text-end">{f(r.movedBack)}</td><td className={`text-end ${r.countFix < 0 ? "text-danger" : ""}`}>{f(r.countFix)}</td><td className="text-end fw-semibold">{f(r.onHand)}</td><td className="text-end">{peso(r.costOwedMinor)}</td></tr>;
+              return <tr key={r.productId}><td>{r.name}</td><td className="text-end">{f(r.supplied)}</td><td className="text-end">{f(r.sold)}</td><td className="text-end">{f(r.returned)}</td><td className="text-end">{f(r.movedBack)}</td><td className="text-end">{f(r.resack)}</td><td className={`text-end ${r.countFix < 0 ? "text-danger" : ""}`}>{f(r.countFix)}</td><td className="text-end fw-semibold">{f(r.onHand)}</td><td className="text-end">{peso(r.costOwedMinor)}</td></tr>;
             })}</tbody>
           </table></div>
+          {(recon.varieties?.length ?? 0) > 0 && (
+            <>
+              <div className="fw-semibold mt-3 mb-1">In kilos, per rice variety (sacks, bags and loose together)</div>
+              <div className="table-responsive"><table className="table table-sm mb-0">
+                <thead><tr><th>Variety</th><th className="text-end">Supplied</th><th className="text-end">Sold</th><th className="text-end">Returned</th><th className="text-end">Moved back</th><th className="text-end">Gone by count</th><th className="text-end">On shelf</th></tr></thead>
+                <tbody>{recon.varieties!.map((v) => {
+                  const kg = (g: number) => `${(g / 1000).toLocaleString(undefined, { maximumFractionDigits: 3 })} kg`;
+                  return <tr key={v.variety}><td className="text-capitalize">{v.variety}</td><td className="text-end">{kg(v.suppliedG)}</td><td className="text-end">{kg(v.soldG)}</td><td className="text-end">{kg(v.returnedG)}</td><td className="text-end">{kg(v.movedBackG)}</td><td className={`text-end ${v.countFixG < 0 ? "text-danger" : ""}`}>{kg(v.countFixG)}</td><td className="text-end fw-semibold">{kg(v.onHandG)}</td></tr>;
+                })}</tbody>
+              </table></div>
+              <div className="small text-muted mt-1">&quot;Gone by count&quot; is rice the count found missing. With no POS, that is rice sold (or lost); the store pays Store 1&apos;s cost for it.</div>
+            </>
+          )}
+        </div>
+      )}
+
+      {sales && (
+        <div className="border rounded p-3 mb-3">
+          <div className="d-flex justify-content-between mb-2"><div className="fw-semibold">{sales.store.name}: weekly sales total</div><button type="button" className="btn btn-sm btn-outline-secondary" onClick={() => setSales(null)}>Close</button></div>
+          <div className="small text-muted mb-2">Rice that left since {new Date(sales.fromAt).toLocaleDateString()} is worth <strong>{peso(sales.expectedMinor)}</strong> at the selling price. Enter the cash and payments the store collected for the same time.</div>
+          <div className="row g-2 align-items-end">
+            <div className="col-8 col-md-4"><label className="form-label small mb-1" htmlFor="ss-amt">Collected</label><PesoInput id="ss-amt" className="form-control form-control-lg" value={salesAmt} onChange={setSalesAmt} placeholder="0.00" /></div>
+            <div className="col-4 col-md-3"><button type="button" className="btn btn-success btn-lg w-100" disabled={busy || salesAmt === ""} onClick={async () => { if (await act("/admin/payable/sales-report", { locationId: sales.store.id, reportedMinor: Math.round(Number(salesAmt) * 100) }, "Sales total saved")) await openSales({ id: sales.store.id } as Bal); }}>Save</button></div>
+          </div>
+          {sales.recent.length > 0 && (
+            <div className="table-responsive mt-3"><table className="table table-sm mb-0">
+              <thead><tr><th>Date</th><th className="text-end">Collected</th><th className="text-end">Rice worth</th><th className="text-end">Difference</th></tr></thead>
+              <tbody>{sales.recent.map((r) => <tr key={r.id}><td>{new Date(r.toAt).toLocaleDateString()}</td><td className="text-end">{peso(r.reportedMinor)}</td><td className="text-end">{peso(r.expectedMinor)}</td><td className={`text-end ${r.differenceMinor < 0 ? "text-danger fw-semibold" : ""}`}>{peso(r.differenceMinor)}</td></tr>)}</tbody>
+            </table></div>
+          )}
+          <div className="small text-muted mt-2">A negative difference means the store collected less than the rice is worth: ask why.</div>
         </div>
       )}
 
