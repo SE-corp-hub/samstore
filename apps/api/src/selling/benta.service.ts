@@ -16,7 +16,7 @@
 // Totals are server-computed. Stock leaves the selling location in the same
 // transaction as the order, its payment and its signatures.
 
-import { blendedCost, costModeOf, recordCostIn, shelfCostFor } from "../domain/shelf-cost.js";
+import { costModeOf, recordCostIn, shelfCostFor } from "../domain/shelf-cost.js";
 import type { ApiError } from "@sam-store/contracts";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../persistence/prisma-repositories.js";
@@ -514,20 +514,16 @@ export class BentaService {
     for (const l of data.lines) {
       await tx.stockInLine.create({ data: { storeId, stockInId: doc.id, productId: l.product.id, quantity: l.quantity, unitCostMinor: l.unitCostMinor, poLineId: l.poLineId ?? null } });
       await recordCostIn(tx, { storeId, productId: l.product.id, warehouseId: locationId }, l.quantity, l.unitCostMinor);
-      // What was on hand BEFORE this stock-in, to blend the new cost with the old one.
-      const levelsBefore = await tx.stockLevel.findMany({ where: { storeId, productId: l.product.id, ...(costMode === "PER_LOCATION" ? { warehouseId: locationId } : { warehouse: { type: { not: "BUFFER" } } }) }, select: { quantityOnHand: true } });
-      const onHandBefore = levelsBefore.reduce((s, x) => s + Math.max(0, x.quantityOnHand), 0);
       await addForTrip(tx, { storeId, productId: l.product.id, warehouseId: locationId, actorId: actor.userId, documentType: "STOCK_IN", documentId: doc.id, note: docNumber }, l.quantity, "STOCK_IN");
-      // Average purchase cost (weighted by what is on hand). One cost per product, unless the store counts cost per location:
+      // Latest purchase cost. One cost per product, unless the store counts cost per location:
       // then only the main location (the default one) moves the product cost; the others keep their own shelf cost.
       const mainLoc = costMode === "PER_LOCATION" ? await tx.warehouse.findUnique({ where: { id: locationId }, select: { isDefault: true } }) : null;
       if (l.unitCostMinor !== null && l.unitCostMinor > 0 && (costMode !== "PER_LOCATION" || mainLoc?.isDefault)) {
         const before = await tx.product.findUnique({ where: { id: l.product.id }, select: { costMinor: true } });
-        const averaged = before ? blendedCost(onHandBefore, before.costMinor, l.quantity, l.unitCostMinor) : l.unitCostMinor;
-        if (before && before.costMinor !== averaged) {
-          await tx.priceHistory.create({ data: { storeId, productId: l.product.id, warehouseId: locationId, field: "COST", oldMinor: before.costMinor, newMinor: averaged, source: "PURCHASE", reason: docNumber, changedById: actor.userId } });
+        if (before && before.costMinor !== l.unitCostMinor) {
+          await tx.priceHistory.create({ data: { storeId, productId: l.product.id, warehouseId: locationId, field: "COST", oldMinor: before.costMinor, newMinor: l.unitCostMinor, source: "PURCHASE", reason: docNumber, changedById: actor.userId } });
         }
-        await tx.product.update({ where: { id: l.product.id }, data: { costMinor: averaged } });
+        await tx.product.update({ where: { id: l.product.id }, data: { costMinor: l.unitCostMinor } });
       }
     }
     if (data.purchaseOrderId) await applyReceipt(tx, storeId, data.purchaseOrderId, data.lines.flatMap((l) => (l.poLineId ? [{ poLineId: l.poLineId, quantity: l.quantity }] : [])));
