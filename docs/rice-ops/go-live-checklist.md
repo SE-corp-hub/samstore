@@ -11,15 +11,15 @@ reports by store, Needs a look, count accuracy, today's suggested list). Added 2
 
 **Checks that have run**
 - Full check on the shop database (22 Oct, commit `ab13edb`, after a backup): migrations applied up to Supplier orders; types and the new tests passed; 11 old tests needed updating and were fixed in `c0dc2bc`.
-- Full check on the **beta** database (`verify-beta.bat`, 22 Oct): at `5e276ca` it passed (40 test files). At `9ada49c`, with the Count upgrade, every Count test passed; one old PIN-lock test failed only because the database clock and the Sam PC clock differed by a fraction of a second. The test was relaxed in `6c50588`. **Run `verify-beta.bat` once more; it should say PASS.**
+- Full check on the **beta** database (`verify-beta.bat`, 22 Oct): at `5e276ca` it passed (40 test files). At `9ada49c`, with the Count upgrade, every Count test passed; one old PIN-lock test failed only because the database clock and the Sam PC clock differed by a fraction of a second. The test was relaxed in `6c50588`. **Re-run on 23 Oct 2026 at the latest code: PASS (see below).**
 - Quick check on the Sam PC (`verify-quick.bat`, 22 Oct): PASS at `9ada49c`, and again PASS at `0178358` (types for api, web and contracts, all database-free tests, including the new price watch, reorder, movement and weekly tests).
-- **Not run yet:** the database tests for the new features (customer return with a sale, price watch, reorder, movement summary, weekly summary). `verify-beta.bat` runs them; see step 1.
+- **Full check on the beta database, 23 Oct 2026, 07:28 (725 s), the latest pushed code: VERIFY RESULT: PASS (BETA DATABASE).** Migrations pending: no; types OK; all 51 test files passed with 0 failures, including the database tests for the 22 Oct evening features (customer return with a sale, price watch, reorder, movement summary, weekly summary) and the earlier PIN-lock test.
 
 **Not tested by a person yet:** everything in sections G to L of `claude/phone-test-checklist.md` (beta site, real phone, staff and owner logins).
 
 **Still to do before go-live** (in this order):
 
-1. [ ] **Run `verify-beta.bat` again** and confirm `VERIFY RESULT: PASS (BETA DATABASE)`. It now also runs the tests of the 22 Oct evening features. Send me the last lines if it fails.
+1. [x] **`verify-beta.bat`** (DONE 23 Oct 2026: PASS on the beta database, 51 test files, 0 failures). Run it again after any further code change.
 2. [ ] **Phone test** of the new screens on the beta site: sections G to L and the new section N of `claude/phone-test-checklist.md`, with a staff login and the owner login. Write down anything odd.
 3. [ ] **Free nightly backup job (decided 22 Oct: free job, no paid plan; do not go live without it).** Built, and **set up on the Sam PC on 22 Oct at 22:27** (Claude ran it with the defaults): the first backup worked (`samstore-20261022-2227.dump`, 0.7 MB, readable) and a daily task runs at **21:30** (next run 23 Oct, 21:30). **Still to do:** choose a second-copy folder (Google Drive or USB; run `setup-nightly-backup.bat` again and type the folder, or write it in `go-live\backup-copy-folder.txt`), and check next day with `backup-status.bat` that the 21:30 backup ran. Details: `docs/rice-ops/backup.md`.
 4. [ ] **Cost (decided 22 Oct: one cost for all locations).** This is the default. Before the opening count, check that Reports & closing, Stock book shows "One cost for all locations". Nothing to build.

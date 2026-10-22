@@ -1,5 +1,9 @@
 # PINDIAN — Progress Log
 
+## Full check on the beta database: PASS (2026-10-23, 07:28)
+
+`verify-beta.bat` on the Sam PC (the owner started it; 725 s) at the latest pushed code: **VERIFY RESULT: PASS (BETA DATABASE)**. Migrations pending: no. Types OK. All 51 test files passed with 0 failures, including the database tests written for the 22 Oct evening features (`transfers-m3`, `benta-m5` price watch and reorder, `reports-m9` movement and weekly summary) and the PIN-lock test that failed earlier on a clock difference. The shop database was not touched.
+
 ## Owner decisions made; free nightly backup built; closing count made optional (2026-10-22, night)
 
 **Owner decisions (22 Oct, 20:49 Manila):**
