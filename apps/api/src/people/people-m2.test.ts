@@ -199,7 +199,8 @@ test("M2: 5 wrong PINs lock PIN login for 15 minutes; the owner can unlock", asy
   assert.equal(!right.ok && right.error.type, "rate_limited", "even the right PIN waits out the lock");
   const u = await prisma.user.findUniqueOrThrow({ where: { id: fx.staff2.id } });
   const mins = (u.pinLockedUntil!.getTime() - Date.now()) / 60_000;
-  assert.ok(mins > 14 && mins <= 15, `locked for ~15 minutes (got ${mins.toFixed(2)})`);
+  // The lock time comes from the database clock, "now" from this computer's clock: allow a minute of difference.
+  assert.ok(mins > 14 && mins <= 16, `locked for ~15 minutes (got ${mins.toFixed(2)})`);
 
   assert.equal((await people.updateMember(fx.storeId, fx.staff2.id, { unlock: true }, fx.owner.id)).ok, true);
   const after = await auth.pinLogin({ phone, pin: "4829" });
