@@ -2,24 +2,25 @@
 
 ## Status: 22 Oct 2026 (Claude)
 
-**Built and pushed** (branch `release/rice-ops`, last commit `6c50588`):
+**Built and pushed** (branch `release/rice-ops`, last commit `0178358` plus the docs commit after it):
 staying signed in, staff bottom bar, offline selling, Stock check, Stock book, cost and price history, the one POS, Move stock,
 Customer returns, Agent orders, Resack, Stock in, Buffer store, Store report, All records, Store payable and the consignment store
 (Store 2), Days left, Top 10 customers, credit statements, net profit, Maya / bank / split payments, special prices per customer,
 Supplier orders and what you owe suppliers, and the Count upgrade (search, any role counts, counts post at once, reasons,
-reports by store, Needs a look, count accuracy, today's suggested list).
+reports by store, Needs a look, count accuracy, today's suggested list). Added 22 Oct evening: customer returns that name the sale, supplier price watch, reorder suggestions (Supplier orders, To reorder), the stock movement summary (Reports, Movement) and the weekly owner summary (Reports, Week).
 
 **Checks that have run**
 - Full check on the shop database (22 Oct, commit `ab13edb`, after a backup): migrations applied up to Supplier orders; types and the new tests passed; 11 old tests needed updating and were fixed in `c0dc2bc`.
 - Full check on the **beta** database (`verify-beta.bat`, 22 Oct): at `5e276ca` it passed (40 test files). At `9ada49c`, with the Count upgrade, every Count test passed; one old PIN-lock test failed only because the database clock and the Sam PC clock differed by a fraction of a second. The test was relaxed in `6c50588`. **Run `verify-beta.bat` once more; it should say PASS.**
-- Quick check on the Sam PC (`verify-quick.bat`, 22 Oct, commit `9ada49c`): PASS (types and database-free tests).
+- Quick check on the Sam PC (`verify-quick.bat`, 22 Oct): PASS at `9ada49c`, and again PASS at `0178358` (types for api, web and contracts, all database-free tests, including the new price watch, reorder, movement and weekly tests).
+- **Not run yet:** the database tests for the new features (customer return with a sale, price watch, reorder, movement summary, weekly summary). `verify-beta.bat` runs them; see step 1.
 
 **Not tested by a person yet:** everything in sections G to L of `claude/phone-test-checklist.md` (beta site, real phone, staff and owner logins).
 
 **Still to do before go-live** (in this order):
 
-1. [ ] **Run `verify-beta.bat` again** and confirm `VERIFY RESULT: PASS (BETA DATABASE)`.
-2. [ ] **Phone test** of the new screens on the beta site: sections G to L of `claude/phone-test-checklist.md`, with a staff login and the owner login. Write down anything odd.
+1. [ ] **Run `verify-beta.bat` again** and confirm `VERIFY RESULT: PASS (BETA DATABASE)`. It now also runs the tests of the 22 Oct evening features. Send me the last lines if it fails.
+2. [ ] **Phone test** of the new screens on the beta site: sections G to L and the new section N of `claude/phone-test-checklist.md`, with a staff login and the owner login. Write down anything odd.
 3. [ ] **Backup decision (owner).** The shop database is on the Free plan, which has no automatic backups. Choose the paid plan (daily backups) or a nightly backup job. Do not go live without one.
 4. [ ] **Owner decision: how cost is counted.** "One cost for all locations" (simple) or "Each location has its own cost". Set it in Reports & closing, Stock book. Decide before the opening count.
 5. [ ] **Real data.** Fill `products.csv`, `customers.csv`, `staff.csv` and `kargadors.csv` in `go-live/` (section A). The dry run must show 0 problems. Include the real cost per product.
@@ -31,7 +32,9 @@ reports by store, Needs a look, count accuracy, today's suggested list).
 11. [ ] **Owner sign-off** on printed prices and credit balances (section A).
 12. [ ] **Deploy.** Only after the owner says "yes" in chat. Then section B (the opening count) on a slow day.
 
-**Not built yet, can wait until after go-live:** courier signature and cash page, phone sign-up, Team "created by" history, cost carried through resack and counts when cost is per location (they use the product cost for now), reorder suggestions, a stock movement summary for all items, a weekly owner summary, a USB or print-dialog fallback for the printer (only if "Check my printer" shows Bluetooth does not work from Chrome), supplier price watch, SMS sending.
+**Not built yet, can wait until after go-live:** courier signature and cash page, phone sign-up, Team "created by" history, cost carried through resack and counts when cost is per location (they use the product cost for now), a USB or print-dialog fallback for the printer (only if "Check my printer" shows Bluetooth does not work from Chrome), SMS sending.
+
+**Open owner decisions:** backup (step 3), SMS provider (step 8), whether staff may type a cost on Stock in and on a new item (today they can; the cost becomes the latest cost), and whether "Close the day" must insist on the top-5 count and no open items (today it only shows them).
 
 **Testing notes:** run `stop-dev.bat` before the full `verify.bat` (the running app locks a database file).
 `verify-beta.bat` runs the full check (migrations, types, every database test) on the separate beta database, so the shop's database is never touched and no backup is needed. It asks for the beta database address each time (Supabase beta project, Connect, Session pooler, port 5432), or reads it from `go-live\beta-verify-url.txt` (one line; git ignores it). It refuses the shop's address. Its log is `verify-logs\latest-beta.txt`, and the result line ends with `(BETA DATABASE)`. `verify.bat` and `update-and-verify-full.bat` use the database in `.env`.
@@ -72,7 +75,7 @@ Work top to bottom. Each box needs a name and a date. **Nothing in this list dep
 
 - [ ] Every staff phone: app added to the home screen, staff signed in with their PIN once.
 - [ ] Usability check done with one real staff member (`docs/rice-ops/usability-test.md`); problems fixed or written down.
-- [ ] Guides printed from `docs/rice-ops/guide/` and placed at each counter: 00, 01, 02, 03, 09, 10 and 14 at every store; 04, 06 and 07 also at the warehouse. Owner and manager also get 08, 11 and 13.
+- [ ] Guides printed from `docs/rice-ops/guide/` and placed at each counter: 00, 01, 02, 03, 09, 10 and 14 at every store; 04, 06 and 07 also at the warehouse. Owner and manager also get 08, 11, 13 and 16.
 - [ ] Each staff member has done once, on a test item: a sale, a credit payment, a Move stock, a Count one item.
 
 ## B. Go-live day (pick a slow day)

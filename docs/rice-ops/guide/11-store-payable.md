@@ -3,7 +3,7 @@
 **Who:** Owner and manager only.
 **When:** every week, when a store pays, or when a count finds rice missing.
 
-A consignment store (Store 2) sells Store 1's rice and owes Store 1's cost for each sale. The app adds that charge by itself. A voided sale takes it off again.
+A consignment store (Store 2) sells Store 1's rice and owes Store 1's cost for each sale. The app adds that charge by itself. A voided sale takes it off again. Good rice returned to Store 2 with its sale picked on **Customer returns** (guide 05) takes that charge off too, at once.
 
 On a phone: **More**, then **Store payable**.
 

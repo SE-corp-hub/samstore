@@ -20,7 +20,10 @@
 No PIN? Tap **No PIN yet, or forgot it? Make / change my PIN**. Type your password (or current PIN) and a **New PIN (4 digits)**, then tap **Save PIN**.
 
 ## What happens to the stock
-- **Return:** good rice is on the shelf already. Your answer is only the record. The Customer returns screen does not link a return to a sale yet, so **Approve** does not lower any credit or give any money back by itself. Settle that with the customer yourself.
+- **Return:** good rice is on the shelf already. The line says "from order …" when staff named the sale.
+  - **Approve, sale named:** a credit sale lowers the customer's credit (the customer gets a text). A cash, GCash or other sale makes a refund note: hand the money back yourself. More than the customer still owed is also a note to hand back.
+  - **Approve, no sale named:** nothing changes in the money. Settle it with the customer yourself.
+  - **Decline:** no money changes. The rice already moved when staff saved it.
 - **Resack, write-off:** the stock changed when staff saved it. Your answer is only the record.
 - **Credit over the limit:** **Approve** takes the rice off the shelf and adds the credit. **Decline** puts the rice back and cancels the sale.
 

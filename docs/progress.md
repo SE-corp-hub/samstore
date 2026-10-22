@@ -1,10 +1,25 @@
 # PINDIAN — Progress Log
 
+## Fixes from the guide review, and four new features (2026-10-22, evening)
+
+**Fixed** (commit `318b29f`): the Credit tile on the staff More screen; the REFUND label on approvals; the Excel Profit column no longer shows for staff; staff can change their own PIN (Counter settings); **Customer returns can name the sale** ("Which sale was it?"), so approving a return lowers credit or makes a refund note, and good rice at the consignment store takes its charge off.
+
+**Built, not yet tested by a person** (commit `0178358`, built while nobody could test, by the owner's request "just build first"):
+- **Supplier price watch** (Supplier orders): last cost per supplier and item in the new-order form, Up / Down / Same on the form and on each saved order; 5% or more is flagged.
+- **Reorder suggestions** (Supplier orders, To reorder): items that would run out within 7 days at the 2-week pace, an amount for 14 days minus what is on order, last supplier and cost, one tap to start a filled-in order.
+- **Stock movement summary** (Reports, Movement): every item at one store or all together: Start, Bought, Moved in, Moved out, Sold, Resack, Count fix, Returns, Other, End; kilo totals; Print (A4) and Excel.
+- **Weekly owner summary** (Reports, Week): sales this week against last per store, credit, what Store 2 owes and its last payment, suppliers owed and late orders, count shortages by reason, running out; Print.
+- Guides: 05, 08, 11, 13 updated; new guide 16 (Week and Movement); 00 index.
+
+**Checks:** quick check on the Sam PC at this commit: types (contracts, api, web) OK and every database-free test passed (55 s, `verify-quick.bat`). The database tests written for these features (`transfers-m3`, `benta-m5` x2, `reports-m9` x2) have **not run**: they need `verify-beta.bat` (and the earlier beta re-run after `6c50588` is also still to do).
+
+**Decisions still open (owner):** backup for the shop database; SMS provider; whether staff may type a cost on Stock in and new items; whether "Close the day" should insist on the top-5 count and no open items.
+
 ## Printed guides and go-live checklist rewritten (2026-10-22)
 
 The Taglish guides in `docs/rice-ops/gabay/` described screens that no longer exist (Lipat at Ilabas, Tanggapin, Para sa iyo, Bilangin...). They are replaced by 16 English one-page guides in `docs/rice-ops/guide/` (00 read me first, 01 sign in, 02 POS, 03 Credit, 04 Move stock, 05 Customer returns, 06 Resack, 07 Stock in, 08 Supplier orders, 09 Count, 10 End of day and reports, 11 Store payable, 12 Agent orders, 13 For your approval, 14 Weak signal, 15 Printing). Every button name in them was checked against the code. `go-live-checklist.md` and `usability-test.md` were refreshed to match. Docs only: no app code changed.
 
-Found while writing them (app issues, not fixed here): the Credit tile is missing from the staff More screen; Customer returns cannot be linked to a sale, so approving a return does not lower credit and a good return at the consignment store does not take the charge off; the approvals list shows the raw word REFUND; Excel on the staff Closing tab writes NaN in a Profit column; staff have no screen to change their own PIN; staff can type a cost on Stock in.
+Found while writing them (app issues; fixed later the same day, see the entry above): the Credit tile is missing from the staff More screen; Customer returns cannot be linked to a sale, so approving a return does not lower credit and a good return at the consignment store does not take the charge off; the approvals list shows the raw word REFUND; Excel on the staff Closing tab writes NaN in a Profit column; staff have no screen to change their own PIN; staff can type a cost on Stock in.
 
 ## All screens in English (2026-10-16)
 

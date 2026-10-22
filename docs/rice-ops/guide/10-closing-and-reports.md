@@ -35,4 +35,4 @@ Print: **Print slip**, **Print / PDF (A4)** (then choose **Save as PDF**), or **
 ## Owner or manager
 Staff never see cost or profit. You also see **Profit**, **Best by profit**, **Worth (cost)**, the **Compare stores** tab, **One store / All stores**, and what a store owes the main store.
 
-**Reports & closing** has more tabs (**Excel** saves a file): **Stock Live** (every store's rice now), **Today** (all stores: sales, profit, expenses, net profit), **This month**, **Short** (count shortages), **Trace** (search a document), **Alerts**, **Stock check**, **Stock book**.
+**Reports & closing** has more tabs (**Excel** saves a file): **Stock Live** (every store's rice now), **Today** (all stores: sales, profit, expenses, net profit), **This month**, **Short** (count shortages), **Trace** (search a document), **Alerts**, **Stock check**, **Stock book**, **Movement** and **Week** (both in guide 16).

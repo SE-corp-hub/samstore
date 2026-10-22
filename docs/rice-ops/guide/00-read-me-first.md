@@ -19,6 +19,7 @@ One page for each job. Print them, stick them at the counter, or open them on th
 | 13 | Decisions waiting for the owner or manager | **For your approval** |
 | 14 | Weak or no signal | Top bar: **Waiting to send** |
 | 15 | Printing receipts | **Counter & printer** |
+| 16 | Weekly summary and stock movement (owner, manager) | **Reports & closing**: **Week** · **Movement** |
 
 ## Three rules for everyone
 
