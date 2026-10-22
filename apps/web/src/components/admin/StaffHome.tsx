@@ -24,7 +24,7 @@ export default function StaffHome({ role, onNavigate, labelFor }: Props) {
     ids
       .filter((id) => allowed.has(id))
       .map((id) => {
-        const n = navItemFor(id);
+        const n = navItemFor(id === "utang" ? "utangrice" : id);
         return n ? { id, icon: n.icon, label: labelFor ? labelFor(id, n.label) : n.label } : null;
       })
       .filter((x): x is { id: string; icon: string; label: string } => x !== null);

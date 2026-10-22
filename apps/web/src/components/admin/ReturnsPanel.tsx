@@ -1,7 +1,8 @@
 "use client";
 
 // Returned by a customer: product, how many, good or damaged, reason. Good rice goes back on the shelf now;
-// damaged rice does not. The owner gets a note to refund or lower the credit.
+// damaged rice does not. The owner gets a note to refund or lower the credit. When the sale it came from is picked,
+// that refund or credit can be worked out, and at a consignment store the cost charge for the rice comes off.
 
 import { useCallback, useEffect, useState } from "react";
 import { API_URL } from "../../config";
@@ -13,7 +14,11 @@ import StoreBar from "./StoreBar";
 interface Place { id: string; name: string; code: string | null; isActive: boolean }
 interface ProductOption { id: string; name: string }
 interface ReturnRow { id: string; docNumber: string; productName: string; quantity: number; condition: "GOOD" | "DAMAGED"; reason: string; locationName: string; orderNumber: string | null; at: string }
+interface SaleChoice { orderId: string; orderNumber: string; at: string; customerName: string | null; paymentMethod: string; bought: number; returned: number; left: number; loose: boolean }
 type Body = { message?: string; errors?: string[]; docNumber?: string };
+
+/** Loose rice is counted in grams: show kilos. */
+const amountText = (loose: boolean, v: number) => (loose ? `${(v / 1000).toLocaleString("en-PH", { maximumFractionDigits: 3 })} kg` : String(v));
 
 export default function ReturnsPanel() {
   const [places, setPlaces] = useState<Place[]>([]);
@@ -27,6 +32,8 @@ export default function ReturnsPanel() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [rows, setRows] = useState<ReturnRow[]>([]);
+  const [sales, setSales] = useState<SaleChoice[]>([]);
+  const [orderId, setOrderId] = useState("");
 
   const loadRows = useCallback(async () => {
     const r = await fetch(`${API_URL}/admin/returns`, { headers: adminHeaders() });
@@ -49,19 +56,32 @@ export default function ReturnsPanel() {
     })().catch(() => setError("Could not load the stores"));
   }, [loadRows]);
 
+  // The sales this rice could have come from (recent sales at this store that include it).
+  useEffect(() => {
+    setOrderId("");
+    setSales([]);
+    if (!locationId || !productId) return undefined;
+    let cancelled = false;
+    void fetch(`${API_URL}/admin/returns/sales?locationId=${encodeURIComponent(locationId)}&productId=${encodeURIComponent(productId)}`, { headers: adminHeaders() })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (!cancelled && d) setSales((d.sales ?? []) as SaleChoice[]); })
+      .catch(() => { /* optional: the return can still be saved without a sale */ });
+    return () => { cancelled = true; };
+  }, [locationId, productId]);
+
   const n = Number(qty || "0");
   const ready = !!locationId && !!productId && n >= 1 && reason.trim().length >= 3;
 
   const submit = async () => {
     setBusy(true);
     setError(null);
-    const r = await sendStep("/admin/returns", { locationId, productId, quantity: n, condition, reason: reason.trim() }, "Customer return");
+    const r = await sendStep("/admin/returns", { locationId, productId, quantity: n, condition, reason: reason.trim(), ...(orderId ? { orderId } : {}) }, "Customer return");
     setBusy(false);
     if (r.status === "queued") { toast("No signal — saved on this phone, will be sent when the signal is back"); return; }
     const d = r.data as Body | null;
     if (!r.ok) { setError(d?.errors?.join(", ") ?? d?.message ?? "The return did not go through"); return; }
     toast(condition === "GOOD" ? `Back on the shelf — ${d?.docNumber ?? "done"}. The owner was told to refund or lower the credit.` : `Recorded — ${d?.docNumber ?? "done"}. Damaged rice is not added to stock.`);
-    setQty("1"); setReason(""); setProductId(""); setCondition("GOOD");
+    setQty("1"); setReason(""); setProductId(""); setCondition("GOOD"); setOrderId("");
     void loadRows();
   };
 
@@ -75,6 +95,20 @@ export default function ReturnsPanel() {
         <option value="">Choose the product…</option>
         {products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
       </select>
+      {productId && (
+        <>
+          <label className="form-label small text-muted" htmlFor="rt-sale">Which sale was it? (if you know)</label>
+          <select id="rt-sale" className="form-select form-select-lg mb-1" value={orderId} onChange={(e) => setOrderId(e.target.value)}>
+            <option value="">I do not know / not a recent sale</option>
+            {sales.map((o) => (
+              <option key={o.orderId} value={o.orderId}>
+                {o.orderNumber} · {new Date(o.at).toLocaleDateString("en-PH")}{o.customerName ? ` · ${o.customerName}` : ""} · bought {amountText(o.loose, o.bought)}{o.returned > 0 ? `, ${amountText(o.loose, o.returned)} already back` : ""}
+              </option>
+            ))}
+          </select>
+          <div className="form-text mb-3">Pick the sale so the refund or the lower credit can be worked out. At a consignment store it also takes the charge for this rice off.</div>
+        </>
+      )}
       <label className="form-label small text-muted" htmlFor="rt-qty">How many came back</label>
       <div className="input-group input-group-lg mb-3" style={{ maxWidth: 280 }}>
         <button type="button" className="btn btn-outline-dark" style={{ minWidth: 64, fontSize: 28 }} aria-label="One less" disabled={n <= 1} onClick={() => setQty(String(Math.max(1, n - 1)))}>−</button>

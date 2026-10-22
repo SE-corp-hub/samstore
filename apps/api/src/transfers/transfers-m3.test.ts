@@ -327,6 +327,33 @@ test("Customer return needs no signature: good goes back on the shelf, damaged d
   assert.equal((await flow.recentReturns(fx.storeId, fx.staff1)).length, 2);
 });
 
+test("Customer return can name its sale: the sale is listed while rice is left to return, then drops off; other stores' staff cannot list it", async () => {
+  const fx = await fixture({ s1: 5 });
+  const flow = new TransferFlowService();
+  const sale = await pos().sell(fx.storeId, fx.staff1.userId, { items: [{ productId: fx.productId, quantity: 2 }], paymentMethod: "cash", tenderedMinor: 260_000 });
+  assert.equal(sale.ok, true, msg(sale));
+  const orderId = sale.ok ? sale.value.orderId : "";
+
+  const before = await flow.salesFor(fx.storeId, fx.staff1, { locationId: fx.s1, productId: fx.productId });
+  assert.equal(before.ok, true, msg(before));
+  const row = before.ok ? before.value.sales.find((x) => x.orderId === orderId) : undefined;
+  assert.ok(row, "the sale is listed");
+  assert.equal(row?.bought, 2);
+  assert.equal(row?.left, 2);
+
+  assert.equal((await flow.createReturn(fx.storeId, fx.staff1, { locationId: fx.s1, productId: fx.productId, quantity: 1, condition: "GOOD", reason: "wrong rice", orderId })).ok, true);
+  const mid = await flow.salesFor(fx.storeId, fx.staff1, { locationId: fx.s1, productId: fx.productId });
+  assert.equal(mid.ok && mid.value.sales.find((x) => x.orderId === orderId)?.left, 1, "one is left to return");
+  assert.equal((await flow.createReturn(fx.storeId, fx.staff1, { locationId: fx.s1, productId: fx.productId, quantity: 1, condition: "DAMAGED", reason: "wet sack", orderId })).ok, true);
+  const after = await flow.salesFor(fx.storeId, fx.staff1, { locationId: fx.s1, productId: fx.productId });
+  assert.equal(after.ok && after.value.sales.some((x) => x.orderId === orderId), false, "nothing left to return: the sale drops off the list");
+
+  const other = await flow.salesFor(fx.storeId, fx.staff2, { locationId: fx.s1, productId: fx.productId });
+  assert.equal(!other.ok && other.error.type, "forbidden", "S2 staff cannot list S1's sales");
+  const nothing = await flow.salesFor(fx.storeId, fx.staff1, { locationId: fx.s1 });
+  assert.equal(!nothing.ok && nothing.error.type, "validation", "needs the product");
+});
+
 test("Buffer store: a move that is short is covered by the Buffer instead of being refused", async () => {
   const fx = await fixture({ s1: 0, s2: 2 });
   const buffer = await prisma.warehouse.create({ data: { storeId: fx.storeId, name: "Buffer store", code: "BF", type: "BUFFER" } });

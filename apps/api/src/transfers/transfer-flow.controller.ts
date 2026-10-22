@@ -124,6 +124,13 @@ export class TransferFlowController {
     return { moves: await this.flow.recentMoves(storeId, actor, locationId) };
   }
 
+  /** GET /admin/returns/sales?locationId=&productId= — recent sales at that store that include the product (to tie a return to its sale). */
+  @Get("returns/sales")
+  async returnSales(@Req() req: Req_, @Query("locationId") locationId?: string, @Query("productId") productId?: string, @Headers("x-store-id") h?: string) {
+    const { storeId, actor } = await this.ctx(req, h, TENANT_ROLES.ADMIN);
+    return unwrap(await this.flow.salesFor(storeId, actor, { locationId, productId }));
+  }
+
   /** GET /admin/returns?locationId= — recent customer returns. */
   @Get("returns")
   async returns(@Req() req: Req_, @Query("locationId") locationId?: string, @Headers("x-store-id") h?: string) {

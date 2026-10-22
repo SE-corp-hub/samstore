@@ -29,6 +29,12 @@ import { txOptions } from "../persistence/tx-options.js";
 export type FlowResult<T> = { ok: true; value: T } | { ok: false; error: ApiError };
 type Tx = Prisma.TransactionClient;
 
+/** One recent sale a customer return can be tied to. For loose rice the numbers are grams. */
+export interface SaleChoice {
+  orderId: string; orderNumber: string; at: string; customerName: string | null; paymentMethod: string;
+  bought: number; returned: number; left: number; loose: boolean;
+}
+
 class StepError extends Error {
   constructor(readonly result: { ok: false; error: ApiError }) {
     super("step refused");
@@ -465,6 +471,38 @@ export class TransferFlowService {
       include: { product: { select: { name: true } }, location: { select: { name: true } }, order: { select: { orderNumber: true } } },
     });
     return rows.map((r) => ({ id: r.id, docNumber: r.docNumber, productName: r.product.name, quantity: r.quantity, condition: r.condition, reason: r.reason, locationName: r.location.name, orderNumber: r.order?.orderNumber ?? null, at: r.createdAt }));
+  }
+
+  /**
+   * Recent sales at a location that include this product, newest first, so a return can be tied to the sale it
+   * came from. A return that names its sale can lower the customer's credit or start a refund, and at a
+   * consignment store it takes the cost charge for those kilos off again. Sales with nothing left to return are left out.
+   */
+  async salesFor(storeId: string, actor: Actor, input: { locationId?: string; productId?: string }): Promise<FlowResult<{ sales: SaleChoice[] }>> {
+    if (!input.locationId || !input.productId) return invalid("Choose the store and the product first");
+    const refusal = locationRefusal(actor, input.locationId);
+    if (refusal) return forbidden(refusal);
+    const since = new Date(Date.now() - 60 * 86_400_000);
+    const orders = await prisma.order.findMany({
+      where: { storeId, sellingLocationId: input.locationId, status: { in: ["COMPLETED", "DELIVERED"] }, createdAt: { gte: since }, items: { some: { productId: input.productId } } },
+      orderBy: { createdAt: "desc" }, take: 40,
+      select: { id: true, orderNumber: true, createdAt: true, occurredAt: true, customerName: true, paymentMethod: true, items: { where: { productId: input.productId }, select: { quantity: true, grams: true } } },
+    });
+    const back = await prisma.stockReturn.groupBy({ by: ["orderId"], where: { storeId, productId: input.productId, orderId: { in: orders.map((o) => o.id) } }, _sum: { quantity: true } });
+    const returned = new Map<string, number>();
+    for (const b of back) if (b.orderId) returned.set(b.orderId, b._sum.quantity ?? 0);
+    const sales: SaleChoice[] = [];
+    for (const o of orders) {
+      const bought = o.items.reduce((n, i) => n + i.quantity, 0);
+      const already = returned.get(o.id) ?? 0;
+      if (bought - already <= 0) continue;
+      sales.push({
+        orderId: o.id, orderNumber: o.orderNumber, at: (o.occurredAt ?? o.createdAt).toISOString(), customerName: o.customerName || null,
+        paymentMethod: o.paymentMethod, bought, returned: already, left: bought - already, loose: o.items.some((i) => i.grams !== null),
+      });
+      if (sales.length >= 25) break;
+    }
+    return { ok: true, value: { sales } };
   }
 
   // ─────────────────────────── Agent order: stock leaves at approval ───────────────────────────

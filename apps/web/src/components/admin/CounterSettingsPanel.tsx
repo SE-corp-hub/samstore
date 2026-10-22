@@ -8,6 +8,7 @@ import { API_URL } from "../../config";
 import { adminHeaders } from "../../lib/admin";
 import { toast } from "../../lib/toast";
 import PrinterSettingsCard from "./PrinterSettingsCard";
+import MyPin from "./MyPin";
 
 export default function CounterSettingsPanel() {
   const [requireOpenShift, setRequireOpenShift] = useState<boolean | null>(null);
@@ -44,6 +45,7 @@ export default function CounterSettingsPanel() {
     <div style={{ maxWidth: 640 }}>
       <h1 className="h4 mb-3"><i className="bi bi-sliders me-2"></i>Counter settings</h1>
       <PrinterSettingsCard />
+      <div className="mt-3"><MyPin /></div>
       {requireOpenShift === null ? (
         <div className="text-muted">Loading…</div>
       ) : (
