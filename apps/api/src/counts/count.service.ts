@@ -23,6 +23,7 @@ import { cacheBust, cacheKey } from "../persistence/ttl-cache.js";
 import { adjustForCount, InsufficientStockError, releaseForTrip, type TripLeg } from "../domain/movements.js";
 import { varietyOf } from "../domain/resack.js";
 import { planOpenedSacks } from "../domain/count-resack.js";
+import { accStat, flagText, needsLook, REPEAT_DAYS, suggestList, suggestText, weeklyTrend, type AccLine, type LookCount } from "../domain/count-looks.js";
 import { asksRecount, checkReason, cleanNote, missingReasons, missingReasonsMessage, reasonsFor, REASON_LABEL, type CountReason } from "../domain/count-reasons.js";
 import { balanceOf, costValue, countedUnits, CountError, gramsIn, isLooseP, lineResult, verdict, WRITE_OFF_LABEL, writeOffCheck } from "../domain/counting.js";
 import { formatKilos } from "../domain/weight.js";
@@ -566,6 +567,148 @@ export class CountService {
         items.push({ productId: p.id, name: p.name, variety: varietyOf(p), loose: isLooseP(p), cells });
       }
       return { locations, items };
+    });
+  }
+
+  // ─────────────────────────── the owner's side: needs a look, limits, suggestions, accuracy ───────────────────────────
+
+  private ownerOnly(actor: Actor) {
+    if (!OWNERS.includes(actor.role)) throw new StepError(forbidden("Only the owner or a manager can see this"));
+  }
+
+  private async limitsOf(storeId: string) {
+    const s = await prisma.storeSettings.findUnique({ where: { storeId }, select: { countRecountMinor: true, countLookMinor: true } });
+    return { recountMinor: s?.countRecountMinor ?? 50_000, lookMinor: s?.countLookMinor ?? 100_000 };
+  }
+
+  /** Counts that nobody has looked at yet and that need it: a big difference, an over count, the same item short again and again, many "Don't know". */
+  async looks(storeId: string, actor: Actor) {
+    return this.run(async () => {
+      this.ownerOnly(actor);
+      const limits = await this.limitsOf(storeId);
+      const now = Date.now();
+      const counts = await prisma.stockCount.findMany({
+        where: { storeId, status: "APPROVED", decidedAt: { gte: new Date(now - REPEAT_DAYS * 86_400_000) } },
+        include: {
+          location: { select: { name: true } },
+          lines: { where: { countedQty: { not: null } }, select: { id: true, productId: true, reason: true, varianceQty: true, postedQty: true, product: { select: productSelect } } },
+        },
+        orderBy: { decidedAt: "desc" }, take: 300,
+      });
+      const rows: LookCount[] = counts.map((c) => ({
+        id: c.id, locationId: c.locationId, decidedAt: c.decidedAt ?? c.startedAt, lookStatus: c.lookStatus,
+        lines: c.lines.map((l) => {
+          const left = l.postedQty ?? l.varianceQty ?? 0;
+          return { productId: l.productId, name: l.product.name, leftoverQty: left, valueMinor: costValue(l.product, left), reason: l.reason };
+        }),
+      }));
+      const flagged = needsLook(rows, limits, now);
+      const byId = new Map(counts.map((c) => [c.id, c] as const));
+      const lineCount = new Map<string, string>();
+      for (const f of flagged) for (const l of byId.get(f.id)?.lines ?? []) lineCount.set(l.id, f.id);
+      // What the consignment store was charged for each of these counts (not counting what was undone).
+      const charged = new Map<string, number>();
+      if (lineCount.size) {
+        const entries = await prisma.storePayableEntry.findMany({ where: { storeId, kind: "CHARGE", sourceLineId: { in: Array.from(lineCount.keys()) } }, select: { id: true, amountMinor: true, sourceLineId: true } });
+        const undone = new Set((await prisma.storePayableEntry.findMany({ where: { storeId, reversesId: { in: entries.map((e) => e.id) } }, select: { reversesId: true } })).map((e) => e.reversesId));
+        for (const e of entries) {
+          const cid = lineCount.get(e.sourceLineId ?? "");
+          if (cid && !undone.has(e.id)) charged.set(cid, (charged.get(cid) ?? 0) + e.amountMinor);
+        }
+      }
+      const names = await this.names(flagged.map((f) => byId.get(f.id)?.submittedById ?? byId.get(f.id)?.startedById));
+      return {
+        limits,
+        items: flagged.map((f) => {
+          const c = byId.get(f.id)!;
+          return {
+            count: { id: c.id, docNumber: c.docNumber, kind: c.kind, location: c.location.name, locationId: c.locationId, decidedAt: c.decidedAt, countedBy: names.get(c.submittedById ?? c.startedById) ?? null },
+            flags: f.flags.map((x) => ({ kind: x.kind, text: flagText(x), productId: x.productId, valueMinor: x.valueMinor, times: x.times })),
+            chargeMinor: charged.get(f.id) ?? 0,
+          };
+        }),
+      };
+    });
+  }
+
+  /** The owner looked at a count: it leaves the list (a note is optional). */
+  async review(storeId: string, actor: Actor, id: string, note: unknown) {
+    return this.run(async () => {
+      this.ownerOnly(actor);
+      const c = await prisma.stockCount.findFirst({ where: { id, storeId, status: "APPROVED" }, select: { id: true, docNumber: true } });
+      if (!c) throw new StepError(notFound());
+      const text = cleanNote(note);
+      await prisma.$transaction(async (tx) => {
+        await tx.stockCount.update({ where: { id }, data: { lookStatus: "OK", lookNote: text, reviewedById: actor.userId, reviewedAt: new Date() } });
+        await tx.auditLog.create({ data: { storeId, actorType: "USER", actorId: actor.userId, action: "count.review", entityType: "StockCount", entityId: id, after: { lookStatus: "OK", note: text } } });
+      });
+      return { id, docNumber: c.docNumber, lookStatus: "OK" as const };
+    });
+  }
+
+  async getLimits(storeId: string, actor: Actor) {
+    return this.run(async () => {
+      this.ownerOnly(actor);
+      return this.limitsOf(storeId);
+    });
+  }
+
+  /** The two limits, in centavos: ask to count again from this much; put on the owner's list from this much. 0 switches one off. */
+  async setLimits(storeId: string, actor: Actor, input: { recountMinor: unknown; lookMinor: unknown }) {
+    return this.run(async () => {
+      this.ownerOnly(actor);
+      const ok = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= 100_000_000;
+      if (!ok(input.recountMinor) || !ok(input.lookMinor)) throw new CountError("Enter the amounts in pesos (0 switches one off)");
+      await prisma.storeSettings.upsert({
+        where: { storeId }, update: { countRecountMinor: input.recountMinor, countLookMinor: input.lookMinor },
+        create: { storeId, countRecountMinor: input.recountMinor, countLookMinor: input.lookMinor },
+      });
+      await prisma.auditLog.create({ data: { storeId, actorType: "USER", actorId: actor.userId, action: "count.limits", entityType: "StoreSettings", entityId: storeId, after: { recountMinor: input.recountMinor, lookMinor: input.lookMinor } } });
+      return { recountMinor: input.recountMinor, lookMinor: input.lookMinor };
+    });
+  }
+
+  /** About ten items to count today: never counted first, then fast sellers weekly and the rest monthly. Any role, at their own store. */
+  async suggest(storeId: string, actor: Actor, input: { locationId?: string }) {
+    return this.run(async () => {
+      const loc = await this.location(storeId, actor, input.locationId);
+      const now = Date.now();
+      const [products, last, sales, levels] = await Promise.all([
+        prisma.product.findMany({ where: this.countable(storeId, loc.id), select: { id: true, name: true } }),
+        this.lastCounted(storeId, loc.id),
+        prisma.stockMovement.groupBy({ by: ["productId"], where: { storeId, warehouseId: loc.id, type: "CONSUME", createdAt: { gte: new Date(now - 30 * 86_400_000) } }, _count: { _all: true } }),
+        prisma.stockLevel.findMany({ where: { storeId, warehouseId: loc.id }, select: { productId: true, quantityOnHand: true } }),
+      ]);
+      const sold = new Map(sales.map((x) => [x.productId, x._count._all] as const));
+      const held = new Map(levels.map((x) => [x.productId, x.quantityOnHand] as const));
+      const list = suggestList(products.map((p) => ({ productId: p.id, name: p.name, lastCountedAt: last.get(p.id) ?? null, sales30: sold.get(p.id) ?? 0, onHand: held.get(p.id) ?? 0 })), now, 10);
+      return { location: loc, items: list.map((x) => ({ productId: x.productId, name: x.name, why: x.why, days: x.days, text: suggestText(x) })) };
+    });
+  }
+
+  /** The share of items right on the first count, over the last 4 weeks: all together, per store and per person. */
+  async accuracy(storeId: string, actor: Actor) {
+    return this.run(async () => {
+      this.ownerOnly(actor);
+      const now = Date.now();
+      const rows = await prisma.stockCountLine.findMany({
+        where: { storeId, countedQty: { not: null }, expectedQty: { not: null }, countedAt: { gte: new Date(now - 28 * 86_400_000) }, count: { status: "APPROVED" } },
+        select: { countedAt: true, countedById: true, countedQty: true, firstCountedQty: true, expectedQty: true, count: { select: { locationId: true } } },
+        take: 50_000,
+      });
+      const all: (AccLine & { by: string | null; at: string })[] = rows.map((r) => ({ countedAt: r.countedAt ?? new Date(now), countedQty: r.countedQty ?? 0, firstCountedQty: r.firstCountedQty, expectedQty: r.expectedQty ?? 0, by: r.countedById, at: r.count.locationId }));
+      const [locs, names] = await Promise.all([
+        prisma.warehouse.findMany({ where: { storeId, isActive: true }, select: { id: true, name: true }, orderBy: [{ isDefault: "desc" }, { name: "asc" }] }),
+        this.names(all.map((x) => x.by)),
+      ]);
+      const people = new Map<string, AccLine[]>();
+      for (const x of all) if (x.by) people.set(x.by, [...(people.get(x.by) ?? []), x]);
+      return {
+        days: 28,
+        total: { ...accStat(all), weeks: weeklyTrend(all, now) },
+        locations: locs.map((l) => { const mine = all.filter((x) => x.at === l.id); return { locationId: l.id, name: l.name, ...accStat(mine), weeks: weeklyTrend(mine, now) }; }).filter((l) => l.counted > 0),
+        people: Array.from(people, ([userId, lines]) => ({ userId, name: names.get(userId) ?? "Staff", ...accStat(lines) })).sort((a, b) => b.counted - a.counted),
+      };
     });
   }
 

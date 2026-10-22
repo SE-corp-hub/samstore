@@ -457,3 +457,73 @@ test("M8: the count report — what moved since the last count, a recorded resac
   assert.equal(cell?.lastCountedAt instanceof Date, true);
   assert.equal(ov.value.items.find((i) => i.productId === fx.sin25.id)?.cells[fx.s2], undefined, "not held and never counted at Store 2");
 });
+
+test("M8: the owner's side — Needs a look, the two limits, today's suggested list and count accuracy", async () => {
+  const fx = await fixture();
+  const countWith = async (counted: { sin: number; din: number; loose: string }, reasons: { productId: string; reason: string }[] = []) => {
+    const c = await svc.start(fx.storeId, fx.staff1, { locationId: fx.s1 });
+    assert.equal(c.ok, true, msg(c));
+    if (!c.ok) throw new Error("no count");
+    assert.equal((await svc.record(fx.storeId, fx.staff1, c.value.id, [{ productId: fx.sin25.id, counted: counted.sin }, { productId: fx.din25.id, counted: counted.din }, { productId: fx.loose.id, counted: counted.loose }])).ok, true);
+    if (reasons.length) assert.equal((await svc.setReasons(fx.storeId, fx.staff1, c.value.id, reasons)).ok, true);
+    const sub = await svc.submit(fx.storeId, fx.staff1, c.value.id, staffSig);
+    assert.equal(sub.ok, true, msg(sub));
+    return c.value;
+  };
+
+  // Today's suggested list: nothing counted yet, so everything is "never counted", what sells first.
+  assert.equal((await benta.sell(fx.storeId, fx.staff1, { idempotencyKey: key(), lines: [{ productId: fx.loose.id, kilos: "1" }], payment: { method: "cash" } })).ok, true);
+  const sug = await svc.suggest(fx.storeId, fx.staff1, {});
+  assert.equal(sug.ok, true, msg(sug));
+  if (!sug.ok) return;
+  assert.deepEqual(sug.value.items.map((i) => [i.name, i.why, i.text]), [["Sinandomeng (per kilo)", "NEVER", "Never counted"], ["Dinorado 25 kg", "NEVER", "Never counted"], ["Sinandomeng 25 kg", "NEVER", "Never counted"]]);
+  assert.equal((await svc.suggest(fx.storeId, fx.staff2, { locationId: fx.s1 })).ok, false, "Store 2 staff cannot ask for Store 1's list");
+
+  // A baseline that matches, then a count with a big shortage: 2 Dinorado sacks (₱2,800) with "Don't know".
+  await countWith({ sin: 10, din: 4, loose: "49" });
+  const c2 = await countWith({ sin: 10, din: 2, loose: "49" }, [{ productId: fx.din25.id, reason: "UNKNOWN" }]);
+  const sugAfter = await svc.suggest(fx.storeId, fx.staff1, {});
+  assert.deepEqual(sugAfter.ok ? sugAfter.value.items : null, [], "everything was counted a moment ago");
+
+  const looks = await svc.looks(fx.storeId, fx.owner);
+  assert.equal(looks.ok, true, msg(looks));
+  if (!looks.ok) return;
+  assert.deepEqual(looks.value.limits, { recountMinor: 50_000, lookMinor: 100_000 });
+  assert.deepEqual(looks.value.items.map((i) => [i.count.docNumber, i.count.countedBy, i.flags.map((f) => f.kind), i.flags[0]?.text, i.chargeMinor]), [[c2.docNumber, "Ate Lorna", ["BIG"], "Short ₱2,800.00 on Dinorado 25 kg", 0]]);
+  assert.equal((await svc.looks(fx.storeId, fx.staff1)).ok, false, "staff do not see the owner's list");
+  assert.equal((await svc.review(fx.storeId, fx.staff1, c2.id, "fine")).ok, false);
+
+  // The owner looks at it: it leaves the list, with a note.
+  const rev = await svc.review(fx.storeId, fx.owner, c2.id, "  checked with   Lorna ");
+  assert.equal(rev.ok, true, msg(rev));
+  const row = await prisma.stockCount.findUniqueOrThrow({ where: { id: c2.id } });
+  assert.deepEqual([row.lookStatus, row.lookNote, row.reviewedById], ["OK", "checked with Lorna", fx.owner.userId]);
+  const after = await svc.looks(fx.storeId, fx.owner);
+  assert.equal(after.ok && after.value.items.length, 0);
+  assert.equal((await svc.review(fx.storeId, fx.owner, "no-such-count", null)).ok, false);
+
+  // The limits: staff cannot read or change them; amounts must be whole centavos; 0 switches a rule off.
+  assert.equal((await svc.getLimits(fx.storeId, fx.staff1)).ok, false);
+  assert.equal((await svc.setLimits(fx.storeId, fx.staff1, { recountMinor: 1, lookMinor: 1 })).ok, false);
+  assert.match(msg(await svc.setLimits(fx.storeId, fx.owner, { recountMinor: -5, lookMinor: 100 })), /pesos/);
+  assert.match(msg(await svc.setLimits(fx.storeId, fx.owner, { recountMinor: 1.5, lookMinor: 100 })), /pesos/);
+  assert.equal((await svc.setLimits(fx.storeId, fx.owner, { recountMinor: 1_000, lookMinor: 0 })).ok, true);
+  const lim = await svc.getLimits(fx.storeId, fx.owner);
+  assert.deepEqual(lim.ok && lim.value, { recountMinor: 1_000, lookMinor: 0 });
+
+  // An over count adds stock from nothing: with the "big" rule off, it is still on the list because it is over the count-again limit.
+  await countWith({ sin: 12, din: 2, loose: "49" }, [{ productId: fx.sin25.id, reason: "STOCKIN_MISSING" }]);
+  assert.equal(await onHand(fx, fx.sin25.id), 12);
+  const over = await svc.looks(fx.storeId, fx.owner);
+  assert.deepEqual(over.ok ? over.value.items.map((i) => [i.flags.map((f) => f.kind), i.flags[0]?.text]) : null, [[["OVER"], "Over count adds stock: Sinandomeng 25 kg (₱2,200.00)"]]);
+
+  // Accuracy: 3 counts of 3 items = 9 lines; Dinorado (count 2) and Sinandomeng (count 3) were not right the first time.
+  const acc = await svc.accuracy(fx.storeId, fx.owner);
+  assert.equal(acc.ok, true, msg(acc));
+  if (!acc.ok) return;
+  assert.deepEqual([acc.value.total.counted, acc.value.total.right, acc.value.total.pct], [9, 7, 78]);
+  assert.deepEqual(acc.value.total.weeks.map((w) => w.counted), [0, 0, 0, 9], "all in the last 7 days");
+  assert.deepEqual(acc.value.locations.map((l) => [l.name, l.counted, l.right]), [["Store 1", 9, 7]]);
+  assert.deepEqual(acc.value.people.map((p) => [p.name, p.counted, p.right]), [["Ate Lorna", 9, 7]]);
+  assert.equal((await svc.accuracy(fx.storeId, fx.staff1)).ok, false);
+});

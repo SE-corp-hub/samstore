@@ -99,6 +99,40 @@ export class CountController {
     return unwrap(await this.counts.overview(storeId, actor));
   }
 
+  /** GET /admin/counts/looks — owner/manager: counts that need a look (big difference, over count, repeated shortage, many "Don't know"). */
+  @Get("counts/looks")
+  async looks(@Req() req: Req_, @Headers("x-store-id") h?: string) {
+    const { storeId, actor } = await this.ctx(req, h);
+    return unwrap(await this.counts.looks(storeId, actor));
+  }
+
+  /** GET /admin/counts/suggest?locationId= — about ten items to count today. */
+  @Get("counts/suggest")
+  async suggest(@Req() req: Req_, @Query("locationId") locationId?: string, @Headers("x-store-id") h?: string) {
+    const { storeId, actor } = await this.ctx(req, h);
+    return unwrap(await this.counts.suggest(storeId, actor, { locationId }));
+  }
+
+  /** GET /admin/counts/accuracy — owner/manager: items right on the first count, per store and per person, weekly. */
+  @Get("counts/accuracy")
+  async accuracy(@Req() req: Req_, @Headers("x-store-id") h?: string) {
+    const { storeId, actor } = await this.ctx(req, h);
+    return unwrap(await this.counts.accuracy(storeId, actor));
+  }
+
+  /** GET /admin/counts/limits · POST /admin/counts/limits { recountMinor, lookMinor } — owner/manager. */
+  @Get("counts/limits")
+  async limits(@Req() req: Req_, @Headers("x-store-id") h?: string) {
+    const { storeId, actor } = await this.ctx(req, h);
+    return unwrap(await this.counts.getLimits(storeId, actor));
+  }
+
+  @Post("counts/limits")
+  async setLimits(@Req() req: Req_, @Body() body: Record<string, unknown>, @Headers("x-store-id") h?: string) {
+    const { storeId, actor } = await this.ctx(req, h);
+    return unwrap(await this.counts.setLimits(storeId, actor, { recountMinor: body?.recountMinor, lookMinor: body?.lookMinor }));
+  }
+
   /** GET /admin/counts/balance?locationId=&productId= — expected vs the system's shelf, per item. */
   @Get("counts/balance")
   async balance(@Req() req: Req_, @Query("locationId") locationId?: string, @Query("productId") productId?: string, @Headers("x-store-id") h?: string) {
@@ -133,6 +167,13 @@ export class CountController {
   async report(@Req() req: Req_, @Param("id") id: string, @Headers("x-store-id") h?: string) {
     const { storeId, actor } = await this.ctx(req, h);
     return unwrap(await this.counts.report(storeId, actor, id));
+  }
+
+  /** POST /admin/counts/:id/look — { note? } the owner looked at it: it leaves the Needs a look list. */
+  @Post("counts/:id/look")
+  async look(@Req() req: Req_, @Param("id") id: string, @Body() body: Record<string, unknown>, @Headers("x-store-id") h?: string) {
+    const { storeId, actor } = await this.ctx(req, h);
+    return unwrap(await this.counts.review(storeId, actor, id, body?.note));
   }
 
   /** GET /admin/counts/:id/check — the check step: only the items that differ, with their reasons to choose from. */

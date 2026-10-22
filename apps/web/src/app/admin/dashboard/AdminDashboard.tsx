@@ -296,7 +296,7 @@ case "erp": return <ErpPanel />;
       case "utangrice": return <UtangRicePanel role={role} />;
       case "agent": return <AgentPanel />;
       case "agentorders": return <AgentOrdersPanel />;
-      case "bilangin": return <BilanginPanel role={role} />;
+      case "bilangin": return <BilanginPanel role={role} onNavigate={setTab} />;
       case "storereport": return <StoreReportPanel role={role} onNavigate={setTab} />;
       case "payable": return <PayablePanel />;
       case "purchaseorders": return <PurchaseOrdersPanel />;

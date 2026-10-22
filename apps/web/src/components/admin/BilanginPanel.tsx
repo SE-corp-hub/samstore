@@ -13,6 +13,7 @@ import { formatKg, groupKg, sheetGroups, titleCase } from "../../lib/count-view"
 import CountCheck from "./CountCheck";
 import CountHome from "./CountHome";
 import CountOverview from "./CountOverview";
+import NeedsLook from "./NeedsLook";
 import CountReport from "./CountReport";
 import CountReportList from "./CountReportList";
 import { API_URL } from "../../config";
@@ -47,9 +48,10 @@ async function post(path: string, body: unknown) {
   return { ok: res.ok, data: (await res.json().catch(() => null)) as ApiBody | null };
 }
 
-export default function BilanginPanel({ role }: { role?: string; onNavigate?: (tab: string) => void }) {
+export default function BilanginPanel({ role, onNavigate }: { role?: string; onNavigate?: (tab: string) => void }) {
   const owner = !!role && (isOwnerRole(role) || role === "MANAGER");
-  const [tab, setTab] = useState<"counts" | "report" | "stores" | "bawas" | "balance">("counts");
+  const [tab, setTab] = useState<"counts" | "report" | "stores" | "look" | "bawas" | "balance">("counts");
+  const [lookCount, setLookCount] = useState(0); // counts that need the owner's look
   const [locations, setLocations] = useState<Loc[]>([]);
   const [homeLocationId, setHomeLocationId] = useState<string | null>(null);
   const [locationId, setLocationId] = useState("");
@@ -81,6 +83,13 @@ export default function BilanginPanel({ role }: { role?: string; onNavigate?: (t
     if (res.ok) setCounts((await res.json()).counts as CountRow[]);
   }, [locationId]);
   useEffect(() => { void loadCounts(); }, [loadCounts]);
+
+  const loadLooks = useCallback(async () => {
+    if (!owner) return;
+    const res = await fetch(`${API_URL}/admin/counts/looks`, { headers: adminHeaders() });
+    if (res.ok) setLookCount(((await res.json()).items as unknown[] | undefined)?.length ?? 0);
+  }, [owner]);
+  useEffect(() => { void loadLooks(); }, [loadLooks]);
 
   const openCount = async (id: string) => {
     const res = await fetch(`${API_URL}/admin/counts/${id}`, { headers: adminHeaders() });
@@ -116,6 +125,7 @@ export default function BilanginPanel({ role }: { role?: string; onNavigate?: (t
         <li className="nav-item"><button className={`nav-link ${tab === "counts" ? "active" : ""}`} onClick={() => setTab("counts")}>Counts</button></li>
         <li className="nav-item"><button className={`nav-link ${tab === "report" ? "active" : ""}`} onClick={() => { setOpen(null); setTab("report"); }}>Report</button></li>
         {owner && <li className="nav-item"><button className={`nav-link ${tab === "stores" ? "active" : ""}`} onClick={() => { setOpen(null); setTab("stores"); }}>All stores</button></li>}
+        {owner && <li className="nav-item"><button className={`nav-link ${tab === "look" ? "active" : ""}`} onClick={() => { setOpen(null); setTab("look"); }}>Needs a look{lookCount > 0 && <span className="badge text-bg-danger ms-1">{lookCount}</span>}</button></li>}
         <li className="nav-item"><button className={`nav-link ${tab === "bawas" ? "active" : ""}`} onClick={() => setTab("bawas")}>Write-off</button></li>
         {owner && <li className="nav-item"><button className={`nav-link ${tab === "balance" ? "active" : ""}`} onClick={() => setTab("balance")}>Balance</button></li>}
       </ul>}
@@ -142,6 +152,8 @@ export default function BilanginPanel({ role }: { role?: string; onNavigate?: (t
       {chosen && tab === "counts" && open && <CountSheet count={open} owner={owner} onClose={async () => { setOpen(null); await loadCounts(); }} onReload={() => void openCount(open.id)} />}
       {chosen && tab === "report" && <CountReportList locations={locations} locationId={locationId} owner={owner} />}
       {chosen && tab === "stores" && owner && <CountOverview />}
+      {chosen && tab === "look" && owner && !open && <NeedsLook onOpenCount={(id) => void openCount(id)} onNavigate={onNavigate} onChanged={() => void loadLooks()} />}
+      {chosen && tab === "look" && owner && open && <CountSheet count={open} owner={owner} onClose={() => setOpen(null)} onReload={() => void openCount(open.id)} />}
       {chosen && tab === "bawas" && <WriteOffForm locationId={locationId} products={products} />}
       {chosen && tab === "balance" && owner && <BalanceView locationId={locationId} />}
     </div>

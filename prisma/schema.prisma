@@ -2097,6 +2097,10 @@ model StockCount {
   approvalId       String?
   kulangValueMinor Int              @default(0)
   sobraValueMinor  Int              @default(0)
+  lookStatus       String           @default("NONE") // the owner's "Needs a look" review: NONE = not looked at, OK = looked at
+  lookNote         String?
+  reviewedById     String?
+  reviewedAt       DateTime?
   lines            StockCountLine[]
 
   @@unique([storeId, docNumber])

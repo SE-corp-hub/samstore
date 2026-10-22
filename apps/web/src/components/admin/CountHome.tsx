@@ -36,13 +36,14 @@ export default function CountHome({ locationId, owner, onOpen, onChanged, onErro
   const [q, setQ] = useState("");
   const [picked, setPicked] = useState<CountItem | null>(null);
   const [setup, setSetup] = useState(false);
+  const [suggest, setSuggest] = useState(false);
 
   const loadItems = useCallback(async () => {
     const r = await call("GET", `/admin/counts/items?locationId=${encodeURIComponent(locationId)}`);
     if (r.ok) setItems(((r.data?.items as CountItem[] | undefined) ?? []));
     else onError(errText(r.data, "Could not load the items"));
   }, [locationId, onError]);
-  useEffect(() => { setItems(null); setPicked(null); setSetup(false); void loadItems(); }, [loadItems]);
+  useEffect(() => { setItems(null); setPicked(null); setSetup(false); setSuggest(false); void loadItems(); }, [loadItems]);
 
   const results = useMemo(() => (items ? (q.trim() ? searchItems(items, q) : staleFirst(items, 5)) : []), [items, q]);
 
@@ -60,6 +61,14 @@ export default function CountHome({ locationId, owner, onOpen, onChanged, onErro
       <ListSetup
         locationId={locationId} owner={owner} items={items} onError={onError} onBack={() => setSetup(false)}
         onStarted={async (id) => { setSetup(false); await onChanged(); await onOpen(id); }}
+      />
+    );
+  }
+  if (suggest) {
+    return (
+      <Suggested
+        locationId={locationId} onError={onError} onBack={() => setSuggest(false)}
+        onStarted={async (id) => { setSuggest(false); await onChanged(); await onOpen(id); }}
       />
     );
   }
@@ -86,6 +95,7 @@ export default function CountHome({ locationId, owner, onOpen, onChanged, onErro
       </div>
       <div className="d-flex flex-wrap gap-2 mb-3">
         <button type="button" className="btn btn-success btn-lg" disabled={!items} onClick={() => setSetup(true)}>Count a list</button>
+        <button type="button" className="btn btn-outline-success btn-lg" onClick={() => setSuggest(true)}>Today&apos;s suggested list</button>
         <button type="button" className="btn btn-outline-dark btn-lg" onClick={onClosing}>Closing count (top 5)</button>
       </div>
       {children}
@@ -182,6 +192,50 @@ function ListSetup({ locationId, owner, items, onStarted, onBack, onError }: {
       )}
       <p className="text-muted mb-2">{ready ? `${n} item${n === 1 ? "" : "s"} to count.` : mode === "stale" && n === 0 ? "Every item was counted in that time." : ""}</p>
       <button type="button" className="btn btn-success btn-lg w-100" disabled={busy || !ready} onClick={() => void start()}>{busy ? "Please wait…" : "Start counting"}</button>
+    </div>
+  );
+}
+
+interface Suggestion { productId: string; name: string; why: string; days: number | null; text: string }
+
+/** About ten items to count today: never counted first, then fast sellers weekly and the rest monthly. */
+function Suggested({ locationId, onStarted, onBack, onError }: { locationId: string; onStarted: (id: string) => void | Promise<void>; onBack: () => void; onError: (m: string | null) => void }) {
+  const [list, setList] = useState<Suggestion[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    let live = true;
+    void call("GET", `/admin/counts/suggest?locationId=${encodeURIComponent(locationId)}`).then((r) => {
+      if (!live) return;
+      if (r.ok) setList((r.data?.items as Suggestion[] | undefined) ?? []); else { onError(errText(r.data, "Could not load the list")); setList([]); }
+    });
+    return () => { live = false; };
+  }, [locationId, onError]);
+
+  const start = async () => {
+    if (!list?.length) return;
+    setBusy(true); onError(null);
+    const r = await call("POST", "/admin/counts", { locationId, productIds: list.map((x) => x.productId) });
+    setBusy(false);
+    if (!r.ok) { onError(errText(r.data, "Could not start the count")); return; }
+    toast(`Started: ${String(r.data?.docNumber ?? "")}`);
+    await onStarted(String(r.data?.id));
+  };
+
+  return (
+    <div style={{ maxWidth: 560 }}>
+      <button type="button" className="btn btn-link px-0 mb-2" onClick={onBack}>← Counts</button>
+      <h2 className="h5">Today&apos;s suggested list</h2>
+      <p className="mb-2">Items never counted come first, then fast sellers (every week) and the rest (every month). A few items each day keeps the numbers right.</p>
+      {list === null && <p className="text-muted">Loading…</p>}
+      {list && list.length === 0 && <div className="alert alert-success">Everything was counted recently. Nothing to suggest today.</div>}
+      {list && list.length > 0 && (
+        <>
+          <ul className="list-group mb-3">
+            {list.map((x) => <li key={x.productId} className="list-group-item d-flex justify-content-between gap-2"><span>{x.name}</span><span className="small text-muted text-end">{x.text}</span></li>)}
+          </ul>
+          <button type="button" className="btn btn-success btn-lg w-100" disabled={busy} onClick={() => void start()}>{busy ? "Please wait…" : `Start counting these ${list.length}`}</button>
+        </>
+      )}
     </div>
   );
 }
