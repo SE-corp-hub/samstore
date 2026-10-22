@@ -58,13 +58,16 @@ export class StoreReportService {
   // ─────────────────────────── Stock left ───────────────────────────
 
   private async stockRows(storeId: string, locationId: string, owner: boolean) {
-    const [levels, prices] = await Promise.all([
+    const since = new Date(Date.now() - 14 * 24 * 3600 * 1000);
+    const [used, levels, prices] = await Promise.all([
+      prisma.stockMovement.groupBy({ by: ["productId"], where: { storeId, warehouseId: locationId, type: "CONSUME", createdAt: { gte: since } }, _sum: { delta: true } }),
       prisma.stockLevel.findMany({ where: { storeId, warehouseId: locationId }, select: { productId: true, quantityOnHand: true, quantityReserved: true } }),
       prisma.locationPrice.findMany({ where: { storeId, warehouseId: locationId }, select: { productId: true, priceMinor: true } }),
     ]);
     const products = await prisma.product.findMany({ where: { storeId, isActive: true, id: { in: levels.map((l) => l.productId) } }, select: productSelect, orderBy: { name: "asc" } });
     const priceBy = new Map(prices.map((p) => [p.productId, p.priceMinor]));
     const levelBy = new Map(levels.map((l) => [l.productId, l]));
+    const perDay = new Map(used.map((u) => [u.productId, Math.abs(u._sum.delta ?? 0) / 14]));
     const rows = products.map((p) => {
       const loose = isLooseP(p);
       const l = levelBy.get(p.id)!;
@@ -73,6 +76,8 @@ export class StoreReportService {
       return {
         productId: p.id, name: p.name, loose, unit: loose ? "kg" : "pcs",
         onHand: l.quantityOnHand, reserved: l.quantityReserved, available, flag: stockFlag(loose, available),
+        // About how many days the stock lasts at the pace of the last 2 weeks (null = nothing sold lately).
+        daysLeft: (perDay.get(p.id) ?? 0) > 0 ? Math.max(0, Math.round(available / perDay.get(p.id)!)) : null,
         unitPriceMinor, valueMinor: valueOf(loose, Math.max(0, l.quantityOnHand), unitPriceMinor),
         ...(owner ? { costValueMinor: valueOf(loose, Math.max(0, l.quantityOnHand), p.costMinor) } : {}),
       };
@@ -160,6 +165,40 @@ export class StoreReportService {
       const loc = p.wanted[0]!;
       const value = await this.salesOf(storeId, loc.id, r.start, r.end, isOwner(actor));
       return { ok: true as const, value: { location: { id: loc.id, name: loc.name }, from: r.from, to: r.to, ...value } };
+    } catch (e) {
+      if (e instanceof ReportError) return fail("validation", e.message);
+      throw e;
+    }
+  }
+
+  // ─────────────────────────── Top 10 customers (owner) ───────────────────────────
+
+  /** The 10 customers who bought most often, and the 10 who spent most, in the last 30 days (all stores). */
+  async topCustomers(storeId: string, actor: Actor) {
+    try {
+      if (!isOwner(actor)) return fail("forbidden", "Top customers is for the owner");
+      const since = new Date(Date.now() - 30 * 24 * 3600 * 1000);
+      const orders = await prisma.order.findMany({
+        where: { storeId, status: { in: ["COMPLETED", "DELIVERED"] }, storeCustomerId: { not: null }, OR: [{ occurredAt: { gte: since } }, { occurredAt: null, createdAt: { gte: since } }] },
+        select: { storeCustomerId: true, totalMinor: true, occurredAt: true, createdAt: true },
+      });
+      const by = new Map<string, { visits: number; totalMinor: number; lastAt: Date }>();
+      for (const o of orders) {
+        const at = o.occurredAt ?? o.createdAt;
+        const cur = by.get(o.storeCustomerId!) ?? { visits: 0, totalMinor: 0, lastAt: at };
+        cur.visits++; cur.totalMinor += o.totalMinor; if (at > cur.lastAt) cur.lastAt = at;
+        by.set(o.storeCustomerId!, cur);
+      }
+      const names = new Map((await prisma.storeCustomer.findMany({ where: { id: { in: [...by.keys()] } }, select: { id: true, customer: { select: { name: true } } } })).map((c) => [c.id, c.customer.name ?? "Customer"]));
+      const rows = [...by.entries()].map(([id, v]) => ({ id, name: names.get(id) ?? "Customer", visits: v.visits, totalMinor: v.totalMinor, lastAt: v.lastAt.toISOString() }));
+      return {
+        ok: true as const,
+        value: {
+          days: 30,
+          byVisits: [...rows].sort((a, b) => b.visits - a.visits || b.totalMinor - a.totalMinor).slice(0, 10),
+          byAmount: [...rows].sort((a, b) => b.totalMinor - a.totalMinor || b.visits - a.visits).slice(0, 10),
+        },
+      };
     } catch (e) {
       if (e instanceof ReportError) return fail("validation", e.message);
       throw e;

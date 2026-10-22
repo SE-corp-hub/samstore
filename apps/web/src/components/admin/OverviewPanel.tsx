@@ -28,6 +28,8 @@ export default function OverviewPanel({ onNavigate, storeSlug, storeName }: Over
   const [utangOverdue, setUtangOverdue] = useState<number | null>(null);
   const [dailyTargetMinor, setDailyTargetMinor] = useState<number | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(false);
+  const [top, setTop] = useState<{ byVisits: { id: string; name: string; visits: number; totalMinor: number }[]; byAmount: { id: string; name: string; visits: number; totalMinor: number }[] } | null>(null);
+  const [topBy, setTopBy] = useState<"amount" | "visits">("amount");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [partial, setPartial] = useState(false); // true when some widgets failed but page still renders
@@ -85,6 +87,14 @@ export default function OverviewPanel({ onNavigate, storeSlug, storeName }: Over
         setUtangOverdue(custs.filter((c) => (c.daysOverdue ?? 0) > 0).length);
       })
       .catch(() => setUtangMinor(null));
+  }, []);
+
+  // Top 10 customers, last 30 days (owner only — silently skipped for other roles)
+  useEffect(() => {
+    fetch(`${API_URL}/admin/rice/top-customers`, { headers: adminHeaders() })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setTop(d && d.byAmount ? d : null))
+      .catch(() => setTop(null));
   }, []);
 
   // Daily sales target (from store settings) — 0/absent = off.
@@ -245,6 +255,29 @@ export default function OverviewPanel({ onNavigate, storeSlug, storeName }: Over
           </div>
         </div>
       </div>
+
+      {top && top.byAmount.length > 0 && (
+        <div className="card mt-3">
+          <div className="card-body">
+            <div className="d-flex align-items-center mb-2">
+              <h6 className="card-title small fw-bold mb-0 me-auto"><i className="bi bi-trophy me-1"></i>Top 10 customers — last 30 days</h6>
+              <div className="btn-group btn-group-sm" role="group" aria-label="Rank by">
+                <button type="button" className={`btn ${topBy === "amount" ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setTopBy("amount")}>By amount</button>
+                <button type="button" className={`btn ${topBy === "visits" ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setTopBy("visits")}>By visits</button>
+              </div>
+            </div>
+            <ol className="list-group list-group-numbered list-group-flush small">
+              {(topBy === "amount" ? top.byAmount : top.byVisits).map((c) => (
+                <li key={c.id} className="list-group-item d-flex justify-content-between align-items-center">
+                  <span className="me-auto ms-2">{c.name}</span>
+                  <span className="text-muted me-3">{c.visits} {c.visits === 1 ? "visit" : "visits"}</span>
+                  <strong>{toPesos(c.totalMinor)}</strong>
+                </li>
+              ))}
+            </ol>
+          </div>
+        </div>
+      )}
 
       {/* Low-stock quick list */}
       {lowItems.length > 0 && (

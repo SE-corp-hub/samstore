@@ -17,6 +17,7 @@ import SignaturePad from "./SignaturePad";
 import { PesoInput } from "../NumberBoxes";
 import { buildText, openTextApp, type TextKind } from "../../lib/text-message";
 import { creditStatusWords, limitPhrase } from "../../lib/credit-status";
+import { printSlip } from "../../lib/slip-print";
 
 interface Cust {
   id: string; name: string; phone: string | null; balanceMinor: number; creditApproved: boolean; limitMinor: number | null; unlimited: boolean; ownLimit: boolean; status: string; availableMinor: number | null;
@@ -25,6 +26,19 @@ interface Cust {
 interface Sms { id: string; template: string; text: string; status: "QUEUED" | "SENT" | "FAILED" | "SKIPPED" | "OPENED"; provider: string | null; lastError: string | null; createdAt: string; storeCustomer: { customer: { name: string | null } } | null }
 interface Settings { utangSmsEnabled: boolean; utangMonthlyReminder: boolean; utangOverdueReminder: boolean; utangOverdueDays: number; smsSenderName: string | null }
 type ApiBody = { message?: string; errors?: string[] } & Record<string, unknown>;
+
+/** Days the oldest unpaid purchase is past its due date (payments are applied to the oldest purchases first). */
+function overdueDays(entries: { type: string; amountMinor: number; startAt: string; dueAt: string | null }[], now = Date.now()): number {
+  const sorted = [...entries].sort((a, b) => new Date(a.startAt).getTime() - new Date(b.startAt).getTime());
+  let paid = sorted.filter((e) => e.type === "payment").reduce((s, e) => s + Math.abs(e.amountMinor), 0);
+  for (const e of sorted) {
+    if (e.type !== "purchase") continue;
+    const left = e.amountMinor - Math.min(paid, e.amountMinor);
+    paid -= Math.min(paid, e.amountMinor);
+    if (left > 0 && e.dueAt) return Math.max(0, Math.floor((now - new Date(e.dueAt).getTime()) / 86_400_000));
+  }
+  return 0;
+}
 
 const peso = (m: number) => `₱${(m / 100).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const errText = (d: ApiBody | null, f: string) => d?.errors?.join(", ") ?? d?.message ?? f;
@@ -87,6 +101,24 @@ export default function UtangRicePanel({ role }: { role?: string; onNavigate?: (
   }, [selected?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /** Open the phone's text app with the customer's balance (or a payment receipt) ready. */
+  const printStatement = (c: Cust, a4: boolean) => {
+    const entries = [...(history ?? [])].sort((x, y) => new Date(x.startAt).getTime() - new Date(y.startAt).getTime());
+    let run = 0;
+    const over = overdueDays(entries);
+    printSlip({
+      storeName: storeName || "SAM STORE", title: "CREDIT STATEMENT", reference: c.name, when: new Date().toLocaleDateString("en-PH"), a4,
+      lines: [...(c.phone ? [{ label: "Phone", value: c.phone }] : []), { label: "Limit", value: limitPhrase(c, peso) }],
+      rows: entries.map((e) => {
+        run += e.amountMinor;
+        return {
+          name: `${new Date(e.startAt).toLocaleDateString("en-PH")} ${e.type === "payment" ? "Payment" : "Utang"}${e.dueAt && e.type === "purchase" ? ` (due ${new Date(e.dueAt).toLocaleDateString("en-PH")})` : ""}${e.note ? ` ${e.note}` : ""}`,
+          qty: `${e.type === "payment" ? "-" : ""}${peso(Math.abs(e.amountMinor))}  bal ${peso(run)}`,
+        };
+      }),
+      totals: [{ label: "Balance", value: peso(c.balanceMinor) }, { label: "Days overdue", value: over > 0 ? String(over) : "none" }],
+      signatures: [{ role: "Received by", name: "" }],
+    });
+  };
   const textCustomer = (c: Cust, kind: TextKind, extra: { paidMinor?: number; balanceMinor: number }) => {
     const text = buildText(kind, { storeName: storeName || "SAM STORE", customerName: c.name, paidMinor: extra.paidMinor, balanceMinor: extra.balanceMinor });
     if (!openTextApp({ phone: c.phone, text, template: kind, storeCustomerId: c.id })) { toast("This customer has no valid mobile number — add it first", "danger"); return; }
@@ -170,6 +202,10 @@ export default function UtangRicePanel({ role }: { role?: string; onNavigate?: (
               <div className="d-grid gap-2 mt-3">
                 <button type="button" className="btn btn-success btn-lg" disabled={selected.balanceMinor <= 0} onClick={() => setPaying(true)}>Credit payment</button>
                 <button type="button" className="btn btn-outline-primary btn-lg" onClick={() => textCustomer(selected, "balance", { balanceMinor: selected.balanceMinor })}><i className="bi bi-chat-dots me-1"></i>Text the balance ({peso(selected.balanceMinor)})</button>
+              </div>
+              <div className="d-flex flex-wrap gap-2 mt-2">
+                <button type="button" className="btn btn-outline-dark" disabled={!history} onClick={() => printStatement(selected, false)}><i className="bi bi-printer me-1"></i>Print statement (slip)</button>
+                <button type="button" className="btn btn-outline-dark" disabled={!history} onClick={() => printStatement(selected, true)}><i className="bi bi-file-earmark-text me-1"></i>Print statement (A4)</button>
               </div>
               {justPaid && (
                 <div className="alert alert-success mt-3 mb-0">

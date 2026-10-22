@@ -174,6 +174,12 @@ export class RiceReportsController {
     const { storeId, actor } = await this.ctx(req, h);
     return unwrap(await this.storeReports.compare(storeId, actor, { from, to }));
   }
+  /** GET /admin/rice/top-customers — top 10 by visits and by amount, last 30 days (owner). */
+  @Get("top-customers")
+  async topCustomers(@Req() req: Req_, @Headers("x-store-id") h?: string) {
+    const { storeId, actor } = await this.ctx(req, h);
+    return unwrap(await this.storeReports.topCustomers(storeId, actor));
+  }
   /** GET /admin/rice/store-buffer — what the Buffer store covered (the "to fix" list). Owner only. */
   @Get("store-buffer")
   async storeBuffer(@Req() req: Req_, @Headers("x-store-id") h?: string) {

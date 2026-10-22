@@ -23,6 +23,7 @@ export interface Slip {
   widthMm?: 58 | 80;
   header?: string | null;        // a line under the store name
   copies?: number;               // 2 = one for the customer, one for the store
+  a4?: boolean;                  // a full A4 page instead of a roll (statements)
 }
 
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -33,7 +34,7 @@ export function safeImage(src: string | null | undefined): string | null {
 }
 
 export function slipHtml(s: Slip): string {
-  const w = s.widthMm ?? 58;
+  const w = s.a4 ? 190 : s.widthMm ?? 58;
   const lines = (s.lines ?? []).map((l) => `<div class="kv"><span>${esc(l.label)}</span><b>${esc(l.value)}</b></div>`).join("");
   const rows = (s.rows ?? []).map((r) => `<div class="row"><span>${esc(r.name)}${r.note ? `<small> ${esc(r.note)}</small>` : ""}</span><b>${esc(r.qty)}</b></div>`).join("");
   const totals = (s.totals ?? []).map((l) => `<div class="kv big"><span>${esc(l.label)}</span><b>${esc(l.value)}</b></div>`).join("");
@@ -42,8 +43,8 @@ export function slipHtml(s: Slip): string {
     return `<div class="sig">${img ? `<img src="${img}" alt="">` : '<div class="blank"></div>'}<div>${esc(g.name)} — ${esc(g.role)}</div>${g.at ? `<small>${esc(g.at)}</small>` : ""}</div>`;
   }).join("");
   return `<!doctype html><html><head><meta charset="utf-8"><title>${esc(s.title)}</title><style>
-@page { size: ${w}mm auto; margin: 2mm; }
-body { font: 11px/1.35 monospace; width: ${w - 4}mm; margin: 0 auto; color: #000; }
+@page { size: ${s.a4 ? "A4" : `${w}mm auto`}; margin: ${s.a4 ? "12mm" : "2mm"}; }
+body { font: ${s.a4 ? "13px" : "11px"}/1.35 monospace; width: ${s.a4 ? "100%" : `${w - 4}mm`}; margin: 0 auto; color: #000; }
 h1 { font-size: 13px; text-align: center; margin: 4px 0 0; } .c { text-align: center; }
 hr { border: 0; border-top: 1px dashed #000; margin: 5px 0; }
 .kv, .row { display: flex; justify-content: space-between; gap: 6px; } .big { font-size: 12px; }
@@ -64,7 +65,7 @@ ${s.footer ? `<hr><div class="c">${esc(s.footer)}</div>` : ""}
 export function printSlip(s: Slip): void {
   const cfg = getPrinterSettings();
   s = { ...s, widthMm: s.widthMm ?? cfg.widthMm, header: s.header ?? (cfg.header || null), footer: cfg.footer || s.footer, copies: s.copies ?? cfg.copies };
-  if (cfg.bluetooth) {
+  if (cfg.bluetooth && !s.a4) {
     // Straight to the Bluetooth printer. If that fails, fall back to the normal print window so a receipt is never lost.
     const slip = s;
     printViaBluetooth(slip, slip.widthMm ?? 58).catch((e) => {

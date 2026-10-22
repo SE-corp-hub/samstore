@@ -20,7 +20,7 @@ const kgText = (g: number) => `${(g / 1000).toLocaleString("en-PH", { maximumFra
 interface Place { id: string; name: string; code: string | null; isActive: boolean; type?: string }
 type Tab = "stock" | "sales" | "records" | "compare" | "day" | "buffer";
 
-interface StockRow { productId: string; name: string; loose: boolean; unit: string; onHand: number; reserved: number; available: number; flag: "ZERO" | "LOW" | "OK"; unitPriceMinor: number; valueMinor: number; costValueMinor?: number }
+interface StockRow { productId: string; name: string; loose: boolean; unit: string; onHand: number; reserved: number; available: number; daysLeft?: number | null; flag: "ZERO" | "LOW" | "OK"; unitPriceMinor: number; valueMinor: number; costValueMinor?: number }
 interface StockData { location: { id: string; name: string }; rows: StockRow[]; totals: { items: number; low: number; empty: number; valueMinor: number; costValueMinor?: number } }
 interface SalesTotals { count: number; totalMinor: number; cashMinor: number; gcashMinor: number; creditMinor: number; otherMinor: number; costMinor?: number; grossProfitMinor?: number }
 interface SalesData { location: { id: string; name: string }; from: string; to: string; sales: SalesTotals; cashInMinor: number; creditGivenMinor: number; creditCollectedMinor: number; items: { name: string; unit: string; quantity: number; salesMinor: number }[]; days: { date: string; count: number; totalMinor: number }[] }
@@ -199,12 +199,13 @@ export default function StoreReportPanel({ role, onNavigate }: { role?: string; 
           {stock.rows.length === 0 ? <p className="text-muted">No stock recorded at {stock.location.name}.</p> : (
             <div className="table-responsive">
               <table className="table table-sm align-middle">
-                <thead><tr><th>Item</th><th className="text-end">Left</th><th className="text-end">Price</th><th className="text-end">Worth</th></tr></thead>
+                <thead><tr><th>Item</th><th className="text-end">Left</th><th className="text-end">Days left</th><th className="text-end">Price</th><th className="text-end">Worth</th></tr></thead>
                 <tbody>
                   {stock.rows.map((r) => (
                     <tr key={r.productId}>
                       <td>{r.name} {flagBadge(r.flag)}{r.reserved > 0 && <div className="small text-muted">{r.loose ? kgText(r.reserved) : r.reserved} held</div>}</td>
                       <td className={`text-end fw-semibold ${r.onHand < 0 ? "text-danger" : ""}`}>{qtyText(r)}</td>
+                      <td className={`text-end ${r.daysLeft != null && r.daysLeft <= 3 ? "text-danger fw-semibold" : ""}`}>{r.daysLeft == null ? <span className="text-muted">—</span> : r.daysLeft > 99 ? "99+" : `~${r.daysLeft}`}</td>
                       <td className="text-end">{peso(r.unitPriceMinor)}{r.loose ? <span className="small text-muted"> /kg</span> : ""}</td>
                       <td className="text-end">{peso(r.valueMinor)}</td>
                     </tr>
