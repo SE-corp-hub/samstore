@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { ageText, countedKg, groupKg, searchItems, sheetGroups, staleCount, staleFirst, titleCase } from "./count-view.js";
+import { ageText, countedKg, differenceText, groupKg, searchItems, sheetGroups, staleCount, staleFirst, titleCase } from "./count-view.js";
 
 const mk = (name: string, over: Partial<{ sku: string; barcode: string | null; variety: string; lastCountedAt: string | null }> = {}) =>
   ({ name, sku: over.sku ?? name.slice(0, 3).toUpperCase(), barcode: over.barcode ?? null, variety: over.variety ?? "", lastCountedAt: over.lastCountedAt ?? null });
@@ -61,4 +61,12 @@ test("live kilos: sacks × sack weight plus loose kilos; empty boxes are skipped
   assert.equal(groupKg([sack, bag, loose], { a: "2" }), 50, "only the counted lines add up");
   assert.equal(groupKg([sack, bag], {}), null, "nothing counted yet");
   assert.equal(groupKg([L("x", "Ties", "", null)], { x: "4" }), null, "no weight, no total");
+});
+
+test("the difference reads in plain words", () => {
+  assert.equal(differenceText(false, -1), "Short 1 sack");
+  assert.equal(differenceText(false, 3), "Over 3 sacks");
+  assert.equal(differenceText(true, 400), "Over 0.4 kg");
+  assert.equal(differenceText(true, -12_500), "Short 12.5 kg");
+  assert.equal(differenceText(false, 0), "Correct");
 });

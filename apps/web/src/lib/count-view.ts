@@ -112,3 +112,11 @@ export function groupKg(lines: Pick<SheetLine, "productId" | "loose" | "unitGram
 }
 
 export const formatKg = (kg: number) => `${kg.toLocaleString("en-PH", { maximumFractionDigits: 3 })} kg`;
+
+/** "Short 1 sack" / "Over 0.4 kg" / "Correct". Loose rice is counted in grams under the hood. */
+export function differenceText(loose: boolean, variance: number): string {
+  if (variance === 0) return "Correct";
+  const abs = Math.abs(variance);
+  const amount = loose ? `${(abs / 1000).toLocaleString("en-PH", { maximumFractionDigits: 3 })} kg` : `${abs} ${abs === 1 ? "sack" : "sacks"}`;
+  return `${variance < 0 ? "Short" : "Over"} ${amount}`;
+}

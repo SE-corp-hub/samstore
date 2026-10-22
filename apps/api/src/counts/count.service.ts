@@ -8,6 +8,9 @@
 //   (no owner approval; the owner sees what was found afterwards). A list count may leave
 //   items uncounted: those stay as they are. Quick count (one item) and the closing top-5
 //   post at once too; the closing top-5 must be counted in full.
+//   Every difference gets a reason (a label only: it posts nothing by itself; "Don't know" is
+//   always allowed). Before submitting, the counter sees the differences (the "check" step),
+//   may count an item again (the first number is kept) and picks the reasons.
 //   Balance: expected = last count + every movement since; it must equal the system's shelf.
 //   Write-off: reason, optional photo, staff signs; the stock moves; over 1% → the owner.
 
@@ -19,6 +22,7 @@ import { prisma } from "../persistence/prisma-repositories.js";
 import { cacheBust, cacheKey } from "../persistence/ttl-cache.js";
 import { adjustForCount, InsufficientStockError, releaseForTrip, type TripLeg } from "../domain/movements.js";
 import { varietyOf } from "../domain/resack.js";
+import { asksRecount, checkReason, cleanNote, missingReasons, missingReasonsMessage, reasonsFor, REASON_LABEL, type CountReason } from "../domain/count-reasons.js";
 import { balanceOf, costValue, countedUnits, CountError, gramsIn, isLooseP, lineResult, verdict, WRITE_OFF_LABEL, writeOffCheck } from "../domain/counting.js";
 import { formatKilos } from "../domain/weight.js";
 import {
@@ -215,6 +219,7 @@ export class CountService {
         kulangValueMinor: c.kulangValueMinor, sobraValueMinor: c.sobraValueMinor, blindHidden: hide, mine: c.startedById === actor.userId,
         lines: c.lines.map((l) => ({
           productId: l.productId, name: l.product.name, loose: isLooseP(l.product), variety: varietyOf(l.product), unitGrams: gramsIn(l.product, 1), countedQty: l.countedQty, countedAt: l.countedAt,
+          reason: l.reason, reasonLabel: l.reason ? REASON_LABEL[l.reason as CountReason] ?? null : null, note: l.note, firstCountedQty: l.firstCountedQty,
           ...(live ? { systemQty: live.get(l.productId) ?? 0 } : {}),
           ...(hide ? {} : {
             expectedQty: l.expectedQty, varianceQty: l.varianceQty, varianceValueMinor: l.varianceValueMinor,
@@ -243,7 +248,15 @@ export class CountService {
       await prisma.$transaction(async (tx) => {
         for (const { line, counted } of parsed) {
           const expected = await this.shelfNow(tx, storeId, line.productId, c.locationId);
-          await tx.stockCountLine.update({ where: { id: line.id }, data: { expectedQty: expected, countedQty: counted, countedAt: new Date(), countedById: actor.userId } });
+          // Counting a line again with a different number keeps the first number, and the old reason is asked for again.
+          const changed = line.countedQty !== null && line.countedQty !== counted;
+          await tx.stockCountLine.update({
+            where: { id: line.id },
+            data: {
+              expectedQty: expected, countedQty: counted, countedAt: new Date(), countedById: actor.userId,
+              ...(changed ? { firstCountedQty: line.firstCountedQty ?? line.countedQty, reason: null, note: null } : {}),
+            },
+          });
         }
       }, txOptions(60_000));
       const done = await prisma.stockCountLine.count({ where: { countId: id, countedQty: { not: null } } });
@@ -268,6 +281,11 @@ export class CountService {
       const counted = c.lines.filter((l) => l.countedQty !== null);
       if (counted.length === 0) throw new CountError("Count at least one item first");
       const results = counted.map((l) => ({ l, r: lineResult(l.product, l.expectedQty!, l.countedQty!) }));
+      // A list count needs a reason on every difference ("Don't know" is one of them).
+      if (c.kind === "FULL" || c.kind === "PARTIAL") {
+        const need = missingReasons(results.map(({ l, r }) => ({ name: l.product.name, varianceQty: r.varianceQty, reason: l.reason })));
+        if (need.length) throw new CountError(missingReasonsMessage(need.map((x) => x.name)));
+      }
       const kulang = -results.filter((x) => x.r.varianceValueMinor < 0).reduce((s, x) => s + x.r.varianceValueMinor, 0);
       const sobra = results.filter((x) => x.r.varianceValueMinor > 0).reduce((s, x) => s + x.r.varianceValueMinor, 0);
       return prisma.$transaction(async (tx) => {
@@ -281,6 +299,69 @@ export class CountService {
         await tx.auditLog.create({ data: { storeId, actorType: "USER", actorId: actor.userId, action: "count.submit", entityType: "StockCount", entityId: id, after: { kulangValueMinor: kulang, sobraValueMinor: sobra, counted: counted.length, skipped: missing.length, posted: true } } });
         return { id, docNumber: c.docNumber, status: "APPROVED" as const, approvalId: null, kulangValueMinor: kulang, sobraValueMinor: sobra, counted: counted.length, skipped: missing.length };
       }, txOptions(120_000));
+    });
+  }
+
+  /**
+   * The check step before submitting: only the items that differ, with the difference, a "count again"
+   * hint for a big one, and the reasons to choose from. The system's number is shown here, after counting
+   * (never while counting), because a difference cannot be shown without it.
+   */
+  async check(storeId: string, actor: Actor, id: string) {
+    return this.run(async () => {
+      const c = await prisma.stockCount.findFirst({ where: { id, storeId }, include: { lines: { include: { product: { select: productSelect } } } } });
+      if (!c) throw new StepError(notFound());
+      const refusal = locationRefusal(actor, c.locationId);
+      if (refusal) throw new StepError(forbidden(refusal));
+      if (c.status !== "OPEN") throw new StepError(conflict("This count is already closed"));
+      const settings = await prisma.storeSettings.findUnique({ where: { storeId }, select: { countRecountMinor: true, countLookMinor: true } });
+      const recountLimitMinor = settings?.countRecountMinor ?? 50_000;
+      const lookLimitMinor = settings?.countLookMinor ?? 100_000;
+      const counted = c.lines.filter((l) => l.countedQty !== null && l.expectedQty !== null);
+      const rows = counted.map((l) => ({ l, r: lineResult(l.product, l.expectedQty!, l.countedQty!) }));
+      const off = rows.filter((x) => x.r.varianceQty !== 0).sort((a, b) => Math.abs(b.r.varianceValueMinor) - Math.abs(a.r.varianceValueMinor));
+      return {
+        id: c.id, docNumber: c.docNumber, counted: counted.length, correct: rows.length - off.length, notCounted: c.lines.length - counted.length,
+        recountLimitMinor, lookLimitMinor,
+        lines: off.map(({ l, r }) => ({
+          productId: l.productId, name: l.product.name, loose: isLooseP(l.product), countedQty: l.countedQty!, expectedQty: l.expectedQty!,
+          varianceQty: r.varianceQty, varianceGrams: r.varianceGrams, varianceValueMinor: r.varianceValueMinor, verdict: r.verdict,
+          firstCountedQty: l.firstCountedQty, reason: l.reason, note: l.note,
+          reasons: reasonsFor(r.varianceQty).map((code) => ({ code, label: REASON_LABEL[code] })),
+          asksRecount: asksRecount(r.varianceValueMinor, recountLimitMinor, l.firstCountedQty !== null),
+        })),
+      };
+    });
+  }
+
+  /**
+   * Set the reason (and an optional note) on counted lines that differ. Allowed while the count is open
+   * (the check step), and for 48 hours after it posted by the person who counted the line or the owner
+   * (the one-item count asks "why?" after it posts).
+   */
+  async setReasons(storeId: string, actor: Actor, id: string, input: { productId?: string; reason?: unknown; note?: unknown }[]) {
+    return this.run(async () => {
+      const c = await prisma.stockCount.findFirst({ where: { id, storeId }, include: { lines: true } });
+      if (!c) throw new StepError(notFound());
+      const refusal = locationRefusal(actor, c.locationId);
+      if (refusal) throw new StepError(forbidden(refusal));
+      const open = c.status === "OPEN";
+      const postedAt = c.decidedAt ?? c.submittedAt ?? c.startedAt;
+      if (!open && !(c.status === "APPROVED" && Date.now() - postedAt.getTime() < 48 * 3_600_000)) throw new StepError(conflict("This count is closed — the reasons can no longer be changed"));
+      if (!Array.isArray(input) || input.length === 0) throw new CountError("Choose a reason");
+      const byProduct = new Map(c.lines.map((l) => [l.productId, l]));
+      const prepared = input.map((x) => {
+        const line = byProduct.get(x.productId ?? "");
+        if (!line) throw new CountError("That product is not in this count");
+        if (line.countedQty === null || line.expectedQty === null) throw new CountError("Count it first");
+        if (!open && !OWNERS.includes(actor.role) && line.countedById !== actor.userId) throw new StepError(forbidden("Only the person who counted it, or the owner, can change this"));
+        return { line, reason: checkReason(line.countedQty - line.expectedQty, x.reason), note: cleanNote(x.note) };
+      });
+      await prisma.$transaction(async (tx) => {
+        for (const p of prepared) await tx.stockCountLine.update({ where: { id: p.line.id }, data: { reason: p.reason, note: p.note } });
+        await tx.auditLog.create({ data: { storeId, actorType: "USER", actorId: actor.userId, action: "count.reasons", entityType: "StockCount", entityId: id, after: { lines: prepared.length } } });
+      }, txOptions(60_000));
+      return { id, saved: prepared.length };
     });
   }
 
@@ -320,7 +401,7 @@ export class CountService {
         await requireSignatures(tx, storeId, { documentType: "COUNT", documentId: c.id, step: "QUICK" });
         await postCount(tx, storeId, c.id, actor.userId);
         await tx.auditLog.create({ data: { storeId, actorType: "USER", actorId: actor.userId, action: "count.quick", entityType: "StockCount", entityId: c.id, after: { productId: p.id, expected, counted } } });
-        return { id: c.id, docNumber, productId: p.id, expectedQty: expected, countedQty: counted, ...r };
+        return { id: c.id, docNumber, productId: p.id, expectedQty: expected, countedQty: counted, ...r, reasons: reasonsFor(r.varianceQty).map((code) => ({ code, label: REASON_LABEL[code] })) };
       }, txOptions());
       await cacheBust(cacheKey("products", storeId));
       return out;

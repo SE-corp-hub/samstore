@@ -267,6 +267,9 @@ model StoreSettings {
   creditLimitMinor          Int            @default(0) // store-wide utang limit (0 = credit disabled)
   creditTermDays            Int            @default(30) // V1: default dueAt offset for credit purchases
   costMode                  String         @default("SHARED") // SHARED = one cost per product; PER_LOCATION = each shelf has its own cost
+  // Count: a short/over worth this much or more asks to be counted again; this much or more goes on the owner's "Needs a look" list.
+  countRecountMinor         Int            @default(50000)
+  countLookMinor            Int            @default(100000)
   // Rice Ops M6: utang texts and reminders (the owner can switch them off).
   utangSmsEnabled           Boolean        @default(true)
   utangMonthlyReminder      Boolean        @default(true)
@@ -2115,6 +2118,9 @@ model StockCountLine {
   varianceQty        Int?
   varianceValueMinor Int?
   postedQty          Int? // the COUNT_ADJUST posted
+  reason             String? // why it is short/over: a code from domain/count-reasons.ts (a label only; it posts nothing by itself)
+  note               String?
+  firstCountedQty    Int? // the number first typed, kept when the line was counted again
 
   @@unique([countId, productId])
   @@index([storeId, productId, countedAt])

@@ -10,6 +10,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { formatKg, groupKg, sheetGroups, titleCase } from "../../lib/count-view";
+import CountCheck from "./CountCheck";
 import CountHome from "./CountHome";
 import { API_URL } from "../../config";
 import { adminHeaders, isOwnerRole } from "../../lib/admin";
@@ -23,7 +24,7 @@ import { getPrinterSettings } from "../../lib/printer-settings";
 
 interface Loc { id: string; name: string; code: string | null; isActive: boolean }
 export interface CountRow { id: string; docNumber: string; kind: string; status: string; location: string; locationId: string; lines: number; startedAt: string; kulangValueMinor: number; sobraValueMinor: number; mine?: boolean }
-interface CountLine { productId: string; name: string; loose: boolean; variety?: string; unitGrams?: number | null; systemQty?: number; countedQty: number | null; expectedQty?: number | null; varianceQty?: number | null; varianceValueMinor?: number | null; verdict?: string | null }
+interface CountLine { productId: string; name: string; loose: boolean; variety?: string; unitGrams?: number | null; systemQty?: number; reasonLabel?: string | null; note?: string | null; firstCountedQty?: number | null; countedQty: number | null; expectedQty?: number | null; varianceQty?: number | null; varianceValueMinor?: number | null; verdict?: string | null }
 export interface CountDetail { id: string; docNumber: string; kind: string; status: string; location: string; locationId: string; blindHidden: boolean; mine?: boolean; kulangValueMinor: number; sobraValueMinor: number; lines: CountLine[] }
 interface Product { id: string; name: string; stockBaseUnit: string | null; stockBaseQuantity: number | null; isActive?: boolean }
 interface BalanceItem { productId: string; name: string; loose: boolean; lastCount: { docNumber: string; countedQty: number; countedAt: string } | null; buckets: Record<string, number>; expected: number; onHand: number; reserved: number; matches: boolean; valueMinor: number }
@@ -142,7 +143,7 @@ export default function BilanginPanel({ role }: { role?: string; onNavigate?: (t
 
 export function CountSheet({ count, owner, onClose, onReload }: { count: CountDetail; owner: boolean; onClose: () => void; onReload: () => void }) {
   const [values, setValues] = useState<Record<string, string>>(() => Object.fromEntries(count.lines.filter((l) => l.countedQty !== null).map((l) => [l.productId, l.loose ? String((l.countedQty ?? 0) / 1000) : String(l.countedQty)])));
-  const [sig, setSig] = useState<string | null>(null);
+  const [checking, setChecking] = useState(false); // the check step: differences, count again, reasons, signature
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const editable = count.status === "OPEN";
@@ -163,7 +164,7 @@ export function CountSheet({ count, owner, onClose, onReload }: { count: CountDe
     rows: count.lines.map((l) => ({
       name: l.name,
       qty: editable ? (values[l.productId] ? `${values[l.productId]} ${l.loose ? "kg" : ""}`.trim() : "______") : (l.countedQty !== null ? qty(l.loose, l.countedQty) : "—"),
-      note: !editable && l.verdict ? `${VERDICT[l.verdict]?.label ?? ""}${l.varianceQty ? ` ${l.varianceQty > 0 ? "+" : ""}${qty(l.loose, l.varianceQty)}` : ""}` : undefined,
+      note: !editable && l.verdict ? `${VERDICT[l.verdict]?.label ?? ""}${l.varianceQty ? ` ${l.varianceQty > 0 ? "+" : ""}${qty(l.loose, l.varianceQty)}` : ""}${l.reasonLabel ? ` - ${l.reasonLabel}` : ""}${l.note ? ` (${l.note})` : ""}` : undefined,
     })),
     totals: editable ? [] : [{ label: "Short", value: peso(count.kulangValueMinor) }, { label: "Over", value: peso(count.sobraValueMinor) }],
     signatures: [{ role: "Counted by", name: "" }], widthMm: 58,
@@ -180,27 +181,22 @@ export function CountSheet({ count, owner, onClose, onReload }: { count: CountDe
     }
     return true;
   };
-  const save = async (submit: boolean) => {
+  /** Save what is typed. "Check the count" saves, then shows the differences before anything is submitted. */
+  const save = async (andCheck: boolean) => {
     setError(null);
-    if (submit && done < count.lines.length && !wholeListOnly) {
-      const left = count.lines.length - done;
-      if (!(await askConfirm(`${left} item${left === 1 ? " is" : "s are"} not counted. ${left === 1 ? "It stays" : "They stay"} as ${left === 1 ? "it is" : "they are"}. Submit the count?`, { ok: "Submit" }))) return;
-    }
     setBusy(true);
     if (!(await saveLines())) { setBusy(false); return; }
-    if (submit) {
-      const r = await post(`/admin/counts/${count.id}/submit`, { signatures: [{ signerKind: "STAFF", imagePng: sig }] });
-      if (!r.ok) { setBusy(false); setError(errText(r.data, "Could not submit")); return; }
-      toast(r.data?.status === "APPROVED" ? "Count posted" : "Submitted — waiting for the owner");
-      setBusy(false);
-      const skipped = Number(r.data?.skipped ?? 0);
-      setResult(r.data?.status === "APPROVED" ? `Count posted. The stock now matches what you counted.${skipped ? ` ${skipped} item${skipped === 1 ? " was" : "s were"} not counted and stay${skipped === 1 ? "s" : ""} as ${skipped === 1 ? "it is" : "they are"}.` : ""}` : "Submitted. The owner will check it, then the differences are posted.");
-      setPrintNow(true);
-      return;
-    }
     setBusy(false);
+    if (andCheck) { setChecking(true); return; }
     toast("Saved");
     onReload();
+  };
+  const submitted = (data: { status?: unknown; skipped?: unknown }) => {
+    toast(data.status === "APPROVED" ? "Count posted" : "Submitted — waiting for the owner");
+    const skipped = Number(data.skipped ?? 0);
+    setChecking(false);
+    setResult(data.status === "APPROVED" ? `Count posted. The stock now matches what you counted.${skipped ? ` ${skipped} item${skipped === 1 ? " was" : "s were"} not counted and stay${skipped === 1 ? "s" : ""} as ${skipped === 1 ? "it is" : "they are"}.` : ""}` : "Submitted. The owner will check it, then the differences are posted.");
+    setPrintNow(true);
   };
   const cancel = async () => {
     if (!(await askConfirm(`Cancel ${count.docNumber}?`, { ok: `Cancel ${count.docNumber}`, danger: true }))) return;
@@ -220,6 +216,7 @@ export function CountSheet({ count, owner, onClose, onReload }: { count: CountDe
       </div>
     );
   }
+  if (checking) return <CountCheck countId={count.id} docNumber={count.docNumber} onBack={() => setChecking(false)} onSubmitted={submitted} />;
   const groups = sheetGroups(shown);
   const showHeadings = groups.length > 1 || (groups[0]?.variety ?? "") !== "";
   return (
@@ -272,6 +269,7 @@ export function CountSheet({ count, owner, onClose, onReload }: { count: CountDe
                       {l.expectedQty !== undefined && l.expectedQty !== null && <span className="text-muted small"> (system {qty(l.loose, l.expectedQty)})</span>}
                       {l.verdict && <span className={`badge ms-2 ${VERDICT[l.verdict]?.cls}`}>{VERDICT[l.verdict]?.label}{l.varianceQty ? ` ${l.varianceQty > 0 ? "+" : ""}${qty(l.loose, l.varianceQty)}` : ""}</span>}
                       {!!l.varianceValueMinor && <span className="small ms-1">{peso(l.varianceValueMinor)}</span>}
+                      {l.reasonLabel && <span className="d-block small text-muted">{l.reasonLabel}{l.note ? ` · ${l.note}` : ""}</span>}
                     </span>
                   )}
                 </li>
@@ -282,13 +280,11 @@ export function CountSheet({ count, owner, onClose, onReload }: { count: CountDe
       })}
       {editable && (
         <>
-          <button type="button" className="btn btn-outline-dark btn-lg mb-3" disabled={busy} onClick={() => void save(false)}>Save for now</button>
-          <div className="fw-semibold">Your signature (staff) — to submit</div>
-          <SignaturePad onSignature={setSig} />
-          <div className="d-flex justify-content-between mt-3">
-            {canCancel ? <button type="button" className="btn btn-outline-secondary btn-lg" disabled={busy} onClick={() => void cancel()}>Cancel {count.docNumber}</button> : <span />}
-            <button type="button" className="btn btn-success btn-lg" disabled={busy || !sig || done === 0 || (wholeListOnly && done < count.lines.length)} onClick={() => void save(true)}>{busy ? "Please wait…" : "Submit the count"}</button>
+          <div className="d-flex flex-wrap justify-content-between gap-2 mt-2">
+            <button type="button" className="btn btn-outline-dark btn-lg" disabled={busy} onClick={() => void save(false)}>Save for now</button>
+            <button type="button" className="btn btn-success btn-lg" disabled={busy || done === 0 || (wholeListOnly && done < count.lines.length)} onClick={() => void save(true)}>{busy ? "Please wait…" : "Check the count"}</button>
           </div>
+          {canCancel && <div className="mt-3"><button type="button" className="btn btn-link text-secondary px-0" disabled={busy} onClick={() => void cancel()}>Cancel {count.docNumber}</button></div>}
         </>
       )}
     </div>

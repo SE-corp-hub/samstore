@@ -113,6 +113,21 @@ export class CountController {
     return unwrap(await this.counts.submit(storeId, actor, id, signaturesFrom(body?.signatures)));
   }
 
+  /** GET /admin/counts/:id/check — the check step: only the items that differ, with their reasons to choose from. */
+  @Get("counts/:id/check")
+  async check(@Req() req: Req_, @Param("id") id: string, @Headers("x-store-id") h?: string) {
+    const { storeId, actor } = await this.ctx(req, h);
+    return unwrap(await this.counts.check(storeId, actor, id));
+  }
+
+  /** POST /admin/counts/:id/reasons — { lines: [{ productId, reason, note? }] } why items are short or over. */
+  @Post("counts/:id/reasons")
+  async reasons(@Req() req: Req_, @Param("id") id: string, @Body() body: Record<string, unknown>, @Headers("x-store-id") h?: string) {
+    const { storeId, actor } = await this.ctx(req, h);
+    const lines = Array.isArray(body?.lines) ? (body.lines as unknown[]).map((l) => { const x = obj(l); return { productId: str(x.productId), reason: x.reason, note: x.note }; }) : [];
+    return unwrap(await this.counts.setReasons(storeId, actor, id, lines));
+  }
+
   @Post("counts/:id/cancel")
   async cancel(@Req() req: Req_, @Param("id") id: string, @Headers("x-store-id") h?: string) {
     const { storeId, actor } = await this.ctx(req, h);

@@ -118,6 +118,10 @@ test("M8: the balance formula matches the ledger for every item in a test count 
   assert.equal(sale.ok, true, msg(sale));
   assert.equal((await svc.record(fx.storeId, fx.staff1, started.value.id, [{ productId: fx.din25.id, counted: 4 }, { productId: fx.loose.id, counted: "50.4" }])).ok, true);
 
+  // Every difference needs a reason ("Don't know" is one of them) before the count can be submitted.
+  assert.match(msg(await svc.submit(fx.storeId, fx.staff1, started.value.id, staffSig)), /Choose a reason for/);
+  const why = await svc.setReasons(fx.storeId, fx.staff1, started.value.id, [{ productId: fx.sin25.id, reason: "UNRINGED" }, { productId: fx.loose.id, reason: "STOCKIN_MISSING", note: "bought on Monday" }]);
+  assert.equal(why.ok, true, msg(why));
   assert.match(msg(await svc.submit(fx.storeId, fx.staff1, started.value.id, [])), /Missing signature/);
   const sub = await svc.submit(fx.storeId, fx.staff1, started.value.id, staffSig);
   assert.equal(sub.ok, true, msg(sub));
@@ -162,6 +166,7 @@ test("M8: a list count may leave items uncounted; one open list per person; staf
   assert.equal(ownerCount.ok, true, `another person can have their own count: ${msg(ownerCount)}`);
   assert.equal((await svc.record(fx.storeId, fx.staff2, c.value.id, [{ productId: fx.sin25.id, counted: 1 }])).ok, false, "Store 2 staff cannot record on Store 1's count");
   assert.equal((await svc.record(fx.storeId, fx.staff1, c.value.id, [{ productId: fx.sin25.id, counted: 5 }])).ok, true);
+  assert.equal((await svc.setReasons(fx.storeId, fx.staff1, c.value.id, [{ productId: fx.sin25.id, reason: "SPILLED" }])).ok, true);
   const sub = await svc.submit(fx.storeId, fx.staff1, c.value.id, staffSig);
   assert.equal(sub.ok, true, msg(sub));
   assert.deepEqual(sub.ok ? [sub.value.status, sub.value.counted, sub.value.skipped] : [], ["APPROVED", 1, 1], "1 counted, 1 left as it is");
@@ -219,6 +224,7 @@ test("M8: every item can be counted (even with no stock row); search list, scope
 
   // Two ghost sacks are found on the shelf: the row is created and the count posts at once.
   assert.equal((await svc.record(fx.storeId, fx.owner, all.value.id, [{ productId: ghost.id, counted: 2 }])).ok, true);
+  assert.equal((await svc.setReasons(fx.storeId, fx.owner, all.value.id, [{ productId: ghost.id, reason: "STOCKIN_MISSING" }])).ok, true);
   const done = await svc.submit(fx.storeId, fx.owner, all.value.id, staffSig);
   assert.equal(done.ok, true, msg(done));
   assert.equal(await onHand(fx, ghost.id), 2);
@@ -234,6 +240,70 @@ test("M8: every item can be counted (even with no stock row); search list, scope
   assert.equal((await svc.start(fx.storeId, fx.owner, { locationId: fx.s1, staleDays: 0.5 })).ok, false, "days must be a whole number");
   const bal = await svc.balance(fx.storeId, fx.owner, { locationId: fx.s1 });
   assert.equal(bal.ok && bal.value.items.every((i) => i.matches), true, "the ledger still matches the shelf");
+});
+
+test("M8: the check step — differences with reasons, count again keeps the first number, a quick count is asked why after it posts", async () => {
+  const fx = await fixture();
+  const c = await svc.start(fx.storeId, fx.staff1, { locationId: fx.s1 });
+  assert.equal(c.ok, true, msg(c));
+  if (!c.ok) return;
+  assert.equal((await svc.record(fx.storeId, fx.staff1, c.value.id, [{ productId: fx.sin25.id, counted: 9 }, { productId: fx.din25.id, counted: 4 }, { productId: fx.loose.id, counted: "50.4" }])).ok, true);
+  const chk = await svc.check(fx.storeId, fx.staff1, c.value.id);
+  assert.equal(chk.ok, true, msg(chk));
+  if (!chk.ok) return;
+  assert.deepEqual([chk.value.counted, chk.value.correct, chk.value.notCounted, chk.value.lines.length], [3, 1, 0, 2]);
+  assert.deepEqual(chk.value.lines.map((l) => l.name), ["Sinandomeng 25 kg", "Sinandomeng (per kilo)"], "the biggest difference first");
+  const sin = chk.value.lines[0]!;
+  assert.deepEqual([sin.countedQty, sin.expectedQty, sin.varianceQty, sin.varianceValueMinor, sin.verdict], [9, 10, -1, -110_000, "KULANG"]);
+  assert.equal(sin.asksRecount, true, "₱1,100 is over the ₱500 limit: count it again");
+  assert.equal(chk.value.lines[1]!.asksRecount, false, "₱18.40 over is small");
+  assert.equal(sin.reasons.some((r) => r.code === "UNRINGED"), true);
+  assert.equal(sin.reasons.some((r) => r.code === "STOCKIN_MISSING"), false, "a short item is never offered an over reason");
+  assert.equal(chk.value.lines[1]!.reasons.some((r) => r.code === "UNKNOWN"), true, "Don't know is always allowed");
+
+  // A reason must fit the direction; a correct item takes none.
+  assert.match(msg(await svc.setReasons(fx.storeId, fx.staff1, c.value.id, [{ productId: fx.sin25.id, reason: "STOCKIN_MISSING" }])), /why it is short/);
+  assert.match(msg(await svc.setReasons(fx.storeId, fx.staff1, c.value.id, [{ productId: fx.din25.id, reason: "UNKNOWN" }])), /correct/);
+  assert.equal((await svc.setReasons(fx.storeId, fx.staff1, c.value.id, [{ productId: fx.sin25.id, reason: "UNRINGED", note: "  sold at   5pm " }])).ok, true);
+
+  // Count again: the first number is kept, the old reason is asked for again.
+  assert.equal((await svc.record(fx.storeId, fx.staff1, c.value.id, [{ productId: fx.sin25.id, counted: 8 }])).ok, true);
+  const again = await svc.check(fx.storeId, fx.staff1, c.value.id);
+  const sin2 = again.ok ? again.value.lines.find((l) => l.productId === fx.sin25.id) : undefined;
+  assert.deepEqual([sin2?.countedQty, sin2?.firstCountedQty, sin2?.varianceQty, sin2?.reason, sin2?.asksRecount], [8, 9, -2, null, false], "counted again once: no second prompt, and the reason is asked again");
+  // …and a count that matches the system drops off the list.
+  assert.equal((await svc.record(fx.storeId, fx.staff1, c.value.id, [{ productId: fx.sin25.id, counted: 10 }])).ok, true);
+  const third = await svc.check(fx.storeId, fx.staff1, c.value.id);
+  assert.deepEqual(third.ok ? third.value.lines.map((l) => l.name) : [], ["Sinandomeng (per kilo)"]);
+  assert.equal((await prisma.stockCountLine.findFirstOrThrow({ where: { countId: c.value.id, productId: fx.sin25.id } })).firstCountedQty, 9, "still the very first number");
+  assert.equal((await svc.record(fx.storeId, fx.staff1, c.value.id, [{ productId: fx.sin25.id, counted: 8 }])).ok, true);
+  assert.equal((await svc.setReasons(fx.storeId, fx.staff1, c.value.id, [{ productId: fx.sin25.id, reason: "SPILLED" }, { productId: fx.loose.id, reason: "SCALE" }])).ok, true);
+  assert.equal((await svc.check(fx.storeId, fx.staff2, c.value.id)).ok, false, "Store 2 staff cannot see Store 1's check");
+  const sub = await svc.submit(fx.storeId, fx.staff1, c.value.id, staffSig);
+  assert.equal(sub.ok, true, msg(sub));
+  assert.equal(await onHand(fx, fx.sin25.id), 8);
+  assert.equal((await svc.check(fx.storeId, fx.staff1, c.value.id)).ok, false, "the check step is only for an open count");
+  const posted = await svc.get(fx.storeId, fx.staff1, c.value.id);
+  const gl = posted.ok ? posted.value.lines : [];
+  assert.deepEqual([gl.find((l) => l.productId === fx.sin25.id)?.reasonLabel, gl.find((l) => l.productId === fx.loose.id)?.reasonLabel], ["Spilled", "Scale difference"]);
+  assert.equal(gl.find((l) => l.productId === fx.sin25.id)?.firstCountedQty, 9);
+
+  // A reason can still be changed after posting (48 hours) by the person who counted, or the owner; nobody else.
+  assert.equal((await svc.setReasons(fx.storeId, fx.staff1, c.value.id, [{ productId: fx.sin25.id, reason: "WEEVILS" }])).ok, true);
+  assert.equal((await svc.setReasons(fx.storeId, fx.owner, c.value.id, [{ productId: fx.sin25.id, reason: "WET" }])).ok, true);
+  assert.equal((await svc.setReasons(fx.storeId, fx.staff2, c.value.id, [{ productId: fx.sin25.id, reason: "WET" }])).ok, false, "Store 2 staff cannot");
+  await prisma.stockCount.update({ where: { id: c.value.id }, data: { decidedAt: new Date(Date.now() - 49 * 3_600_000) } });
+  assert.match(msg(await svc.setReasons(fx.storeId, fx.staff1, c.value.id, [{ productId: fx.sin25.id, reason: "WEEVILS" }])), /closed/);
+
+  // The one-item count posts at once, then asks why.
+  const q = await svc.quick(fx.storeId, fx.staff1, { productId: fx.din25.id, counted: 3, signatures: staffSig });
+  assert.equal(q.ok, true, msg(q));
+  if (!q.ok) return;
+  assert.equal(q.value.reasons.some((r) => r.code === "UNRINGED"), true);
+  assert.equal(await onHand(fx, fx.din25.id), 3);
+  assert.equal((await svc.setReasons(fx.storeId, fx.staff1, q.value.id, [{ productId: fx.din25.id, reason: "UNRINGED" }])).ok, true);
+  const ql = await prisma.stockCountLine.findFirstOrThrow({ where: { countId: q.value.id } });
+  assert.equal(ql.reason, "UNRINGED");
 });
 
 test("M8: the zero check — a sale that empties the shelf asks; a quick count posts at once and the sale goes through", async () => {

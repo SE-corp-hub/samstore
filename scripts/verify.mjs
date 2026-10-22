@@ -56,6 +56,7 @@ const TEST_FILES = [
   "apps/api/src/domain/utang.test.ts",
   "apps/api/src/domain/agent-order.test.ts",
   "apps/api/src/domain/counting.test.ts",
+  "apps/api/src/domain/count-reasons.test.ts",
   "apps/api/src/domain/reports.test.ts",
   "apps/api/src/domain/rice-import.test.ts",
   "apps/web/src/lib/riceTheme.test.ts",
