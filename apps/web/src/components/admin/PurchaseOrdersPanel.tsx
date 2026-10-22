@@ -4,7 +4,9 @@
 //   Orders          what was ordered from a supplier, what has arrived, what is still to come. Counter staff receive a
 //                   delivery against an order on Stock in; the order's cost is used, so they never type or see it.
 //   New order       supplier, where it goes, expected date, items with quantity and agreed cost
+//   To reorder      items about to run out at the pace of the last 2 weeks, with an amount to order; one tap starts a new order
 //   Suppliers owe   what arrived (at the agreed cost) minus what was paid; what is still on order; pay, undo, statement
+//   Price watch     the new-order form and each order line show the supplier's cost against the last time
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { API_URL } from "../../config";
@@ -13,12 +15,16 @@ import { askConfirm } from "../../lib/ask";
 import { toast } from "../../lib/toast";
 import { printSlip } from "../../lib/slip-print";
 import { PesoInput, KiloInput, WholeInput } from "../NumberBoxes";
+import { costMove, draftFromReorder, moveText, type CostMove } from "../../lib/po-view";
 
 const peso = (m: number) => `₱${(m / 100).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const qtyText = (loose: boolean, q: number) => (loose ? `${(q / 1000).toLocaleString("en-PH", { maximumFractionDigits: 3 })} kg` : q.toLocaleString("en-PH"));
 const dateText = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString("en-PH", { day: "numeric", month: "short", year: "numeric" }) : "");
 
-interface Line { id: string; productId: string; name: string; loose: boolean; quantity: number; receivedQty: number; unitCostMinor?: number; lineTotalMinor?: number }
+interface Line { id: string; productId: string; name: string; loose: boolean; quantity: number; receivedQty: number; unitCostMinor?: number; lineTotalMinor?: number; move?: CostMove }
+interface LastCost { productId: string; name: string; loose: boolean; unitCostMinor: number; at: string; poNumber: string }
+interface ReorderItem { productId: string; name: string; loose: boolean; urgency: "OUT" | "NOW" | "SOON"; daysLeft: number | null; availableQty: number; perDay: number; onOrderQty: number; suggestedQty: number; supplierId: string | null; supplierName: string | null; lastCostMinor: number | null; productCostMinor: number }
+interface ReorderData { items: ReorderItem[]; soonDays: number; coverDays: number }
 interface Order { id: string; docNumber: string; supplierId: string; supplierName: string; locationId: string; locationName: string; status: string; expectedAt: string | null; overdue: boolean; note: string | null; createdAt: string; lines: Line[]; totalMinor?: number; receivedMinor?: number }
 interface Supplier { id: string; name: string }
 interface Balance { id: string; name: string; contactPerson: string | null; phone: string | null; receivedMinor: number; paidMinor: number; owedMinor: number; pendingMinor: number; openOrders: number; overdueOrders: number; lastPaymentAt: string | null }
@@ -33,6 +39,8 @@ const isLoose = (p?: { stockBaseUnit: string | null; stockBaseQuantity: number |
 const errText = (d: Body | null, f: string) => d?.errors?.join(", ") ?? d?.message ?? f;
 const BADGE: Record<string, string> = { OPEN: "text-bg-primary", PARTLY: "text-bg-warning", RECEIVED: "text-bg-success", CANCELLED: "text-bg-secondary" };
 const STATUS_TEXT: Record<string, string> = { OPEN: "Waiting", PARTLY: "Partly arrived", RECEIVED: "Complete", CANCELLED: "Cancelled" };
+const URGENCY: Record<ReorderItem["urgency"], { text: string; cls: string }> = { OUT: { text: "Out", cls: "text-bg-danger" }, NOW: { text: "Order now", cls: "text-bg-warning" }, SOON: { text: "Soon", cls: "text-bg-secondary" } };
+const perDayText = (loose: boolean, q: number) => (loose ? `${(q / 1000).toLocaleString("en-PH", { maximumFractionDigits: 1 })} kg` : q.toLocaleString("en-PH", { maximumFractionDigits: 1 }));
 
 async function call(path: string, method: "GET" | "POST", body?: unknown) {
   const res = await fetch(`${API_URL}${path}`, { method, headers: { "Content-Type": "application/json", ...adminHeaders() }, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) });
@@ -40,7 +48,10 @@ async function call(path: string, method: "GET" | "POST", body?: unknown) {
 }
 
 export default function PurchaseOrdersPanel() {
-  const [tab, setTab] = useState<"orders" | "owed">("orders");
+  const [tab, setTab] = useState<"orders" | "reorder" | "owed">("orders");
+  const [reorder, setReorder] = useState<ReorderData | null>(null);
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [lastCosts, setLastCosts] = useState<LastCost[]>([]);
   const [orders, setOrders] = useState<Order[] | null>(null);
   const [filter, setFilter] = useState<"open" | "all">("open");
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -58,6 +69,7 @@ export default function PurchaseOrdersPanel() {
   const [rows, setRows] = useState<Row[]>([{ productId: "", qty: "", cost: "" }]);
 
   const byId = useMemo(() => new Map(products.map((p) => [p.id, p])), [products]);
+  const lastBy = useMemo(() => new Map(lastCosts.map((c) => [c.productId, c])), [lastCosts]);
 
   const loadOrders = useCallback(async () => {
     const r = await call(`/admin/purchase-orders?status=${filter}`, "GET");
@@ -70,7 +82,25 @@ export default function PurchaseOrdersPanel() {
     setBalances(r.data as unknown as NonNullable<typeof balances>);
   }, []);
 
+  const loadReorder = useCallback(async () => {
+    const r = await call("/admin/purchase-orders/reorder", "GET");
+    if (!r.ok) { setError(errText(r.data, "Could not work out what to reorder")); return; }
+    const d = r.data as unknown as ReorderData;
+    setReorder(d);
+    setPicked(new Set(d.items.map((i) => i.productId)));
+  }, []);
+
   useEffect(() => { void loadOrders().catch(() => setError("Could not load the orders")); }, [loadOrders]);
+  useEffect(() => { void loadReorder().catch(() => setError("Could not work out what to reorder")); }, [loadReorder]);
+  // Price watch: what the chosen supplier charged last time
+  useEffect(() => {
+    if (!form.supplierId) { setLastCosts([]); return; }
+    let live = true;
+    void call(`/admin/purchase-orders/last-costs?supplierId=${encodeURIComponent(form.supplierId)}`, "GET").then((r) => {
+      if (live && r.ok) setLastCosts((r.data as unknown as { costs: LastCost[] }).costs);
+    }).catch(() => undefined);
+    return () => { live = false; };
+  }, [form.supplierId]);
   useEffect(() => { if (tab === "owed") void loadOwed().catch(() => setError("Could not load what is owed")); }, [tab, loadOwed]);
   useEffect(() => {
     void call("/admin/purchase-orders/suppliers", "GET").then((r) => { if (r.ok) setSuppliers((r.data as unknown as { suppliers: Supplier[] }).suppliers); }).catch(() => undefined);
@@ -113,9 +143,24 @@ export default function PurchaseOrdersPanel() {
     setForm((f) => ({ ...f, supplierId: "", supplierName: "", expectedAt: "", note: "" }));
     setFilter("open");
     await loadOrders();
+    void loadReorder().catch(() => undefined);
     const s = await call("/admin/purchase-orders/suppliers", "GET");
     if (s.ok) setSuppliers((s.data as unknown as { suppliers: Supplier[] }).suppliers);
   };
+
+  // ───────────── to reorder ─────────────
+  const startOrder = () => {
+    if (!reorder) return;
+    const chosen = reorder.items.filter((i) => picked.has(i.productId) && byId.has(i.productId));
+    if (chosen.length === 0) return;
+    const d = draftFromReorder(chosen);
+    setForm((f) => ({ ...f, supplierId: d.supplierId, supplierName: "" }));
+    setRows(d.rows);
+    setCreating(true);
+    setFilter("open");
+    setTab("orders");
+  };
+  const togglePick = (id: string) => setPicked((cur) => { const n = new Set(cur); if (n.has(id)) n.delete(id); else n.add(id); return n; });
 
   const cancelOrder = async (o: Order) => {
     const arrived = o.lines.some((l) => l.receivedQty > 0);
@@ -166,6 +211,7 @@ export default function PurchaseOrdersPanel() {
 
       <ul className="nav nav-pills mb-3">
         <li className="nav-item"><button type="button" className={`nav-link ${tab === "orders" ? "active" : ""}`} onClick={() => setTab("orders")}>Orders</button></li>
+        <li className="nav-item"><button type="button" className={`nav-link ${tab === "reorder" ? "active" : ""}`} onClick={() => { setTab("reorder"); void loadReorder().catch(() => undefined); }}>To reorder{reorder && reorder.items.length > 0 ? ` (${reorder.items.length})` : ""}</button></li>
         <li className="nav-item"><button type="button" className={`nav-link ${tab === "owed" ? "active" : ""}`} onClick={() => setTab("owed")}>Suppliers owe</button></li>
       </ul>
 
@@ -208,12 +254,14 @@ export default function PurchaseOrdersPanel() {
               </div>
               {rows.map((r, i) => {
                 const p = byId.get(r.productId);
+                const last = form.supplierId ? lastBy.get(r.productId) : undefined;
+                const mv = last && costOf(r) > 0 ? costMove(last.unitCostMinor, costOf(r)) : null;
                 return (
                   <div key={i} className="row g-2 mb-2 align-items-end">
                     <div className="col-12 col-md-5">
                       {i === 0 && <label className="form-label small mb-1">Item</label>}
                       <select className="form-select" aria-label={`Item ${i + 1}`} value={r.productId}
-                        onChange={(e) => { const np = byId.get(e.target.value); setRows(rows.map((x, j) => (j === i ? { ...x, productId: e.target.value, cost: np?.costMinor ? String(np.costMinor / 100) : x.cost } : x))); }}>
+                        onChange={(e) => { const np = byId.get(e.target.value); const lc = lastBy.get(e.target.value); setRows(rows.map((x, j) => (j === i ? { ...x, productId: e.target.value, cost: lc ? String(lc.unitCostMinor / 100) : np?.costMinor ? String(np.costMinor / 100) : x.cost } : x))); }}>
                         <option value="">Choose…</option>
                         {products.map((x) => <option key={x.id} value={x.id} disabled={rows.some((y, j) => j !== i && y.productId === x.id)}>{x.name}</option>)}
                       </select>
@@ -227,6 +275,11 @@ export default function PurchaseOrdersPanel() {
                     <div className="col-5 col-md-3">
                       {i === 0 && <label className="form-label small mb-1">Agreed cost {p && isLoose(p) ? "per kilo" : "each"}</label>}
                       <PesoInput className="form-control" aria-label="Agreed cost" value={r.cost} onChange={(v) => setRows(rows.map((x, j) => (j === i ? { ...x, cost: v } : x)))} placeholder="0.00" />
+                      {last && (
+                        <div className={`small mt-1 ${mv?.kind === "UP" ? (mv.big ? "text-danger fw-semibold" : "text-warning-emphasis") : mv?.kind === "DOWN" ? "text-success" : "text-muted"}`}>
+                          {mv ? moveText(mv, peso) : `Last time ${peso(last.unitCostMinor)}${last.loose ? "/kg" : ""} (${dateText(last.at)})`}
+                        </div>
+                      )}
                     </div>
                     <div className="col-2 col-md-2 text-end">
                       {rows.length > 1 && <button type="button" className="btn btn-link text-danger" aria-label="Remove" onClick={() => setRows(rows.filter((_, j) => j !== i))}>×</button>}
@@ -266,7 +319,14 @@ export default function PurchaseOrdersPanel() {
                           <td className="text-end">{qtyText(l.loose, l.quantity)}</td>
                           <td className="text-end">{qtyText(l.loose, l.receivedQty)}</td>
                           <td className="text-end">{qtyText(l.loose, Math.max(0, l.quantity - l.receivedQty))}</td>
-                          <td className="text-end">{l.unitCostMinor !== undefined ? `${peso(l.unitCostMinor)}${l.loose ? "/kg" : ""}` : ""}</td>
+                          <td className="text-end">
+                            {l.unitCostMinor !== undefined ? `${peso(l.unitCostMinor)}${l.loose ? "/kg" : ""}` : ""}
+                            {l.move && (l.move.kind === "UP" || l.move.kind === "DOWN") && (
+                              <div className={`small ${l.move.kind === "UP" ? (l.move.big ? "text-danger fw-semibold" : "text-warning-emphasis") : "text-success"}`} title={moveText(l.move, peso)}>
+                                {l.move.kind === "UP" ? "Up" : "Down"} {Math.abs(l.move.pct)}%
+                              </div>
+                            )}
+                          </td>
                         </tr>
                       ))}</tbody>
                     </table>
@@ -285,6 +345,40 @@ export default function PurchaseOrdersPanel() {
             </div>
           )}
           <p className="small text-muted mt-3">To receive a delivery, open <b>Stock in</b>, choose the store, then pick the order. Counter staff see what was ordered but not the cost.</p>
+        </>
+      )}
+
+      {tab === "reorder" && (
+        <>
+          {reorder === null ? <p className="text-muted">Loading…</p> : reorder.items.length === 0 ? (
+            <p className="text-muted">Nothing is about to run out. An item is listed here when, at the pace of the last 2 weeks, it would run out within {reorder.soonDays} days, counting what is already on order.</p>
+          ) : (
+            <>
+              <p className="small text-muted">
+                These would run out within {reorder.soonDays} days at the pace of the last 2 weeks (all stores and the warehouse together). The amount to order is enough for {reorder.coverDays} days of selling; rice already on order is taken off.
+                Untick what you do not want, then start an order.
+              </p>
+              <div className="table-responsive">
+                <table className="table table-sm align-middle">
+                  <thead><tr><th /><th>Item</th><th className="text-end">Left</th><th className="text-end">Sells a day</th><th className="text-end">Days left</th><th className="text-end">On order</th><th className="text-end">Order</th><th>Last supplier</th></tr></thead>
+                  <tbody>{reorder.items.map((i) => (
+                    <tr key={i.productId}>
+                      <td><input type="checkbox" className="form-check-input" aria-label={`Order ${i.name}`} checked={picked.has(i.productId)} onChange={() => togglePick(i.productId)} /></td>
+                      <td>{i.name} <span className={`badge ${URGENCY[i.urgency].cls}`}>{URGENCY[i.urgency].text}</span></td>
+                      <td className="text-end">{qtyText(i.loose, i.availableQty)}</td>
+                      <td className="text-end">{perDayText(i.loose, i.perDay)}</td>
+                      <td className="text-end">{i.daysLeft === null ? "" : i.daysLeft.toLocaleString("en-PH", { maximumFractionDigits: 1 })}</td>
+                      <td className="text-end">{i.onOrderQty > 0 ? qtyText(i.loose, i.onOrderQty) : ""}</td>
+                      <td className="text-end fw-semibold">{qtyText(i.loose, i.suggestedQty)}</td>
+                      <td className="small">{i.supplierName ?? <span className="text-muted">none yet</span>}{i.lastCostMinor !== null ? <div className="text-muted">{peso(i.lastCostMinor)}{i.loose ? "/kg" : ""}</div> : null}</td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+              </div>
+              <button type="button" className="btn btn-primary" disabled={picked.size === 0} onClick={startOrder}>Start an order with the {picked.size} ticked item{picked.size === 1 ? "" : "s"}</button>
+              <p className="small text-muted mt-2 mb-0">The new order opens with the amounts filled in. Change anything, choose the supplier if it is empty, then save.</p>
+            </>
+          )}
         </>
       )}
 

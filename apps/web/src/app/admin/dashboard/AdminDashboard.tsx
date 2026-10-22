@@ -300,7 +300,7 @@ case "erp": return <ErpPanel />;
       case "storereport": return <StoreReportPanel role={role} onNavigate={setTab} />;
       case "payable": return <PayablePanel />;
       case "purchaseorders": return <PurchaseOrdersPanel />;
-      case "ulat": return <UlatPanel role={role} />;
+      case "ulat": return <UlatPanel role={role} onNavigate={setTab} />;
       case "stores": return <StoresPanel />;
       default: return <OrdersPanel />;
     }

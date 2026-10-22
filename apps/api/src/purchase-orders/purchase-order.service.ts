@@ -9,6 +9,8 @@ import { isLooseP } from "../domain/counting.js";
 import { seesCost } from "../domain/cost-redact.js";
 import { nextDocNumber } from "../people/people.service.js";
 import { chargeAmount } from "../payable/charges.js";
+import { lastCostByProduct, previousCost, priceMove, type CostRow, type PriceMove } from "../domain/price-watch.js";
+import { byUrgency, COVER_DAYS, reorderAdvice, SOON_DAYS, type Urgency } from "../domain/reorder.js";
 
 export type PoResult<T> = { ok: true; value: T } | { ok: false; error: ApiError };
 const invalid = (m: string) => ({ ok: false as const, error: { type: "validation" as const, errors: [m] } });
@@ -23,6 +25,15 @@ export interface PoLineView {
   id: string; productId: string; name: string; loose: boolean;
   quantity: number; receivedQty: number;
   unitCostMinor?: number; lineTotalMinor?: number;
+  /** Owner/manager only: how this cost compares with the supplier's cost the time before. */
+  move?: PriceMove;
+}
+export interface LastCost { productId: string; name: string; loose: boolean; unitCostMinor: number; at: string; poNumber: string }
+export interface ReorderItem {
+  productId: string; name: string; loose: boolean; urgency: Urgency; daysLeft: number | null;
+  /** Stock units: pieces, or grams for loose rice. All places added together. */
+  availableQty: number; perDay: number; onOrderQty: number; suggestedQty: number;
+  supplierId: string | null; supplierName: string | null; lastCostMinor: number | null; productCostMinor: number;
 }
 export interface PoView {
   id: string; docNumber: string; supplierId: string; supplierName: string; locationId: string; locationName: string;
@@ -68,6 +79,8 @@ export class PurchaseOrderService {
     ]);
     const prod = new Map(products.map((p) => [p.id, p]));
     const locName = new Map(locations.map((l) => [l.id, l.name]));
+    // Price watch: what each supplier charged for the same item on earlier orders (owner and manager only).
+    const before: CostRow[] = cost && orders.length > 0 ? await this.costRows(storeId, [...new Set(orders.map((o) => o.supplierId))], productIds) : [];
     const now = Date.now();
     const views: PoView[] = orders.map((o) => {
       let total = 0;
@@ -78,7 +91,7 @@ export class PurchaseOrderService {
         total += chargeAmount(loose, l.quantity, l.unitCostMinor);
         received += chargeAmount(loose, l.receivedQty, l.unitCostMinor);
         const base: PoLineView = { id: l.id, productId: l.productId, name: p?.name ?? "Item", loose, quantity: l.quantity, receivedQty: l.receivedQty };
-        return cost ? { ...base, unitCostMinor: l.unitCostMinor, lineTotalMinor: chargeAmount(loose, l.quantity, l.unitCostMinor) } : base;
+        return cost ? { ...base, unitCostMinor: l.unitCostMinor, lineTotalMinor: chargeAmount(loose, l.quantity, l.unitCostMinor), move: priceMove(previousCost(before, o.supplierId, l.productId, o.createdAt.getTime()), l.unitCostMinor) } : base;
       });
       const view: PoView = {
         id: o.id, docNumber: o.docNumber, supplierId: o.supplierId, supplierName: o.supplierName, locationId: o.locationId, locationName: locName.get(o.locationId) ?? "",
@@ -89,6 +102,89 @@ export class PurchaseOrderService {
       return cost ? { ...view, totalMinor: total, receivedMinor: received } : view;
     });
     return { ok: true, value: { orders: views } };
+  }
+
+  /** Costs on earlier (not cancelled) orders for these suppliers and items, newest first. */
+  private async costRows(storeId: string, supplierIds: string[], productIds: string[]): Promise<CostRow[]> {
+    if (supplierIds.length === 0 || productIds.length === 0) return [];
+    const rows = await prisma.purchaseOrderLine.findMany({
+      where: { storeId, productId: { in: productIds }, order: { supplierId: { in: supplierIds }, status: { not: "CANCELLED" } } },
+      orderBy: { order: { createdAt: "desc" } }, take: 4000,
+      select: { productId: true, unitCostMinor: true, order: { select: { supplierId: true, createdAt: true } } },
+    });
+    return rows.map((r) => ({ supplierId: r.order.supplierId, productId: r.productId, unitCostMinor: r.unitCostMinor, at: r.order.createdAt.getTime() }));
+  }
+
+  /** Items that will run out soon at the pace of the last 2 weeks, with how much to order. All stores and the warehouse together (Buffer stores left out). */
+  async reorder(storeId: string): Promise<PoResult<{ items: ReorderItem[]; soonDays: number; coverDays: number }>> {
+    const places = await prisma.warehouse.findMany({ where: { storeId, isActive: true, type: { not: "BUFFER" } }, select: { id: true } });
+    const ids = places.map((p) => p.id);
+    const since = new Date(Date.now() - 14 * DAY_MS);
+    const [levels, used, open] = await Promise.all([
+      prisma.stockLevel.groupBy({ by: ["productId"], where: { storeId, warehouseId: { in: ids } }, _sum: { quantityOnHand: true, quantityReserved: true } }),
+      prisma.stockMovement.groupBy({ by: ["productId"], where: { storeId, warehouseId: { in: ids }, type: "CONSUME", createdAt: { gte: since } }, _sum: { delta: true } }),
+      prisma.purchaseOrderLine.findMany({ where: { storeId, order: { status: { in: ["OPEN", "PARTLY"] } } }, select: { productId: true, quantity: true, receivedQty: true } }),
+    ]);
+    const have = new Map(levels.map((l) => [l.productId, (l._sum.quantityOnHand ?? 0) - (l._sum.quantityReserved ?? 0)]));
+    const coming = new Map<string, number>();
+    for (const l of open) coming.set(l.productId, (coming.get(l.productId) ?? 0) + Math.max(0, l.quantity - l.receivedQty));
+    const selling = used.filter((u) => Math.abs(u._sum.delta ?? 0) > 0);
+    const products = await prisma.product.findMany({
+      where: { storeId, isActive: true, id: { in: selling.map((u) => u.productId) } },
+      select: { id: true, name: true, costMinor: true, stockBaseUnit: true, stockBaseQuantity: true },
+    });
+    const prod = new Map(products.map((p) => [p.id, p]));
+    const picked: ReorderItem[] = [];
+    for (const u of selling) {
+      const p = prod.get(u.productId);
+      if (!p) continue;
+      const loose = isLooseP(p);
+      const perDay = Math.abs(u._sum.delta ?? 0) / 14;
+      const advice = reorderAdvice({ available: have.get(p.id) ?? 0, perDay, onOrder: coming.get(p.id) ?? 0, loose });
+      if (!advice.urgency) continue;
+      picked.push({
+        productId: p.id, name: p.name, loose, urgency: advice.urgency, daysLeft: advice.daysLeft,
+        availableQty: Math.max(0, have.get(p.id) ?? 0), perDay: Math.round(perDay * 100) / 100, onOrderQty: coming.get(p.id) ?? 0, suggestedQty: advice.suggested,
+        supplierId: null, supplierName: null, lastCostMinor: null, productCostMinor: p.costMinor,
+      });
+    }
+    if (picked.length > 0) {
+      // The supplier and the cost of the last order that carried the item
+      const lines = await prisma.purchaseOrderLine.findMany({
+        where: { storeId, productId: { in: picked.map((x) => x.productId) }, order: { status: { not: "CANCELLED" } } },
+        orderBy: { order: { createdAt: "desc" } }, take: 3000,
+        select: { productId: true, unitCostMinor: true, order: { select: { supplierId: true, supplierName: true } } },
+      });
+      const lastBy = new Map<string, (typeof lines)[number]>();
+      for (const l of lines) if (!lastBy.has(l.productId)) lastBy.set(l.productId, l);
+      for (const it of picked) {
+        const l = lastBy.get(it.productId);
+        if (l) { it.supplierId = l.order.supplierId; it.supplierName = l.order.supplierName; it.lastCostMinor = l.unitCostMinor; }
+      }
+    }
+    picked.sort(byUrgency);
+    return { ok: true, value: { items: picked, soonDays: SOON_DAYS, coverDays: COVER_DAYS } };
+  }
+
+  /** What this supplier charged last time, per item, so the new-order form can show it next to the cost being typed. */
+  async lastCosts(storeId: string, supplierId: string | undefined): Promise<PoResult<{ costs: LastCost[] }>> {
+    if (!supplierId) return invalid("Choose the supplier");
+    const supplier = await prisma.supplier.findFirst({ where: { id: supplierId, storeId }, select: { id: true } });
+    if (!supplier) return { ok: true, value: { costs: [] } };
+    const lines = await prisma.purchaseOrderLine.findMany({
+      where: { storeId, order: { supplierId, status: { not: "CANCELLED" } } },
+      orderBy: { order: { createdAt: "desc" } }, take: 1500,
+      select: { productId: true, unitCostMinor: true, order: { select: { docNumber: true, supplierId: true, createdAt: true } } },
+    });
+    const rows: CostRow[] = lines.map((r) => ({ supplierId: r.order.supplierId, productId: r.productId, unitCostMinor: r.unitCostMinor, at: r.order.createdAt.getTime() }));
+    const latest = lastCostByProduct(rows, supplierId);
+    const docOf = new Map(lines.map((r) => [`${r.productId}:${r.order.createdAt.getTime()}`, r.order.docNumber]));
+    const products = await prisma.product.findMany({ where: { storeId, id: { in: [...latest.keys()] } }, select: { id: true, name: true, stockBaseUnit: true, stockBaseQuantity: true } });
+    const costs: LastCost[] = products.map((p) => {
+      const r = latest.get(p.id)!;
+      return { productId: p.id, name: p.name, loose: isLooseP(p), unitCostMinor: r.unitCostMinor, at: new Date(r.at).toISOString(), poNumber: docOf.get(`${p.id}:${r.at}`) ?? "" };
+    }).sort((a, b) => a.name.localeCompare(b.name));
+    return { ok: true, value: { costs } };
   }
 
   async create(

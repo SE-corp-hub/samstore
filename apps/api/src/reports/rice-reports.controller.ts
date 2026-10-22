@@ -12,6 +12,7 @@ import { loadActor } from "../people/people.service.js";
 import { signaturesFrom } from "../people/signature-input.js";
 import { RiceReportsService, watchStock } from "./rice-reports.service.js";
 import { StoreReportService } from "./store-report.service.js";
+import { WeeklySummaryService } from "./weekly-summary.service.js";
 
 function statusFor(error: ApiError): HttpStatus {
   switch (error.type) {
@@ -38,6 +39,7 @@ const str = (v: unknown): string | undefined => (typeof v === "string" ? v : und
 export class RiceReportsController {
   private readonly reports = new RiceReportsService();
   private readonly storeReports = new StoreReportService();
+  private readonly weekly = new WeeklySummaryService();
 
   private async ctx(req: Req_, h: string | undefined) {
     const user = req.user;
@@ -132,6 +134,20 @@ export class RiceReportsController {
   async setCostMode(@Req() req: Req_, @Body() body: { costMode?: unknown }, @Headers("x-store-id") h?: string) {
     const { storeId, actor } = await this.ctx(req, h);
     return unwrap(await this.reports.setCostMode(storeId, actor, body?.costMode));
+  }
+
+  /** GET /admin/rice/movement-summary?locationId=&from=&to= — every item: start, bought, moved, sold, resack, count fix, returns, end (owner and manager). */
+  @Get("movement-summary")
+  async movementSummary(@Req() req: Req_, @Query("locationId") locationId?: string, @Query("from") from?: string, @Query("to") to?: string, @Headers("x-store-id") h?: string) {
+    const { storeId, actor } = await this.ctx(req, h);
+    return unwrap(await this.reports.movementSummary(storeId, actor, { locationId, from, to }));
+  }
+
+  /** GET /admin/rice/weekly?to=YYYY-MM-DD — the weekly owner summary: 7 days ending on `to` (today by default) against the 7 before (owner and manager). */
+  @Get("weekly")
+  async weeklySummary(@Req() req: Req_, @Query("to") to?: string, @Headers("x-store-id") h?: string) {
+    const { storeId, actor } = await this.ctx(req, h);
+    return unwrap(await this.weekly.summary(storeId, actor, { to }));
   }
 
   /** GET /admin/rice/stock-book/check?locationId= — where the shelf and the ledger disagree (owner, read-only). */

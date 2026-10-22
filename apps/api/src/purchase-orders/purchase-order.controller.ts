@@ -53,6 +53,20 @@ export class PurchaseOrderController {
     return unwrap(await this.orders.suppliers(storeId));
   }
 
+  /** GET /admin/purchase-orders/reorder — items that will run out soon, with a suggested amount (owner and manager). */
+  @Get("reorder")
+  async reorder(@Req() req: Req_, @Headers("x-store-id") h?: string) {
+    const { storeId } = await this.owner(req, h);
+    return unwrap(await this.orders.reorder(storeId));
+  }
+
+  /** GET /admin/purchase-orders/last-costs?supplierId= — what this supplier charged last time, per item (owner and manager). */
+  @Get("last-costs")
+  async lastCosts(@Req() req: Req_, @Query("supplierId") supplierId?: string, @Headers("x-store-id") h?: string) {
+    const { storeId } = await this.owner(req, h);
+    return unwrap(await this.orders.lastCosts(storeId, supplierId));
+  }
+
   /** GET /admin/purchase-orders?status=open|all|OPEN|PARTLY|RECEIVED|CANCELLED&locationId=&supplierId= — counter staff always get open orders without costs. */
   @Get()
   async list(@Req() req: Req_, @Query("status") status?: string, @Query("locationId") locationId?: string, @Query("supplierId") supplierId?: string, @Headers("x-store-id") h?: string) {

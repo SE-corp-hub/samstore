@@ -8,6 +8,7 @@ import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
 import { prisma } from "../persistence/prisma-repositories.js";
 import { RiceReportsService, watchStock } from "./rice-reports.service.js";
+import { WeeklySummaryService } from "./weekly-summary.service.js";
 import { BentaService } from "../selling/benta.service.js";
 import { UtangService } from "../utang/utang.service.js";
 import { CountService } from "../counts/count.service.js";
@@ -234,4 +235,72 @@ test.skip("M9: monthly gross profit from frozen costs; the kargador pay sheet; T
   assert.equal(a.ok && a.value.approvals.some((x) => x.kind === "WRITE_OFF"), true);
   assert.equal(a.ok && a.value.ledgerMismatch, 0, "every shelf number equals its ledger");
   assert.equal((await reports.alerts(fx.storeId, fx.staff1)).ok, false);
+});
+
+test("Movement summary: start + bought + sold = end for every item; staff cannot open it; a wrong store or wrong dates are refused", async () => {
+  const fx = await fixture(); // 20 sacks and 50 kg loose arrived at Store 1
+  const sale = await benta.sell(fx.storeId, fx.staff1, { idempotencyKey: key(), lines: [{ productId: fx.sin25.id, quantity: 2 }], payment: { method: "cash", tenderedMinor: 300_000 } });
+  assert.equal(sale.ok, true, msg(sale));
+  const today = manilaDate(new Date());
+  const r = await reports.movementSummary(fx.storeId, fx.owner, { locationId: fx.s1, from: today, to: today });
+  assert.equal(r.ok, true, msg(r));
+  if (!r.ok) return;
+  assert.equal(r.value.location.name, "Store 1");
+  const sack = r.value.rows.find((x) => x.productId === fx.sin25.id)!;
+  assert.equal(sack.start, 0);
+  assert.equal(sack.bought, 20);
+  assert.equal(sack.sold, -2);
+  assert.equal(sack.end, 18);
+  const kg = r.value.rows.find((x) => x.productId === fx.loose.id)!;
+  assert.equal(kg.bought, 50_000);
+  assert.equal(kg.end, 50_000);
+  assert.equal(r.value.kilos.bought, 20 * 25 + 50, "kilos add sacks and loose rice");
+  assert.equal(r.value.kilos.sold, -50);
+  // Store 2 holds nothing and moved nothing
+  const other = await reports.movementSummary(fx.storeId, fx.owner, { locationId: fx.s2, from: today, to: today });
+  assert.equal(other.ok && other.value.rows.length, 0);
+  // all places together give the same totals here
+  const all = await reports.movementSummary(fx.storeId, fx.owner, { from: today, to: today });
+  assert.equal(all.ok && all.value.location.name, "All places");
+  assert.equal(all.ok && all.value.rows.find((x) => x.productId === fx.sin25.id)?.end, 18);
+  // a period in the past: nothing had happened yet, so no rows
+  const past = await reports.movementSummary(fx.storeId, fx.owner, { from: "2020-01-01", to: "2020-01-07" });
+  assert.equal(past.ok && past.value.rows.length, 0);
+  // refused
+  assert.equal((await reports.movementSummary(fx.storeId, fx.staff1, { locationId: fx.s1 })).ok, false, "owner and manager only");
+  assert.equal((await reports.movementSummary(fx.storeId, fx.owner, { locationId: "nope" })).ok, false);
+  assert.equal((await reports.movementSummary(fx.storeId, fx.owner, { from: "2026-02-01", to: "2026-01-01" })).ok, false);
+  assert.equal((await reports.movementSummary(fx.storeId, fx.owner, { from: "2025-01-01", to: "2026-01-01" })).ok, false, "more than 93 days");
+});
+
+test("Weekly summary: this week's sales against last week's, credit, running out; staff cannot open it; a future day is refused", async () => {
+  const fx = await fixture(); // 20 sacks and 50 kg loose at Store 1
+  const sale = await benta.sell(fx.storeId, fx.staff1, { idempotencyKey: key(), lines: [{ productId: fx.sin25.id, quantity: 2 }], payment: { method: "cash", tenderedMinor: 300_000 } });
+  assert.equal(sale.ok, true, msg(sale));
+  const credit = await benta.sell(fx.storeId, fx.staff1, { idempotencyKey: key(), customerId: fx.customerId, lines: [{ productId: fx.sin25.id, quantity: 1 }], payment: { method: "utang" }, signatures: [{ signerKind: "CUSTOMER", signerName: "Juan", imagePng: PNG }] });
+  assert.equal(credit.ok, true, msg(credit));
+  const r = await new WeeklySummaryService().summary(fx.storeId, fx.owner, {});
+  assert.equal(r.ok, true, msg(r));
+  if (!r.ok) return;
+  const s1 = r.value.sales.stores.find((x) => x.id === fx.s1)!;
+  assert.equal(s1.thisMinor, 3 * 130_000, "two sold for cash and one on credit");
+  assert.equal(s1.lastMinor, 0);
+  assert.equal(s1.changePct, null, "nothing last week to compare with");
+  assert.equal(s1.count, 2);
+  assert.equal(r.value.sales.total.thisMinor, 390_000);
+  assert.equal(r.value.credit.givenMinor, 130_000);
+  assert.equal(r.value.credit.owedNowMinor, 130_000);
+  assert.equal(r.value.credit.customersOwing, 1);
+  assert.equal(r.value.consignment.length, 0, "no consignment store here");
+  assert.equal(r.value.suppliers.owedMinor, 0);
+  assert.equal(r.value.counts.counts, 0);
+  assert.ok(r.value.running.total >= 0);
+  // a week that ended long ago has no sales
+  const old = await new WeeklySummaryService().summary(fx.storeId, fx.owner, { to: "2020-06-30" });
+  assert.equal(old.ok && old.value.sales.total.thisMinor, 0);
+  assert.equal(old.ok && old.value.from, "2020-06-24");
+  // refused
+  assert.equal((await new WeeklySummaryService().summary(fx.storeId, fx.staff1, {})).ok, false, "owner and manager only");
+  assert.equal((await new WeeklySummaryService().summary(fx.storeId, fx.owner, { to: "2999-01-01" })).ok, false, "not a day in the future");
+  assert.equal((await new WeeklySummaryService().summary(fx.storeId, fx.owner, { to: "yesterday" })).ok, false);
 });

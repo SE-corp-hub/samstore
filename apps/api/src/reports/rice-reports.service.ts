@@ -19,6 +19,7 @@ import { aging, dayRange, lineCost, lineGrams, manilaDate, monthRange, pct, Repo
 import { varietyOf } from "../domain/resack.js";
 import { costValue, isLooseP } from "../domain/counting.js";
 import { checkChain, periodTotals, type ChainCheck, type LedgerRow } from "../domain/stock-book.js";
+import { buildSummary, type KiloTotals, type SummaryRow } from "../domain/movement-summary.js";
 import { isDraftStale } from "../domain/people.js";
 import { captureSignatures, locationRefusal, requireSignatures, signatureErrorResult, type Actor, type SignatureInput } from "../people/people.service.js";
 
@@ -709,6 +710,45 @@ export class RiceReportsService {
           };
         }),
       };
+    });
+  }
+
+  /**
+   * Read-only. Every item at one place (or all places together): the stock at the start of the dates, what was bought,
+   * moved in and out, sold, resacked, fixed by a count, returned, and the stock at the end.
+   */
+  async movementSummary(storeId: string, actor: Actor, input: { locationId?: string; from?: string; to?: string }): Promise<ReportResult<{
+    location: { id: string | null; name: string }; from: string; to: string; rows: SummaryRow[]; kilos: KiloTotals;
+  }>> {
+    return this.run(async () => {
+      this.owner(actor);
+      const locations = await this.locations(storeId);
+      const one = input.locationId ? locations.find((l) => l.id === input.locationId) : undefined;
+      if (input.locationId && !one) throw new StepError(invalid("Choose a store"));
+      const places = one ? [one] : locations;
+      const today = manilaDate(new Date());
+      const toDay = input.to || today;
+      const fromDay = input.from || manilaDate(new Date(Date.now() - 6 * 86_400_000));
+      const start = dayRange(fromDay).from;
+      const end = dayRange(toDay).to;
+      if (end <= start) throw new StepError(invalid("The end date is before the start date"));
+      if ((end.getTime() - start.getTime()) / 86_400_000 > 93) throw new StepError(invalid("Choose at most 93 days"));
+      const where = { storeId, warehouseId: { in: places.map((l) => l.id) }, type: { notIn: RESERVED_ONLY } };
+      const [levels, inPeriod, afterRows, products] = await Promise.all([
+        prisma.stockLevel.findMany({ where: { storeId, warehouseId: { in: places.map((l) => l.id) } }, select: { productId: true, quantityOnHand: true } }),
+        prisma.stockMovement.groupBy({ by: ["productId", "type", "documentType"], where: { ...where, createdAt: { gte: start, lt: end } }, _sum: { delta: true } }),
+        prisma.stockMovement.groupBy({ by: ["productId"], where: { ...where, createdAt: { gte: end } }, _sum: { delta: true } }),
+        prisma.product.findMany({ where: { storeId }, select: productSelect }),
+      ]);
+      const onHand = new Map<string, number>();
+      for (const l of levels) onHand.set(l.productId, (onHand.get(l.productId) ?? 0) + l.quantityOnHand);
+      const after = new Map(afterRows.map((a): [string, number] => [a.productId, a._sum.delta ?? 0]));
+      const { rows, kilos } = buildSummary(
+        products.map((p) => ({ id: p.id, name: p.name, loose: isLooseP(p), unitGrams: (p.stockBaseUnit ?? "").toLowerCase() === "g" && (p.stockBaseQuantity ?? 0) > 0 ? p.stockBaseQuantity! : null })),
+        onHand, after,
+        inPeriod.map((g) => ({ productId: g.productId, type: g.type, documentType: g.documentType, delta: g._sum.delta ?? 0 })),
+      );
+      return { location: { id: one ? one.id : null, name: one ? one.name : "All places" }, from: fromDay, to: toDay, rows, kilos };
     });
   }
 

@@ -474,3 +474,72 @@ test("a purchase order: receive against it at the agreed cost, owe the supplier,
   assert.ok(c.ok);
   assert.equal(c.value.status, "CANCELLED");
 });
+
+test("price watch: a later order shows the move against the supplier's last cost; a cancelled order does not count; staff see nothing", async () => {
+  const fx = await fixture();
+  const po = new PurchaseOrderService();
+  const a = await po.create(fx.storeId, fx.owner.userId, { supplierName: "Aling Nena", locationId: fx.s1, lines: [{ productId: fx.sin25.id, quantity: 4, unitCostMinor: 100_000 }] });
+  assert.ok(a.ok, msg(a));
+  const first = await po.list(fx.storeId, "OWNER", { status: "all" });
+  assert.ok(first.ok);
+  assert.equal(first.value.orders[0]?.lines[0]?.move?.kind, "NEW", "first time with this supplier");
+  await new Promise((r) => setTimeout(r, 20));
+  const cancelled = await po.create(fx.storeId, fx.owner.userId, { supplierName: "Aling Nena", locationId: fx.s1, lines: [{ productId: fx.sin25.id, quantity: 1, unitCostMinor: 150_000 }] });
+  assert.ok(cancelled.ok);
+  assert.ok((await po.cancel(fx.storeId, fx.owner.userId, cancelled.value.id)).ok);
+  await new Promise((r) => setTimeout(r, 20));
+  const b = await po.create(fx.storeId, fx.owner.userId, { supplierName: "Aling Nena", locationId: fx.s1, lines: [{ productId: fx.sin25.id, quantity: 4, unitCostMinor: 105_000 }] });
+  assert.ok(b.ok, msg(b));
+  const list = await po.list(fx.storeId, "OWNER", { status: "all" });
+  assert.ok(list.ok);
+  const second = list.value.orders.find((o) => o.id === b.value.id)?.lines[0]?.move;
+  assert.equal(second?.kind, "UP");
+  assert.equal(second?.lastMinor, 100_000, "the cancelled order is ignored");
+  assert.equal(second?.changeMinor, 5_000);
+  assert.equal(second?.big, true);
+  const sup = list.value.orders.find((o) => o.id === b.value.id)!.supplierId;
+  const last = await po.lastCosts(fx.storeId, sup);
+  assert.ok(last.ok, msg(last));
+  assert.equal(last.value.costs.find((x) => x.productId === fx.sin25.id)?.unitCostMinor, 105_000, "the newest real order");
+  const none = await po.lastCosts(fx.storeId, undefined);
+  assert.ok(!none.ok);
+  const staff = await po.list(fx.storeId, "STAFF", {});
+  assert.ok(staff.ok);
+  assert.equal(JSON.stringify(staff.value).includes("move"), false, "counter staff never see cost moves");
+});
+
+test("reorder suggestions: fast sellers running low are listed with an amount; an order on the way takes the item off", async () => {
+  const fx = await fixture();
+  const po = new PurchaseOrderService();
+  const empty = await po.reorder(fx.storeId);
+  assert.ok(empty.ok);
+  assert.equal(empty.value.items.length, 0, "nothing sold lately, nothing to suggest");
+  // 70 sacks sold in the last 2 weeks = 5 a day; 15 sacks are left in all places = 3 days
+  await prisma.stockMovement.create({ data: { storeId: fx.storeId, productId: fx.sin25.id, warehouseId: fx.s1, delta: -70, type: "CONSUME" } });
+  const r1 = await po.reorder(fx.storeId);
+  assert.ok(r1.ok, msg(r1));
+  const it = r1.value.items.find((x) => x.productId === fx.sin25.id);
+  assert.ok(it, "listed");
+  assert.equal(it.urgency, "SOON");
+  assert.equal(it.availableQty, 15);
+  assert.equal(it.perDay, 5);
+  assert.equal(it.suggestedQty, 55, "2 weeks of selling (70) minus the 15 left");
+  assert.equal(it.supplierId, null);
+  // an order of 40 on the way covers it (55 sacks = 11 days)
+  const made = await po.create(fx.storeId, fx.owner.userId, { supplierName: "Mang Tonyo", locationId: fx.wh, lines: [{ productId: fx.sin25.id, quantity: 40, unitCostMinor: 101_000 }] });
+  assert.ok(made.ok, msg(made));
+  const r2 = await po.reorder(fx.storeId);
+  assert.ok(r2.ok);
+  assert.equal(r2.value.items.some((x) => x.productId === fx.sin25.id), false, "already on order");
+  // cancel it: back on the list, now with the supplier and the last cost
+  assert.ok((await po.cancel(fx.storeId, fx.owner.userId, made.value.id)).ok);
+  const bigger = await po.create(fx.storeId, fx.owner.userId, { supplierName: "Mang Tonyo", locationId: fx.wh, lines: [{ productId: fx.sin25.id, quantity: 5, unitCostMinor: 101_000 }] });
+  assert.ok(bigger.ok);
+  const r3 = await po.reorder(fx.storeId);
+  assert.ok(r3.ok);
+  const back = r3.value.items.find((x) => x.productId === fx.sin25.id);
+  assert.equal(back?.onOrderQty, 5);
+  assert.equal(back?.suggestedQty, 50);
+  assert.equal(back?.supplierName, "Mang Tonyo");
+  assert.equal(back?.lastCostMinor, 101_000);
+});

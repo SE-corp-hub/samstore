@@ -12,6 +12,8 @@ import { toast } from "../../lib/toast";
 import NumPad from "./NumPad";
 import SignaturePad from "./SignaturePad";
 import { CountSheet, type CountDetail, type CountRow } from "./BilanginPanel";
+import MovementSummary from "./MovementSummary";
+import WeeklySummary from "./WeeklySummary";
 
 type ApiBody = { message?: string; errors?: string[] } & Record<string, unknown>;
 interface Loc { id: string; name: string; code: string | null; type: string }
@@ -76,13 +78,13 @@ function downloadCsv(name: string, rows: (string | number | null | undefined)[][
   setTimeout(() => URL.revokeObjectURL(a.href), 2_000);
 }
 
-type Tab = "live" | "daily" | "monthly" | "kulang" | "trace" | "alerts" | "check" | "book";
+type Tab = "live" | "daily" | "monthly" | "kulang" | "trace" | "alerts" | "check" | "book" | "moves" | "week";
 
-export default function UlatPanel({ role }: { role?: string; onNavigate?: (tab: string) => void }) {
+export default function UlatPanel({ role, onNavigate }: { role?: string; onNavigate?: (tab: string) => void }) {
   const owner = !!role && (isOwnerRole(role) || role === "MANAGER");
   const [tab, setTab] = useState<Tab>(owner ? "live" : "daily");
   const tabs: [Tab, string][] = owner
-    ? [["live", "Stock Live"], ["daily", "Today"], ["monthly", "This month"], ["kulang", "Short"], ["trace", "Trace"], ["alerts", "Alerts"], ["check", "Stock check"], ["book", "Stock book"]]
+    ? [["live", "Stock Live"], ["daily", "Today"], ["monthly", "This month"], ["kulang", "Short"], ["trace", "Trace"], ["alerts", "Alerts"], ["check", "Stock check"], ["book", "Stock book"], ["moves", "Movement"], ["week", "Week"]]
     : [["live", "Stock Live"], ["daily", "Closing"]];
   return (
     <div style={{ fontSize: 17 }}>
@@ -98,6 +100,8 @@ export default function UlatPanel({ role }: { role?: string; onNavigate?: (tab: 
       {tab === "alerts" && owner && <Alerts />}
       {tab === "check" && owner && <StockCheck />}
       {tab === "book" && owner && <StockBook />}
+      {tab === "moves" && owner && <MovementSummary />}
+      {tab === "week" && owner && <WeeklySummary onNavigate={onNavigate} />}
     </div>
   );
 }
