@@ -2247,3 +2247,18 @@ model StoreSalesReport {
 
   @@index([storeId, locationId, createdAt])
 }
+
+/// A special price for one customer and one product (per piece, or per kilo for loose rice). Beats the store's price at sale time.
+model CustomerPrice {
+  id              String   @id @default(cuid())
+  storeId         String
+  storeCustomerId String
+  productId       String
+  priceMinor      Int
+  createdById     String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([storeId, storeCustomerId, productId])
+  @@index([storeId, storeCustomerId])
+}

@@ -9,6 +9,7 @@ import { requireUser, resolveTenant, TENANT_ROLES } from "../auth/tenant-context
 import { loadActor } from "../people/people.service.js";
 import { badRequest, signaturesFrom } from "../people/signature-input.js";
 import { BentaService, type BentaLineInput } from "./benta.service.js";
+import { CustomerPriceService } from "./customer-price.service.js";
 
 function statusFor(error: ApiError): HttpStatus {
   switch (error.type) {
@@ -47,12 +48,38 @@ function linesFrom(v: unknown): BentaLineInput[] {
 @UseInterceptors(IdempotencyInterceptor)
 export class BentaController {
   private readonly benta = new BentaService();
+  private readonly customerPrices = new CustomerPriceService();
 
   private async ctx(req: Req_, headerStoreId: string | undefined) {
     const user = req.user;
     requireUser(user);
     const { storeId, role } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
     return { storeId, actor: await loadActor(storeId, user.sub, role) };
+  }
+
+  /** GET /admin/benta/customer-prices?customerId= — a customer's special prices (counter staff may read them). */
+  @Get("benta/customer-prices")
+  async customerPriceList(@Req() req: Req_, @Query("customerId") customerId?: string, @Headers("x-store-id") h?: string) {
+    const { storeId } = await this.ctx(req, h);
+    return unwrap(await this.customerPrices.list(storeId, customerId));
+  }
+
+  /** POST /admin/benta/customer-prices — { customerId, productId, priceMinor } (owner/manager). */
+  @Post("benta/customer-prices")
+  async customerPriceSet(@Req() req: Req_, @Body() body: Record<string, unknown>, @Headers("x-store-id") h?: string) {
+    const user = req.user;
+    requireUser(user);
+    const { storeId } = await resolveTenant(user, h, TENANT_ROLES.OWNER_MANAGER);
+    return unwrap(await this.customerPrices.set(storeId, user.sub, { customerId: str(body?.customerId), productId: str(body?.productId), priceMinor: body?.priceMinor }));
+  }
+
+  /** POST /admin/benta/customer-prices/:id/remove (owner/manager). */
+  @Post("benta/customer-prices/:id/remove")
+  async customerPriceRemove(@Req() req: Req_, @Param("id") id: string, @Headers("x-store-id") h?: string) {
+    const user = req.user;
+    requireUser(user);
+    const { storeId } = await resolveTenant(user, h, TENANT_ROLES.OWNER_MANAGER);
+    return unwrap(await this.customerPrices.remove(storeId, user.sub, id));
   }
 
   /** GET /admin/benta/catalog?locationId= — products with this location's price and stock everywhere, most-sold first. */

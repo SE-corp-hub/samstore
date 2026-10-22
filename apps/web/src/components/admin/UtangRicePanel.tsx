@@ -198,6 +198,7 @@ export default function UtangRicePanel({ role }: { role?: string; onNavigate?: (
               <div>Limit: {limitPhrase(selected, peso)}{!selected.creditApproved && " — cannot buy on credit yet"}</div>
               {selected.creditApproved && <div className="mb-1">Status: <span className={`badge ${creditStatusWords(selected.status).cls}`}>{creditStatusWords(selected.status).label}</span>{selected.availableMinor !== null && <span className="ms-2">can still borrow {peso(selected.availableMinor)}</span>}</div>}
               {selected.status === "AT_LIMIT" && <div className="alert alert-warning py-2 mt-2 mb-0">At the limit. The customer must pay some of the balance first, then can buy on credit again.</div>}
+              {owner && <SpecialPrices customerId={selected.id} />}
               {owner && <LimitEditor customer={selected} onSaved={async () => { setSelected(null); await load(); }} />}
               <div className="d-grid gap-2 mt-3">
                 <button type="button" className="btn btn-success btn-lg" disabled={selected.balanceMinor <= 0} onClick={() => setPaying(true)}>Credit payment</button>
@@ -389,6 +390,64 @@ function PayForm({ customer, locationId, onCancel, onDone }: { customer: Cust; l
           <button type="button" className="btn btn-outline-secondary btn-lg" disabled={busy} onClick={onCancel}>Back</button>
           <button type="button" className="btn btn-success btn-lg" disabled={!ready} onClick={() => void save()}>{busy ? "Please wait…" : "Receive"}</button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+/** Owner/manager: this customer's own prices (per piece, or per kilo for loose rice). They beat the store price at the counter. */
+function SpecialPrices({ customerId }: { customerId: string }) {
+  const [rows, setRows] = useState<{ id: string; productId: string; name: string; loose: boolean; priceMinor: number; listPriceMinor: number }[] | null>(null);
+  const [products, setProducts] = useState<{ id: string; name: string; loose: boolean }[]>([]);
+  const [productId, setProductId] = useState("");
+  const [price, setPrice] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const load = useCallback(async () => {
+    const res = await fetch(`${API_URL}/admin/benta/customer-prices?customerId=${encodeURIComponent(customerId)}`, { headers: adminHeaders() });
+    const d = await res.json().catch(() => null);
+    setRows(res.ok ? (d?.prices ?? []) : []);
+  }, [customerId]);
+  useEffect(() => {
+    setRows(null); void load();
+    fetch(`${API_URL}/admin/products`, { headers: adminHeaders() }).then((r) => (r.ok ? r.json() : null)).then((ps) => {
+      setProducts(((ps?.products ?? ps?.items ?? []) as { id: string; name: string; stockBaseUnit?: string | null; stockBaseQuantity?: number | null }[]).map((p) => ({ id: p.id, name: p.name, loose: (p.stockBaseUnit ?? "").toLowerCase() === "g" && p.stockBaseQuantity === 1 })));
+    }).catch(() => undefined);
+  }, [load]);
+  const post = async (path: string, body: unknown) => {
+    setBusy(true); setError(null);
+    const res = await fetch(`${API_URL}${path}`, { method: "POST", headers: { "Content-Type": "application/json", ...adminHeaders() }, body: JSON.stringify(body) });
+    const d = await res.json().catch(() => null);
+    setBusy(false);
+    if (!res.ok) { setError(d?.errors?.join(", ") ?? d?.message ?? "That did not go through"); return false; }
+    await load();
+    return true;
+  };
+  const chosen = products.find((p) => p.id === productId);
+  return (
+    <div className="border rounded p-2 mt-3">
+      <div className="fw-semibold mb-1">Special prices</div>
+      {error && <div className="alert alert-danger py-1 small">{error}</div>}
+      {rows === null ? <p className="text-muted small mb-1">Loading…</p> : rows.length === 0 ? <p className="text-muted small mb-1">None. This customer pays the store price.</p> : (
+        <ul className="list-group mb-2">
+          {rows.map((r) => (
+            <li key={r.id} className="list-group-item d-flex align-items-center gap-2 py-1">
+              <span className="me-auto">{r.name} <span className="text-muted small">store {peso(r.listPriceMinor)}{r.loose ? "/kg" : ""}</span></span>
+              <strong>{peso(r.priceMinor)}{r.loose ? "/kg" : ""}</strong>
+              <button type="button" className="btn btn-sm btn-outline-danger" disabled={busy} onClick={() => void post(`/admin/benta/customer-prices/${r.id}/remove`, {})}>Remove</button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="row g-2 align-items-end">
+        <div className="col-12 col-md-6">
+          <select className="form-select" aria-label="Product" value={productId} onChange={(e) => setProductId(e.target.value)}>
+            <option value="">Choose a product…</option>
+            {products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        </div>
+        <div className="col-6 col-md-3"><PesoInput id="sp-price" className="form-control" value={price} onChange={setPrice} placeholder={chosen?.loose ? "₱ per kilo" : "₱ each"} /></div>
+        <div className="col-6 col-md-3"><button type="button" className="btn btn-success w-100" disabled={busy || !productId || !(Number(price) > 0)} onClick={async () => { if (await post("/admin/benta/customer-prices", { customerId, productId, priceMinor: Math.round(Number(price) * 100) })) { setProductId(""); setPrice(""); } }}>Save price</button></div>
       </div>
     </div>
   );

@@ -277,11 +277,14 @@ export class BentaService {
       const remotes = new Map((await prisma.warehouse.findMany({ where: { storeId, id: { in: remoteIds }, isActive: true }, select: { id: true, name: true } })).map((w) => [w.id, w]));
       if (remotes.size !== remoteIds.length) throw new SellingError("Unknown location to take from");
 
+      // A customer picked at the counter may have special prices; they beat the store's price (not a manual change, so no reason is needed).
+      const pcust = input.customerId ? await prisma.storeCustomer.findFirst({ where: { storeId, id: input.customerId }, include: { customer: { select: { name: true } } } }) : null;
+      const special = pcust ? new Map((await prisma.customerPrice.findMany({ where: { storeId, storeCustomerId: pcust.id, productId: { in: ids } }, select: { productId: true, priceMinor: true } })).map((x) => [x.productId, x.priceMinor])) : new Map<string, number>();
       const priced: (PricedLine & { product: P; catalogUnitPriceMinor: number; overridden: boolean; overrideReason: string | null; sourceLocationId: string | null })[] = [];
       for (const l of lines) {
         const p = products.get(l.productId ?? "");
         if (!p || !p.isActive || p.reviewStatus === "MERGED") throw new SellingError("Product not found — refresh the page");
-        const catalog = priceAt(p.priceMinor, prices.get(p.id));
+        const catalog = special.get(p.id) ?? priceAt(p.priceMinor, prices.get(p.id));
         let override: number | null = null;
         if (l.unitPriceMinorOverride !== undefined && l.unitPriceMinorOverride !== null) {
           if (typeof l.unitPriceMinorOverride !== "number") throw new SellingError("Wrong price");
@@ -313,6 +316,11 @@ export class BentaService {
         if (limitMinor !== null && !limitCheck(sc.creditBalanceMinor, subtotal, limitMinor).ok) {
           throw new SellingError(`${customerName} owes ${pesoText(sc.creditBalanceMinor)} of a ${pesoText(limitMinor)} credit limit. This sale would pass the limit — take a payment first, then sell on credit again.`);
         }
+      }
+      // A named customer on a cash/GCash/Maya/bank/split sale is linked to the sale (for their history and the top customers).
+      if (pcust && method !== "utang") {
+        storeCustomerId = pcust.id;
+        customerName = pcust.customer.name ?? "Customer";
       }
       const paper = input.paperSlip ? checkPaperSlip(input.paperSlip, new Date()) : null;
       const registerSessionId = method === "utang" ? null : await this.drawerFor(storeId, loc.id);

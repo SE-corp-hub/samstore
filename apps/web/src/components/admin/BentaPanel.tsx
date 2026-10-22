@@ -123,6 +123,8 @@ export default function BentaPanel() {
   // What the done screen needs to text the customer, kept after the cart is cleared.
   const [textInfo, setTextInfo] = useState<{ customerId: string; name: string | null; phone: string | null; balanceAfterMinor: number } | null>(null);
   const [textPhone, setTextPhone] = useState("");
+  const [priceCustomer, setPriceCustomer] = useState(""); // a customer picked at the counter: their special prices apply
+  const [specialCount, setSpecialCount] = useState(0);
 
   const loadCatalog = useCallback(async (loc?: string) => {
     const q = loc ? `?locationId=${encodeURIComponent(loc)}` : "";
@@ -133,6 +135,18 @@ export default function BentaPanel() {
     setItems(d.products as Item[]);
     setLocationId((d.location as Loc).id);
   }, []);
+
+  // Choosing a customer at the start of a sale puts their special prices on the product buttons.
+  const pickPriceCustomer = async (id: string) => {
+    setPriceCustomer(id); setCustomerId(id); setCustomerSig(null); setSpecialCount(0);
+    await loadCatalog(locationId);
+    if (!id) return;
+    const res = await fetch(`${API_URL}/admin/benta/customer-prices?customerId=${encodeURIComponent(id)}`, { headers: adminHeaders() });
+    const d = (await res.json().catch(() => null)) as { prices?: { productId: string; priceMinor: number }[] } | null;
+    const m = new Map((d?.prices ?? []).map((x) => [x.productId, x.priceMinor]));
+    setItems((prev) => prev.map((i) => (m.has(i.id) ? { ...i, priceMinor: m.get(i.id)! } : i)));
+    setSpecialCount(m.size);
+  };
 
   useEffect(() => {
     (async () => {
@@ -195,6 +209,8 @@ export default function BentaPanel() {
   const reset = () => {
     keyRef.current = null;
     try { window.sessionStorage.removeItem(cartKey()); } catch { /* convenience only */ }
+    if (priceCustomer) void loadCatalog(locationId);
+    setPriceCustomer(""); setSpecialCount(0);
     setCart([]); setStep("pick"); setPay(null); setTendered(""); setReference(""); setParts([{ method: "cash", amount: "", reference: "" }, { method: "gcash", amount: "", reference: "" }]); setCustomerId(""); setCustomerSig(null);
     setPaper(false); setSlipNo(""); setSlipTime(""); setSlipPhoto(null); setStaffSig(null); setError(null);
   };
@@ -226,7 +242,7 @@ export default function BentaPanel() {
         method: pay, tenderedMinor: pay === "cash" && tendered ? toMinor(tendered) : undefined, reference: needsRef(pay) ? reference.trim() : undefined,
         ...(pay === "split" ? { tenders: parts.map((x) => ({ method: x.method, amountMinor: toMinor(x.amount || "0"), reference: x.method === "cash" ? undefined : x.reference.trim() })) } : {}),
       },
-      customerId: pay === "utang" ? customerId : undefined,
+      customerId: pay === "utang" ? customerId : priceCustomer || undefined,
       paperSlip: paper ? { slipNo: slipNo.trim(), occurredAt: new Date(slipTime).toISOString() } : undefined,
       signatures,
     };
@@ -363,6 +379,15 @@ export default function BentaPanel() {
 
       {step === "pick" && !editing && !newItem && (
         <>
+          {customers.length > 0 && (
+            <div className="mb-2">
+              <select className="form-select" aria-label="Customer with special prices" disabled={cart.length > 0} value={priceCustomer} onChange={(e) => void pickPriceCustomer(e.target.value)}>
+                <option value="">Customer: walk-in (store prices)</option>
+                {customers.map((c) => <option key={c.id} value={c.id}>{c.name ?? c.phone ?? "—"}</option>)}
+              </select>
+              {priceCustomer && <div className="small text-muted mt-1">{specialCount > 0 ? `${specialCount} special ${specialCount === 1 ? "price" : "prices"} for this customer.` : "No special prices for this customer — store prices apply."}</div>}
+            </div>
+          )}
           <input className="form-control form-control-lg mb-3" placeholder="Search (name or first letters)" aria-label="Search" value={search} onChange={(e) => setSearch(e.target.value)} />
           <div className="row g-2 mb-3">
             {shown.map((i) => (
@@ -558,7 +583,7 @@ export default function BentaPanel() {
             {pay === "utang" && (
               <>
                 <label className="form-label" htmlFor="bt-cust">Customer</label>
-                <select id="bt-cust" className="form-select form-select-lg mb-2" value={customerId} onChange={(e) => { setCustomerId(e.target.value); setCustomerSig(null); }}>
+                <select id="bt-cust" className="form-select form-select-lg mb-2" disabled={!!priceCustomer} value={customerId} onChange={(e) => { setCustomerId(e.target.value); setCustomerSig(null); }}>
                   <option value="">Choose…</option>
                   {customers.filter((c) => c.creditApproved).map((c) => <option key={c.id} value={c.id}>{c.name ?? c.phone ?? "—"} — owes {peso(c.creditBalanceMinor)} · {creditStatusWords(c.creditStatus).label}</option>)}
                 </select>

@@ -46,6 +46,7 @@ after(async () => {
     }
     await prisma.creditEntry.deleteMany({ where });
     await prisma.storePayableEntry.deleteMany({ where });
+    await prisma.customerPrice.deleteMany({ where });
     await prisma.stockMovement.deleteMany({ where });
     await prisma.order.deleteMany({ where });
     await prisma.storeCustomer.deleteMany({ where });
@@ -372,4 +373,18 @@ test("Split payment: part cash, part GCash pays one sale; the parts must add up 
   assert.equal(await onHand(fx, fx.sin25.id, fx.s1), 9);
   const maya = await svc.sell(fx.storeId, fx.staff1, { idempotencyKey: key(), lines: [{ productId: fx.sin25.id, quantity: 1 }], payment: { method: "maya", reference: "998877" } });
   assert.equal(maya.ok, true, msg(maya));
+});
+
+test("Special price: a customer's own price beats the store price, and the sale is linked to them", async () => {
+  const fx = await fixture();
+  const cust = await prisma.customerPrice.create({ data: { storeId: fx.storeId, storeCustomerId: fx.customerId, productId: fx.sin25.id, priceMinor: 120_000, createdById: fx.owner.userId } });
+  assert.ok(cust.id);
+  const r = await svc.sell(fx.storeId, fx.staff1, { idempotencyKey: key(), customerId: fx.customerId, lines: [{ productId: fx.sin25.id, quantity: 2 }], payment: { method: "cash" } });
+  assert.equal(r.ok, true, msg(r));
+  if (!r.ok) return;
+  assert.equal(r.value.totalMinor, 240_000, "2 sacks at the special 1,200.00, not 1,300.00");
+  const o = await prisma.order.findUniqueOrThrow({ where: { id: r.value.orderId } });
+  assert.equal(o.storeCustomerId, fx.customerId);
+  const walkIn = await svc.sell(fx.storeId, fx.staff1, { idempotencyKey: key(), lines: [{ productId: fx.sin25.id, quantity: 1 }], payment: { method: "cash" } });
+  assert.equal(walkIn.ok && walkIn.value.totalMinor, 130_000, "no customer: the store price");
 });
