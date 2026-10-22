@@ -15,6 +15,7 @@ const fail = (type: "validation" | "forbidden", m: string): { ok: false; error: 
 const OWNERS = ["OWNER", "MANAGER", "STORE_OWNER", "PLATFORM_ADMIN"];
 const isOwner = (a: Actor) => OWNERS.includes(a.role);
 const MAX_DAYS = 93;
+const MAX_DAYS_SALES = 366; // the sales report may cover a whole year
 
 const productSelect = { id: true, name: true, priceMinor: true, costMinor: true, stockBaseUnit: true, stockBaseQuantity: true } as const;
 
@@ -44,14 +45,14 @@ export class StoreReportService {
     return { res: null, wanted };
   }
 
-  private range(from: string | undefined, to: string | undefined) {
+  private range(from: string | undefined, to: string | undefined, maxDays = MAX_DAYS) {
     const today = manilaDate(new Date());
     const f = from || today;
     const t = to || f;
     const start = dayRange(f).from;
     const end = dayRange(t).to;
     if (end <= start) throw new ReportError("The end date is before the start date");
-    if ((end.getTime() - start.getTime()) / 86_400_000 > MAX_DAYS) throw new ReportError(`Choose at most ${MAX_DAYS} days`);
+    if ((end.getTime() - start.getTime()) / 86_400_000 > maxDays) throw new ReportError(`Choose at most ${maxDays} days`);
     return { from: f, to: t, start, end };
   }
 
@@ -124,7 +125,7 @@ export class StoreReportService {
     ]);
     const products = new Map((await prisma.product.findMany({ where: { storeId, id: { in: [...new Set(orders.flatMap((o) => o.items.map((i) => i.productId).filter((x): x is string => !!x)))] } }, select: productSelect })).map((x) => [x.id, x]));
     const t = { count: orders.length, totalMinor: 0, cashMinor: 0, gcashMinor: 0, creditMinor: 0, otherMinor: 0, costMinor: 0 };
-    const items = new Map<string, { name: string; loose: boolean; quantity: number; salesMinor: number }>();
+    const items = new Map<string, { name: string; loose: boolean; quantity: number; salesMinor: number; costMinor: number }>();
     const days = new Map<string, { count: number; totalMinor: number }>();
     // A split sale is counted by what each part actually paid (cash, GCash, or Maya/bank under "other").
     const splitIds = orders.filter((o) => o.paymentMethod === "split").map((o) => o.id);
@@ -150,11 +151,11 @@ export class StoreReportService {
         const p = i.productId ? products.get(i.productId) : undefined;
         const loose = p ? isLooseP(p) : i.soldBy === "KILO" || i.soldBy === "PESO";
         const key = i.productId ?? i.productName;
-        const cur = items.get(key) ?? { name: i.productName, loose, quantity: 0, salesMinor: 0 };
+        const cur = items.get(key) ?? { name: i.productName, loose, quantity: 0, salesMinor: 0, costMinor: 0 };
         cur.quantity += loose ? (i.grams ?? i.quantity) : i.quantity;
         cur.salesMinor += i.lineTotalMinor;
         items.set(key, cur);
-        if (p) t.costMinor += lineCost(i, p.costMinor, loose);
+        if (p) { const c = lineCost(i, p.costMinor, loose); t.costMinor += c; cur.costMinor += c; }
       }
     }
     return {
@@ -162,14 +163,14 @@ export class StoreReportService {
       cashInMinor: payments.filter((p) => p.method === "cash").reduce((s, p) => s + p.amountMinor, 0),
       creditGivenMinor: credits.reduce((s, c) => s + c.amountMinor, 0),
       creditCollectedMinor: payments.filter((p) => !p.orderId && p.method !== "credit").reduce((s, p) => s + p.amountMinor, 0),
-      items: [...items.values()].map((v) => ({ name: v.name, unit: v.loose ? "kg" : "pcs", quantity: v.loose ? v.quantity / 1000 : v.quantity, salesMinor: v.salesMinor })).sort((a, b) => b.salesMinor - a.salesMinor),
+      items: [...items.values()].map((v) => ({ name: v.name, unit: v.loose ? "kg" : "pcs", quantity: v.loose ? v.quantity / 1000 : v.quantity, salesMinor: v.salesMinor, ...(owner ? { profitMinor: v.salesMinor - v.costMinor } : {}) })).sort((a, b) => b.salesMinor - a.salesMinor),
       days: [...days.entries()].map(([date, v]) => ({ date, ...v })).sort((a, b) => (a.date < b.date ? 1 : -1)),
     };
   }
 
   async sales(storeId: string, actor: Actor, input: { locationId?: string; from?: string; to?: string }) {
     try {
-      const r = this.range(input.from, input.to);
+      const r = this.range(input.from, input.to, MAX_DAYS_SALES);
       const p = await this.places(storeId, actor, input.locationId ?? actor.homeLocationId ?? undefined);
       if (p.res) return p.res;
       const loc = p.wanted[0]!;

@@ -23,11 +23,34 @@ type Tab = "stock" | "sales" | "records" | "compare" | "day" | "buffer";
 interface StockRow { productId: string; name: string; loose: boolean; unit: string; onHand: number; reserved: number; available: number; daysLeft?: number | null; flag: "ZERO" | "LOW" | "OK"; unitPriceMinor: number; valueMinor: number; costValueMinor?: number }
 interface StockData { location: { id: string; name: string }; rows: StockRow[]; totals: { items: number; low: number; empty: number; valueMinor: number; costValueMinor?: number } }
 interface SalesTotals { count: number; totalMinor: number; cashMinor: number; gcashMinor: number; creditMinor: number; otherMinor: number; costMinor?: number; grossProfitMinor?: number }
-interface SalesData { location: { id: string; name: string }; from: string; to: string; sales: SalesTotals; cashInMinor: number; creditGivenMinor: number; creditCollectedMinor: number; items: { name: string; unit: string; quantity: number; salesMinor: number }[]; days: { date: string; count: number; totalMinor: number }[] }
+interface SalesData { location: { id: string; name: string }; from: string; to: string; sales: SalesTotals; cashInMinor: number; creditGivenMinor: number; creditCollectedMinor: number; items: { name: string; unit: string; quantity: number; salesMinor: number; profitMinor?: number }[]; days: { date: string; count: number; totalMinor: number }[] }
 interface CompareData { from: string; to: string; stores: { location: { id: string; name: string; type: string }; sales: SalesTotals; cashInMinor: number; creditGivenMinor: number; creditCollectedMinor: number; stock: { items: number; low: number; empty: number; valueMinor: number }; owesMinor: number }[]; total: { salesMinor: number; count: number; grossProfitMinor: number; creditGivenMinor: number; stockValueMinor: number; owesMinor: number } }
 interface BufferData { buffer: { id: string; name: string } | null; owed: { productId: string; name: string; unit: string; quantity: number; valueMinor: number; oldestAt: string | null }[]; surplus: { productId: string; name: string; unit: string; quantity: number }[]; totals: { owedMinor: number; owedItems: number }; entries: { at: string; productName: string; unit: string; quantity: number; orderNumber: string | null; store: string | null; by: string | null; what: string }[] }
 interface RecordRow { at: string; kind: "SALE" | "STOCK" | "MONEY"; title: string; detail: string; store: string | null; docNumber: string | null; amountMinor: number | null; qtyText: string | null; balanceText: string | null; by: string | null }
 interface DaySection { location: { id: string; name: string }; locked: boolean; closedAt: string | null; cashCountedMinor: number | null; cashVarianceMinor: number | null; sales: { count: number; totalMinor: number; cashMinor: number; gcashMinor: number; utangMinor: number }; cash: { expectedMinor: number }; utang: { givenMinor: number; collectedMinor: number }; stockIn: { documents: number; units: number }; kilosByVariety: { variety: string; grams: number; salesMinor: number }[] }
+
+/** Best-first by amount, quantity or profit; or the slowest sellers first. */
+function rankedItems<T extends { quantity: number; salesMinor: number; profitMinor?: number }>(items: T[], by: "sales" | "qty" | "profit" | "slow"): T[] {
+  const list = [...items];
+  if (by === "qty") return list.sort((a, b) => b.quantity - a.quantity);
+  if (by === "profit") return list.sort((a, b) => (b.profitMinor ?? 0) - (a.profitMinor ?? 0));
+  if (by === "slow") return list.sort((a, b) => a.salesMinor - b.salesMinor);
+  return list.sort((a, b) => b.salesMinor - a.salesMinor);
+}
+
+/** Add the days up into weeks (starting Monday) or months. */
+function groupDays(days: { date: string; count: number; totalMinor: number }[], by: "day" | "week" | "month") {
+  if (by === "day") return days.map((d) => ({ label: d.date, count: d.count, totalMinor: d.totalMinor }));
+  const out = new Map<string, { label: string; count: number; totalMinor: number }>();
+  for (const d of days) {
+    const dt = new Date(`${d.date}T00:00:00Z`);
+    const key = by === "month" ? d.date.slice(0, 7) : new Date(dt.getTime() - ((dt.getUTCDay() + 6) % 7) * 86_400_000).toISOString().slice(0, 10);
+    const cur = out.get(key) ?? { label: by === "month" ? key : `Week of ${key}`, count: 0, totalMinor: 0 };
+    cur.count += d.count; cur.totalMinor += d.totalMinor;
+    out.set(key, cur);
+  }
+  return [...out.entries()].sort((a, b) => (a[0] < b[0] ? 1 : -1)).map(([, v]) => v);
+}
 
 const qtyText = (r: StockRow) => (r.loose ? kgText(r.onHand) : `${r.onHand.toLocaleString("en-PH")} pcs`);
 const flagBadge = (f: StockRow["flag"]) => (f === "ZERO" ? <span className="badge text-bg-danger">Out</span> : f === "LOW" ? <span className="badge text-bg-warning">Low</span> : null);
@@ -45,6 +68,8 @@ export default function StoreReportPanel({ role, onNavigate }: { role?: string; 
   const [locationId, setLocationId] = useState("");
   const [from, setFrom] = useState(today());
   const [to, setTo] = useState(today());
+  const [sortBy, setSortBy] = useState<"sales" | "qty" | "profit" | "slow">("sales");
+  const [group, setGroup] = useState<"day" | "week" | "month">("day");
   const [stock, setStock] = useState<StockData | null>(null);
   const [sales, setSales] = useState<SalesData | null>(null);
   const [compare, setCompare] = useState<CompareData | null>(null);
@@ -128,12 +153,12 @@ export default function StoreReportPanel({ role, onNavigate }: { role?: string; 
     };
     printSlip(s);
   };
-  const printSales = () => {
+  const printSales = (a4 = false) => {
     if (!sales) return;
     printSlip({
-      storeName: sales.location.name, title: "SALES", when: sales.from === sales.to ? sales.from : `${sales.from} to ${sales.to}`,
+      storeName: sales.location.name, title: "SALES", when: sales.from === sales.to ? sales.from : `${sales.from} to ${sales.to}`, a4,
       lines: [{ label: "Sales", value: String(sales.sales.count) }],
-      rows: sales.items.map((i) => ({ name: i.name, qty: i.unit === "kg" ? `${i.quantity} kg` : String(i.quantity), note: peso(i.salesMinor) })),
+      rows: rankedItems(sales.items, sortBy).map((i) => ({ name: i.name, qty: i.unit === "kg" ? `${i.quantity} kg` : String(i.quantity), note: peso(i.salesMinor) })),
       totals: [{ label: "Cash", value: peso(sales.sales.cashMinor) }, { label: "GCash", value: peso(sales.sales.gcashMinor) }, { label: "Credit", value: peso(sales.sales.creditMinor) }, { label: "Maya/bank/other", value: peso(sales.sales.otherMinor) }, { label: "Total", value: peso(sales.sales.totalMinor) }],
     });
   };
@@ -181,7 +206,9 @@ export default function StoreReportPanel({ role, onNavigate }: { role?: string; 
           {range && <div><label className="form-label small mb-1" htmlFor="sr-to">To</label><input id="sr-to" type="date" className="form-control" value={to} min={from} max={today()} onChange={(e) => setTo(e.target.value)} /></div>}
           {range && <div className="btn-group">
             <button type="button" className="btn btn-outline-secondary" onClick={() => { setFrom(today()); setTo(today()); }}>Today</button>
+            {tab === "sales" && <button type="button" className="btn btn-outline-secondary" onClick={() => { const d = new Date(Date.now() + 8 * 3_600_000); const back = (d.getUTCDay() + 6) % 7; setFrom(new Date(d.getTime() - back * 86_400_000).toISOString().slice(0, 10)); setTo(today()); }}>This week</button>}
             <button type="button" className="btn btn-outline-secondary" onClick={() => { const d = new Date(Date.now() + 8 * 3_600_000); const m = d.toISOString().slice(0, 7); setFrom(`${m}-01`); setTo(today()); }}>This month</button>
+            {tab === "sales" && <button type="button" className="btn btn-outline-secondary" onClick={() => { const d = new Date(Date.now() + 8 * 3_600_000); setFrom(`${d.toISOString().slice(0, 4)}-01-01`); setTo(today()); }}>This year</button>}
           </div>}
         </div>
       )}
@@ -228,14 +255,28 @@ export default function StoreReportPanel({ role, onNavigate }: { role?: string; 
             <div className="col-6 col-md-3"><div className="border rounded p-2"><div className="small text-muted">Maya / bank / other</div><div className="fs-5">{peso(sales.sales.otherMinor)}</div></div></div>
           </div>
           <div className="small mb-3">Cash received {peso(sales.cashInMinor)} · Credit collected {peso(sales.creditCollectedMinor)}{owner && sales.sales.grossProfitMinor !== undefined ? <> · <span className={sales.sales.grossProfitMinor < 0 ? "text-danger fw-bold" : "text-success fw-bold"}>Profit {peso(sales.sales.grossProfitMinor)}</span></> : null}</div>
-          <h6>Items sold</h6>
+          <div className="d-flex flex-wrap align-items-center gap-2 mb-1">
+            <h6 className="mb-0 me-auto">Items sold — {sortBy === "slow" ? "slowest first" : "best first"}</h6>
+            <select className="form-select form-select-sm w-auto" aria-label="Rank by" value={sortBy} onChange={(e) => setSortBy(e.target.value as typeof sortBy)}>
+              <option value="sales">Best by amount</option><option value="qty">Best by quantity</option>
+              {owner && <option value="profit">Best by profit</option>}<option value="slow">Slowest sellers</option>
+            </select>
+          </div>
           {sales.items.length === 0 ? <p className="text-muted small">No sales in this period.</p> : (
-            <table className="table table-sm"><thead><tr><th>Item</th><th className="text-end">Sold</th><th className="text-end">Amount</th></tr></thead>
-              <tbody>{sales.items.map((i) => <tr key={i.name}><td>{i.name}</td><td className="text-end">{i.unit === "kg" ? `${i.quantity.toLocaleString("en-PH", { maximumFractionDigits: 3 })} kg` : i.quantity}</td><td className="text-end">{peso(i.salesMinor)}</td></tr>)}</tbody></table>
+            <table className="table table-sm"><thead><tr><th>#</th><th>Item</th><th className="text-end">Sold</th><th className="text-end">Amount</th>{owner && <th className="text-end">Profit</th>}</tr></thead>
+              <tbody>{rankedItems(sales.items, sortBy).map((i, n) => <tr key={i.name}><td className="text-muted">{n + 1}</td><td>{i.name}</td><td className="text-end">{i.unit === "kg" ? `${i.quantity.toLocaleString("en-PH", { maximumFractionDigits: 3 })} kg` : i.quantity}</td><td className="text-end">{peso(i.salesMinor)}</td>{owner && <td className="text-end">{i.profitMinor !== undefined ? peso(i.profitMinor) : ""}</td>}</tr>)}</tbody></table>
           )}
-          {sales.days.length > 1 && (<><h6>By day</h6>
-            <table className="table table-sm"><tbody>{sales.days.map((d) => <tr key={d.date}><td>{d.date}</td><td className="text-end">{d.count} sales</td><td className="text-end">{peso(d.totalMinor)}</td></tr>)}</tbody></table></>)}
-          <button type="button" className="btn btn-outline-dark" onClick={printSales} disabled={!sales.sales.count}>Print</button>
+          {sales.days.length > 1 && (<>
+            <div className="d-flex align-items-center gap-2 mb-1"><h6 className="mb-0 me-auto">Sales by</h6>
+              <div className="btn-group btn-group-sm" role="group" aria-label="Group by">
+                {(["day", "week", "month"] as const).map((g) => <button key={g} type="button" className={`btn ${group === g ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setGroup(g)}>{g[0]!.toUpperCase() + g.slice(1)}</button>)}
+              </div>
+            </div>
+            <table className="table table-sm"><tbody>{groupDays(sales.days, group).map((d) => <tr key={d.label}><td>{d.label}</td><td className="text-end">{d.count} sales</td><td className="text-end">{peso(d.totalMinor)}</td></tr>)}</tbody></table></>)}
+          <div className="d-flex gap-2">
+            <button type="button" className="btn btn-outline-dark" onClick={() => printSales(false)} disabled={!sales.sales.count}>Print slip</button>
+            <button type="button" className="btn btn-outline-dark" onClick={() => printSales(true)} disabled={!sales.sales.count}><i className="bi bi-file-earmark-pdf me-1"></i>Print / PDF (A4)</button>
+          </div>
         </>
       )}
 
