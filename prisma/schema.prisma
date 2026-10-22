@@ -797,6 +797,7 @@ model Warehouse {
   address   String? // M1: where the kargador goes
   isActive  Boolean      @default(true) // M1: inactive locations keep history but take no new stock
   needsReview Boolean    @default(false) // added by counter staff on the spot — the owner checks it
+  consignment Boolean    @default(false) // sells the main store's rice: each sale charges the main store's cost to its Store payable
   createdAt DateTime     @default(now())
   updatedAt DateTime     @updatedAt
 
@@ -2220,6 +2221,7 @@ model StorePayableEntry {
   quantity         Int? // stock units (loose rice: grams)
   unitCostMinor    Int? // cost at the time (loose rice: per kilo)
   sourceLocationId String? // the store the rice was taken from
+  orderId          String? // the sale this charge came from (so a void or a return can reduce it)
   sourceLineId     String?  @unique // the count line this charge came from (so it is charged once)
   reversesId       String?  @unique // the entry this one undoes
   note             String?

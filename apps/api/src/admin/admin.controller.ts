@@ -1202,7 +1202,7 @@ export class AdminController {
   @Post("warehouses")
   async createWarehouse(
     @Req() req: Request & { user?: AuthPrincipal },
-    @Body() body: { name: string; type?: string; code?: string | null; address?: string | null },
+    @Body() body: { name: string; type?: string; code?: string | null; address?: string | null; consignment?: boolean },
     @Headers("x-store-id") headerStoreId?: string,
   ) {
     const user = req.user;
@@ -1213,6 +1213,7 @@ export class AdminController {
       type: body?.type,
       code: body?.code,
       address: body?.address,
+      consignment: typeof body?.consignment === "boolean" ? body.consignment : undefined,
     });
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
     return result.value;
@@ -1238,7 +1239,7 @@ export class AdminController {
   async updateWarehouse(
     @Req() req: Request & { user?: AuthPrincipal },
     @Param("id") id: string,
-    @Body() body: { name?: string; type?: string; code?: string | null; address?: string | null; isActive?: boolean; isDefault?: boolean; needsReview?: boolean },
+    @Body() body: { name?: string; type?: string; code?: string | null; address?: string | null; isActive?: boolean; isDefault?: boolean; needsReview?: boolean; consignment?: boolean },
     @Headers("x-store-id") headerStoreId?: string,
   ) {
     const user = req.user;
@@ -1252,6 +1253,7 @@ export class AdminController {
       isActive: typeof body?.isActive === "boolean" ? body.isActive : undefined,
       isDefault: typeof body?.isDefault === "boolean" ? body.isDefault : undefined,
       needsReview: typeof body?.needsReview === "boolean" ? body.needsReview : undefined,
+      consignment: typeof body?.consignment === "boolean" ? body.consignment : undefined,
     });
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
     return result.value;

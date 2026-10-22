@@ -12,6 +12,7 @@ import { shelfCostFor } from "../domain/shelf-cost.js";
 import { isLooseP } from "../domain/counting.js";
 import { nextDocNumber, type Actor } from "../people/people.service.js";
 import { txOptions } from "../persistence/tx-options.js";
+import { chargeAmount } from "./charges.js";
 
 export type PayableResult<T> = { ok: true; value: T } | { ok: false; error: ApiError };
 const invalid = (m: string) => ({ ok: false as const, error: { type: "validation" as const, errors: [m] } });
@@ -27,11 +28,6 @@ class StepError extends Error {
 
 const OWNERS = ["OWNER", "MANAGER", "STORE_OWNER", "PLATFORM_ADMIN"];
 const productSelect = { id: true, name: true, stockBaseUnit: true, stockBaseQuantity: true } as const;
-
-/** Peso value of `qty` stock units at `unitMinor` (loose rice: grams, cost per kilo). */
-export function chargeAmount(loose: boolean, qty: number, unitMinor: number): number {
-  return loose ? Math.round((qty * unitMinor) / 1000) : qty * unitMinor;
-}
 
 export class PayableService {
   private async run<T>(actor: Actor, fn: () => Promise<T>): Promise<PayableResult<T>> {
@@ -59,11 +55,24 @@ export class PayableService {
     return this.run(actor, async () => {
       const stores = await this.stores(storeId);
       const sums = await prisma.storePayableEntry.groupBy({ by: ["locationId", "kind"], where: { storeId }, _sum: { amountMinor: true } });
+      const week = Date.now() - 7 * 24 * 3600 * 1000;
+      const lastPay = new Map((await prisma.storePayableEntry.groupBy({ by: ["locationId"], where: { storeId, kind: "PAYMENT" }, _max: { createdAt: true } })).map((x) => [x.locationId, x._max.createdAt]));
+      const firstCharge = new Map((await prisma.storePayableEntry.groupBy({ by: ["locationId"], where: { storeId, kind: "CHARGE" }, _min: { createdAt: true } })).map((x) => [x.locationId, x._min.createdAt]));
+      const lastCount = new Map((await prisma.stockCount.groupBy({ by: ["locationId"], where: { storeId, status: "APPROVED" }, _max: { decidedAt: true } })).map((x) => [x.locationId, x._max.decidedAt]));
+      const consign = new Map((await prisma.warehouse.findMany({ where: { storeId }, select: { id: true, consignment: true } })).map((w) => [w.id, w.consignment]));
       const balances = stores.map((s) => {
         const mine = sums.filter((x) => x.locationId === s.id);
         const sum = (k: string) => mine.filter((x) => x.kind === k).reduce((a, x) => a + (x._sum.amountMinor ?? 0), 0);
-        return { id: s.id, name: s.name, code: s.code, isMain: s.isDefault, chargesMinor: sum("CHARGE"), paymentsMinor: -sum("PAYMENT"), reversedMinor: sum("REVERSAL"), owesMinor: mine.reduce((a, x) => a + (x._sum.amountMinor ?? 0), 0) };
+        return { id: s.id, name: s.name, code: s.code, isMain: s.isDefault, chargesMinor: sum("CHARGE"), paymentsMinor: -sum("PAYMENT"), reversedMinor: sum("REVERSAL"), owesMinor: mine.reduce((a, x) => a + (x._sum.amountMinor ?? 0), 0),
+          consignment: consign.get(s.id) === true, lastPaymentAt: lastPay.get(s.id) ?? null, lastCountAt: lastCount.get(s.id) ?? null,
+          weeklyDue: false, countDue: false };
       });
+      for (const b of balances) {
+        if (!b.consignment) continue;
+        const since = b.lastPaymentAt ?? firstCharge.get(b.id) ?? null;
+        b.weeklyDue = b.owesMinor > 0 && !!since && since.getTime() < week;
+        b.countDue = !b.lastCountAt || b.lastCountAt.getTime() < week;
+      }
       // Shortages found by approved counts that nobody has been charged for yet.
       const used = new Set((await prisma.storePayableEntry.findMany({ where: { storeId, sourceLineId: { not: null } }, select: { sourceLineId: true } })).map((x) => x.sourceLineId!));
       const lines = await prisma.stockCountLine.findMany({
@@ -185,6 +194,9 @@ export class PayableService {
       if (e.kind !== "CHARGE" && e.kind !== "PAYMENT") throw new StepError(conflict("This entry cannot be undone"));
       return prisma.$transaction(async (tx) => {
         if (await tx.storePayableEntry.findFirst({ where: { reversesId: e.id }, select: { id: true } })) throw new StepError(conflict("Already undone"));
+        if (e.kind === "CHARGE" && e.orderId && (await tx.storePayableEntry.findFirst({ where: { storeId, orderId: e.orderId, productId: e.productId, kind: "REVERSAL" }, select: { id: true } }))) {
+          throw new StepError(conflict("This sale was already voided or partly returned, so its charge cannot be undone by hand"));
+        }
         if (e.kind === "CHARGE") {
           const owes = (await tx.storePayableEntry.aggregate({ where: { storeId, locationId: e.locationId }, _sum: { amountMinor: true } }))._sum.amountMinor ?? 0;
           if (owes - e.amountMinor < 0) throw new StepError(conflict("Payments already cover this charge — undo the payment first"));
@@ -199,6 +211,32 @@ export class PayableService {
         await tx.auditLog.create({ data: { storeId, actorType: "USER", actorId: actor.userId, action: "payable.reverse", entityType: "StorePayableEntry", entityId: r.id, after: { reverses: e.docNumber, reason: why } } });
         return { id: r.id, docNumber };
       }, txOptions());
+    });
+  }
+
+  /** Per item: supplied − sold − returned − shortage = should be on the shelf, against what the system says is there. */
+  async reconcile(storeId: string, actor: Actor, locationId: string | undefined) {
+    return this.run(actor, async () => {
+      const store = (await this.stores(storeId)).find((s) => s.id === locationId);
+      if (!store) throw new StepError(invalid("Choose a store"));
+      const moves = await prisma.stockMovement.groupBy({ by: ["productId", "type"], where: { storeId, warehouseId: store.id }, _sum: { delta: true } });
+      const levels = await prisma.stockLevel.findMany({ where: { storeId, warehouseId: store.id }, select: { productId: true, quantityOnHand: true } });
+      const ids = [...new Set([...moves.map((m) => m.productId), ...levels.map((l) => l.productId)])];
+      const prods = new Map((await prisma.product.findMany({ where: { storeId, id: { in: ids } }, select: productSelect })).map((p) => [p.id, p]));
+      const charges = await prisma.storePayableEntry.groupBy({ by: ["productId"], where: { storeId, locationId: store.id, kind: { in: ["CHARGE", "REVERSAL"] }, productId: { not: null } }, _sum: { amountMinor: true } });
+      const owed = new Map(charges.map((c) => [c.productId!, c._sum.amountMinor ?? 0]));
+      const at = (pid: string, types: string[]) => moves.filter((m) => m.productId === pid && types.includes(m.type)).reduce((a, m) => a + (m._sum.delta ?? 0), 0);
+      const rows = ids.map((pid) => {
+        const p = prods.get(pid);
+        const supplied = at(pid, ["TRANSFER_IN", "RECEIVE_IN", "STOCK_IN", "RECEIPT"]);
+        const sold = Math.abs(at(pid, ["CONSUME"]));
+        const returned = at(pid, ["RETURN_IN", "VOID_RESTORE"]);
+        const movedBack = Math.abs(at(pid, ["TRANSFER_OUT"]));
+        const countFix = at(pid, ["COUNT_ADJUST", "ADJUST"]);
+        const onHand = levels.find((l) => l.productId === pid)?.quantityOnHand ?? 0;
+        return { productId: pid, name: p?.name ?? "", loose: p ? isLooseP(p) : false, supplied, sold, returned, movedBack, countFix, onHand, costOwedMinor: owed.get(pid) ?? 0 };
+      }).filter((r) => r.supplied || r.sold || r.onHand || r.countFix).sort((a, b) => a.name.localeCompare(b.name));
+      return { store: { id: store.id, name: store.name }, rows };
     });
   }
 

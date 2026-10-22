@@ -29,6 +29,8 @@ export interface LocationInput {
   isActive?: boolean;
   isDefault?: boolean;
   needsReview?: boolean;
+  /** Sells the main store's rice and owes its cost for every sale. */
+  consignment?: boolean;
 }
 
 function validateLocation(input: LocationInput, creating: boolean): string[] {
@@ -70,6 +72,7 @@ export class WarehouseService {
       isActive: w.isActive,
       isDefault: w.isDefault,
       needsReview: w.needsReview,
+      consignment: w.consignment,
       stockCount: w._count.stockLevels,
     }));
   }
@@ -97,6 +100,7 @@ export class WarehouseService {
         address: data.address?.trim() || null,
         isDefault: count === 0 && data.type !== "BUFFER",
         needsReview: data.needsReview === true,
+        consignment: data.consignment === true && data.type !== "BUFFER" && count > 0,
       },
     });
     return { ok: true, value: { id: warehouse.id } };
@@ -135,6 +139,7 @@ export class WarehouseService {
           ...(code !== undefined ? { code } : {}),
           ...(input.type !== undefined ? { type: input.type as LocationType } : {}),
           ...(input.needsReview !== undefined ? { needsReview: input.needsReview } : {}),
+          ...(input.consignment !== undefined ? { consignment: input.consignment && !current.isDefault && current.type !== "BUFFER" } : {}),
           ...(input.address !== undefined ? { address: input.address?.trim() || null } : {}),
           ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
           ...(input.isDefault === true ? { isDefault: true } : {}),

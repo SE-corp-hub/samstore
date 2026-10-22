@@ -10,6 +10,7 @@
 // step's signatures — all in ONE transaction, so a step either happens completely or
 // not at all. Short on a trip goes to the owner's "Para sa iyo".
 
+import { consignmentMain, reduceForReturn } from "../payable/charges.js";
 import type { ApiError } from "@sam-store/contracts";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../persistence/prisma-repositories.js";
@@ -388,6 +389,10 @@ export class TransferFlowService {
         });
         if (input.condition === "GOOD") {
           await addForTrip(tx, { storeId, productId: product.id, warehouseId: location.id, actorId: actor.userId, documentType: "RETURN", documentId: r.id, note: docNumber }, qty, "RETURN_IN");
+          // Good rice back at a consignment store is unsold again: its cost charge comes off.
+          if (order && (await consignmentMain(tx, storeId, location.id))) {
+            await reduceForReturn(tx, { storeId, orderId: order.id, productId: product.id, quantity: qty, actorId: actor.userId, docNumber });
+          }
         }
         const approval = await requestApproval(tx, {
           storeId, kind: "REFUND", documentType: "RETURN", documentId: r.id, locationId: location.id,

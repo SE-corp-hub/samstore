@@ -8,6 +8,7 @@
 //   Balance: expected = last count + every movement since; it must equal the system's shelf.
 //   Write-off: reason, optional photo, staff signs; the stock moves; over 1% → the owner.
 
+import { chargeCountShort } from "../payable/charges.js";
 import type { ApiError } from "@sam-store/contracts";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../persistence/prisma-repositories.js";
@@ -57,6 +58,8 @@ async function postCount(tx: Tx, storeId: string, countId: string, decidedById: 
     }
     await tx.stockCountLine.update({ where: { id: l.id }, data: { postedQty: delta } });
   }
+  // A consignment store pays the main store's cost for what is missing (the owner can undo it in Store payable).
+  await chargeCountShort(tx, { storeId, countId: count.id, countDoc: count.docNumber, locationId: count.locationId, actorId: decidedById });
   await tx.stockCount.update({ where: { id: countId }, data: { status: "APPROVED", decidedById, decidedAt: new Date() } });
 }
 

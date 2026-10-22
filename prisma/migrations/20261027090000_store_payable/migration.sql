@@ -10,6 +10,7 @@ CREATE TABLE "StorePayableEntry" (
     "quantity" INTEGER,
     "unitCostMinor" INTEGER,
     "sourceLocationId" TEXT,
+    "orderId" TEXT,
     "sourceLineId" TEXT,
     "reversesId" TEXT,
     "note" TEXT,
@@ -23,3 +24,4 @@ CREATE UNIQUE INDEX "StorePayableEntry_sourceLineId_key" ON "StorePayableEntry"(
 CREATE UNIQUE INDEX "StorePayableEntry_reversesId_key" ON "StorePayableEntry"("reversesId");
 CREATE UNIQUE INDEX "StorePayableEntry_storeId_docNumber_key" ON "StorePayableEntry"("storeId", "docNumber");
 CREATE INDEX "StorePayableEntry_storeId_locationId_createdAt_idx" ON "StorePayableEntry"("storeId", "locationId", "createdAt");
+CREATE INDEX "StorePayableEntry_storeId_orderId_idx" ON "StorePayableEntry"("storeId", "orderId");

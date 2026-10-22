@@ -24,6 +24,7 @@ import { cacheBust, cacheKey } from "../persistence/ttl-cache.js";
 import { PrismaOrderSequenceRepository } from "../persistence/prisma-repositories.js";
 import { randomId } from "../persistence/repositories.js";
 import { addForTrip, deductStock, InsufficientStockError, recordMovement, releaseForTrip, reserveForTrip, unreserveForTrip, type TripLeg } from "../domain/movements.js";
+import { chargeSale } from "../payable/charges.js";
 import { coverShortage, deductWithBuffer } from "../domain/buffer.js";
 import { formatOrderNumber } from "../domain/order-number.js";
 import { resolveLinePrice, PriceOverrideError } from "../domain/price-override.js";
@@ -103,6 +104,8 @@ export interface BentaSaleView {
   releases: { id: string; docNumber: string }[];
   /** Rice Ops M8 — the zero check: items this sale emptied here ("May natira pa ba?"). */
   zeroCheck: { productId: string; name: string }[];
+  /** Consignment store: items sold for less than the main store's cost (a warning, not a block). */
+  belowCost: string[];
 }
 
 const PAY_CODE: Record<PayMethod, string> = { cash: "cash", gcash: "gcash", utang: "credit" };
@@ -228,7 +231,7 @@ export class BentaService {
       locationId: o.sellingLocationId ?? "", occurredAt: (o.occurredAt ?? o.createdAt).toISOString(), encodedLater: o.encodedLater, replayed: true,
       lines: o.items.map((i) => ({ productId: i.productId ?? "", name: i.productName, soldBy: i.soldBy, quantity: i.quantity, grams: i.grams, unitPriceMinor: i.unitPriceMinor, lineTotalMinor: i.lineTotalMinor, enteredAmountMinor: i.enteredAmountMinor, sourceLocationId: i.sourceLocationId })),
       releases: o.stockTransfers.map((t) => ({ id: t.id, docNumber: t.docNumber ?? "" })),
-      zeroCheck: [],
+      zeroCheck: [], belowCost: [],
     };
   }
 
@@ -322,7 +325,7 @@ export class BentaService {
       const prepared = waitOwner ? null : await prepareTenders({ storeId, orderId, targetMinor: subtotal, storeCustomerId, tenders: [tender], requireFullCoverage: true });
       if (prepared && !prepared.ok) throw new StepError(prepared);
       const plan = prepared?.ok ? prepared.value : null;
-      const outcome = { approvalId: null as string | null, smsStatus: null as string | null };
+      const outcome = { approvalId: null as string | null, smsStatus: null as string | null, belowCost: [] as string[] };
 
       const shelfCosts = await Promise.all(priced.map((l) => shelfCostFor(prisma, storeId, l.product.id, l.sourceLocationId ?? loc.id)));
       const items = priced.map((l, idx) => ({
@@ -396,6 +399,12 @@ export class BentaService {
               await coverShortage(tx, storeId, { productId: l.product.id, warehouseId: l.sourceLocationId!, needed: l.stockQty, actorId: actor.userId, documentType: "SALE", documentId: orderId, reason: `sale ${orderNumber}` });
               await deductStock(tx, storeId, [{ productId: l.product.id, quantity: l.stockQty }], { type: "CONSUME", orderId, createdBy: actor.userId, warehouseId: l.sourceLocationId!, documentType: "SALE", documentId: orderId });
             }
+            // A consignment store owes the main store's cost for what it sells.
+            const charged = await chargeSale(tx, {
+              storeId, orderId, orderNumber, locationId: loc.id, actorId: actor.userId,
+              lines: priced.map((l) => ({ productId: l.product.id, productName: l.product.name, quantity: l.stockQty, loose: isLoose(l.product), lineTotalMinor: l.lineTotalMinor })),
+            });
+            outcome.belowCost = charged.belowCost;
             if (method === "utang" && storeCustomerId) {
               // The text carries the balance this transaction just wrote.
               const bal = await tx.storeCustomer.findUniqueOrThrow({ where: { id: storeCustomerId }, select: { creditBalanceMinor: true } });
@@ -432,6 +441,7 @@ export class BentaService {
         occurredAt: (paper?.occurredAt ?? now).toISOString(), encodedLater: !!paper, replayed: false,
         lines: items.map((i) => ({ productId: i.productId, name: i.productName, soldBy: i.soldBy, quantity: i.quantity, grams: i.grams, unitPriceMinor: i.unitPriceMinor, lineTotalMinor: i.lineTotalMinor, enteredAmountMinor: i.enteredAmountMinor, sourceLocationId: i.sourceLocationId })),
         releases,
+        belowCost: outcome.belowCost,
         zeroCheck: emptied.filter((e) => products.get(e.productId)?.trackStock !== false).map((e) => ({ productId: e.productId, name: products.get(e.productId)?.name ?? "" })),
       };
       return view;

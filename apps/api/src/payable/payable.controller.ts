@@ -46,6 +46,13 @@ export class PayableController {
     return unwrap(await this.payable.summary(storeId, actor));
   }
 
+  /** GET /admin/payable/reconcile?locationId= — supplied, sold, returned, short, on hand: per item. */
+  @Get("reconcile")
+  async reconcile(@Req() req: Req_, @Query("locationId") locationId?: string, @Headers("x-store-id") h?: string) {
+    const { storeId, actor } = await this.ctx(req, h);
+    return unwrap(await this.payable.reconcile(storeId, actor, locationId));
+  }
+
   /** GET /admin/payable/statement?locationId= — one store's statement with a running balance. */
   @Get("statement")
   async statement(@Req() req: Req_, @Query("locationId") locationId?: string, @Headers("x-store-id") h?: string) {

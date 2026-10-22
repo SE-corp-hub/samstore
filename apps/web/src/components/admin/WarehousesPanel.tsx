@@ -19,6 +19,7 @@ interface Location {
   isActive: boolean;
   isDefault: boolean;
   needsReview?: boolean;
+  consignment?: boolean;
   stockCount: number;
 }
 interface Transfer {
@@ -47,7 +48,7 @@ type ApiBody = { message?: string; errors?: string[]; prices?: PriceRow[] };
 
 const peso = (minor: number) => `₱${(minor / 100).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const label = (l: { name: string; code: string | null }) => (l.code ? `${l.code} · ${l.name}` : l.name);
-const emptyForm = { name: "", code: "", type: "STORE" as LocationType, address: "" };
+const emptyForm = { name: "", code: "", type: "STORE" as LocationType, address: "", consignment: false };
 const errorText = (d: ApiBody, fallback: string) => d?.errors?.join(", ") ?? d?.message ?? fallback;
 
 async function call(url: string, method: string, body?: unknown): Promise<{ ok: boolean; data: ApiBody }> {
@@ -120,7 +121,7 @@ export default function WarehousesPanel() {
     e.preventDefault();
     setSaving(true);
     setError(null);
-    const body = { name: form.name, code: form.code || null, type: form.type, address: form.address || null };
+    const body = { name: form.name, code: form.code || null, type: form.type, address: form.address || null, consignment: form.consignment };
     const { ok, data } = editingId
       ? await call(`${API_URL}/admin/warehouses/${editingId}`, "PATCH", body)
       : await call(`${API_URL}/admin/warehouses`, "POST", body);
@@ -142,7 +143,7 @@ export default function WarehousesPanel() {
 
   const startEdit = (l: Location) => {
     setEditingId(l.id);
-    setForm({ name: l.name, code: l.code ?? "", type: l.type, address: l.address ?? "" });
+    setForm({ name: l.name, code: l.code ?? "", type: l.type, address: l.address ?? "", consignment: l.consignment === true });
   };
 
   const request = async (e: React.FormEvent) => {
@@ -225,6 +226,14 @@ export default function WarehousesPanel() {
                     <option value="BUFFER">Buffer store (covers shortages, no limit)</option>
                   </select>
                 </div>
+                {form.type === "STORE" && (
+                  <div className="col-12">
+                    <div className="form-check">
+                      <input id="loc-consign" type="checkbox" className="form-check-input" checked={form.consignment} onChange={(e) => setForm({ ...form, consignment: e.target.checked })} />
+                      <label className="form-check-label small" htmlFor="loc-consign">Consignment store: sells the main store&apos;s rice and owes its cost for each sale</label>
+                    </div>
+                  </div>
+                )}
                 <div className="col-12">
                   <label className="form-label small mb-1" htmlFor="loc-address">Address (for the porter)</label>
                   <input id="loc-address" className="form-control form-control-sm" placeholder="Street, barangay" value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} maxLength={300} />
@@ -296,7 +305,7 @@ export default function WarehousesPanel() {
                       <div>
                         <div className="fw-semibold">{label(l)}</div>
                         <div className="small text-muted">
-                          {l.type === "WAREHOUSE" ? "Warehouse" : l.type === "BUFFER" ? "Buffer" : "Store"} · {l.stockCount} products stocked
+                          {l.type === "WAREHOUSE" ? "Warehouse" : l.type === "BUFFER" ? "Buffer" : l.consignment ? "Consignment store" : "Store"} · {l.stockCount} products stocked
                           {l.isDefault && <span className="badge text-bg-primary ms-2">Default</span>}
                           {!l.isActive && <span className="badge text-bg-secondary ms-2">Switched off</span>}
                           {l.needsReview && <span className="badge text-bg-warning ms-2">Added by staff — please check</span>}

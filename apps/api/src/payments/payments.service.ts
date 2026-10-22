@@ -5,6 +5,7 @@
 // - Void (same-day, unfulfilled POS sale): reverses the sale, restores stock, order → CANCELLED.
 // - Refund: negative Payment + order → CANCELLED with reason (audited).
 
+import { reverseSaleCharges } from "../payable/charges.js";
 import { prisma } from "../persistence/prisma-repositories.js";
 import { randomId } from "../persistence/repositories.js";
 import { restoreStock } from "../domain/movements.js";
@@ -343,6 +344,7 @@ export class PaymentsService {
         await restoreStock(tx, storeId, order.items.map((it) => ({ productId: it.productId ?? "", quantity: it.quantity })), { type: "VOID_RESTORE", orderId, createdBy: actorId });
       }
       await tx.order.update({ where: { id: orderId }, data: { status: "CANCELLED", paymentStatus: "CANCELLED_REFUND" } });
+      await reverseSaleCharges(tx, storeId, orderId, actorId, reason?.trim() || "sale voided");
       await tx.payment.create({
         data: { orderId, storeId, method: "cash", amountMinor: 0, note: `VOID: ${reason?.trim() ?? "same-day void"}`.slice(0, 200), type: "void", createdBy: actorId, registerSessionId: await this.registers.attachOpenSession(storeId) },
       });

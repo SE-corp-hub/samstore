@@ -107,7 +107,7 @@ export default function BentaPanel() {
   const [slipTime, setSlipTime] = useState("");
   const [slipPhoto, setSlipPhoto] = useState<string | null>(null);
   const [staffSig, setStaffSig] = useState<string | null>(null);
-  const [last, setLast] = useState<{ status: "COMPLETED" | "WAITING_OWNER" | "DECLINED"; smsStatus: string | null; orderNumber: string; totalMinor: number; changeMinor: number; lines: { name: string; soldBy: string | null; quantity: number; grams: number | null; lineTotalMinor: number }[]; releases: { docNumber: string }[]; zeroCheck: { productId: string; name: string }[] } | null>(null);
+  const [last, setLast] = useState<{ status: "COMPLETED" | "WAITING_OWNER" | "DECLINED"; smsStatus: string | null; orderNumber: string; totalMinor: number; changeMinor: number; lines: { name: string; soldBy: string | null; quantity: number; grams: number | null; lineTotalMinor: number }[]; releases: { docNumber: string }[]; zeroCheck: { productId: string; name: string }[]; belowCost?: string[] } | null>(null);
   const [checking, setChecking] = useState<{ productId: string; name: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -299,6 +299,9 @@ export default function BentaPanel() {
               if (!textInfo.phone) void fetch(`${API_URL}/admin/customers/${textInfo.customerId}`, { method: "PATCH", headers: { "Content-Type": "application/json", ...adminHeaders() }, body: JSON.stringify({ phone }) }).catch(() => {});
             }}><i className="bi bi-chat-dots me-1"></i>Text customer</button>
           </div></div>
+        )}
+        {(last.belowCost?.length ?? 0) > 0 && (
+          <div className="alert alert-warning">Sold below Store 1&apos;s cost: {last.belowCost!.join(", ")}. This store still owes the full cost — check the price.</div>
         )}
         {checking ? (
           <QuickCount productId={checking.productId} name={checking.name} loose={!!byId.get(checking.productId)?.loose} locationId={locationId}

@@ -18,7 +18,7 @@ import { PesoInput, KiloInput, WholeInput } from "../NumberBoxes";
 const peso = (m: number) => `₱${(m / 100).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const qtyText = (loose: boolean, q: number) => (loose ? `${(q / 1000).toLocaleString("en-PH", { maximumFractionDigits: 3 })} kg` : `${q.toLocaleString("en-PH")} pcs`);
 
-interface Bal { id: string; name: string; code: string | null; isMain: boolean; chargesMinor: number; paymentsMinor: number; reversedMinor: number; owesMinor: number }
+interface Bal { id: string; name: string; code: string | null; isMain: boolean; chargesMinor: number; paymentsMinor: number; reversedMinor: number; owesMinor: number; consignment?: boolean; lastPaymentAt?: string | null; lastCountAt?: string | null; weeklyDue?: boolean; countDue?: boolean }
 interface ToCharge { lineId: string; countDoc: string; countedAt: string | null; atId: string; at: string; productId: string; name: string; loose: boolean; quantity: number; unitCostMinor: number; amountMinor: number }
 interface Entry { id: string; docNumber: string; kind: string; locationId: string; store: string; amountMinor: number; productName: string | null; loose: boolean; quantity: number | null; unitCostMinor: number | null; note: string | null; by: string | null; at: string; reversed: boolean; canReverse: boolean }
 interface Summary { stores: Bal[]; toAssign: ToCharge[]; entries: Entry[]; totalOwesMinor: number }
@@ -41,6 +41,12 @@ export default function PayablePanel() {
   const [payAmount, setPayAmount] = useState("");
   const [payNote, setPayNote] = useState("");
   const [adding, setAdding] = useState(false);
+  const [recon, setRecon] = useState<{ store: { name: string }; rows: { productId: string; name: string; loose: boolean; supplied: number; sold: number; returned: number; movedBack: number; countFix: number; onHand: number; costOwedMinor: number }[] } | null>(null);
+  const checkShelf = async (s: Bal) => {
+    const r = await call(`/admin/payable/reconcile?locationId=${encodeURIComponent(s.id)}`, "GET");
+    if (!r.ok) { setError(errText(r.data, "Could not check the shelf")); return; }
+    setRecon(r.data as unknown as NonNullable<typeof recon>);
+  };
   const [add, setAdd] = useState({ productId: "", qty: "", note: "" });
 
   const load = useCallback(async () => {
@@ -109,15 +115,35 @@ export default function PayablePanel() {
               <div className="small text-muted">{s.name} owes</div>
               <div className="fs-3 fw-semibold">{peso(s.owesMinor)}</div>
               <div className="small text-muted mb-2">Charged {peso(s.chargesMinor)} · Paid {peso(s.paymentsMinor)}</div>
+              {(s.weeklyDue || s.countDue) && (
+                <div className="mb-2">
+                  {s.weeklyDue && <span className="badge text-bg-danger me-1">Weekly payment due</span>}
+                  {s.countDue && <span className="badge text-bg-warning">Count the shelf this week</span>}
+                </div>
+              )}
               <div className="d-flex gap-2">
                 <button type="button" className="btn btn-success" disabled={s.owesMinor <= 0} onClick={() => { setPaying(s); setPayAmount(""); setPayNote(""); }}>Record payment</button>
                 <button type="button" className="btn btn-outline-dark" onClick={() => void statement(s)}>Print statement</button>
+                <button type="button" className="btn btn-outline-dark" onClick={() => void checkShelf(s)}>Check shelf</button>
               </div>
             </div>
           </div>
         ))}
         {others.length === 0 && <p className="text-muted">Add another store in Warehouses first.</p>}
       </div>
+
+      {recon && (
+        <div className="border rounded p-3 mb-3">
+          <div className="d-flex justify-content-between mb-2"><div className="fw-semibold">{recon.store.name}: supplied − sold − returned − moved back ± count = on shelf</div><button type="button" className="btn btn-sm btn-outline-secondary" onClick={() => setRecon(null)}>Close</button></div>
+          <div className="table-responsive"><table className="table table-sm mb-0">
+            <thead><tr><th>Item</th><th className="text-end">Supplied</th><th className="text-end">Sold</th><th className="text-end">Returned</th><th className="text-end">Moved back</th><th className="text-end">Count fix</th><th className="text-end">On shelf</th><th className="text-end">Cost owed</th></tr></thead>
+            <tbody>{recon.rows.map((r) => {
+              const f = (n: number) => (r.loose ? `${(n / 1000).toLocaleString(undefined, { maximumFractionDigits: 3 })} kg` : n.toLocaleString());
+              return <tr key={r.productId}><td>{r.name}</td><td className="text-end">{f(r.supplied)}</td><td className="text-end">{f(r.sold)}</td><td className="text-end">{f(r.returned)}</td><td className="text-end">{f(r.movedBack)}</td><td className={`text-end ${r.countFix < 0 ? "text-danger" : ""}`}>{f(r.countFix)}</td><td className="text-end fw-semibold">{f(r.onHand)}</td><td className="text-end">{peso(r.costOwedMinor)}</td></tr>;
+            })}</tbody>
+          </table></div>
+        </div>
+      )}
 
       {paying && (
         <div className="border rounded p-3 mb-3 bg-body-tertiary">
