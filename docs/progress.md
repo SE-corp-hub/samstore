@@ -18,6 +18,8 @@
 
 **Shop database report (22 Oct, 23:02, read only, new `check-shop-state.bat` writes `go-live\shop-state.txt`):** 87 of 89 migrations applied; the 2 pending are `count_reasons` and `count_look`. The locations dry run would give the default location "Main Warehouse" the code S1 and create Store 2, Store 3 and Warehouse; the owner has to say whether "Main Warehouse" is Store 1 or the warehouse. Nothing was changed.
 
+**Applied to the shop database (22 Oct, 23:13, after the owner's yes in chat; a backup from 22:27 existed):** the 2 pending migrations (`count_reasons`, `count_look`; "Database schema is up to date!") and the locations setup: "Main Warehouse" is Store 1 (renamed, code S1), and Store 2 (S2), Store 3 (S3) and Warehouse (WH) were created. A read-only reconcile afterwards found one old known drift: `KAPE-001` has 42 on hand but the ledger implies 121 (old test activity, already described in this log; not caused by today's changes; the planned fix is `npm run ledger:rebase -- --store sam-store`, dry run first, together with the real opening count). Nothing was deployed to production.
+
 **Still for the owner/person:** choose the second-copy folder and check the 21:30 backup ran (`backup-status.bat`); `verify-beta.bat`; phone test sections G to N; real data CSVs; production settings; apply the last two migrations after a backup; locations; usability check; sign-off; deploy only after "yes" in chat.
 
 ## Fixes from the guide review, and four new features (2026-10-22, evening)
