@@ -8,6 +8,7 @@
 //   2. if yes: db:backup (must say BACKUP OK) → db:doctor --stop-stuck → migrate deploy
 //   3. db:generate, typecheck
 //   4. the Rice Ops tests (pure + live-DB), one file at a time
+// (verify-beta.bat runs the same steps on the BETA database only: no backup, log in verify-logs/latest-beta.txt.)
 // Everything is printed AND written to verify-logs/latest.txt (plus a dated copy), so
 // Claude can read the result from this folder. The scripts it runs never print the
 // database password (backup/doctor mask it; Prisma prints the host only).
@@ -18,9 +19,21 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+
+/** verify-beta.bat: the same full check, but on the BETA database only (no backup, no stopping sessions). Only scripts/verify-beta.mjs may start this, because it proves the address is not the shop's. */
+const BETA = process.argv.includes("--beta");
+if (BETA && process.env.VERIFY_TARGET !== "beta") {
+  console.error("Run verify-beta.bat for the beta database. This script will not take the beta database address from anywhere else.");
+  process.exit(2);
+}
+if (BETA && !process.env.DATABASE_URL) {
+  console.error("No beta database address was passed in. Run verify-beta.bat.");
+  process.exit(2);
+}
+const TAG = BETA ? " (BETA DATABASE)" : "";
 const logDir = join(root, "verify-logs");
 mkdirSync(logDir, { recursive: true });
-const latest = join(logDir, "latest.txt");
+const latest = join(logDir, BETA ? "latest-beta.txt" : "latest.txt"); // the beta run never overwrites the shop's log
 const log = createWriteStream(latest, { flags: "w" });
 const started = new Date();
 
@@ -96,10 +109,11 @@ function run(label, cmd) {
 }
 
 async function main() {
-  out(`VERIFY started ${started.toISOString()} in ${root}\n`);
+  out(`VERIFY started ${started.toISOString()} in ${root}${TAG}\n`);
+  if (BETA) out("BETA MODE: every database step below runs on the BETA database. The shop's database is not touched, and no backup is taken.\n");
   const results = [];
   const fail = (step) => {
-    out(`\nVERIFY RESULT: FAIL at "${step}"\n`);
+    out(`\nVERIFY RESULT: FAIL at "${step}"${TAG}\n`);
     results.push(`${step}: FAIL`);
     return 1;
   };
@@ -110,12 +124,14 @@ async function main() {
   results.push(`migrations pending: ${pending ? "yes" : "no"}`);
 
   if (pending) {
-    const backup = await run("backup (required before any database change)", "npm run db:backup");
-    if (backup.code !== 0 || !/BACKUP OK/.test(backup.text)) return fail("backup");
-    results.push("backup: OK");
-    const doctor = await run("database doctor", "npm run db:doctor -- --stop-stuck");
-    if (doctor.code !== 0) return fail("db:doctor");
-    const deploy = await run("apply migrations", "npx prisma migrate deploy");
+    if (!BETA) {
+      const backup = await run("backup (required before any database change)", "npm run db:backup");
+      if (backup.code !== 0 || !/BACKUP OK/.test(backup.text)) return fail("backup");
+      results.push("backup: OK");
+      const doctor = await run("database doctor", "npm run db:doctor -- --stop-stuck");
+      if (doctor.code !== 0) return fail("db:doctor");
+    }
+    const deploy = await run(BETA ? "apply migrations (beta database)" : "apply migrations", "npx prisma migrate deploy");
     if (deploy.code !== 0) return fail("migrate deploy");
     results.push("migrate deploy: OK");
   }
@@ -146,18 +162,20 @@ async function main() {
   }
 
   out(`\n──────── SUMMARY (${Math.round((Date.now() - started.getTime()) / 1000)} s) ────────\n${results.join("\n")}\n`);
-  out(failed ? `\nVERIFY RESULT: FAIL (${failed} test file(s))\n` : QUICK ? "\nVERIFY RESULT: PASS (QUICK: types and database-free tests only; run verify.bat before pushing database or money changes)\n" : "\nVERIFY RESULT: PASS — ready to commit\n");
+  out(failed ? `\nVERIFY RESULT: FAIL (${failed} test file(s))${TAG}\n` : QUICK ? "\nVERIFY RESULT: PASS (QUICK: types and database-free tests only; run verify.bat before pushing database or money changes)\n" : `\nVERIFY RESULT: PASS — ready to commit${TAG}\n`);
   return failed ? 1 : 0;
 }
 
 main().then((code) => {
   log.end(() => {
-    const dated = join(logDir, `verify-${started.toISOString().slice(0, 16).replace(/[-:T]/g, "")}.txt`);
+    const dated = join(logDir, `verify-${BETA ? "beta-" : ""}${started.toISOString().slice(0, 16).replace(/[-:T]/g, "")}.txt`);
     try { copyFileSync(latest, dated); } catch { /* the latest copy is enough */ }
     // keep the folder small: the 10 newest dated logs
     try {
-      const old = readdirSync(logDir).filter((n) => /^verify-\d+\.txt$/.test(n)).sort().slice(0, -10);
-      for (const n of old) unlinkSync(join(logDir, n));
+      for (const re of [/^verify-\d+\.txt$/, /^verify-beta-\d+\.txt$/]) {
+        const old = readdirSync(logDir).filter((n) => re.test(n)).sort().slice(0, -10);
+        for (const n of old) unlinkSync(join(logDir, n));
+      }
     } catch { /* ignore */ }
     process.exit(code);
   });

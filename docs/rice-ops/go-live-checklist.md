@@ -25,6 +25,8 @@ cost carried through resack and counts when cost is per location (they use the p
 shelf-level cost changes in the History list, detailed API schemas, object storage for payment proofs.
 
 **Known testing notes:** run `stop-dev.bat` before the full `verify.bat` (the running app locks a database file).
+
+**Testing on the beta database only:** `verify-beta.bat` runs the full check (migrations, types, every database test) on the separate beta database, so the shop's database is never touched and no backup is needed. The first time it asks you to paste the beta database address (Supabase beta project → Connect → Session pooler, port 5432); it refuses the shop's address. Its log is `verify-logs\latest-beta.txt`, and the result line ends with `(BETA DATABASE)`. `verify.bat` and `update-and-verify-full.bat` use the database in `.env`.
 `verify-quick.bat` (35 s) is enough for small read-only changes. `test-setup.bat` makes a TEST Bigasan store with new logins in `go-live\test-logins.txt`.
 
 Work top to bottom. Each box needs a name and a date. **Nothing in this list deploys by
