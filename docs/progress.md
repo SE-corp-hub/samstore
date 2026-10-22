@@ -14,7 +14,9 @@
 - **Close the day wording:** step 2 is now "Count 5 items (optional)" with one plain sentence on what it is (the 5 items that sold most in the last day, or the biggest stock if nothing was sold); the button says "Count the 5 items now"; "Still open" says "(for your information)"; the Count screen button is "Quick count: 5 best sellers". Behaviour is unchanged (it never blocked closing).
 - **Docs corrected:** guides 03, 09, 10, 13, 14 (no "the customer gets a text" from the app; the closing count is optional); go-live checklist (decisions recorded, steps 3, 4 and 8, production settings, backup tick-box).
 
-**Still for the owner/person:** run `setup-nightly-backup.bat` on the Sam PC; `verify-beta.bat`; phone test sections G to N; real data CSVs; production settings; apply the last two migrations after a backup; locations; usability check; sign-off; deploy only after "yes" in chat.
+**Backup set up (22 Oct, 22:27, run by Claude through the Sam PC at the owner's request, with the defaults):** first backup OK (`samstore-20261022-2227.dump`, 0.7 MB; the file is checked readable), daily task "Samstore nightly backup" at 21:30, next run 23 Oct 21:30. No second-copy folder yet. `setup-nightly-backup.bat` now also accepts `21:30 none` to run without questions (commit after `7a00fbd`). `verify-beta.bat` was NOT run: it needs the beta database address pasted by the owner (it is never saved or sent through chat).
+
+**Still for the owner/person:** choose the second-copy folder and check the 21:30 backup ran (`backup-status.bat`); `verify-beta.bat`; phone test sections G to N; real data CSVs; production settings; apply the last two migrations after a backup; locations; usability check; sign-off; deploy only after "yes" in chat.
 
 ## Fixes from the guide review, and four new features (2026-10-22, evening)
 

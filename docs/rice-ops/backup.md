@@ -19,6 +19,8 @@
 4. Type the folder for the second copy (for example `G:\My Drive\samstore-backups`) or press Enter to skip. You can set it later in `go-live\backup-copy-folder.txt` (one line, the folder path).
 5. It makes a first backup right away (a few minutes is normal). If that works, it schedules the daily job and says **DONE**. If it does not work, nothing is scheduled; tell Claude what it says.
 
+Without questions: `setup-nightly-backup.bat 21:30 none` (the time, then the second-copy folder or `none`). Claude used this on 22 Oct with 21:30 and no second copy, so the second-copy folder is still to be set.
+
 If the PC is off at the chosen time, the backup runs as soon as the PC is on again. A black window opens for a few minutes while it runs. Leave it open; it closes by itself.
 
 You need the PostgreSQL command-line tools on this PC (they are already there if `npm run db:backup` worked before).
