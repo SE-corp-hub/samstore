@@ -12,6 +12,9 @@ import { useCallback, useEffect, useState } from "react";
 import { formatKg, groupKg, sheetGroups, titleCase } from "../../lib/count-view";
 import CountCheck from "./CountCheck";
 import CountHome from "./CountHome";
+import CountOverview from "./CountOverview";
+import CountReport from "./CountReport";
+import CountReportList from "./CountReportList";
 import { API_URL } from "../../config";
 import { adminHeaders, isOwnerRole } from "../../lib/admin";
 import { toast } from "../../lib/toast";
@@ -46,7 +49,7 @@ async function post(path: string, body: unknown) {
 
 export default function BilanginPanel({ role }: { role?: string; onNavigate?: (tab: string) => void }) {
   const owner = !!role && (isOwnerRole(role) || role === "MANAGER");
-  const [tab, setTab] = useState<"counts" | "bawas" | "balance">("counts");
+  const [tab, setTab] = useState<"counts" | "report" | "stores" | "bawas" | "balance">("counts");
   const [locations, setLocations] = useState<Loc[]>([]);
   const [homeLocationId, setHomeLocationId] = useState<string | null>(null);
   const [locationId, setLocationId] = useState("");
@@ -111,6 +114,8 @@ export default function BilanginPanel({ role }: { role?: string; onNavigate?: (t
       )}
       {chosen && <ul className="nav nav-tabs mb-3">
         <li className="nav-item"><button className={`nav-link ${tab === "counts" ? "active" : ""}`} onClick={() => setTab("counts")}>Counts</button></li>
+        <li className="nav-item"><button className={`nav-link ${tab === "report" ? "active" : ""}`} onClick={() => { setOpen(null); setTab("report"); }}>Report</button></li>
+        {owner && <li className="nav-item"><button className={`nav-link ${tab === "stores" ? "active" : ""}`} onClick={() => { setOpen(null); setTab("stores"); }}>All stores</button></li>}
         <li className="nav-item"><button className={`nav-link ${tab === "bawas" ? "active" : ""}`} onClick={() => setTab("bawas")}>Write-off</button></li>
         {owner && <li className="nav-item"><button className={`nav-link ${tab === "balance" ? "active" : ""}`} onClick={() => setTab("balance")}>Balance</button></li>}
       </ul>}
@@ -135,6 +140,8 @@ export default function BilanginPanel({ role }: { role?: string; onNavigate?: (t
       )}
 
       {chosen && tab === "counts" && open && <CountSheet count={open} owner={owner} onClose={async () => { setOpen(null); await loadCounts(); }} onReload={() => void openCount(open.id)} />}
+      {chosen && tab === "report" && <CountReportList locations={locations} locationId={locationId} owner={owner} />}
+      {chosen && tab === "stores" && owner && <CountOverview />}
       {chosen && tab === "bawas" && <WriteOffForm locationId={locationId} products={products} />}
       {chosen && tab === "balance" && owner && <BalanceView locationId={locationId} />}
     </div>
@@ -191,7 +198,7 @@ export function CountSheet({ count, owner, onClose, onReload }: { count: CountDe
     toast("Saved");
     onReload();
   };
-  const submitted = (data: { status?: unknown; skipped?: unknown }) => {
+  const submitted = (data: ApiBody) => {
     toast(data.status === "APPROVED" ? "Count posted" : "Submitted — waiting for the owner");
     const skipped = Number(data.skipped ?? 0);
     setChecking(false);
@@ -209,13 +216,15 @@ export function CountSheet({ count, owner, onClose, onReload }: { count: CountDe
     return (
       <div style={{ maxWidth: 720 }}>
         <div className="alert alert-success"><strong>{count.docNumber}</strong> — {result}<div className="mt-1">You counted {done} of {count.lines.length} items.</div></div>
-        <div className="d-flex gap-2">
+        <div className="d-flex gap-2 mb-3">
           <button type="button" className="btn btn-dark btn-lg" onClick={printSheet}><i className="bi bi-printer me-1"></i>Print count slip</button>
           <button type="button" className="btn btn-outline-secondary btn-lg" onClick={onClose}>← Counts</button>
         </div>
+        <CountReport countId={count.id} embedded />
       </div>
     );
   }
+  if (count.status === "APPROVED") return <CountReport countId={count.id} onBack={onClose} />;
   if (checking) return <CountCheck countId={count.id} docNumber={count.docNumber} onBack={() => setChecking(false)} onSubmitted={submitted} />;
   const groups = sheetGroups(shown);
   const showHeadings = groups.length > 1 || (groups[0]?.variety ?? "") !== "";

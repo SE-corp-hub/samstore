@@ -85,6 +85,20 @@ export class CountController {
     return unwrap(await this.counts.startClosing(storeId, actor, { locationId: str(body?.locationId) }));
   }
 
+  /** GET /admin/counts/report?locationId=&from=&to= — counts posted in a period, totals, shortages by reason, every difference. */
+  @Get("counts/report")
+  async reportList(@Req() req: Req_, @Query("locationId") locationId?: string, @Query("from") from?: string, @Query("to") to?: string, @Headers("x-store-id") h?: string) {
+    const { storeId, actor } = await this.ctx(req, h);
+    return unwrap(await this.counts.reportList(storeId, actor, { locationId, from, to }));
+  }
+
+  /** GET /admin/counts/overview — owner/manager: every item against every store, last counted and what the system holds. */
+  @Get("counts/overview")
+  async overview(@Req() req: Req_, @Headers("x-store-id") h?: string) {
+    const { storeId, actor } = await this.ctx(req, h);
+    return unwrap(await this.counts.overview(storeId, actor));
+  }
+
   /** GET /admin/counts/balance?locationId=&productId= — expected vs the system's shelf, per item. */
   @Get("counts/balance")
   async balance(@Req() req: Req_, @Query("locationId") locationId?: string, @Query("productId") productId?: string, @Headers("x-store-id") h?: string) {
@@ -106,11 +120,19 @@ export class CountController {
     return unwrap(await this.counts.record(storeId, actor, id, lines));
   }
 
-  /** POST /admin/counts/:id/submit — { signatures } */
+  /** POST /admin/counts/:id/submit — { signatures, recordResack? (kinds of rice where a sack was opened) } */
   @Post("counts/:id/submit")
   async submit(@Req() req: Req_, @Param("id") id: string, @Body() body: Record<string, unknown>, @Headers("x-store-id") h?: string) {
     const { storeId, actor } = await this.ctx(req, h);
-    return unwrap(await this.counts.submit(storeId, actor, id, signaturesFrom(body?.signatures)));
+    const resack = Array.isArray(body?.recordResack) ? (body.recordResack as unknown[]).filter((x): x is string => typeof x === "string") : undefined;
+    return unwrap(await this.counts.submit(storeId, actor, id, signaturesFrom(body?.signatures), resack));
+  }
+
+  /** GET /admin/counts/:id/report — one posted count explained (differences, since the last count, weight, resack, charge). */
+  @Get("counts/:id/report")
+  async report(@Req() req: Req_, @Param("id") id: string, @Headers("x-store-id") h?: string) {
+    const { storeId, actor } = await this.ctx(req, h);
+    return unwrap(await this.counts.report(storeId, actor, id));
   }
 
   /** GET /admin/counts/:id/check — the check step: only the items that differ, with their reasons to choose from. */

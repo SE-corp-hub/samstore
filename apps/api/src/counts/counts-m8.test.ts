@@ -365,3 +365,95 @@ test("M8: Manual na bawas — reason and signature; the stock moves; over 1% goe
   const bal = await svc.balance(fx.storeId, fx.owner, { locationId: fx.s1 });
   assert.equal(bal.ok && bal.value.items.every((i) => i.matches), true, "write-offs are in the balance (bawas)");
 });
+
+test("M8: the count report — what moved since the last count, a recorded resack, rice by weight, the period report and the all-stores table", async () => {
+  const fx = await fixture();
+  const countAll = async (actor: Actor, counted: { sin: number; din: number; loose: string }) => {
+    const c = await svc.start(fx.storeId, actor, { locationId: fx.s1 });
+    assert.equal(c.ok, true, msg(c));
+    if (!c.ok) throw new Error("no count");
+    const rec = await svc.record(fx.storeId, actor, c.value.id, [{ productId: fx.sin25.id, counted: counted.sin }, { productId: fx.din25.id, counted: counted.din }, { productId: fx.loose.id, counted: counted.loose }]);
+    assert.equal(rec.ok, true, msg(rec));
+    return c.value;
+  };
+
+  // 1) A count that matches everything: the starting point.
+  const c1 = await countAll(fx.staff1, { sin: 10, din: 4, loose: "50" });
+  const s1 = await svc.submit(fx.storeId, fx.staff1, c1.id, staffSig);
+  assert.equal(s1.ok && [s1.value.kulangValueMinor, s1.value.sobraValueMinor].join(), "0,0", msg(s1));
+
+  // 2) 6 sacks come in and 2 are sold: the records now say 14.
+  assert.equal((await benta.stockIn(fx.storeId, fx.staff1, { locationId: fx.s1, lines: [{ productId: fx.sin25.id, quantity: 6 }], signatures: staffSig })).ok, true);
+  assert.equal((await benta.sell(fx.storeId, fx.staff1, { idempotencyKey: key(), lines: [{ productId: fx.sin25.id, quantity: 2 }], payment: { method: "cash" } })).ok, true);
+
+  // 3) One sack was opened and nobody recorded it: 13 sacks and 75 kg loose instead of 14 and 50.
+  const c2 = await countAll(fx.staff1, { sin: 13, din: 4, loose: "75" });
+  const chk = await svc.check(fx.storeId, fx.staff1, c2.id);
+  assert.equal(chk.ok, true, msg(chk));
+  if (!chk.ok) return;
+  assert.deepEqual(chk.value.lines.map((l) => l.name), ["Sinandomeng (per kilo)", "Sinandomeng 25 kg"]);
+  assert.deepEqual(chk.value.openedSacks.map((o) => [o.variety, o.sacks, o.kg, o.unexplainedKg]), [["sinandomeng", 1, 25, 0]], "the check step sees the opened sack");
+  assert.equal(chk.value.openedAutomatic, false, "an ordinary store is asked; it is not recorded by itself");
+  assert.equal((await svc.setReasons(fx.storeId, fx.staff1, c2.id, [{ productId: fx.sin25.id, reason: "OPENED_SACK" }, { productId: fx.loose.id, reason: "OPENED_SACK" }])).ok, true);
+  assert.match(msg(await svc.report(fx.storeId, fx.staff1, c2.id)), /Finish the count first/, "an open count has no report yet");
+  const s2 = await svc.submit(fx.storeId, fx.staff1, c2.id, staffSig, ["sinandomeng", "jasmine"]); // a kind that did not change is ignored
+  assert.equal(s2.ok, true, msg(s2));
+  if (!s2.ok) return;
+  assert.deepEqual([s2.value.kulangValueMinor, s2.value.sobraValueMinor], [0, 0], "the opened sack explains both differences: nothing is lost");
+  assert.deepEqual([await onHand(fx, fx.sin25.id), await onHand(fx, fx.loose.id)], [13, 75_000]);
+  assert.equal((await prisma.stockMovement.count({ where: { storeId: fx.storeId, documentType: "COUNT", documentId: c2.id } })), 0, "nothing was left to adjust");
+  assert.equal((await prisma.stockMovement.count({ where: { storeId: fx.storeId, documentType: "COUNT_RESACK", documentId: c2.id } })), 2, "the resack moved the sack and the loose rice");
+
+  const rep = await svc.report(fx.storeId, fx.staff1, c2.id);
+  assert.equal(rep.ok, true, msg(rep));
+  if (!rep.ok) return;
+  const sum = rep.value.summary;
+  assert.deepEqual([sum.counted, sum.correct, sum.short, sum.over, sum.explained], [3, 1, 0, 0, 2]);
+  assert.deepEqual(rep.value.lines.map((l) => [l.name, l.varianceValueMinor, l.explainedQty !== 0, l.reasonLabel]), [["Sinandomeng (per kilo)", 0, true, "Opened a sack, not recorded"], ["Sinandomeng 25 kg", 0, true, "Opened a sack, not recorded"]]);
+  assert.deepEqual(rep.value.openedByCount.map((o) => [o.variety, o.sacks, o.kg, o.automatic]), [["sinandomeng", 1, 25, false]]);
+  const since = rep.value.lines.find((l) => l.name === "Sinandomeng 25 kg")?.since;
+  assert.deepEqual([since?.from?.docNumber, since?.from?.countedQty, since?.buckets.pumasok, since?.buckets.nabenta, since?.ledgerShouldBe], [c1.docNumber, 10, 6, -2, 14], "last count 10, stock in 6, sold 2: the records said 14");
+  const wt = rep.value.weight.find((w) => w.variety === "sinandomeng");
+  assert.deepEqual([wt?.countedKg, wt?.systemKg, wt?.diffKg, wt?.complete], [400, 400, 0, true], "sacks and loose rice together: the weight matches");
+  assert.equal(rep.value.charge, null);
+  assert.equal((await svc.report(fx.storeId, fx.staff2, c2.id)).ok, false, "Store 2 staff cannot open Store 1's report");
+
+  // 4) A real shortage: 12 sacks (spilled) and 3 Dinorado (don't know).
+  const c3 = await countAll(fx.staff1, { sin: 12, din: 3, loose: "75" });
+  assert.equal((await svc.setReasons(fx.storeId, fx.staff1, c3.id, [{ productId: fx.sin25.id, reason: "SPILLED", note: "torn sack" }, { productId: fx.din25.id, reason: "UNKNOWN" }])).ok, true);
+  const s3 = await svc.submit(fx.storeId, fx.staff1, c3.id, staffSig);
+  assert.equal(s3.ok && [s3.value.kulangValueMinor, s3.value.sobraValueMinor].join(), "250000,0", msg(s3));
+  const rep3 = await svc.report(fx.storeId, fx.owner, c3.id);
+  assert.equal(rep3.ok, true, msg(rep3));
+  if (!rep3.ok) return;
+  assert.deepEqual(rep3.value.lines.map((l) => [l.name, l.varianceValueMinor, l.reasonLabel, l.note]), [["Dinorado 25 kg", -140_000, "Don't know", null], ["Sinandomeng 25 kg", -110_000, "Spilled", "torn sack"]], "the biggest first");
+  assert.deepEqual([rep3.value.summary.short, rep3.value.summary.over, rep3.value.summary.explained], [2, 0, 0]);
+  assert.equal(rep3.value.lines[1]!.countedBy, "Ate Lorna");
+  assert.equal(rep3.value.charge, null, "not a consignment store: nothing is charged");
+
+  // 5) The period report: totals, why, every difference; staff see only their own store.
+  const list = await svc.reportList(fx.storeId, fx.owner, {});
+  assert.equal(list.ok, true, msg(list));
+  if (!list.ok) return;
+  assert.deepEqual([list.value.totals.counts, list.value.totals.items, list.value.totals.correct, list.value.totals.short, list.value.totals.over, list.value.totals.kulangValueMinor, list.value.totals.sobraValueMinor], [3, 9, 5, 2, 0, 250_000, 0]);
+  const byReason = Object.fromEntries(list.value.byReason.map((r) => [r.code, [r.items, r.shortValueMinor, r.overValueMinor]]));
+  assert.deepEqual(byReason, { UNKNOWN: [1, 140_000, 0], SPILLED: [1, 110_000, 0], OPENED_SACK: [2, 0, 0] });
+  assert.equal(list.value.differences.length, 4);
+  assert.equal(list.value.counts[0]?.docNumber, c3.docNumber, "newest first");
+  const mine = await svc.reportList(fx.storeId, fx.staff2, { locationId: fx.s1 });
+  assert.equal(mine.ok && mine.value.totals.counts, 0, "Store 2 staff are held to their own store");
+  assert.match(msg(await svc.reportList(fx.storeId, fx.owner, { from: "2026-12-31", to: "2026-01-01" })), /after/);
+  const none = await svc.reportList(fx.storeId, fx.owner, { from: "2020-01-01", to: "2020-01-31" });
+  assert.equal(none.ok && none.value.totals.counts, 0);
+
+  // 6) All stores: owner/manager only; what each store holds and when it was last counted.
+  assert.equal((await svc.overview(fx.storeId, fx.staff1)).ok, false);
+  const ov = await svc.overview(fx.storeId, fx.owner);
+  assert.equal(ov.ok, true, msg(ov));
+  if (!ov.ok) return;
+  assert.deepEqual(ov.value.locations.map((l) => l.name), ["Store 1", "Store 2"]);
+  const cell = ov.value.items.find((i) => i.productId === fx.sin25.id)?.cells[fx.s1];
+  assert.equal(cell?.onHand, 12);
+  assert.equal(cell?.lastCountedAt instanceof Date, true);
+  assert.equal(ov.value.items.find((i) => i.productId === fx.sin25.id)?.cells[fx.s2], undefined, "not held and never counted at Store 2");
+});

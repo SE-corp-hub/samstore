@@ -26,7 +26,11 @@ interface DiffLine {
   productId: string; name: string; loose: boolean; countedQty: number; expectedQty: number; varianceQty: number; varianceValueMinor: number;
   firstCountedQty: number | null; reason: string | null; note: string | null; reasons: { code: string; label: string }[]; asksRecount: boolean;
 }
-interface Check { id: string; docNumber: string; counted: number; correct: number; notCounted: number; recountLimitMinor: number; lookLimitMinor: number; lines: DiffLine[] }
+interface OpenedSack { variety: string; sacks: number; kg: number; sackName: string; looseName: string; unexplainedKg: number }
+interface Check {
+  id: string; docNumber: string; counted: number; correct: number; notCounted: number; recountLimitMinor: number; lookLimitMinor: number; lines: DiffLine[];
+  openedSacks: OpenedSack[]; openedAutomatic: boolean;
+}
 
 export default function CountCheck({ countId, docNumber, onBack, onSubmitted }: {
   countId: string; docNumber: string; onBack: () => void; onSubmitted: (data: ApiBody) => void;
@@ -38,6 +42,7 @@ export default function CountCheck({ countId, docNumber, onBack, onSubmitted }: 
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [sig, setSig] = useState<string | null>(null);
   const [photo, setPhoto] = useState<string | null>(null);
+  const [resack, setResack] = useState<Record<string, boolean>>({});
 
   const load = useCallback(async () => {
     const r = await call("GET", `/admin/counts/${countId}/check`);
@@ -79,7 +84,8 @@ export default function CountCheck({ countId, docNumber, onBack, onSubmitted }: 
     setBusy(true); setError(null);
     const signatures: { signerKind: string; imagePng: string | null }[] = [{ signerKind: "STAFF", imagePng: sig }];
     if (photo) signatures.push({ signerKind: "SLIP_PHOTO", imagePng: photo });
-    const r = await call("POST", `/admin/counts/${countId}/submit`, { signatures });
+    const recordResack = Object.keys(resack).filter((v) => resack[v]);
+    const r = await call("POST", `/admin/counts/${countId}/submit`, { signatures, recordResack });
     setBusy(false);
     if (!r.ok) { setError(errText(r.data, "Could not submit")); return; }
     onSubmitted(r.data ?? {});
@@ -143,6 +149,29 @@ export default function CountCheck({ countId, docNumber, onBack, onSubmitted }: 
           </div>
         </div>
       ))}
+      {check.openedSacks.length > 0 && (
+        <div className="card border-info mb-3">
+          <div className="card-body py-2">
+            <div className="fw-semibold mb-1">A sack may have been opened</div>
+            {check.openedSacks.map((o) => (
+              <div key={o.variety} className="mb-2">
+                <div className="small">
+                  {o.sacks} sack{o.sacks === 1 ? "" : "s"} of <strong>{o.variety}</strong> fewer, and {o.kg.toLocaleString("en-PH", { maximumFractionDigits: 3 })} kg more loose rice. It looks like {o.sacks === 1 ? "a sack was" : "sacks were"} opened.
+                  {o.unexplainedKg > 0.0005 && <> About {o.unexplainedKg.toLocaleString("en-PH", { maximumFractionDigits: 3 })} kg of the loose rice is still extra.</>}
+                </div>
+                {check.openedAutomatic ? (
+                  <div className="small text-muted">This store opens sacks without recording them, so it is recorded as a resack for you.</div>
+                ) : (
+                  <div className="form-check">
+                    <input id={`resack-${o.variety}`} className="form-check-input" type="checkbox" checked={!!resack[o.variety]} onChange={(e) => setResack({ ...resack, [o.variety]: e.target.checked })} />
+                    <label className="form-check-label small" htmlFor={`resack-${o.variety}`}>Yes, a sack was opened. Record it as a resack.</label>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       {needPhoto && (
         <div className="mb-3">
           <label className="form-label fw-semibold" htmlFor="count-photo">A photo of the shelf (optional)</label>

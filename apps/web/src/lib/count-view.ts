@@ -120,3 +120,58 @@ export function differenceText(loose: boolean, variance: number): string {
   const amount = loose ? `${(abs / 1000).toLocaleString("en-PH", { maximumFractionDigits: 3 })} kg` : `${abs} ${abs === 1 ? "sack" : "sacks"}`;
   return `${variance < 0 ? "Short" : "Over"} ${amount}`;
 }
+
+// ───────────── the count report and the all-stores table ─────────────
+
+/** What moved an item since the last count, in plain words. */
+export const BUCKET_LABEL: Record<string, string> = {
+  pumasok: "Stock in", lipat_papasok: "Transfer in", ibinalik: "Returned", resack_lumabas: "Resack (out)", nabenta: "Sold",
+  lipat_palabas: "Transfer out", resack_pumasok: "Resack (in)", bawas: "Write-off", bilang: "Count", iba: "Other",
+};
+const BUCKET_ORDER = ["pumasok", "lipat_papasok", "ibinalik", "resack_lumabas", "nabenta", "lipat_palabas", "resack_pumasok", "bawas", "bilang", "iba"];
+
+const unitText = (loose: boolean, n: number) => (loose ? `${(n / 1000).toLocaleString("en-PH", { maximumFractionDigits: 3 })} kg` : `${n}`);
+
+/** "Stock in +20 · Sold −18" (empty buckets are left out; "nothing moved" when there are none). */
+export function sinceText(loose: boolean, buckets: Record<string, number>): string {
+  const parts = BUCKET_ORDER.filter((k) => (buckets[k] ?? 0) !== 0).map((k) => {
+    const v = buckets[k]!;
+    return `${BUCKET_LABEL[k] ?? k} ${v > 0 ? "+" : "−"}${unitText(loose, Math.abs(v))}`;
+  });
+  return parts.length ? parts.join(" · ") : "nothing moved";
+}
+
+/** CSV that Excel opens: a BOM first, a cell quoted when it holds a comma, a quote or a line break. */
+export function csvText(rows: (string | number | null | undefined)[][]): string {
+  const cell = (v: string | number | null | undefined) => {
+    const s = v === null || v === undefined ? "" : String(v);
+    return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  return `﻿${rows.map((r) => r.map(cell).join(",")).join("\r\n")}\r\n`;
+}
+
+export function downloadCsv(name: string, rows: (string | number | null | undefined)[][]) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([csvText(rows)], { type: "text/csv;charset=utf-8" }));
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2_000);
+}
+
+export const pesoText = (minor: number) => `₱${(Math.abs(minor) / 100).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+export interface OverviewItem { productId: string; name: string; variety: string; loose: boolean; cells: Record<string, { lastCountedAt: string | null; onHand: number }> }
+
+/** When the item was counted longest ago in any store (null = never counted somewhere it is held). */
+export function oldestCount(item: Pick<OverviewItem, "cells">): number {
+  let oldest = Infinity;
+  for (const c of Object.values(item.cells)) oldest = Math.min(oldest, c.lastCountedAt ? Date.parse(c.lastCountedAt) : -Infinity);
+  return oldest === Infinity ? Infinity : oldest;
+}
+
+/** The all-stores table: filter by words, longest-not-counted first (or by name). */
+export function overviewRows<T extends OverviewItem>(items: T[], query: string, byAge: boolean): T[] {
+  const words = norm(query).split(" ").filter(Boolean);
+  const kept = items.filter((i) => words.every((w) => norm(`${i.name} ${i.variety}`).includes(w)));
+  return kept.sort((a, b) => (byAge ? oldestCount(a) - oldestCount(b) : 0) || a.name.localeCompare(b.name));
+}

@@ -4,7 +4,7 @@
 
 import type { Prisma } from "@prisma/client";
 import { adjustForCount, InsufficientStockError, type TripLeg } from "../domain/movements.js";
-import { varietyOf } from "../domain/resack.js";
+import { planOpenedSacks } from "../domain/count-resack.js";
 import { consignmentMain } from "./charges.js";
 
 type Tx = Prisma.TransactionClient;
@@ -16,40 +16,34 @@ interface CountLine {
   product: { name: string; variety?: string | null; stockBaseUnit: string | null; stockBaseQuantity: number | null };
 }
 
-/** Returns what was moved per product (sack: −k, loose: +k × grams) so the count only posts what is left over. */
+/**
+ * Returns what was moved per product (sack: −k, loose: +k × grams) so the count only posts what is left over.
+ * Automatic at a consignment store. Anywhere else only for the kinds of rice in `varieties`
+ * (the counter said "yes, a sack was opened" at the check step).
+ */
 export async function autoResackFromCount(
-  tx: Tx, input: { storeId: string; locationId: string; countId: string; countDoc: string; actorId: string; lines: CountLine[] },
+  tx: Tx, input: { storeId: string; locationId: string; countId: string; countDoc: string; actorId: string; lines: CountLine[]; varieties?: string[] },
 ): Promise<Map<string, number>> {
   const moved = new Map<string, number>();
-  if (!(await consignmentMain(tx, input.storeId, input.locationId))) return moved;
-  const groups = new Map<string, CountLine[]>();
-  for (const l of input.lines) {
-    if (l.countedQty === null || l.expectedQty === null) continue;
-    if ((l.product.stockBaseUnit ?? "").toLowerCase() !== "g" || !l.product.stockBaseQuantity) continue;
-    const key = varietyOf(l.product);
-    groups.set(key, [...(groups.get(key) ?? []), l]);
-  }
-  for (const [variety, lines] of groups) {
-    const loose = lines.find((l) => l.product.stockBaseQuantity === 1);
-    const sack = lines.filter((l) => (l.product.stockBaseQuantity ?? 0) > 1).sort((a, b) => b.product.stockBaseQuantity! - a.product.stockBaseQuantity!)[0];
-    if (!loose || !sack) continue;
-    const surplus = loose.countedQty! - loose.expectedQty!;
-    const sackGone = sack.expectedQty! - sack.countedQty!;
-    if (surplus <= 0 || sackGone <= 0) continue;
-    const grams = sack.product.stockBaseQuantity!;
-    const k = Math.min(sackGone, Math.ceil(surplus / grams));
+  const consignment = !!(await consignmentMain(tx, input.storeId, input.locationId));
+  if (!consignment && !(input.varieties && input.varieties.length)) return moved;
+  const wanted = consignment ? null : new Set(input.varieties);
+  for (const plan of planOpenedSacks(input.lines)) {
+    if (wanted && !wanted.has(plan.variety)) continue;
+    const grams = plan.grams / plan.sacks;
+    const k = plan.sacks;
     const leg = (productId: string): TripLeg => ({ storeId: input.storeId, productId, warehouseId: input.locationId, actorId: input.actorId, documentType: "COUNT_RESACK", documentId: input.countId, note: `Resack from count ${input.countDoc}` });
     try {
-      await adjustForCount(tx, leg(sack.productId), -k);
+      await adjustForCount(tx, leg(plan.sackProductId), -k);
     } catch (e) {
       if (e instanceof InsufficientStockError) continue; // part of it is held elsewhere: leave it to the count
       throw e;
     }
-    await adjustForCount(tx, leg(loose.productId), k * grams);
-    moved.set(sack.productId, -k);
-    moved.set(loose.productId, k * grams);
+    await adjustForCount(tx, leg(plan.looseProductId), k * grams);
+    moved.set(plan.sackProductId, -k);
+    moved.set(plan.looseProductId, k * grams);
     await tx.auditLog.create({
-      data: { storeId: input.storeId, actorType: "USER", actorId: input.actorId, action: "count.auto_resack", entityType: "StockCount", entityId: input.countId, after: { variety, sacksOpened: k, grams: k * grams, unexplainedGrams: Math.max(0, surplus - k * grams) } },
+      data: { storeId: input.storeId, actorType: "USER", actorId: input.actorId, action: "count.auto_resack", entityType: "StockCount", entityId: input.countId, after: { variety: plan.variety, sacksOpened: k, grams: k * grams, unexplainedGrams: plan.unexplainedGrams, automatic: consignment } },
     });
   }
   return moved;

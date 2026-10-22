@@ -14,7 +14,7 @@
 //   Balance: expected = last count + every movement since; it must equal the system's shelf.
 //   Write-off: reason, optional photo, staff signs; the stock moves; over 1% → the owner.
 
-import { chargeCountShort } from "../payable/charges.js";
+import { chargeCountShort, consignmentMain } from "../payable/charges.js";
 import { autoResackFromCount } from "../payable/count-resack.js";
 import type { ApiError } from "@sam-store/contracts";
 import { Prisma } from "@prisma/client";
@@ -22,6 +22,7 @@ import { prisma } from "../persistence/prisma-repositories.js";
 import { cacheBust, cacheKey } from "../persistence/ttl-cache.js";
 import { adjustForCount, InsufficientStockError, releaseForTrip, type TripLeg } from "../domain/movements.js";
 import { varietyOf } from "../domain/resack.js";
+import { planOpenedSacks } from "../domain/count-resack.js";
 import { asksRecount, checkReason, cleanNote, missingReasons, missingReasonsMessage, reasonsFor, REASON_LABEL, type CountReason } from "../domain/count-reasons.js";
 import { balanceOf, costValue, countedUnits, CountError, gramsIn, isLooseP, lineResult, verdict, WRITE_OFF_LABEL, writeOffCheck } from "../domain/counting.js";
 import { formatKilos } from "../domain/weight.js";
@@ -48,18 +49,31 @@ const OWNERS = ["OWNER", "MANAGER", "STORE_OWNER", "PLATFORM_ADMIN"];
 const productSelect = { id: true, name: true, stockBaseUnit: true, stockBaseQuantity: true, costMinor: true, variety: true } as const;
 type P = Prisma.ProductGetPayload<{ select: typeof productSelect }>;
 
+interface ReportLine {
+  productId: string; name: string; loose: boolean; countedQty: number; expectedQty: number; firstCountedQty: number | null;
+  varianceQty: number; varianceValueMinor: number; explainedQty: number; verdict: string; reason: string | null; reasonLabel: string | null; note: string | null; countedBy: string | null;
+  since: { from: { docNumber: string; countedQty: number; countedAt: Date } | null; buckets: Record<string, number>; ledgerShouldBe: number } | null;
+}
+interface ReportDifference {
+  docNumber: string; postedAt: Date | null; location: string; item: string; loose: boolean; countedQty: number | null; expectedQty: number | null; varianceQty: number;
+  varianceValueMinor: number; reason: string | null; reasonLabel: string | null; note: string | null; countedBy: string | null;
+}
+
 const qtyText = (p: P, qty: number) => (isLooseP(p) ? formatKilos(qty) : `${qty}`);
 
 /** Post every counted line's difference as COUNT_ADJUST, inside the caller's transaction. */
-async function postCount(tx: Tx, storeId: string, countId: string, decidedById: string) {
+async function postCount(tx: Tx, storeId: string, countId: string, decidedById: string, opts: { resackVarieties?: string[] } = {}) {
   const count = await tx.stockCount.findUniqueOrThrow({ where: { id: countId }, include: { lines: { include: { product: { select: productSelect } } } } });
   // A consignment store opens sacks without recording it: record the resack first, then post only what is left over.
-  const opened = await autoResackFromCount(tx, { storeId, locationId: count.locationId, countId: count.id, countDoc: count.docNumber, actorId: decidedById, lines: count.lines });
+  const opened = await autoResackFromCount(tx, { storeId, locationId: count.locationId, countId: count.id, countDoc: count.docNumber, actorId: decidedById, lines: count.lines, varieties: opts.resackVarieties });
+  const posted = new Map<string, number>();
   for (const l of count.lines) {
     if (l.countedQty === null || l.expectedQty === null) continue;
     const delta = l.countedQty - l.expectedQty - (opened.get(l.productId) ?? 0);
+    posted.set(l.productId, delta);
     if (delta !== 0) {
-      const leg: TripLeg = { storeId, productId: l.productId, warehouseId: count.locationId, actorId: decidedById, documentType: "COUNT", documentId: count.id, note: `Bilang ${count.docNumber}` };
+      const why = l.reason ? REASON_LABEL[l.reason as CountReason] : undefined;
+      const leg: TripLeg = { storeId, productId: l.productId, warehouseId: count.locationId, actorId: decidedById, documentType: "COUNT", documentId: count.id, note: `Bilang ${count.docNumber}${why ? ` · ${why}` : ""}` };
       try {
         await adjustForCount(tx, leg, delta);
       } catch (e) {
@@ -72,6 +86,7 @@ async function postCount(tx: Tx, storeId: string, countId: string, decidedById: 
   // A consignment store pays the main store's cost for what is missing (the owner can undo it in Store payable).
   await chargeCountShort(tx, { storeId, countId: count.id, countDoc: count.docNumber, locationId: count.locationId, actorId: decidedById });
   await tx.stockCount.update({ where: { id: countId }, data: { status: "APPROVED", decidedById, decidedAt: new Date() } });
+  return posted;
 }
 
 // The owner approves a full/partial count in Para sa iyo → the adjustments post. Decline → nothing changes.
@@ -269,7 +284,7 @@ export class CountService {
    * A list count may leave items uncounted; they are dropped from the count and stay as they are.
    * The quick count and the closing top-5 must be counted in full.
    */
-  async submit(storeId: string, actor: Actor, id: string, signatures: SignatureInput[] | undefined) {
+  async submit(storeId: string, actor: Actor, id: string, signatures: SignatureInput[] | undefined, recordResack?: string[]) {
     return this.run(async () => {
       const c = await prisma.stockCount.findFirst({ where: { id, storeId }, include: { location: { select: { name: true } }, lines: { include: { product: { select: productSelect } } } } });
       if (!c) throw new StepError(notFound());
@@ -288,6 +303,9 @@ export class CountService {
       }
       const kulang = -results.filter((x) => x.r.varianceValueMinor < 0).reduce((s, x) => s + x.r.varianceValueMinor, 0);
       const sobra = results.filter((x) => x.r.varianceValueMinor > 0).reduce((s, x) => s + x.r.varianceValueMinor, 0);
+      // "A sack was opened" can be recorded as a resack at the check step, only for kinds of rice where the numbers really say so.
+      const planned = new Set(planOpenedSacks(counted).map((p) => p.variety));
+      const resackVarieties = (recordResack ?? []).filter((v) => typeof v === "string" && planned.has(v));
       return prisma.$transaction(async (tx) => {
         const claimed = await tx.stockCount.updateMany({ where: { id, storeId, status: "OPEN" }, data: { status: "SUBMITTED", submittedById: actor.userId, submittedAt: new Date(), kulangValueMinor: kulang, sobraValueMinor: sobra } });
         if (claimed.count === 0) throw new StepError(conflict("This count was already submitted"));
@@ -295,9 +313,16 @@ export class CountService {
         for (const { l, r } of results) await tx.stockCountLine.update({ where: { id: l.id }, data: { varianceQty: r.varianceQty, varianceValueMinor: r.varianceValueMinor } });
         await captureSignatures(tx, storeId, actor, { documentType: "COUNT", documentId: id, step: "SUBMIT", locationId: c.locationId }, signatures);
         await requireSignatures(tx, storeId, { documentType: "COUNT", documentId: id, step: "SUBMIT" });
-        await postCount(tx, storeId, id, actor.userId);
-        await tx.auditLog.create({ data: { storeId, actorType: "USER", actorId: actor.userId, action: "count.submit", entityType: "StockCount", entityId: id, after: { kulangValueMinor: kulang, sobraValueMinor: sobra, counted: counted.length, skipped: missing.length, posted: true } } });
-        return { id, docNumber: c.docNumber, status: "APPROVED" as const, approvalId: null, kulangValueMinor: kulang, sobraValueMinor: sobra, counted: counted.length, skipped: missing.length };
+        const posted = await postCount(tx, storeId, id, actor.userId, { resackVarieties });
+        // What an opened sack explains is not a loss: the totals keep only what really had to be posted.
+        let kulangNet = 0, sobraNet = 0;
+        for (const { l, r } of results) {
+          const v = costValue(l.product, posted.get(l.productId) ?? r.varianceQty);
+          if (v < 0) kulangNet += -v; else sobraNet += v;
+        }
+        if (kulangNet !== kulang || sobraNet !== sobra) await tx.stockCount.update({ where: { id }, data: { kulangValueMinor: kulangNet, sobraValueMinor: sobraNet } });
+        await tx.auditLog.create({ data: { storeId, actorType: "USER", actorId: actor.userId, action: "count.submit", entityType: "StockCount", entityId: id, after: { kulangValueMinor: kulangNet, sobraValueMinor: sobraNet, counted: counted.length, skipped: missing.length, posted: true, resackVarieties } } });
+        return { id, docNumber: c.docNumber, status: "APPROVED" as const, approvalId: null, kulangValueMinor: kulangNet, sobraValueMinor: sobraNet, counted: counted.length, skipped: missing.length };
       }, txOptions(120_000));
     });
   }
@@ -320,9 +345,12 @@ export class CountService {
       const counted = c.lines.filter((l) => l.countedQty !== null && l.expectedQty !== null);
       const rows = counted.map((l) => ({ l, r: lineResult(l.product, l.expectedQty!, l.countedQty!) }));
       const off = rows.filter((x) => x.r.varianceQty !== 0).sort((a, b) => Math.abs(b.r.varianceValueMinor) - Math.abs(a.r.varianceValueMinor));
+      // Sacks that look opened: the sack count dropped and the loose rice of the same kind rose. A consignment store records it by itself.
+      const openedAutomatic = !!(await consignmentMain(prisma, storeId, c.locationId));
+      const openedSacks = planOpenedSacks(counted).map((p) => ({ variety: p.variety, sacks: p.sacks, kg: p.grams / 1000, sackName: p.sackName, looseName: p.looseName, unexplainedKg: p.unexplainedGrams / 1000 }));
       return {
         id: c.id, docNumber: c.docNumber, counted: counted.length, correct: rows.length - off.length, notCounted: c.lines.length - counted.length,
-        recountLimitMinor, lookLimitMinor,
+        recountLimitMinor, lookLimitMinor, openedSacks, openedAutomatic,
         lines: off.map(({ l, r }) => ({
           productId: l.productId, name: l.product.name, loose: isLooseP(l.product), countedQty: l.countedQty!, expectedQty: l.expectedQty!,
           varianceQty: r.varianceQty, varianceGrams: r.varianceGrams, varianceValueMinor: r.varianceValueMinor, verdict: r.verdict,
@@ -331,6 +359,213 @@ export class CountService {
           asksRecount: asksRecount(r.varianceValueMinor, recountLimitMinor, l.firstCountedQty !== null),
         })),
       };
+    });
+  }
+
+  private async names(ids: (string | null | undefined)[]): Promise<Map<string, string>> {
+    const uniq = Array.from(new Set(ids.filter((x): x is string => !!x)));
+    if (uniq.length === 0) return new Map();
+    const users = await prisma.user.findMany({ where: { id: { in: uniq } }, select: { id: true, name: true, phone: true, email: true } });
+    return new Map(users.map((u) => [u.id, u.name || u.phone || u.email || "Staff"] as const));
+  }
+
+  /**
+   * One posted count explained: what differs (with the reason), what happened to each item since the
+   * last count, the weight of each kind of rice, the resack jobs around it, and (owner) what Store 2 was charged.
+   */
+  async report(storeId: string, actor: Actor, id: string) {
+    return this.run(async () => {
+      const c = await prisma.stockCount.findFirst({ where: { id, storeId }, include: { location: { select: { id: true, name: true } }, lines: { include: { product: { select: productSelect } } } } });
+      if (!c) throw new StepError(notFound());
+      const refusal = locationRefusal(actor, c.locationId);
+      if (refusal) throw new StepError(forbidden(refusal));
+      if (c.status === "OPEN") throw new StepError(conflict("Finish the count first"));
+      if (c.status === "CANCELLED") throw new StepError(conflict("This count was cancelled"));
+      const owner = OWNERS.includes(actor.role);
+      const counted = c.lines.filter((l) => l.countedQty !== null && l.expectedQty !== null);
+      // A sack opened and recorded as a resack explains part of a difference: only what was left over is a real loss or gain.
+      const rows = counted.map((l) => {
+        const r = lineResult(l.product, l.expectedQty!, l.countedQty!);
+        const leftoverQty = l.postedQty ?? r.varianceQty;
+        return { l, r, leftoverQty, leftoverValueMinor: costValue(l.product, leftoverQty) };
+      });
+      const differing = rows.filter((x) => x.r.varianceQty !== 0).sort((a, b) => Math.abs(b.leftoverValueMinor) - Math.abs(a.leftoverValueMinor) || Math.abs(b.r.varianceValueMinor) - Math.abs(a.r.varianceValueMinor));
+      const correct = rows.filter((x) => x.r.varianceQty === 0);
+      const names = await this.names([c.startedById, c.submittedById, ...counted.map((x) => x.countedById)]);
+
+      // What happened to each differing item since the count before (the 20 biggest differences).
+      const lines: ReportLine[] = [];
+      for (const [i, { l, r, leftoverQty, leftoverValueMinor }] of differing.entries()) {
+        let since: { from: { docNumber: string; countedQty: number; countedAt: Date } | null; buckets: Record<string, number>; ledgerShouldBe: number } | null = null;
+        if (i < 20 && l.countedAt) {
+          const prev = await prisma.stockCountLine.findFirst({
+            where: { storeId, productId: l.productId, countedQty: { not: null }, postedQty: { not: null }, countId: { not: c.id }, countedAt: { lt: l.countedAt }, count: { locationId: c.locationId, status: "APPROVED" } },
+            orderBy: { countedAt: "desc" }, select: { countId: true, countedQty: true, countedAt: true, count: { select: { docNumber: true } } },
+          });
+          const moves = await prisma.stockMovement.findMany({
+            where: {
+              storeId, productId: l.productId, warehouseId: c.locationId,
+              createdAt: { ...(prev ? { gt: prev.countedAt! } : {}), lte: l.countedAt },
+              ...(prev ? { NOT: { documentType: "COUNT", documentId: prev.countId } } : {}),
+            },
+            select: { type: true, delta: true },
+          });
+          const { expected, buckets } = balanceOf(prev?.countedQty ?? 0, moves);
+          since = { from: prev ? { docNumber: prev.count.docNumber, countedQty: prev.countedQty!, countedAt: prev.countedAt! } : null, buckets, ledgerShouldBe: expected };
+        }
+        lines.push({
+          productId: l.productId, name: l.product.name, loose: isLooseP(l.product), countedQty: l.countedQty!, expectedQty: l.expectedQty!, firstCountedQty: l.firstCountedQty,
+          varianceQty: r.varianceQty, varianceValueMinor: leftoverValueMinor, explainedQty: r.varianceQty - leftoverQty, verdict: r.verdict,
+          reason: l.reason, reasonLabel: l.reason ? REASON_LABEL[l.reason as CountReason] ?? null : null, note: l.note, countedBy: names.get(l.countedById ?? "") ?? null, since,
+        });
+      }
+
+      // The weight of each kind of rice (sacks and loose together), so an opened sack never looks like a loss.
+      const stocked = await prisma.stockLevel.findMany({ where: { storeId, warehouseId: c.locationId, quantityOnHand: { gt: 0 } }, include: { product: { select: productSelect } } });
+      const countedIds = new Set(rows.map((x) => x.l.productId));
+      const notCountedKinds = new Set(stocked.filter((x) => !countedIds.has(x.productId) && gramsIn(x.product, 1) !== null).map((x) => varietyOf(x.product)));
+      const kinds = new Map<string, { variety: string; countedG: number; systemG: number; parts: { name: string; countedKg: number; systemKg: number }[] }>();
+      for (const { l } of rows) {
+        const g = gramsIn(l.product, 1);
+        if (g === null) continue;
+        const v = varietyOf(l.product);
+        const k = kinds.get(v) ?? { variety: v, countedG: 0, systemG: 0, parts: [] };
+        k.countedG += l.countedQty! * g;
+        k.systemG += l.expectedQty! * g;
+        k.parts.push({ name: l.product.name, countedKg: (l.countedQty! * g) / 1000, systemKg: (l.expectedQty! * g) / 1000 });
+        kinds.set(v, k);
+      }
+      const weight = Array.from(kinds.values()).map((k) => ({ variety: k.variety, countedKg: k.countedG / 1000, systemKg: k.systemG / 1000, diffKg: (k.countedG - k.systemG) / 1000, complete: !notCountedKinds.has(k.variety), parts: k.parts }))
+        .sort((a, b) => Math.abs(b.diffKg) - Math.abs(a.diffKg) || a.variety.localeCompare(b.variety));
+
+      // Resack jobs of the kinds of rice that differ, in the 30 days before the count.
+      const diffKinds = new Set(differing.map((x) => varietyOf(x.l.product)));
+      const jobs = diffKinds.size === 0 ? [] : await prisma.resackJob.findMany({
+        where: { storeId, locationId: c.locationId, status: { not: "CANCELLED" }, startedAt: { gte: new Date(c.startedAt.getTime() - 30 * 86_400_000), lte: c.decidedAt ?? c.startedAt } },
+        include: { inputProduct: { select: productSelect }, outputs: { include: { product: { select: productSelect } } } }, orderBy: { startedAt: "desc" }, take: 40,
+      });
+      const resacks = jobs.filter((j) => diffKinds.has(varietyOf(j.inputProduct))).slice(0, 10).map((j) => ({
+        docNumber: j.docNumber, at: j.startedAt, status: j.status,
+        from: `${qtyText(j.inputProduct, j.inputQty)}${isLooseP(j.inputProduct) ? "" : " ×"} ${j.inputProduct.name}`,
+        to: j.outputs.map((o) => `${qtyText(o.product, o.quantity)}${isLooseP(o.product) ? "" : " ×"} ${o.product.name}`).join(", "),
+        lossGrams: j.lossGrams,
+      }));
+
+      // What the consignment store was charged for what is missing (owner only: it is at cost).
+      let charge: { totalMinor: number; entries: { docNumber: string; product: string; quantity: number; amountMinor: number; undone: boolean }[] } | null = null;
+      if (owner) {
+        const entries = await prisma.storePayableEntry.findMany({ where: { storeId, kind: "CHARGE", sourceLineId: { in: c.lines.map((l) => l.id) } }, select: { id: true, docNumber: true, amountMinor: true, productId: true, quantity: true } });
+        if (entries.length) {
+          const undone = new Set((await prisma.storePayableEntry.findMany({ where: { storeId, reversesId: { in: entries.map((e) => e.id) } }, select: { reversesId: true } })).map((e) => e.reversesId));
+          const nameOf = new Map(c.lines.map((l) => [l.productId, l.product.name] as const));
+          const list = entries.map((e) => ({ docNumber: e.docNumber, product: nameOf.get(e.productId ?? "") ?? "", quantity: e.quantity ?? 0, amountMinor: e.amountMinor, undone: undone.has(e.id) }));
+          charge = { totalMinor: list.filter((e) => !e.undone).reduce((sum, e) => sum + e.amountMinor, 0), entries: list };
+        }
+      }
+
+      const opened = await prisma.auditLog.findMany({ where: { storeId, action: "count.auto_resack", entityId: c.id }, select: { after: true }, orderBy: { createdAt: "asc" } });
+      const openedByCount = opened.map((o) => {
+        const a = (o.after ?? {}) as { variety?: string; sacksOpened?: number; grams?: number; unexplainedGrams?: number; automatic?: boolean };
+        return { variety: a.variety ?? "", sacks: a.sacksOpened ?? 0, kg: (a.grams ?? 0) / 1000, unexplainedKg: (a.unexplainedGrams ?? 0) / 1000, automatic: a.automatic === true };
+      });
+      return {
+        count: { id: c.id, docNumber: c.docNumber, kind: c.kind, status: c.status, location: c.location.name, locationId: c.locationId, startedAt: c.startedAt, postedAt: c.decidedAt ?? c.submittedAt, countedBy: Array.from(new Set(counted.map((x) => names.get(x.countedById ?? "")).filter(Boolean))).join(", ") || names.get(c.startedById) || null },
+        summary: {
+          counted: counted.length, correct: correct.length, short: differing.filter((x) => x.leftoverQty < 0).length, over: differing.filter((x) => x.leftoverQty > 0).length,
+          explained: differing.filter((x) => x.leftoverQty === 0).length, kulangValueMinor: c.kulangValueMinor, sobraValueMinor: c.sobraValueMinor,
+        },
+        openedByCount,
+        lines, correct: correct.map((x) => ({ productId: x.l.productId, name: x.l.product.name, loose: isLooseP(x.l.product), countedQty: x.l.countedQty! })).sort((a, b) => a.name.localeCompare(b.name)),
+        weight, resacks, charge,
+      };
+    });
+  }
+
+  /** Counts posted in a period (staff: their own store), with the totals, the shortages by reason, and every difference for the Excel file. */
+  async reportList(storeId: string, actor: Actor, f: { locationId?: string; from?: string; to?: string }) {
+    return this.run(async () => {
+      const day = /^\d{4}-\d{2}-\d{2}$/;
+      const todayMnl = new Date(Date.now() + 8 * 3_600_000).toISOString().slice(0, 10);
+      const to = f.to && day.test(f.to) ? f.to : todayMnl;
+      const from = f.from && day.test(f.from) ? f.from : new Date(Date.parse(`${to}T00:00:00Z`) - 29 * 86_400_000).toISOString().slice(0, 10);
+      if (from > to) throw new CountError("The first date is after the last date");
+      const isOwner = OWNERS.includes(actor.role);
+      if (!isOwner && !actor.homeLocationId) throw new StepError(forbidden("You are not assigned to a location"));
+      const loc = isOwner ? f.locationId || undefined : actor.homeLocationId ?? undefined;
+      const counts = await prisma.stockCount.findMany({
+        where: { storeId, status: "APPROVED", decidedAt: { gte: new Date(`${from}T00:00:00+08:00`), lte: new Date(`${to}T23:59:59.999+08:00`) }, ...(loc ? { locationId: loc } : {}) },
+        include: {
+          location: { select: { name: true } },
+          lines: { select: { productId: true, expectedQty: true, countedQty: true, varianceQty: true, postedQty: true, reason: true, note: true, countedById: true, product: { select: { name: true, stockBaseUnit: true, stockBaseQuantity: true, costMinor: true } } } },
+        },
+        orderBy: { decidedAt: "desc" }, take: 200,
+      });
+      const names = await this.names(counts.flatMap((c) => [c.startedById, ...c.lines.map((l) => l.countedById)]));
+      const reasons = new Map<string, { code: string; label: string; items: number; shortValueMinor: number; overValueMinor: number }>();
+      const differences: ReportDifference[] = [];
+      let correct = 0, short = 0, over = 0, kulang = 0, sobra = 0, items = 0;
+      const summaries = counts.map((c) => {
+        const done = c.lines.filter((l) => l.countedQty !== null);
+        let cShort = 0, cOver = 0, cCorrect = 0;
+        for (const l of done) {
+          const v = l.varianceQty ?? 0;
+          if (v === 0) { cCorrect++; continue; }
+          const left = l.postedQty ?? v; // what an opened sack explains is not a loss
+          const value = costValue(l.product, left);
+          if (left < 0) cShort++; else if (left > 0) cOver++;
+          const code = l.reason ?? "NONE";
+          const r = reasons.get(code) ?? { code, label: l.reason ? REASON_LABEL[l.reason as CountReason] ?? l.reason : "No reason (older count)", items: 0, shortValueMinor: 0, overValueMinor: 0 };
+          r.items++;
+          if (value < 0) r.shortValueMinor += -value; else r.overValueMinor += value;
+          reasons.set(code, r);
+          if (differences.length < 2000) {
+            differences.push({
+              docNumber: c.docNumber, postedAt: c.decidedAt, location: c.location.name, item: l.product.name, loose: isLooseP(l.product), countedQty: l.countedQty, expectedQty: l.expectedQty, varianceQty: v,
+              varianceValueMinor: value, reason: l.reason, reasonLabel: l.reason ? REASON_LABEL[l.reason as CountReason] ?? null : null, note: l.note, countedBy: names.get(l.countedById ?? "") ?? null,
+            });
+          }
+        }
+        correct += cCorrect; short += cShort; over += cOver; kulang += c.kulangValueMinor; sobra += c.sobraValueMinor; items += done.length;
+        return { id: c.id, docNumber: c.docNumber, kind: c.kind, location: c.location.name, locationId: c.locationId, postedAt: c.decidedAt, items: done.length, correct: cCorrect, short: cShort, over: cOver, kulangValueMinor: c.kulangValueMinor, sobraValueMinor: c.sobraValueMinor, countedBy: Array.from(new Set(done.map((l) => names.get(l.countedById ?? "")).filter(Boolean))).join(", ") || names.get(c.startedById) || null };
+      });
+      return {
+        from, to, locationId: loc ?? null,
+        totals: { counts: counts.length, items, correct, short, over, kulangValueMinor: kulang, sobraValueMinor: sobra },
+        byReason: Array.from(reasons.values()).sort((a, b) => b.shortValueMinor + b.overValueMinor - (a.shortValueMinor + a.overValueMinor)),
+        counts: summaries, differences,
+      };
+    });
+  }
+
+  /** Owner/manager: every item against every store, with when it was last counted and what the system holds. */
+  async overview(storeId: string, actor: Actor) {
+    return this.run(async () => {
+      if (!OWNERS.includes(actor.role)) throw new StepError(forbidden("Only the owner or a manager can see all stores"));
+      const [locations, products, levels, last] = await Promise.all([
+        prisma.warehouse.findMany({ where: { storeId, isActive: true }, select: { id: true, name: true, type: true }, orderBy: [{ isDefault: "desc" }, { name: "asc" }] }),
+        prisma.product.findMany({ where: { storeId, trackStock: true }, select: { id: true, name: true, variety: true, isActive: true, stockBaseUnit: true, stockBaseQuantity: true }, orderBy: { name: "asc" } }),
+        prisma.stockLevel.findMany({ where: { storeId }, select: { productId: true, warehouseId: true, quantityOnHand: true } }),
+        prisma.$queryRaw<{ productId: string; locationId: string; last: Date }[]>`
+          SELECT l."productId", c."locationId", MAX(l."countedAt") AS "last"
+            FROM "StockCountLine" l JOIN "StockCount" c ON c."id" = l."countId"
+           WHERE l."storeId" = ${storeId} AND l."countedQty" IS NOT NULL AND c."status" = 'APPROVED'
+           GROUP BY l."productId", c."locationId"`,
+      ]);
+      const onHand = new Map(levels.map((l) => [`${l.productId}|${l.warehouseId}`, l.quantityOnHand] as const));
+      const lastAt = new Map(last.map((l) => [`${l.productId}|${l.locationId}`, l.last] as const));
+      const items: { productId: string; name: string; variety: string; loose: boolean; cells: Record<string, { lastCountedAt: Date | null; onHand: number }> }[] = [];
+      for (const p of products) {
+        const cells: Record<string, { lastCountedAt: Date | null; onHand: number }> = {};
+        for (const loc of locations) {
+          const key = `${p.id}|${loc.id}`;
+          const qty = onHand.get(key) ?? 0;
+          const at = lastAt.get(key) ?? null;
+          if (qty > 0 || at) cells[loc.id] = { lastCountedAt: at, onHand: qty };
+        }
+        if (!p.isActive && Object.keys(cells).length === 0) continue;
+        items.push({ productId: p.id, name: p.name, variety: varietyOf(p), loose: isLooseP(p), cells });
+      }
+      return { locations, items };
     });
   }
 

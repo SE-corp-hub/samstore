@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { ageText, countedKg, differenceText, groupKg, searchItems, sheetGroups, staleCount, staleFirst, titleCase } from "./count-view.js";
+import { ageText, countedKg, csvText, differenceText, groupKg, oldestCount, overviewRows, pesoText, searchItems, sheetGroups, sinceText, staleCount, staleFirst, titleCase } from "./count-view.js";
 
 const mk = (name: string, over: Partial<{ sku: string; barcode: string | null; variety: string; lastCountedAt: string | null }> = {}) =>
   ({ name, sku: over.sku ?? name.slice(0, 3).toUpperCase(), barcode: over.barcode ?? null, variety: over.variety ?? "", lastCountedAt: over.lastCountedAt ?? null });
@@ -69,4 +69,36 @@ test("the difference reads in plain words", () => {
   assert.equal(differenceText(true, 400), "Over 0.4 kg");
   assert.equal(differenceText(true, -12_500), "Short 12.5 kg");
   assert.equal(differenceText(false, 0), "Correct");
+});
+
+test("what moved since the last count reads in order, and skips what did not move", () => {
+  assert.equal(sinceText(false, { pumasok: 20, nabenta: -18, bilang: 0 }), "Stock in +20 · Sold −18");
+  assert.equal(sinceText(true, { nabenta: -2500, resack_lumabas: 50_000 }), "Resack (out) +50 kg · Sold −2.5 kg");
+  assert.equal(sinceText(false, {}), "nothing moved");
+});
+
+test("the Excel file keeps commas, quotes and line breaks inside their cell, and starts with the BOM Excel needs", () => {
+  const text = csvText([["Item", "Note"], ["Jasmine, 25 kg", 'He said "wet"'], ["Dinorado", null], ["A", "line 1\nline 2"]]);
+  assert.equal(text.charCodeAt(0), 0xfeff);
+  assert.equal(text.slice(1), 'Item,Note\r\n"Jasmine, 25 kg","He said ""wet"""\r\nDinorado,\r\nA,"line 1\nline 2"\r\n');
+});
+
+test("pesos show two decimals and never a minus (the colour says short or over)", () => {
+  assert.equal(pesoText(-125_050), "₱1,250.50");
+  assert.equal(pesoText(0), "₱0.00");
+});
+
+test("all stores: the item counted longest ago comes first, never counted before all; words filter", () => {
+  const cell = (d: string | null, onHand = 5) => ({ lastCountedAt: d, onHand });
+  const items = [
+    { productId: "1", name: "Dinorado 25 kg", variety: "dinorado", loose: false, cells: { s1: cell("2026-10-20T00:00:00Z"), s2: cell("2026-10-01T00:00:00Z") } },
+    { productId: "2", name: "Sinandomeng 25 kg", variety: "sinandomeng", loose: false, cells: { s1: cell("2026-10-21T00:00:00Z") } },
+    { productId: "3", name: "Jasmine 25 kg", variety: "jasmine", loose: false, cells: { s1: cell("2026-10-21T00:00:00Z"), s2: cell(null) } },
+    { productId: "4", name: "Empty", variety: "", loose: false, cells: {} },
+  ];
+  assert.equal(oldestCount(items[2]!), -Infinity, "one store never counted");
+  assert.equal(oldestCount(items[3]!), Infinity, "held nowhere: nothing to count");
+  assert.deepEqual(overviewRows(items, "", true).map((i) => i.productId), ["3", "1", "2", "4"]);
+  assert.deepEqual(overviewRows(items, "", false).map((i) => i.productId), ["1", "4", "3", "2"], "by name");
+  assert.deepEqual(overviewRows(items, "25 sin", true).map((i) => i.productId), ["2"]);
 });
