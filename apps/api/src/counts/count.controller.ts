@@ -50,12 +50,25 @@ export class CountController {
     return { storeId, counts: await this.counts.list(storeId, actor, { locationId, status }) };
   }
 
-  /** POST /admin/counts — the owner starts a count: { locationId, productIds? (empty = all items there), note? } */
+  /**
+   * POST /admin/counts — anyone starts a list count at their location:
+   * { locationId, productIds? | variety? | staleDays? (nothing = every item there), showSystem? (owner/manager only), note? }
+   */
   @Post("counts")
   async start(@Req() req: Req_, @Body() body: Record<string, unknown>, @Headers("x-store-id") h?: string) {
     const { storeId, actor } = await this.ctx(req, h);
     const ids = Array.isArray(body?.productIds) ? (body.productIds as unknown[]).filter((x): x is string => typeof x === "string") : [];
-    return unwrap(await this.counts.start(storeId, actor, { locationId: str(body?.locationId), productIds: ids, note: str(body?.note) }));
+    return unwrap(await this.counts.start(storeId, actor, {
+      locationId: str(body?.locationId), productIds: ids, variety: str(body?.variety), staleDays: typeof body?.staleDays === "number" ? body.staleDays : undefined,
+      showSystem: body?.showSystem === true, note: str(body?.note),
+    }));
+  }
+
+  /** GET /admin/counts/items?locationId= — every item that can be counted there, with when it was last counted (no quantities, no cost). */
+  @Get("counts/items")
+  async items(@Req() req: Req_, @Query("locationId") locationId?: string, @Headers("x-store-id") h?: string) {
+    const { storeId, actor } = await this.ctx(req, h);
+    return unwrap(await this.counts.items(storeId, actor, { locationId }));
   }
 
   /** POST /admin/counts/quick — the zero check: { locationId?, productId, counted (sacks, or kilos text for loose), signatures } */

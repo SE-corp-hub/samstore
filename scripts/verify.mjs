@@ -76,6 +76,7 @@ const TEST_FILES = [
   "apps/web/src/lib/slip-print.test.ts",
   "apps/web/src/lib/printer-settings.test.ts",
   "apps/web/src/lib/bt-print.test.ts",
+  "apps/web/src/lib/count-view.test.ts",
   "apps/api/src/domain/stock-book.test.ts",
   "apps/api/src/domain/price-history.test.ts",
   "apps/api/src/domain/shelf-cost.test.ts",

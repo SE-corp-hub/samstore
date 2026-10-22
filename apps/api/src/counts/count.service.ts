@@ -1,10 +1,13 @@
 // Rice Ops M8 — Bilangin (counts), the balance, and Manual na bawas (write-offs).
 //
-//   Full / partial count: the owner starts it for one location; staff count WITHOUT seeing
-//   the system's numbers (blind); each line keeps what the system had at the moment it was
-//   counted, so sales during the count never show as kulang. Staff submit and sign; the
-//   owner approves in Para sa iyo and the adjustments post as "Bilang CNT-…".
-//   Quick count (zero check, "May natira pa ba?") and the closing top-5: post at once.
+//   Any role can count (staff at their own location only). A list count (all items, or one kind
+//   of rice, or items not counted lately, or items picked) is counted WITHOUT seeing the
+//   system's numbers (blind, unless the owner/manager asks to see them); each line keeps what
+//   the system had at the moment it was counted, so sales during the count never show as
+//   kulang. The counter submits and signs and the adjustments post at once as "Bilang CNT-…"
+//   (no owner approval; the owner sees what was found afterwards). A list count may leave
+//   items uncounted: those stay as they are. Quick count (one item) and the closing top-5
+//   post at once too; the closing top-5 must be counted in full.
 //   Balance: expected = last count + every movement since; it must equal the system's shelf.
 //   Write-off: reason, optional photo, staff signs; the stock moves; over 1% → the owner.
 
@@ -15,6 +18,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../persistence/prisma-repositories.js";
 import { cacheBust, cacheKey } from "../persistence/ttl-cache.js";
 import { adjustForCount, InsufficientStockError, releaseForTrip, type TripLeg } from "../domain/movements.js";
+import { varietyOf } from "../domain/resack.js";
 import { balanceOf, costValue, countedUnits, CountError, gramsIn, isLooseP, lineResult, verdict, WRITE_OFF_LABEL, writeOffCheck } from "../domain/counting.js";
 import { formatKilos } from "../domain/weight.js";
 import {
@@ -106,25 +110,79 @@ export class CountService {
 
   // ─────────────────────────── full / partial counts ───────────────────────────
 
-  async start(storeId: string, actor: Actor, input: { locationId?: string; productIds?: string[]; note?: string }) {
+  /** The last time each item was counted (a posted count) at a location. */
+  private async lastCounted(storeId: string, locationId: string): Promise<Map<string, Date>> {
+    const rows = await prisma.stockCountLine.groupBy({
+      by: ["productId"],
+      where: { storeId, countedQty: { not: null }, count: { locationId, status: "APPROVED" } },
+      _max: { countedAt: true },
+    });
+    const out = new Map<string, Date>();
+    for (const r of rows) if (r._max.countedAt) out.set(r.productId, r._max.countedAt);
+    return out;
+  }
+
+  /** Items that can be counted at a location: every active, tracked item (even with no stock row yet), plus inactive ones that still have rice on the shelf. */
+  private countable(storeId: string, locationId: string): Prisma.ProductWhereInput {
+    return { storeId, trackStock: true, OR: [{ isActive: true }, { stockLevels: { some: { warehouseId: locationId, quantityOnHand: { gt: 0 } } } }] };
+  }
+
+  /**
+   * The search list for the Count screen: every item that can be counted here, with when it was last counted.
+   * Never carries the system's quantity (staff count blind) or any cost.
+   */
+  async items(storeId: string, actor: Actor, input: { locationId?: string }) {
     return this.run(async () => {
-      if (!OWNERS.includes(actor.role)) throw new StepError(forbidden("Only the owner can start a count"));
       const loc = await this.location(storeId, actor, input.locationId);
-      const open = await prisma.stockCount.findFirst({ where: { storeId, locationId: loc.id, status: { in: ["OPEN", "SUBMITTED"] }, kind: { in: ["FULL", "PARTIAL"] } }, select: { docNumber: true } });
-      if (open) throw new StepError(conflict(`There is still an open count here (${open.docNumber}) — finish it first`));
+      const products = await prisma.product.findMany({
+        where: this.countable(storeId, loc.id),
+        select: { id: true, name: true, sku: true, barcode: true, variety: true, stockBaseUnit: true, stockBaseQuantity: true },
+        orderBy: { name: "asc" },
+      });
+      const last = await this.lastCounted(storeId, loc.id);
+      return {
+        location: loc,
+        items: products.map((p) => ({
+          productId: p.id, name: p.name, sku: p.sku, barcode: p.barcode, variety: varietyOf(p), loose: isLooseP(p),
+          unitGrams: gramsIn(p, 1), lastCountedAt: last.get(p.id) ?? null,
+        })),
+      };
+    });
+  }
+
+  /**
+   * Start a list count at a location. Any role may (staff only at their own location).
+   * Scope: nothing chosen = every item here; or `variety` (one kind of rice), `staleDays` (not counted for N days), `productIds` (picked items).
+   * Staff always count blind; the owner/manager may ask to see the system numbers (`showSystem`).
+   */
+  async start(storeId: string, actor: Actor, input: { locationId?: string; productIds?: string[]; variety?: string; staleDays?: number; showSystem?: boolean; note?: string }) {
+    return this.run(async () => {
+      const loc = await this.location(storeId, actor, input.locationId);
+      const mine = await prisma.stockCount.findFirst({ where: { storeId, locationId: loc.id, status: "OPEN", kind: { in: ["FULL", "PARTIAL"] }, startedById: actor.userId }, select: { docNumber: true } });
+      if (mine) throw new StepError(conflict(`You already have an open count here (${mine.docNumber}). Finish it or cancel it first.`));
       const chosen = (input.productIds ?? []).filter(Boolean);
-      const products = chosen.length
-        ? await prisma.product.findMany({ where: { storeId, id: { in: chosen }, isActive: true }, select: { id: true } })
-        : await prisma.product.findMany({ where: { storeId, isActive: true, stockLevels: { some: { warehouseId: loc.id } } }, select: { id: true } });
+      const variety = (input.variety ?? "").trim().toLowerCase();
+      const staleDays = input.staleDays === undefined ? 0 : input.staleDays;
+      if (staleDays !== 0 && (!Number.isInteger(staleDays) || staleDays < 1 || staleDays > 3650)) throw new CountError("Choose how many days (1 or more)");
+      const scope = this.countable(storeId, loc.id);
+      let products = await prisma.product.findMany({ where: chosen.length ? { AND: [scope, { id: { in: chosen } }] } : scope, select: { id: true, name: true, variety: true } });
       if (chosen.length && products.length !== new Set(chosen).size) throw new CountError("Unknown product");
-      if (products.length === 0) throw new CountError("No products to count here");
+      if (!chosen.length && variety) products = products.filter((p) => varietyOf(p) === variety);
+      if (!chosen.length && staleDays) {
+        const last = await this.lastCounted(storeId, loc.id);
+        const cutoff = Date.now() - staleDays * 86_400_000;
+        products = products.filter((p) => { const t = last.get(p.id); return !t || t.getTime() < cutoff; });
+      }
+      if (products.length === 0) throw new CountError("No items to count here");
+      const everything = !chosen.length && !variety && !staleDays;
+      const blind = !(OWNERS.includes(actor.role) && input.showSystem === true);
       return prisma.$transaction(async (tx) => {
         const docNumber = await nextDocNumber(tx, storeId, "CNT");
-        const c = await tx.stockCount.create({ data: { storeId, docNumber, locationId: loc.id, kind: chosen.length ? "PARTIAL" : "FULL", note: input.note?.trim().slice(0, 200) || null, startedById: actor.userId }, select: { id: true, docNumber: true } });
+        const c = await tx.stockCount.create({ data: { storeId, docNumber, locationId: loc.id, kind: everything ? "FULL" : "PARTIAL", blind, note: input.note?.trim().slice(0, 200) || null, startedById: actor.userId }, select: { id: true, docNumber: true } });
         await tx.stockCountLine.createMany({ data: products.map((p) => ({ storeId, countId: c.id, productId: p.id })) });
-        await tx.auditLog.create({ data: { storeId, actorType: "USER", actorId: actor.userId, action: "count.start", entityType: "StockCount", entityId: c.id, after: { locationId: loc.id, lines: products.length } } });
+        await tx.auditLog.create({ data: { storeId, actorType: "USER", actorId: actor.userId, action: "count.start", entityType: "StockCount", entityId: c.id, after: { locationId: loc.id, lines: products.length, blind } } });
         return { id: c.id, docNumber: c.docNumber, lines: products.length };
-      });
+      }, txOptions(60_000));
     });
   }
 
@@ -136,7 +194,7 @@ export class CountService {
       include: { location: { select: { name: true } }, _count: { select: { lines: true } } },
       orderBy: { startedAt: "desc" }, take: 50,
     });
-    return rows.map((c) => ({ id: c.id, docNumber: c.docNumber, kind: c.kind, status: c.status, location: c.location.name, locationId: c.locationId, lines: c._count.lines, startedAt: c.startedAt, kulangValueMinor: c.kulangValueMinor, sobraValueMinor: c.sobraValueMinor, approvalId: c.approvalId }));
+    return rows.map((c) => ({ id: c.id, docNumber: c.docNumber, kind: c.kind, status: c.status, location: c.location.name, locationId: c.locationId, lines: c._count.lines, startedAt: c.startedAt, kulangValueMinor: c.kulangValueMinor, sobraValueMinor: c.sobraValueMinor, approvalId: c.approvalId, mine: c.startedById === actor.userId }));
   }
 
   /** One count. Staff never see the system's numbers on a blind count that is still open. */
@@ -145,14 +203,19 @@ export class CountService {
     if (!c) return notFound();
     const refusal = locationRefusal(actor, c.locationId);
     if (refusal) return forbidden(refusal);
-    const hide = c.blind && c.status === "OPEN" && !OWNERS.includes(actor.role);
+    // While a count is open, staff never see the system's numbers; the owner/manager see them only on a count they started with "show system numbers".
+    const hide = c.status === "OPEN" && (c.blind || !OWNERS.includes(actor.role));
+    const live = c.status === "OPEN" && !hide
+      ? new Map((await prisma.stockLevel.findMany({ where: { storeId, warehouseId: c.locationId, productId: { in: c.lines.map((l) => l.productId) } }, select: { productId: true, quantityOnHand: true } })).map((r) => [r.productId, r.quantityOnHand] as const))
+      : null;
     return {
       ok: true as const,
       value: {
         id: c.id, docNumber: c.docNumber, kind: c.kind, status: c.status, location: c.location.name, locationId: c.locationId, startedAt: c.startedAt,
-        kulangValueMinor: c.kulangValueMinor, sobraValueMinor: c.sobraValueMinor, blindHidden: hide,
+        kulangValueMinor: c.kulangValueMinor, sobraValueMinor: c.sobraValueMinor, blindHidden: hide, mine: c.startedById === actor.userId,
         lines: c.lines.map((l) => ({
-          productId: l.productId, name: l.product.name, loose: isLooseP(l.product), countedQty: l.countedQty, countedAt: l.countedAt,
+          productId: l.productId, name: l.product.name, loose: isLooseP(l.product), variety: varietyOf(l.product), unitGrams: gramsIn(l.product, 1), countedQty: l.countedQty, countedAt: l.countedAt,
+          ...(live ? { systemQty: live.get(l.productId) ?? 0 } : {}),
           ...(hide ? {} : {
             expectedQty: l.expectedQty, varianceQty: l.varianceQty, varianceValueMinor: l.varianceValueMinor,
             varianceGrams: l.varianceQty === null ? null : gramsIn(l.product, l.varianceQty), verdict: l.varianceQty === null ? null : verdict(l.varianceQty),
@@ -182,13 +245,17 @@ export class CountService {
           const expected = await this.shelfNow(tx, storeId, line.productId, c.locationId);
           await tx.stockCountLine.update({ where: { id: line.id }, data: { expectedQty: expected, countedQty: counted, countedAt: new Date(), countedById: actor.userId } });
         }
-      }, txOptions());
+      }, txOptions(60_000));
       const done = await prisma.stockCountLine.count({ where: { countId: id, countedQty: { not: null } } });
       return { id, counted: done, total: c.lines.length };
     });
   }
 
-  /** Submit and sign. Full/partial → the owner's Para sa iyo; quick/closing → posted now. */
+  /**
+   * Submit and sign: the differences post at once, for every kind of count (no owner approval).
+   * A list count may leave items uncounted; they are dropped from the count and stay as they are.
+   * The quick count and the closing top-5 must be counted in full.
+   */
   async submit(storeId: string, actor: Actor, id: string, signatures: SignatureInput[] | undefined) {
     return this.run(async () => {
       const c = await prisma.stockCount.findFirst({ where: { id, storeId }, include: { location: { select: { name: true } }, lines: { include: { product: { select: productSelect } } } } });
@@ -196,38 +263,34 @@ export class CountService {
       const refusal = locationRefusal(actor, c.locationId);
       if (refusal) throw new StepError(forbidden(refusal));
       const missing = c.lines.filter((l) => l.countedQty === null);
-      if (missing.length) throw new CountError(`Not counted yet: ${missing.slice(0, 3).map((l) => l.product.name).join(", ")}${missing.length > 3 ? ` +${missing.length - 3} more` : ""}`);
-      const results = c.lines.map((l) => ({ l, r: lineResult(l.product, l.expectedQty!, l.countedQty!) }));
+      const wholeListOnly = c.kind === "QUICK" || c.kind === "CLOSING";
+      if (missing.length && wholeListOnly) throw new CountError(`Not counted yet: ${missing.slice(0, 3).map((l) => l.product.name).join(", ")}${missing.length > 3 ? ` +${missing.length - 3} more` : ""}`);
+      const counted = c.lines.filter((l) => l.countedQty !== null);
+      if (counted.length === 0) throw new CountError("Count at least one item first");
+      const results = counted.map((l) => ({ l, r: lineResult(l.product, l.expectedQty!, l.countedQty!) }));
       const kulang = -results.filter((x) => x.r.varianceValueMinor < 0).reduce((s, x) => s + x.r.varianceValueMinor, 0);
       const sobra = results.filter((x) => x.r.varianceValueMinor > 0).reduce((s, x) => s + x.r.varianceValueMinor, 0);
-      const postNow = c.kind === "QUICK" || c.kind === "CLOSING";
       return prisma.$transaction(async (tx) => {
         const claimed = await tx.stockCount.updateMany({ where: { id, storeId, status: "OPEN" }, data: { status: "SUBMITTED", submittedById: actor.userId, submittedAt: new Date(), kulangValueMinor: kulang, sobraValueMinor: sobra } });
         if (claimed.count === 0) throw new StepError(conflict("This count was already submitted"));
+        if (missing.length) await tx.stockCountLine.deleteMany({ where: { countId: id, countedQty: null } });
         for (const { l, r } of results) await tx.stockCountLine.update({ where: { id: l.id }, data: { varianceQty: r.varianceQty, varianceValueMinor: r.varianceValueMinor } });
         await captureSignatures(tx, storeId, actor, { documentType: "COUNT", documentId: id, step: "SUBMIT", locationId: c.locationId }, signatures);
         await requireSignatures(tx, storeId, { documentType: "COUNT", documentId: id, step: "SUBMIT" });
-        let approvalId: string | null = null;
-        if (postNow) {
-          await postCount(tx, storeId, id, actor.userId);
-        } else {
-          const off = results.filter((x) => x.r.varianceQty !== 0);
-          approvalId = (await requestApproval(tx, {
-            storeId, kind: "COUNT", documentType: "COUNT", documentId: id, locationId: c.locationId,
-            summary: `Count ${c.docNumber} at ${c.location.name}: ${c.lines.length} items, ${off.length} short/over. Short ₱${(kulang / 100).toFixed(2)}, over ₱${(sobra / 100).toFixed(2)}.${off.length ? ` E.g.: ${off.slice(0, 3).map((x) => `${x.l.product.name} ${x.r.varianceQty > 0 ? "+" : ""}${qtyText(x.l.product, x.r.varianceQty)}`).join(", ")}.` : ""} Approve to post it.`,
-            detail: { kulangValueMinor: kulang, sobraValueMinor: sobra, lines: c.lines.length },
-            requestedById: actor.userId,
-          })).id;
-          await tx.stockCount.update({ where: { id }, data: { approvalId } });
-        }
-        await tx.auditLog.create({ data: { storeId, actorType: "USER", actorId: actor.userId, action: "count.submit", entityType: "StockCount", entityId: id, after: { kulangValueMinor: kulang, sobraValueMinor: sobra, posted: postNow } } });
-        return { id, docNumber: c.docNumber, status: postNow ? "APPROVED" : "SUBMITTED", approvalId, kulangValueMinor: kulang, sobraValueMinor: sobra };
-      }, txOptions(60_000));
+        await postCount(tx, storeId, id, actor.userId);
+        await tx.auditLog.create({ data: { storeId, actorType: "USER", actorId: actor.userId, action: "count.submit", entityType: "StockCount", entityId: id, after: { kulangValueMinor: kulang, sobraValueMinor: sobra, counted: counted.length, skipped: missing.length, posted: true } } });
+        return { id, docNumber: c.docNumber, status: "APPROVED" as const, approvalId: null, kulangValueMinor: kulang, sobraValueMinor: sobra, counted: counted.length, skipped: missing.length };
+      }, txOptions(120_000));
     });
   }
 
+  /** The owner/manager, or the person who started the count, may cancel it while it is open. */
   async cancel(storeId: string, actor: Actor, id: string) {
-    if (!OWNERS.includes(actor.role)) return forbidden("Only the owner can cancel");
+    const c = await prisma.stockCount.findFirst({ where: { id, storeId }, select: { locationId: true, startedById: true } });
+    if (!c) return notFound();
+    const refusal = locationRefusal(actor, c.locationId);
+    if (refusal) return forbidden(refusal);
+    if (!OWNERS.includes(actor.role) && c.startedById !== actor.userId) return forbidden("Only the person who started this count, or the owner, can cancel it");
     const r = await prisma.stockCount.updateMany({ where: { id, storeId, status: "OPEN" }, data: { status: "CANCELLED", decidedById: actor.userId, decidedAt: new Date() } });
     return r.count ? { ok: true as const, value: { id, status: "CANCELLED" } } : conflict("This count is no longer open");
   }

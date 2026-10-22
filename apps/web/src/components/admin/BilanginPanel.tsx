@@ -1,13 +1,16 @@
 "use client";
 
 // Rice Ops M8 — Bilangin (counts), Manual na bawas (write-offs) and the Balance.
-//   Bilangin:  the owner starts a count; staff count every item WITHOUT seeing the
-//              system's numbers, then sign; the owner approves in Para sa iyo and the
-//              differences post. Closing: a quick count of the top 5 (posts at once).
+//   Bilangin:  anyone searches for an item and counts it, or starts a list count (everything,
+//              one kind of rice, not counted lately, or picked items). They count WITHOUT seeing
+//              the system's numbers, then sign; the differences post at once (no owner approval).
+//              Closing: a quick count of the top 5 (posts at once).
 //   Bawas:     spilled, wet, bukbok, sample, giveaway… with a photo; over 1% → the owner.
 //   Balance:   per item — last count + what came in/out since = expected; Kulang in red.
 
 import { useCallback, useEffect, useState } from "react";
+import { formatKg, groupKg, sheetGroups, titleCase } from "../../lib/count-view";
+import CountHome from "./CountHome";
 import { API_URL } from "../../config";
 import { adminHeaders, isOwnerRole } from "../../lib/admin";
 import { toast } from "../../lib/toast";
@@ -19,9 +22,9 @@ import { printSlip } from "../../lib/slip-print";
 import { getPrinterSettings } from "../../lib/printer-settings";
 
 interface Loc { id: string; name: string; code: string | null; isActive: boolean }
-export interface CountRow { id: string; docNumber: string; kind: string; status: string; location: string; locationId: string; lines: number; startedAt: string; kulangValueMinor: number; sobraValueMinor: number }
-interface CountLine { productId: string; name: string; loose: boolean; countedQty: number | null; expectedQty?: number | null; varianceQty?: number | null; varianceValueMinor?: number | null; verdict?: string | null }
-export interface CountDetail { id: string; docNumber: string; kind: string; status: string; location: string; locationId: string; blindHidden: boolean; kulangValueMinor: number; sobraValueMinor: number; lines: CountLine[] }
+export interface CountRow { id: string; docNumber: string; kind: string; status: string; location: string; locationId: string; lines: number; startedAt: string; kulangValueMinor: number; sobraValueMinor: number; mine?: boolean }
+interface CountLine { productId: string; name: string; loose: boolean; variety?: string; unitGrams?: number | null; systemQty?: number; countedQty: number | null; expectedQty?: number | null; varianceQty?: number | null; varianceValueMinor?: number | null; verdict?: string | null }
+export interface CountDetail { id: string; docNumber: string; kind: string; status: string; location: string; locationId: string; blindHidden: boolean; mine?: boolean; kulangValueMinor: number; sobraValueMinor: number; lines: CountLine[] }
 interface Product { id: string; name: string; stockBaseUnit: string | null; stockBaseQuantity: number | null; isActive?: boolean }
 interface BalanceItem { productId: string; name: string; loose: boolean; lastCount: { docNumber: string; countedQty: number; countedAt: string } | null; buckets: Record<string, number>; expected: number; onHand: number; reserved: number; matches: boolean; valueMinor: number }
 type ApiBody = { message?: string; errors?: string[] } & Record<string, unknown>;
@@ -81,14 +84,6 @@ export default function BilanginPanel({ role }: { role?: string; onNavigate?: (t
     if (!res.ok) { setError(errText(d, "Could not open")); return; }
     setOpen(d as unknown as CountDetail);
   };
-  const startFull = async () => {
-    if (!(await askConfirm(`Start a full count at ${locations.find((l) => l.id === locationId)?.name}?`, { ok: "Start" }))) return;
-    const r = await post("/admin/counts", { locationId });
-    if (!r.ok) { setError(errText(r.data, "Could not start")); return; }
-    toast(`Started: ${String(r.data?.docNumber ?? "")}`);
-    await loadCounts();
-    await openCount(String(r.data?.id));
-  };
   const startClosing = async () => {
     const r = await post("/admin/counts/closing", { locationId });
     if (!r.ok) { setError(errText(r.data, "Could not start")); return; }
@@ -121,15 +116,12 @@ export default function BilanginPanel({ role }: { role?: string; onNavigate?: (t
       {error && <div className="alert alert-danger py-2" role="alert">{error}</div>}
 
       {chosen && tab === "counts" && !open && (
-        <>
-          <div className="d-flex flex-wrap gap-2 mb-3">
-            {owner && <button type="button" className="btn btn-success btn-lg" onClick={() => void startFull()}>Start a full count</button>}
-            <button type="button" className="btn btn-outline-dark btn-lg" onClick={() => void startClosing()}>Closing count (top 5)</button>
-          </div>
+        <CountHome locationId={locationId} owner={owner} onOpen={openCount} onChanged={loadCounts} onError={setError} onClosing={() => void startClosing()}>
+          <h2 className="h6">Counts here</h2>
           <div className="list-group">
             {counts.map((c) => (
               <button key={c.id} type="button" className="list-group-item list-group-item-action d-flex justify-content-between" onClick={() => void openCount(c.id)}>
-                <span><span className="fw-semibold">{c.docNumber}</span> · {c.kind === "FULL" ? "Full" : c.kind === "PARTIAL" ? "Partial" : c.kind === "CLOSING" ? "Closing" : "Quick"} · {c.lines} items<span className="d-block small text-muted">{new Date(c.startedAt).toLocaleString("en-PH")}</span></span>
+                <span><span className="fw-semibold">{c.docNumber}</span> · {c.kind === "FULL" ? "Full" : c.kind === "PARTIAL" ? "List" : c.kind === "CLOSING" ? "Closing" : "Quick"} · {c.lines} items{c.mine && c.status === "OPEN" && <span className="badge text-bg-light border ms-2">Yours</span>}<span className="d-block small text-muted">{new Date(c.startedAt).toLocaleString("en-PH")}</span></span>
                 <span className="text-end">
                   <span className={`badge ${c.status === "OPEN" ? "text-bg-primary" : c.status === "SUBMITTED" ? "text-bg-warning" : c.status === "APPROVED" ? "text-bg-success" : "text-bg-secondary"}`}>{c.status === "OPEN" ? "Open" : c.status === "SUBMITTED" ? "With the owner" : c.status === "APPROVED" ? "Posted" : "Cancelled"}</span>
                   {c.status !== "OPEN" && c.kulangValueMinor > 0 && <span className="d-block small text-danger">Short {peso(c.kulangValueMinor)}</span>}
@@ -138,7 +130,7 @@ export default function BilanginPanel({ role }: { role?: string; onNavigate?: (t
             ))}
             {counts.length === 0 && <p className="text-muted">No counts here yet.</p>}
           </div>
-        </>
+        </CountHome>
       )}
 
       {chosen && tab === "counts" && open && <CountSheet count={open} owner={owner} onClose={async () => { setOpen(null); await loadCounts(); }} onReload={() => void openCount(open.id)} />}
@@ -160,6 +152,9 @@ export function CountSheet({ count, owner, onClose, onReload }: { count: CountDe
   const [result, setResult] = useState<string | null>(null); // shown after submitting
   const [storeName, setStoreName] = useState("");
   const [printNow, setPrintNow] = useState(false);
+  // A list count may leave items uncounted; the quick and closing counts must be counted in full.
+  const wholeListOnly = count.kind === "QUICK" || count.kind === "CLOSING";
+  const canCancel = owner || !!count.mine;
   useEffect(() => { void fetch(`${API_URL}/admin/settings`, { headers: adminHeaders() }).then((r) => (r.ok ? r.json() : null)).then((d) => setStoreName(d?.store?.name ?? "")).catch(() => {}); }, []);
   const shown = count.lines.filter((l) => (!find.trim() || l.name.toLowerCase().includes(find.trim().toLowerCase())) && (!onlyLeft || (values[l.productId] ?? "") === ""));
   const printSheet = () => printSlip({
@@ -176,19 +171,30 @@ export function CountSheet({ count, owner, onClose, onReload }: { count: CountDe
 
   useEffect(() => { if (printNow && result) { setPrintNow(false); if (getPrinterSettings().autoPrint) printSheet(); } }); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const save = async (submit: boolean) => {
-    setBusy(true); setError(null);
+  /** Save what is typed, 40 lines at a time (a long sheet stays quick on a slow connection). */
+  const saveLines = async (): Promise<boolean> => {
     const lines = count.lines.filter((l) => (values[l.productId] ?? "") !== "").map((l) => ({ productId: l.productId, counted: l.loose ? values[l.productId] : Number(values[l.productId]) }));
-    if (lines.length) {
-      const r = await post(`/admin/counts/${count.id}/lines`, { lines });
-      if (!r.ok) { setBusy(false); setError(errText(r.data, "Could not save")); return; }
+    for (let i = 0; i < lines.length; i += 40) {
+      const r = await post(`/admin/counts/${count.id}/lines`, { lines: lines.slice(i, i + 40) });
+      if (!r.ok) { setError(errText(r.data, "Could not save")); return false; }
     }
+    return true;
+  };
+  const save = async (submit: boolean) => {
+    setError(null);
+    if (submit && done < count.lines.length && !wholeListOnly) {
+      const left = count.lines.length - done;
+      if (!(await askConfirm(`${left} item${left === 1 ? " is" : "s are"} not counted. ${left === 1 ? "It stays" : "They stay"} as ${left === 1 ? "it is" : "they are"}. Submit the count?`, { ok: "Submit" }))) return;
+    }
+    setBusy(true);
+    if (!(await saveLines())) { setBusy(false); return; }
     if (submit) {
       const r = await post(`/admin/counts/${count.id}/submit`, { signatures: [{ signerKind: "STAFF", imagePng: sig }] });
       if (!r.ok) { setBusy(false); setError(errText(r.data, "Could not submit")); return; }
       toast(r.data?.status === "APPROVED" ? "Count posted" : "Submitted — waiting for the owner");
       setBusy(false);
-      setResult(r.data?.status === "APPROVED" ? "Count posted. The stock now matches what you counted." : "Submitted. The owner will check it, then the differences are posted.");
+      const skipped = Number(r.data?.skipped ?? 0);
+      setResult(r.data?.status === "APPROVED" ? `Count posted. The stock now matches what you counted.${skipped ? ` ${skipped} item${skipped === 1 ? " was" : "s were"} not counted and stay${skipped === 1 ? "s" : ""} as ${skipped === 1 ? "it is" : "they are"}.` : ""}` : "Submitted. The owner will check it, then the differences are posted.");
       setPrintNow(true);
       return;
     }
@@ -214,13 +220,15 @@ export function CountSheet({ count, owner, onClose, onReload }: { count: CountDe
       </div>
     );
   }
+  const groups = sheetGroups(shown);
+  const showHeadings = groups.length > 1 || (groups[0]?.variety ?? "") !== "";
   return (
     <div style={{ maxWidth: 720 }}>
       <button type="button" className="btn btn-link px-0 mb-2" onClick={onClose}>← Counts</button>
       <h2 className="h5">{count.docNumber} · {count.location}</h2>
       {editable && (
         <>
-          <p className="mb-2">Count <strong>what is on the shelf</strong>. {count.blindHidden ? "The system's numbers are hidden." : ""}</p>
+          <p className="mb-2">Count <strong>what is on the shelf</strong>. {count.blindHidden ? "The system's numbers are hidden." : ""}{!wholeListOnly && " You can leave items you did not count."}</p>
           <div className="progress mb-1" style={{ height: 10 }} role="progressbar" aria-label="Counted so far" aria-valuenow={done} aria-valuemin={0} aria-valuemax={count.lines.length}>
             <div className="progress-bar bg-success" style={{ width: `${count.lines.length ? (done * 100) / count.lines.length : 0}%` }} />
           </div>
@@ -238,35 +246,48 @@ export function CountSheet({ count, owner, onClose, onReload }: { count: CountDe
       {!editable && count.status !== "CANCELLED" && <p>Short <strong className="text-danger">{peso(count.kulangValueMinor)}</strong> · Over <strong>{peso(count.sobraValueMinor)}</strong></p>}
       {error && <div className="alert alert-danger py-2">{error}</div>}
       {shown.length === 0 && <p className="text-muted">{onlyLeft && !find.trim() ? "Everything is counted." : "No item matches."}</p>}
-      <ul className="list-group mb-3" style={{ fontVariantNumeric: "tabular-nums" }}>
-        {shown.map((l) => (
-          <li key={l.productId} className="list-group-item d-flex flex-wrap justify-content-between align-items-center gap-2">
-            <span>{l.name}</span>
-            {editable ? (
-              <div className="input-group" style={{ maxWidth: 200 }}>
-                <input className="form-control form-control-lg text-end" inputMode="decimal" aria-label={`Count of ${l.name}`} value={values[l.productId] ?? ""}
-                  onChange={(e) => setValues({ ...values, [l.productId]: e.target.value.replace(l.loose ? /[^\d.]/g : /\D/g, "").slice(0, 10) })} />
-                <span className="input-group-text">{l.loose ? "kg" : "sacks"}</span>
+      {groups.map((g) => {
+        const kgNow = editable ? groupKg(g.lines, values) : null;
+        return (
+          <div key={g.variety || "other"} className="mb-3">
+            {showHeadings && (
+              <div className="d-flex justify-content-between align-items-baseline px-1 mb-1">
+                <h3 className="h6 mb-0">{g.variety ? titleCase(g.variety) : "Other items"}</h3>
+                {kgNow !== null && <span className="small text-muted">Counted so far: {formatKg(kgNow)}</span>}
               </div>
-            ) : (
-              <span>
-                {l.countedQty !== null && qty(l.loose, l.countedQty)}
-                {l.expectedQty !== undefined && l.expectedQty !== null && <span className="text-muted small"> (system {qty(l.loose, l.expectedQty)})</span>}
-                {l.verdict && <span className={`badge ms-2 ${VERDICT[l.verdict]?.cls}`}>{VERDICT[l.verdict]?.label}{l.varianceQty ? ` ${l.varianceQty > 0 ? "+" : ""}${qty(l.loose, l.varianceQty)}` : ""}</span>}
-                {!!l.varianceValueMinor && <span className="small ms-1">{peso(l.varianceValueMinor)}</span>}
-              </span>
             )}
-          </li>
-        ))}
-      </ul>
+            <ul className="list-group" style={{ fontVariantNumeric: "tabular-nums" }}>
+              {g.lines.map((l) => (
+                <li key={l.productId} className="list-group-item d-flex flex-wrap justify-content-between align-items-center gap-2">
+                  <span>{l.name}{editable && l.systemQty !== undefined && <span className="text-muted small"> (system {qty(l.loose, l.systemQty)})</span>}</span>
+                  {editable ? (
+                    <div className="input-group" style={{ maxWidth: 200 }}>
+                      <input className="form-control form-control-lg text-end" inputMode="decimal" aria-label={`Count of ${l.name}`} value={values[l.productId] ?? ""}
+                        onChange={(e) => setValues({ ...values, [l.productId]: e.target.value.replace(l.loose ? /[^\d.]/g : /\D/g, "").slice(0, 10) })} />
+                      <span className="input-group-text">{l.loose ? "kg" : "sacks"}</span>
+                    </div>
+                  ) : (
+                    <span>
+                      {l.countedQty !== null && qty(l.loose, l.countedQty)}
+                      {l.expectedQty !== undefined && l.expectedQty !== null && <span className="text-muted small"> (system {qty(l.loose, l.expectedQty)})</span>}
+                      {l.verdict && <span className={`badge ms-2 ${VERDICT[l.verdict]?.cls}`}>{VERDICT[l.verdict]?.label}{l.varianceQty ? ` ${l.varianceQty > 0 ? "+" : ""}${qty(l.loose, l.varianceQty)}` : ""}</span>}
+                      {!!l.varianceValueMinor && <span className="small ms-1">{peso(l.varianceValueMinor)}</span>}
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+        );
+      })}
       {editable && (
         <>
           <button type="button" className="btn btn-outline-dark btn-lg mb-3" disabled={busy} onClick={() => void save(false)}>Save for now</button>
           <div className="fw-semibold">Your signature (staff) — to submit</div>
           <SignaturePad onSignature={setSig} />
           <div className="d-flex justify-content-between mt-3">
-            {owner ? <button type="button" className="btn btn-outline-secondary btn-lg" disabled={busy} onClick={() => void cancel()}>Cancel {count.docNumber}</button> : <span />}
-            <button type="button" className="btn btn-success btn-lg" disabled={busy || !sig || done < count.lines.length} onClick={() => void save(true)}>{busy ? "Please wait…" : "Submit the count"}</button>
+            {canCancel ? <button type="button" className="btn btn-outline-secondary btn-lg" disabled={busy} onClick={() => void cancel()}>Cancel {count.docNumber}</button> : <span />}
+            <button type="button" className="btn btn-success btn-lg" disabled={busy || !sig || done === 0 || (wholeListOnly && done < count.lines.length)} onClick={() => void save(true)}>{busy ? "Please wait…" : "Submit the count"}</button>
           </div>
         </>
       )}

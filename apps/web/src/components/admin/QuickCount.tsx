@@ -12,8 +12,12 @@ import { useLang } from "../../lib/lang";
 
 type ApiBody = { message?: string; errors?: string[] } & Record<string, unknown>;
 
-export default function QuickCount({ productId, name, loose, locationId, onDone, onCancel }: {
+export default function QuickCount({ productId, name, loose, locationId, onDone, onCancel, title, cancelLabel }: {
   productId: string; name: string; loose: boolean; locationId?: string | null; onDone: () => void | Promise<void>; onCancel: () => void;
+  /** Heading; the POS uses the default question. */
+  title?: string;
+  /** Label of the left button; the POS uses "None left". */
+  cancelLabel?: string;
 }) {
   const { t } = useLang();
   const [value, setValue] = useState("");
@@ -33,14 +37,14 @@ export default function QuickCount({ productId, name, loose, locationId, onDone,
   return (
     <div className="card border-warning mb-3" style={{ maxWidth: 520, fontSize: 18 }}>
       <div className="card-body">
-        <h2 className="h5">{t("count.question")} — {name}</h2>
+        <h2 className="h5">{title ?? `${t("count.question")} — ${name}`}</h2>
         <p className="mb-2">Count what is on the shelf now{loose ? " (in kilos)" : ""}.</p>
         {error && <div className="alert alert-danger py-2">{error}</div>}
         <NumPad value={value} onChange={setValue} decimals={loose ? 3 : 0} label="Counted" unit={loose ? "kg" : "sacks"} />
         <div className="fw-semibold mt-2">Your signature (staff)</div>
         <SignaturePad onSignature={setSig} />
         <div className="d-flex justify-content-between mt-3">
-          <button type="button" className="btn btn-outline-secondary btn-lg" disabled={busy} onClick={onCancel}>{t("count.none")}</button>
+          <button type="button" className="btn btn-outline-secondary btn-lg" disabled={busy} onClick={onCancel}>{cancelLabel ?? t("count.none")}</button>
           <button type="button" className="btn btn-success btn-lg" disabled={busy || !sig} onClick={() => void save()}>{busy ? t("btn.wait") : t("count.save")}</button>
         </div>
       </div>

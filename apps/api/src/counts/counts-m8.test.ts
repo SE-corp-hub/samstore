@@ -1,9 +1,10 @@
 // Rice Ops M8 — counts, balance and write-offs, against the real DB. Proves the M8 "done when":
 //   * the balance formula matches the ledger for every item in a test count.
-// Plus: blind counting (staff never see the system's numbers), a sale during the count is
-// not a false kulang, the owner approves before anything posts (decline posts nothing),
-// the zero check (quick count) posts at once and lets the sale go through, the closing
-// top-5, write-offs (over 1% → owner; the stock moves; signatures; never below holds).
+// Plus: any role can count (staff at their own store), blind counting (staff never see the
+// system's numbers), a sale during the count is not a false kulang, a count posts at once when
+// submitted (no owner approval), a list count may leave items uncounted, items with no stock row
+// can be counted, the zero check (quick count) posts at once and lets the sale go through, the
+// closing top-5, write-offs (over 1% → owner; the stock moves; signatures; never below holds).
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
@@ -11,7 +12,7 @@ import bcrypt from "bcryptjs";
 import { prisma } from "../persistence/prisma-repositories.js";
 import { CountService } from "./count.service.js";
 import { BentaService } from "../selling/benta.service.js";
-import { PeopleService, type Actor, type SignatureInput } from "../people/people.service.js";
+import { type Actor, type SignatureInput } from "../people/people.service.js";
 
 const PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==";
 const run = `M8R${Date.now()}${Math.floor(Math.random() * 1000)}`;
@@ -91,14 +92,13 @@ async function fixture() {
 const onHand = async (fx: { storeId: string; s1: string }, productId: string, w = fx.s1) =>
   (await prisma.stockLevel.findFirst({ where: { storeId: fx.storeId, productId, warehouseId: w } }))?.quantityOnHand ?? 0;
 
-test("M8: the balance formula matches the ledger for every item in a test count (blind, owner-approved, sales during the count)", async () => {
+test("M8: the balance formula matches the ledger for every item in a test count (blind, posts at once, sales during the count)", async () => {
   const fx = await fixture();
   // Before any count the balance is the ledger since the beginning — and it matches.
   const before = await svc.balance(fx.storeId, fx.owner, { locationId: fx.s1 });
   assert.equal(before.ok && before.value.items.every((i) => i.matches), true, msg(before));
 
-  assert.equal((await svc.start(fx.storeId, fx.staff1, { locationId: fx.s1 })).ok, false, "staff cannot start a count");
-  const started = await svc.start(fx.storeId, fx.owner, { locationId: fx.s1 });
+  const started = await svc.start(fx.storeId, fx.staff1, { locationId: fx.s1 }); // any role can start a count
   assert.equal(started.ok, true, msg(started));
   if (!started.ok) return;
   assert.match(started.value.docNumber, /^CNT-\d{6}$/);
@@ -122,14 +122,11 @@ test("M8: the balance formula matches the ledger for every item in a test count 
   const sub = await svc.submit(fx.storeId, fx.staff1, started.value.id, staffSig);
   assert.equal(sub.ok, true, msg(sub));
   if (!sub.ok) return;
-  assert.equal(sub.value.status, "SUBMITTED");
+  assert.equal(sub.value.status, "APPROVED", "a count posts at once: no owner approval");
+  assert.equal(sub.value.approvalId, null);
   assert.deepEqual([sub.value.kulangValueMinor, sub.value.sobraValueMinor], [110_000, 1_840], "1 sack short at cost; 400 g over at ₱46/kg");
-  assert.equal(await onHand(fx, fx.sin25.id), 8, "nothing posts before the owner approves (10 − 2 sold)");
-
-  const people = new PeopleService();
-  const yes = await people.decideApproval(fx.storeId, sub.value.approvalId!, fx.owner, { decision: "APPROVE", pin: PIN });
-  assert.equal(yes.ok, true, msg(yes));
   assert.equal(await onHand(fx, fx.sin25.id), 7, "9 counted − 2 sold after = 7: only the real kulang posted");
+  assert.equal((await prisma.approvalRequest.count({ where: { storeId: fx.storeId, kind: "COUNT" } })), 0, "nothing waits in Para sa iyo");
   assert.equal(await onHand(fx, fx.din25.id), 4);
   assert.equal(await onHand(fx, fx.loose.id), 50_400);
   const posted = await prisma.stockMovement.findMany({ where: { storeId: fx.storeId, documentType: "COUNT", documentId: started.value.id }, select: { productId: true, delta: true, type: true } });
@@ -154,22 +151,89 @@ test("M8: the balance formula matches the ledger for every item in a test count 
   assert.equal(open.ok && open.value.lines.find((l) => l.productId === fx.sin25.id)?.verdict, "KULANG");
 });
 
-test("M8: a declined count posts nothing; staff count only at their location; every line must be counted", async () => {
+test("M8: a list count may leave items uncounted; one open list per person; staff count only at their store; who may cancel", async () => {
   const fx = await fixture();
-  const c = await svc.start(fx.storeId, fx.owner, { locationId: fx.s1, productIds: [fx.sin25.id, fx.din25.id] });
+  const c = await svc.start(fx.storeId, fx.staff1, { locationId: fx.s1, productIds: [fx.sin25.id, fx.din25.id] });
   assert.equal(c.ok, true, msg(c));
   if (!c.ok) return;
-  assert.equal((await svc.start(fx.storeId, fx.owner, { locationId: fx.s1 })).ok, false, "one open count per location");
-  assert.equal((await svc.record(fx.storeId, fx.staff2, c.value.id, [{ productId: fx.sin25.id, counted: 1 }])).ok, false, "Store 2 staff cannot count Store 1");
+  assert.equal((await svc.start(fx.storeId, fx.staff1, { locationId: fx.s1 })).ok, false, "one open list count per person per store");
+  assert.equal((await svc.start(fx.storeId, fx.staff2, { locationId: fx.s1 })).ok, false, "Store 2 staff cannot count Store 1");
+  const ownerCount = await svc.start(fx.storeId, fx.owner, { locationId: fx.s1, variety: "dinorado" });
+  assert.equal(ownerCount.ok, true, `another person can have their own count: ${msg(ownerCount)}`);
+  assert.equal((await svc.record(fx.storeId, fx.staff2, c.value.id, [{ productId: fx.sin25.id, counted: 1 }])).ok, false, "Store 2 staff cannot record on Store 1's count");
   assert.equal((await svc.record(fx.storeId, fx.staff1, c.value.id, [{ productId: fx.sin25.id, counted: 5 }])).ok, true);
-  assert.match(msg(await svc.submit(fx.storeId, fx.staff1, c.value.id, staffSig)), /Not counted yet: Dinorado/);
-  assert.equal((await svc.record(fx.storeId, fx.staff1, c.value.id, [{ productId: fx.din25.id, counted: 4 }])).ok, true);
   const sub = await svc.submit(fx.storeId, fx.staff1, c.value.id, staffSig);
   assert.equal(sub.ok, true, msg(sub));
-  const no = await new PeopleService().decideApproval(fx.storeId, sub.ok ? sub.value.approvalId! : "", fx.owner, { decision: "DECLINE", pin: PIN, note: "Bilangin ulit bukas" });
-  assert.equal(no.ok, true, msg(no));
-  assert.equal(await onHand(fx, fx.sin25.id), 10, "declined: the 5 'kulang' never posted");
-  assert.equal((await prisma.stockCount.findUniqueOrThrow({ where: { id: c.value.id } })).status, "CANCELLED");
+  assert.deepEqual(sub.ok ? [sub.value.status, sub.value.counted, sub.value.skipped] : [], ["APPROVED", 1, 1], "1 counted, 1 left as it is");
+  assert.equal(await onHand(fx, fx.sin25.id), 5, "the counted item posted");
+  assert.equal(await onHand(fx, fx.din25.id), 4, "the item that was not counted did not change");
+  assert.equal(await prisma.stockCountLine.count({ where: { countId: c.value.id } }), 1, "only what was counted stays on the count");
+  assert.match(msg(await svc.submit(fx.storeId, fx.staff1, ownerCount.ok ? ownerCount.value.id : "", staffSig)), /Count at least one item first/);
+  // Cancelling: the person who started it, or the owner; nobody else.
+  const mineToo = await svc.start(fx.storeId, fx.staff1, { locationId: fx.s1 });
+  assert.equal(mineToo.ok, true, msg(mineToo));
+  assert.equal((await svc.cancel(fx.storeId, fx.staff1, ownerCount.ok ? ownerCount.value.id : "")).ok, false, "staff cannot cancel the owner's count");
+  assert.equal((await svc.cancel(fx.storeId, fx.staff1, mineToo.ok ? mineToo.value.id : "")).ok, true, "the starter can cancel their own");
+  assert.equal((await svc.cancel(fx.storeId, fx.owner, ownerCount.ok ? ownerCount.value.id : "")).ok, true, "the owner can cancel any");
+  // The quick count and the closing top-5 still have to be counted in full.
+  const closing = await svc.startClosing(fx.storeId, fx.staff1, {});
+  assert.equal(closing.ok, true, msg(closing));
+  if (!closing.ok) return;
+  const firstLine = await prisma.stockCountLine.findFirstOrThrow({ where: { countId: closing.value.id }, select: { productId: true } });
+  assert.equal((await svc.record(fx.storeId, fx.staff1, closing.value.id, [{ productId: firstLine.productId, counted: firstLine.productId === fx.loose.id ? "50" : 1 }])).ok, true);
+  assert.match(msg(await svc.submit(fx.storeId, fx.staff1, closing.value.id, staffSig)), /Not counted yet/);
+});
+
+test("M8: every item can be counted (even with no stock row); search list, scopes, system numbers for the owner only", async () => {
+  const fx = await fixture();
+  const ghost = await prisma.product.create({ data: { storeId: fx.storeId, sku: `${run}-${seq}-G50`, name: "Ghost Rice 50 kg", priceMinor: 250_000, costMinor: 200_000, stockBaseUnit: "g", stockBaseQuantity: 50_000, stockConversionFamily: "Bigas" } });
+  const untracked = await prisma.product.create({ data: { storeId: fx.storeId, sku: `${run}-${seq}-UT`, name: "Plastic bag", priceMinor: 100, costMinor: 50, trackStock: false } });
+  const archived = await prisma.product.create({ data: { storeId: fx.storeId, sku: `${run}-${seq}-AR`, name: "Old Rice 25 kg", priceMinor: 100, costMinor: 50, isActive: false, stockBaseUnit: "g", stockBaseQuantity: 25_000 } });
+
+  const list = await svc.items(fx.storeId, fx.staff1, { locationId: fx.s1 });
+  assert.equal(list.ok, true, msg(list));
+  if (!list.ok) return;
+  const names = list.value.items.map((i) => i.name);
+  assert.equal(names.includes("Ghost Rice 50 kg"), true, "an item with no stock row here is listed");
+  assert.equal(names.includes("Plastic bag") || names.includes("Old Rice 25 kg"), false, "untracked and archived items are not listed");
+  assert.deepEqual(Object.keys(list.value.items[0]!).sort(), ["barcode", "lastCountedAt", "loose", "name", "productId", "sku", "unitGrams", "variety"], "no quantity and no cost in the search list");
+  assert.equal(list.value.items.find((i) => i.productId === fx.loose.id)?.loose, true);
+  assert.equal(list.value.items.find((i) => i.productId === fx.sin25.id)?.unitGrams, 25_000);
+  assert.equal((await svc.items(fx.storeId, fx.staff2, { locationId: fx.s1 })).ok, false, "Store 2 staff cannot list Store 1");
+
+  // Scopes: one kind of rice, picked items, everything.
+  const sin = await svc.start(fx.storeId, fx.owner, { locationId: fx.s1, variety: "Sinandomeng" });
+  assert.deepEqual(sin.ok ? sin.value.lines : -1, 2, "the sack and the loose kilos of one kind");
+  if (sin.ok) assert.equal((await svc.cancel(fx.storeId, fx.owner, sin.value.id)).ok, true);
+  const all = await svc.start(fx.storeId, fx.owner, { locationId: fx.s1, showSystem: true });
+  assert.equal(all.ok, true, msg(all));
+  if (!all.ok) return;
+  assert.equal(all.value.lines, 4, "all 4 active tracked items, the ghost included");
+  assert.equal((await prisma.stockCount.findUniqueOrThrow({ where: { id: all.value.id } })).kind, "FULL");
+  // The owner asked to see the system numbers; staff still never do.
+  const ownerView = await svc.get(fx.storeId, fx.owner, all.value.id);
+  assert.equal(ownerView.ok && ownerView.value.lines.find((l) => l.productId === fx.sin25.id)?.systemQty, 10);
+  const staffView = await svc.get(fx.storeId, fx.staff1, all.value.id);
+  assert.equal(staffView.ok && staffView.value.blindHidden, true);
+  assert.equal(staffView.ok && staffView.value.lines.some((l) => "systemQty" in l), false);
+
+  // Two ghost sacks are found on the shelf: the row is created and the count posts at once.
+  assert.equal((await svc.record(fx.storeId, fx.owner, all.value.id, [{ productId: ghost.id, counted: 2 }])).ok, true);
+  const done = await svc.submit(fx.storeId, fx.owner, all.value.id, staffSig);
+  assert.equal(done.ok, true, msg(done));
+  assert.equal(await onHand(fx, ghost.id), 2);
+  assert.equal(untracked.trackStock, false);
+  assert.equal(archived.isActive, false);
+
+  // "Not counted in 14 days": the ghost was counted just now, the other three never were.
+  const stale = await svc.start(fx.storeId, fx.owner, { locationId: fx.s1, staleDays: 14 });
+  assert.deepEqual(stale.ok ? stale.value.lines : -1, 3);
+  if (stale.ok) assert.equal((await svc.cancel(fx.storeId, fx.owner, stale.value.id)).ok, true);
+  const after = await svc.items(fx.storeId, fx.staff1, { locationId: fx.s1 });
+  assert.equal(after.ok && after.value.items.find((i) => i.productId === ghost.id)?.lastCountedAt !== null, true, "the search list shows it was counted");
+  assert.equal((await svc.start(fx.storeId, fx.owner, { locationId: fx.s1, staleDays: 0.5 })).ok, false, "days must be a whole number");
+  const bal = await svc.balance(fx.storeId, fx.owner, { locationId: fx.s1 });
+  assert.equal(bal.ok && bal.value.items.every((i) => i.matches), true, "the ledger still matches the shelf");
 });
 
 test("M8: the zero check — a sale that empties the shelf asks; a quick count posts at once and the sale goes through", async () => {
