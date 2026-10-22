@@ -68,13 +68,13 @@ export interface BentaLineInput {
   priceOverrideReason?: string;
 }
 
-export type PayMethod = "cash" | "gcash" | "utang";
+export type PayMethod = "cash" | "gcash" | "maya" | "bank" | "split" | "utang";
 
 export interface BentaInput {
   idempotencyKey?: unknown;
   locationId?: string;
   lines?: BentaLineInput[];
-  payment?: { method?: string; tenderedMinor?: unknown; reference?: string };
+  payment?: { method?: string; tenderedMinor?: unknown; reference?: string; tenders?: { method?: string; amountMinor?: unknown; tenderedMinor?: unknown; reference?: string }[] };
   /** Utang: the store customer (StoreCustomer id). */
   customerId?: string;
   /** Optional name on a cash sale. */
@@ -108,7 +108,8 @@ export interface BentaSaleView {
   belowCost: string[];
 }
 
-const PAY_CODE: Record<PayMethod, string> = { cash: "cash", gcash: "gcash", utang: "credit" };
+const PAY_CODE: Record<PayMethod, string> = { cash: "cash", gcash: "gcash", maya: "maya", bank: "bank_transfer", split: "split", utang: "credit" };
+const SPLIT_PARTS: Record<string, string> = { cash: "cash", gcash: "gcash", maya: "maya", bank: "bank_transfer" };
 
 const productSelect = {
   id: true, name: true, sku: true, priceMinor: true, costMinor: true, isActive: true, reviewStatus: true,
@@ -266,7 +267,7 @@ export class BentaService {
       if (lines.length === 0) throw new SellingError("The sale is empty");
       if (lines.length > 50) throw new SellingError("Up to 50 lines per sale");
       const method = input.payment?.method as PayMethod | undefined;
-      if (method !== "cash" && method !== "gcash" && method !== "utang") throw new SellingError("Payment: Cash, GCash or Credit?");
+      if (!method || !(method in PAY_CODE)) throw new SellingError("Payment: Cash, GCash, Maya, Bank, Split or Credit?");
 
       // Products, this location's prices, and any other locations the lines come from.
       const ids = [...new Set(lines.map((l) => l.productId ?? ""))];
@@ -319,10 +320,26 @@ export class BentaService {
       const store = await prisma.store.findUnique({ where: { id: storeId }, include: { settings: true } });
       if (!store) throw new StepError(notFound("Store not found"));
       const orderId = randomId();
-      const tender = { methodCode: PAY_CODE[method], amountMinor: subtotal, ...(method === "cash" && input.payment?.tenderedMinor !== undefined ? { tenderedMinor: input.payment.tenderedMinor as number } : {}), ...(input.payment?.reference ? { reference: input.payment.reference } : {}) };
-      if (method === "cash" && tender.tenderedMinor !== undefined && !Number.isInteger(tender.tenderedMinor)) throw new SellingError("Enter the cash received");
+      // One payment, or a split: several methods that together pay the whole sale (credit is never part of a split).
+      let tendersIn: { methodCode: string; amountMinor: number; tenderedMinor?: number; reference?: string }[];
+      if (method === "split") {
+        const parts = Array.isArray(input.payment?.tenders) ? input.payment!.tenders! : [];
+        if (parts.length < 2 || parts.length > 4) throw new SellingError("Split: choose 2 to 4 ways to pay");
+        tendersIn = parts.map((t) => {
+          const code = SPLIT_PARTS[(t.method ?? "").toLowerCase()];
+          if (!code) throw new SellingError("Split: Cash, GCash, Maya or Bank only (credit cannot be split)");
+          if (typeof t.amountMinor !== "number" || !Number.isInteger(t.amountMinor) || t.amountMinor <= 0) throw new SellingError("Split: enter how much each part pays");
+          if (t.tenderedMinor !== undefined && (typeof t.tenderedMinor !== "number" || !Number.isInteger(t.tenderedMinor))) throw new SellingError("Enter the cash received");
+          return { methodCode: code, amountMinor: t.amountMinor, ...(code === "cash" && t.tenderedMinor !== undefined ? { tenderedMinor: t.tenderedMinor } : {}), ...(t.reference ? { reference: t.reference } : {}) };
+        });
+        if (tendersIn.reduce((s, t) => s + t.amountMinor, 0) !== subtotal) throw new SellingError(`The parts must add up to ${pesoText(subtotal)}`);
+      } else {
+        const tender = { methodCode: PAY_CODE[method], amountMinor: subtotal, ...(method === "cash" && input.payment?.tenderedMinor !== undefined ? { tenderedMinor: input.payment.tenderedMinor as number } : {}), ...(input.payment?.reference ? { reference: input.payment.reference } : {}) };
+        if (method === "cash" && tender.tenderedMinor !== undefined && !Number.isInteger(tender.tenderedMinor)) throw new SellingError("Enter the cash received");
+        tendersIn = [tender];
+      }
       // A sale waiting for the owner takes no money yet (the utang is posted on approval).
-      const prepared = waitOwner ? null : await prepareTenders({ storeId, orderId, targetMinor: subtotal, storeCustomerId, tenders: [tender], requireFullCoverage: true });
+      const prepared = waitOwner ? null : await prepareTenders({ storeId, orderId, targetMinor: subtotal, storeCustomerId, tenders: tendersIn, requireFullCoverage: true });
       if (prepared && !prepared.ok) throw new StepError(prepared);
       const plan = prepared?.ok ? prepared.value : null;
       const outcome = { approvalId: null as string | null, smsStatus: null as string | null, belowCost: [] as string[] };

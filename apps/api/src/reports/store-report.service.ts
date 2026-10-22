@@ -126,9 +126,19 @@ export class StoreReportService {
     const t = { count: orders.length, totalMinor: 0, cashMinor: 0, gcashMinor: 0, creditMinor: 0, otherMinor: 0, costMinor: 0 };
     const items = new Map<string, { name: string; loose: boolean; quantity: number; salesMinor: number }>();
     const days = new Map<string, { count: number; totalMinor: number }>();
+    // A split sale is counted by what each part actually paid (cash, GCash, or Maya/bank under "other").
+    const splitIds = orders.filter((o) => o.paymentMethod === "split").map((o) => o.id);
+    const splitPays = splitIds.length ? await prisma.payment.findMany({ where: { orderId: { in: splitIds }, type: "payment" }, select: { orderId: true, method: true, amountMinor: true } }) : [];
     for (const o of orders) {
       t.totalMinor += o.totalMinor;
-      if (o.paymentMethod === "cash") t.cashMinor += o.totalMinor;
+      if (o.paymentMethod === "split") {
+        let rest = o.totalMinor;
+        for (const sp of splitPays.filter((x) => x.orderId === o.id)) {
+          if (sp.method === "cash") t.cashMinor += sp.amountMinor; else if (sp.method === "gcash") t.gcashMinor += sp.amountMinor; else t.otherMinor += sp.amountMinor;
+          rest -= sp.amountMinor;
+        }
+        if (rest > 0) t.otherMinor += rest;
+      } else if (o.paymentMethod === "cash") t.cashMinor += o.totalMinor;
       else if (o.paymentMethod === "gcash") t.gcashMinor += o.totalMinor;
       else if (o.paymentMethod === "credit") t.creditMinor += o.totalMinor;
       else t.otherMinor += o.totalMinor;

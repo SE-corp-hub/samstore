@@ -38,7 +38,10 @@ interface Customer { id: string; name: string | null; phone: string | null; cred
 type Mode = "PIECE" | "KILO" | "PESO";
 interface CartLine { productId: string; mode: Mode; value: string; sourceLocationId: string | null; /** Manual price (centavos per piece / per kilo), only when it differs from the list price. */ price?: number; reason?: string }
 interface Held { id: string; label: string; at: number; locationId: string; cart: CartLine[] }
-type Pay = "cash" | "gcash" | "utang";
+type Pay = "cash" | "gcash" | "maya" | "bank" | "split" | "utang";
+const PAY_LABEL: Record<Pay, string> = { cash: "Cash", gcash: "GCash", maya: "Maya", bank: "Bank transfer", split: "Split", utang: "Credit" };
+interface SplitPart { method: "cash" | "gcash" | "maya" | "bank"; amount: string; reference: string }
+const needsRef = (m: Pay) => m === "gcash" || m === "maya" || m === "bank";
 type ApiBody = { message?: string; errors?: string[] } & Record<string, unknown>;
 
 const peso = (m: number) => `₱${(m / 100).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -99,6 +102,7 @@ export default function BentaPanel() {
   const [pay, setPay] = useState<Pay | null>(null);
   const [tendered, setTendered] = useState("");
   const [reference, setReference] = useState("");
+  const [parts, setParts] = useState<SplitPart[]>([{ method: "cash", amount: "", reference: "" }, { method: "gcash", amount: "", reference: "" }]);
   const [customerId, setCustomerId] = useState("");
   const [customerSig, setCustomerSig] = useState<string | null>(null);
   const [newCust, setNewCust] = useState(false);       // the "New customer" mini form in the credit step
@@ -191,13 +195,14 @@ export default function BentaPanel() {
   const reset = () => {
     keyRef.current = null;
     try { window.sessionStorage.removeItem(cartKey()); } catch { /* convenience only */ }
-    setCart([]); setStep("pick"); setPay(null); setTendered(""); setReference(""); setCustomerId(""); setCustomerSig(null);
+    setCart([]); setStep("pick"); setPay(null); setTendered(""); setReference(""); setParts([{ method: "cash", amount: "", reference: "" }, { method: "gcash", amount: "", reference: "" }]); setCustomerId(""); setCustomerSig(null);
     setPaper(false); setSlipNo(""); setSlipTime(""); setSlipPhoto(null); setStaffSig(null); setError(null);
   };
 
   const canSubmit = total > 0 && !!pay && !busy
     && (pay !== "cash" || !tendered || toMinor(tendered) >= total)
-    && (pay !== "gcash" || reference.trim().length >= 4)
+    && (!needsRef(pay) || reference.trim().length >= 4)
+    && (pay !== "split" || (parts.reduce((s, x) => s + toMinor(x.amount || "0"), 0) === total && parts.every((x) => toMinor(x.amount || "0") > 0 && (x.method === "cash" || x.reference.trim().length >= 4))))
     && (pay !== "utang" || (!!customer && !!customerSig && !overLimit))
     && (!paper || (!!slipNo.trim() && !!slipTime && !!slipPhoto && !!staffSig));
 
@@ -217,7 +222,10 @@ export default function BentaPanel() {
         ...(l.mode === "PIECE" ? { quantity: Number(l.value) } : l.mode === "KILO" ? { kilos: l.value } : { amountMinor: toMinor(l.value) }),
         ...(l.price !== undefined && l.price !== byId.get(l.productId)?.priceMinor ? { unitPriceMinorOverride: l.price, priceOverrideReason: l.reason?.trim() } : {}),
       })),
-      payment: { method: pay, tenderedMinor: pay === "cash" && tendered ? toMinor(tendered) : undefined, reference: pay === "gcash" ? reference.trim() : undefined },
+      payment: {
+        method: pay, tenderedMinor: pay === "cash" && tendered ? toMinor(tendered) : undefined, reference: needsRef(pay) ? reference.trim() : undefined,
+        ...(pay === "split" ? { tenders: parts.map((x) => ({ method: x.method, amountMinor: toMinor(x.amount || "0"), reference: x.method === "cash" ? undefined : x.reference.trim() })) } : {}),
+      },
       customerId: pay === "utang" ? customerId : undefined,
       paperSlip: paper ? { slipNo: slipNo.trim(), occurredAt: new Date(slipTime).toISOString() } : undefined,
       signatures,
@@ -498,9 +506,9 @@ export default function BentaPanel() {
               <span className="fw-bold" style={{ fontSize: 28, fontVariantNumeric: "tabular-nums" }}>{peso(total)}</span>
             </div>
             <div className="d-grid gap-2 mb-3" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
-              {(["cash", "gcash", "utang"] as Pay[]).map((p) => (
+              {(["cash", "gcash", "maya", "bank", "split", "utang"] as Pay[]).map((p) => (
                 <button key={p} type="button" className={`btn btn-lg ${pay === p ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setPay(p)}>
-                  {p === "cash" ? "Cash" : p === "gcash" ? "GCash" : "Credit"}
+                  {PAY_LABEL[p]}
                 </button>
               ))}
             </div>
@@ -514,9 +522,36 @@ export default function BentaPanel() {
                 {tendered && <div className={`mt-2 fs-4 ${change < 0 ? "text-danger" : ""}`} style={{ fontVariantNumeric: "tabular-nums" }}>{change < 0 ? `Short ${peso(-change)}` : `Change ${peso(change)}`}</div>}
               </>
             )}
-            {pay === "gcash" && (
+            {pay === "split" && (
               <>
-                <label className="form-label" htmlFor="bt-ref">GCash reference no.</label>
+                <div className="small text-muted mb-2">Part of the sale in each way. The parts must add up to {peso(total)}.</div>
+                {parts.map((x, i) => (
+                  <div key={i} className="row g-2 mb-2 align-items-end">
+                    <div className="col-5">
+                      <select className="form-select form-select-lg" aria-label="Way to pay" value={x.method} onChange={(e) => setParts(parts.map((y, j) => (j === i ? { ...y, method: e.target.value as SplitPart["method"] } : y)))}>
+                        <option value="cash">Cash</option><option value="gcash">GCash</option><option value="maya">Maya</option><option value="bank">Bank transfer</option>
+                      </select>
+                    </div>
+                    <div className="col-7">
+                      <input className="form-control form-control-lg" inputMode="decimal" placeholder="₱ amount" aria-label="Amount" value={x.amount} onChange={(e) => setParts(parts.map((y, j) => (j === i ? { ...y, amount: e.target.value.replace(/[^\d.]/g, "").slice(0, 10) } : y)))} />
+                    </div>
+                    {x.method !== "cash" && (
+                      <div className="col-12">
+                        <input className="form-control" inputMode="numeric" placeholder={`${x.method === "gcash" ? "GCash" : x.method === "maya" ? "Maya" : "Bank"} reference no.`} aria-label="Reference number" value={x.reference} onChange={(e) => setParts(parts.map((y, j) => (j === i ? { ...y, reference: e.target.value.replace(/\s/g, "").slice(0, 40) } : y)))} />
+                      </div>
+                    )}
+                  </div>
+                ))}
+                <div className="d-flex gap-2 align-items-center">
+                  {parts.length < 4 && <button type="button" className="btn btn-outline-secondary btn-sm" onClick={() => setParts([...parts, { method: "cash", amount: "", reference: "" }])}>+ Add a part</button>}
+                  {parts.length > 2 && <button type="button" className="btn btn-outline-secondary btn-sm" onClick={() => setParts(parts.slice(0, -1))}>Remove last</button>}
+                  {(() => { const left = total - parts.reduce((s, x) => s + toMinor(x.amount || "0"), 0); return <span className={`ms-auto fw-semibold ${left === 0 ? "text-success" : "text-danger"}`}>{left === 0 ? "Fully paid" : left > 0 ? `${peso(left)} left` : `${peso(-left)} too much`}</span>; })()}
+                </div>
+              </>
+            )}
+            {needsRef(pay as Pay) && (
+              <>
+                <label className="form-label" htmlFor="bt-ref">{pay === "maya" ? "Maya" : pay === "bank" ? "Bank transfer" : "GCash"} reference no.</label>
                 <input id="bt-ref" className="form-control form-control-lg" inputMode="numeric" value={reference} onChange={(e) => setReference(e.target.value.replace(/\s/g, "").slice(0, 40))} />
               </>
             )}

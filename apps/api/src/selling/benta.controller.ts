@@ -64,7 +64,7 @@ export class BentaController {
 
   /**
    * POST /admin/benta — { idempotencyKey, locationId?, lines:[{productId, quantity | kilos | grams | amountMinor, sourceLocationId?}],
-   * payment:{method:"cash"|"gcash"|"utang", tenderedMinor?, reference?}, customerId?, customerName?, signatures?, paperSlip?:{slipNo, occurredAt} }
+   * payment:{method:"cash"|"gcash"|"maya"|"bank"|"split"|"utang", tenderedMinor?, reference?, tenders?:[{method,amountMinor,reference?}] (split)}, customerId?, customerName?, signatures?, paperSlip?:{slipNo, occurredAt} }
    * The same idempotencyKey always returns the same sale (replayed: true).
    */
   @Post("benta")
@@ -74,7 +74,10 @@ export class BentaController {
     const paper = obj(body?.paperSlip);
     return unwrap(await this.benta.sell(storeId, actor, {
       idempotencyKey: body?.idempotencyKey ?? headerKey, locationId: str(body?.locationId), lines: linesFrom(body?.lines),
-      payment: { method: str(pay.method), tenderedMinor: pay.tenderedMinor, reference: str(pay.reference) },
+      payment: {
+        method: str(pay.method), tenderedMinor: pay.tenderedMinor, reference: str(pay.reference),
+        tenders: Array.isArray(pay.tenders) ? (pay.tenders as unknown[]).map((t) => { const o = obj(t) ?? {}; return { method: str(o.method), amountMinor: o.amountMinor, tenderedMinor: o.tenderedMinor, reference: str(o.reference) }; }) : undefined,
+      },
       customerId: str(body?.customerId), customerName: str(body?.customerName), signatures: signaturesFrom(body?.signatures),
       paperSlip: paper ? { slipNo: paper.slipNo, occurredAt: paper.occurredAt } : undefined,
     }));

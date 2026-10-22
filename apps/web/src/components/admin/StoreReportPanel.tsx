@@ -134,7 +134,7 @@ export default function StoreReportPanel({ role, onNavigate }: { role?: string; 
       storeName: sales.location.name, title: "SALES", when: sales.from === sales.to ? sales.from : `${sales.from} to ${sales.to}`,
       lines: [{ label: "Sales", value: String(sales.sales.count) }],
       rows: sales.items.map((i) => ({ name: i.name, qty: i.unit === "kg" ? `${i.quantity} kg` : String(i.quantity), note: peso(i.salesMinor) })),
-      totals: [{ label: "Cash", value: peso(sales.sales.cashMinor) }, { label: "GCash", value: peso(sales.sales.gcashMinor) }, { label: "Credit", value: peso(sales.sales.creditMinor) }, { label: "Total", value: peso(sales.sales.totalMinor) }],
+      totals: [{ label: "Cash", value: peso(sales.sales.cashMinor) }, { label: "GCash", value: peso(sales.sales.gcashMinor) }, { label: "Credit", value: peso(sales.sales.creditMinor) }, { label: "Maya/bank/other", value: peso(sales.sales.otherMinor) }, { label: "Total", value: peso(sales.sales.totalMinor) }],
     });
   };
   const printDay = () => {
@@ -225,6 +225,7 @@ export default function StoreReportPanel({ role, onNavigate }: { role?: string; 
             <div className="col-6 col-md-3"><div className="border rounded p-2"><div className="small text-muted">Cash</div><div className="fs-5">{peso(sales.sales.cashMinor)}</div></div></div>
             <div className="col-6 col-md-3"><div className="border rounded p-2"><div className="small text-muted">GCash</div><div className="fs-5">{peso(sales.sales.gcashMinor)}</div></div></div>
             <div className="col-6 col-md-3"><div className="border rounded p-2"><div className="small text-muted">Credit</div><div className="fs-5">{peso(sales.sales.creditMinor)}</div></div></div>
+            <div className="col-6 col-md-3"><div className="border rounded p-2"><div className="small text-muted">Maya / bank / other</div><div className="fs-5">{peso(sales.sales.otherMinor)}</div></div></div>
           </div>
           <div className="small mb-3">Cash received {peso(sales.cashInMinor)} · Credit collected {peso(sales.creditCollectedMinor)}{owner && sales.sales.grossProfitMinor !== undefined ? <> · <span className={sales.sales.grossProfitMinor < 0 ? "text-danger fw-bold" : "text-success fw-bold"}>Profit {peso(sales.sales.grossProfitMinor)}</span></> : null}</div>
           <h6>Items sold</h6>
