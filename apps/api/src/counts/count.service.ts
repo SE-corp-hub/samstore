@@ -552,8 +552,8 @@ export class CountService {
            WHERE l."storeId" = ${storeId} AND l."countedQty" IS NOT NULL AND c."status" = 'APPROVED'
            GROUP BY l."productId", c."locationId"`,
       ]);
-      const onHand = new Map(levels.map((l) => [`${l.productId}|${l.warehouseId}`, l.quantityOnHand] as const));
-      const lastAt = new Map(last.map((l) => [`${l.productId}|${l.locationId}`, l.last] as const));
+      const onHand = new Map<string, number>(levels.map((l) => [`${l.productId}|${l.warehouseId}`, l.quantityOnHand]));
+      const lastAt = new Map<string, Date>(last.map((l) => [`${l.productId}|${l.locationId}`, l.last]));
       const items: { productId: string; name: string; variety: string; loose: boolean; cells: Record<string, { lastCountedAt: Date | null; onHand: number }> }[] = [];
       for (const p of products) {
         const cells: Record<string, { lastCountedAt: Date | null; onHand: number }> = {};
