@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { ageText, countedKg, csvText, differenceText, groupKg, oldestCount, overviewRows, pesoText, searchItems, sheetGroups, sinceText, staleCount, staleFirst, titleCase } from "./count-view.js";
+import { type OverviewItem, ageText, countedKg, csvText, differenceText, groupKg, oldestCount, overviewRows, pesoText, searchItems, sheetGroups, sinceText, staleCount, staleFirst, titleCase } from "./count-view.js";
 
 const mk = (name: string, over: Partial<{ sku: string; barcode: string | null; variety: string; lastCountedAt: string | null }> = {}) =>
   ({ name, sku: over.sku ?? name.slice(0, 3).toUpperCase(), barcode: over.barcode ?? null, variety: over.variety ?? "", lastCountedAt: over.lastCountedAt ?? null });
@@ -90,7 +90,7 @@ test("pesos show two decimals and never a minus (the colour says short or over)"
 
 test("all stores: the item counted longest ago comes first, never counted before all; words filter", () => {
   const cell = (d: string | null, onHand = 5) => ({ lastCountedAt: d, onHand });
-  const items = [
+  const items: OverviewItem[] = [
     { productId: "1", name: "Dinorado 25 kg", variety: "dinorado", loose: false, cells: { s1: cell("2026-10-20T00:00:00Z"), s2: cell("2026-10-01T00:00:00Z") } },
     { productId: "2", name: "Sinandomeng 25 kg", variety: "sinandomeng", loose: false, cells: { s1: cell("2026-10-21T00:00:00Z") } },
     { productId: "3", name: "Jasmine 25 kg", variety: "jasmine", loose: false, cells: { s1: cell("2026-10-21T00:00:00Z"), s2: cell(null) } },
