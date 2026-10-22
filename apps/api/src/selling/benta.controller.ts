@@ -122,7 +122,7 @@ export class BentaController {
     }));
   }
 
-  /** POST /admin/stock-in — Manual na pasok: { locationId?, supplierName?, note?, lines:[{productId, quantity, unitCostMinor?}], signatures } */
+  /** POST /admin/stock-in — Manual na pasok: { locationId?, supplierName?, note?, purchaseOrderId? (cost then comes from the order), lines:[{productId, quantity, unitCostMinor?}], signatures } */
   @Post("stock-in")
   async stockIn(@Req() req: Req_, @Body() body: Record<string, unknown>, @Headers("x-store-id") h?: string) {
     const { storeId, actor } = await this.ctx(req, h);
@@ -130,7 +130,7 @@ export class BentaController {
     if (!Array.isArray(raw)) badRequest("lines must be a list");
     const lines = (raw as unknown[]).map((l) => { const x = obj(l) ?? {}; return { productId: str(x.productId), quantity: x.quantity, unitCostMinor: x.unitCostMinor }; });
     return unwrap(await this.benta.stockIn(storeId, actor, {
-      locationId: str(body?.locationId), supplierName: str(body?.supplierName), note: str(body?.note), lines, signatures: signaturesFrom(body?.signatures),
+      locationId: str(body?.locationId), supplierName: str(body?.supplierName), note: str(body?.note), purchaseOrderId: str(body?.purchaseOrderId), lines, signatures: signaturesFrom(body?.signatures),
     }));
   }
 

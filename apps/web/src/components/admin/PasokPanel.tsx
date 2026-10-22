@@ -19,6 +19,8 @@ interface Loc { id: string; name: string; code: string | null; isActive: boolean
 interface Product { id: string; name: string; stockBaseUnit: string | null; stockBaseQuantity: number | null; isActive?: boolean; reviewStatus?: string }
 interface StockInDoc { id: string; docNumber: string; supplierName: string | null; createdAt: string; lines: { name: string; loose: boolean; quantity: number; unitCostMinor: number | null }[] }
 interface Row { productId: string; amount: string; cost: string }
+/** An open supplier order for this store: what was ordered, and what has not arrived yet. No costs (counter staff never see them). */
+interface PoOrder { id: string; docNumber: string; supplierName: string; expectedAt: string | null; overdue: boolean; lines: { id: string; productId: string; name: string; loose: boolean; quantity: number; receivedQty: number }[] }
 type ApiBody = { message?: string; errors?: string[] } & Record<string, unknown>;
 
 const peso = (m: number) => `₱${(m / 100).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -42,6 +44,8 @@ export default function PasokPanel(_props: { role?: string; onNavigate?: (tab: s
   const [storeName, setStoreName] = useState("");
   const [docs, setDocs] = useState<StockInDoc[]>([]);
   const [justDone, setJustDone] = useState<string | null>(null); // docNumber just received
+  const [orders, setOrders] = useState<PoOrder[]>([]); // open supplier orders for this store
+  const [poId, setPoId] = useState(""); // the order this delivery is received against ("" = no order)
 
   const load = useCallback(async () => {
     const [me, locs, ps, st] = await Promise.all([
@@ -69,10 +73,28 @@ export default function PasokPanel(_props: { role?: string; onNavigate?: (tab: s
   }, []);
   useEffect(() => { if (chosen && locationId) void loadDocs(locationId); }, [chosen, locationId, loadDocs]);
 
+  const loadOrders = useCallback(async (loc: string) => {
+    if (!loc) { setOrders([]); return; }
+    const r = await fetch(`${API_URL}/admin/purchase-orders?status=open&locationId=${encodeURIComponent(loc)}`, { headers: adminHeaders() }).then((x) => (x.ok ? x.json() : null)).catch(() => null);
+    setOrders(((r?.orders ?? []) as PoOrder[]).filter((o) => o.lines.some((l) => l.quantity > l.receivedQty)));
+  }, []);
+  useEffect(() => { setPoId(""); if (chosen && locationId) void loadOrders(locationId); }, [chosen, locationId, loadOrders]);
+
   const byId = useMemo(() => new Map(products.map((p) => [p.id, p])), [products]);
   const units = (r: Row) => { const p = byId.get(r.productId); const n = Number(r.amount); return !p || !(n > 0) ? 0 : isLoose(p) ? Math.round(n * 1000) : Number.isInteger(n) ? n : 0; };
   const ready = rows.length > 0 && rows.every((r) => r.productId && units(r) > 0) && !!sig && !busy;
   const here = locations.find((l) => l.id === locationId);
+  const po = orders.find((o) => o.id === poId);
+  const poLine = (productId: string) => po?.lines.find((l) => l.productId === productId);
+  const poLeft = (productId: string) => { const l = poLine(productId); return l ? Math.max(0, l.quantity - l.receivedQty) : 0; };
+  const overOrder = !!po && rows.some((r) => units(r) > poLeft(r.productId));
+  const pickOrder = (id: string) => {
+    setPoId(id); setJustDone(null);
+    const o = orders.find((x) => x.id === id);
+    if (!o) { setRows([{ productId: "", amount: "", cost: "" }]); setSupplier(""); return; }
+    setSupplier(o.supplierName);
+    setRows(o.lines.filter((l) => l.quantity > l.receivedQty).map((l) => { const left = l.quantity - l.receivedQty; return { productId: l.productId, amount: String(l.loose ? left / 1000 : left), cost: "" }; }));
+  };
 
   const slipOf = (d: StockInDoc): Slip => ({
     storeName: storeName || "SAM STORE", title: "STOCK IN RECEIPT", reference: d.docNumber, when: new Date(d.createdAt).toLocaleString("en-PH"),
@@ -84,13 +106,14 @@ export default function PasokPanel(_props: { role?: string; onNavigate?: (tab: s
   const saveIn = async () => {
     setBusy(true); setError(null);
     const body = {
-      locationId, supplierName: supplier.trim() || undefined,
-      lines: rows.map((r) => ({ productId: r.productId, quantity: units(r), unitCostMinor: r.cost ? Math.round(Number(r.cost) * 100) : undefined })),
+      locationId, supplierName: po ? undefined : supplier.trim() || undefined, purchaseOrderId: po?.id,
+      // On a purchase order the cost comes from the order, never from this phone.
+      lines: rows.map((r) => ({ productId: r.productId, quantity: units(r), unitCostMinor: !po && r.cost ? Math.round(Number(r.cost) * 100) : undefined })),
       signatures: [{ signerKind: "STAFF", imagePng: sig }],
     };
-    const sent = await sendStep("/admin/stock-in", body, `Stock in${supplier.trim() ? ` (${supplier.trim()})` : ""}`);
+    const sent = await sendStep("/admin/stock-in", body, `Stock in${po ? ` (${po.docNumber})` : supplier.trim() ? ` (${supplier.trim()})` : ""}`);
     setBusy(false);
-    const clear = () => { setRows([{ productId: "", amount: "", cost: "" }]); setSupplier(""); setSig(null); setSigKey((k) => k + 1); };
+    const clear = () => { setRows([{ productId: "", amount: "", cost: "" }]); setSupplier(""); setPoId(""); setSig(null); setSigKey((k) => k + 1); void loadOrders(locationId); };
     if (sent.status === "queued") { toast("No signal — saved on this phone, it will be sent when the signal returns"); clear(); return; }
     const d = sent.data as ApiBody | null;
     if (!sent.ok) { setError(errText(d, "Did not go through")); return; }
@@ -119,7 +142,7 @@ export default function PasokPanel(_props: { role?: string; onNavigate?: (tab: s
         <h1 className="h4 mb-0">Stock in</h1>
       </div>
       <StoreBar includeBuffer locations={locations} value={locationId} homeLocationId={homeLocationId} locked={adding || rows.some((r) => r.productId || r.amount)}
-        lockedNote="Receive or clear what you started to switch store." onPick={(id) => { setLocationId(id); setJustDone(null); }} />
+        lockedNote="Receive or clear what you started to switch store." onPick={(id) => { setLocationId(id); setJustDone(null); setPoId(""); }} />
       {chosen && adding && <NewItemForm preorder onCancel={() => setAdding(false)} onDone={addCreated} locationId={locationId} />}
       {chosen && !adding && (<>
       {error && <div className="alert alert-danger py-2" role="alert">{error}</div>}
@@ -135,10 +158,37 @@ export default function PasokPanel(_props: { role?: string; onNavigate?: (tab: s
 
       <div className="card mb-4" style={{ maxWidth: 620 }}>
         <div className="card-body">
+          {orders.length > 0 && (
+            <div className="mb-3">
+              <label className="form-label" htmlFor="pk-po">Is this a delivery for an order?</label>
+              <select id="pk-po" className="form-select form-select-lg" value={poId} disabled={!poId && rows.some((r) => r.productId || r.amount)} onChange={(e) => pickOrder(e.target.value)}>
+                <option value="">No order — enter it myself</option>
+                {orders.map((o) => <option key={o.id} value={o.id}>{o.docNumber} · {o.supplierName}{o.expectedAt ? ` · due ${new Date(o.expectedAt).toLocaleDateString("en-PH", { day: "numeric", month: "short" })}` : ""}{o.overdue ? " · late" : ""}</option>)}
+              </select>
+              {!poId && rows.some((r) => r.productId || r.amount) && <div className="small text-muted mt-1">Clear what you started to pick an order.</div>}
+              {po && <div className="small text-muted mt-1">The amounts below are what is still to arrive. Change them to what really came; the cost comes from the order.</div>}
+            </div>
+          )}
+          {!po && (<>
           <label className="form-label" htmlFor="pk-sup">Supplier (if any)</label>
           <input id="pk-sup" className="form-control form-control-lg mb-3" value={supplier} onChange={(e) => setSupplier(e.target.value.slice(0, 80))} />
+          </>)}
           {rows.map((r, i) => {
             const p = byId.get(r.productId);
+            if (po) {
+              const left = poLeft(r.productId);
+              const over = units(r) > left;
+              return (
+                <div key={r.productId || i} className="row g-2 mb-2 align-items-center">
+                  <div className="col-12 col-sm-6"><div className="fw-semibold">{poLine(r.productId)?.name ?? p?.name ?? ""}</div><div className="small text-muted">{left > 0 ? `${isLoose(p) ? `${(left / 1000).toLocaleString("en-PH", { maximumFractionDigits: 3 })} kg` : left} still to arrive` : "complete"}</div></div>
+                  <div className="col-8 col-sm-4">
+                    <input className={`form-control form-control-lg text-center ${over ? "is-invalid" : ""}`} aria-label={isLoose(p) ? "How many kilos arrived" : "How many arrived"} placeholder={isLoose(p) ? "kilos" : "how many"} inputMode="decimal" value={r.amount} onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, amount: num(e.target.value) } : x)))} />
+                    {over && <div className="invalid-feedback">More than is left on the order</div>}
+                  </div>
+                  <div className="col-4 col-sm-2">{rows.length > 1 && <button type="button" className="btn btn-link text-danger" aria-label="Did not arrive" onClick={() => setRows(rows.filter((_, j) => j !== i))}>×</button>}</div>
+                </div>
+              );
+            }
             return (
               <div key={i} className="row g-2 mb-2 align-items-end">
                 <div className="col-12 col-sm-6">
@@ -157,13 +207,15 @@ export default function PasokPanel(_props: { role?: string; onNavigate?: (tab: s
               </div>
             );
           })}
-          <div className="d-flex flex-wrap gap-2 mb-3">
-            <button type="button" className="btn btn-outline-secondary" onClick={() => setRows([...rows, { productId: "", amount: "", cost: "" }])}>+ One more</button>
-            <button type="button" className="btn btn-outline-success" onClick={() => setAdding(true)}>+ New item (not in the list)</button>
-          </div>
+          {!po && (
+            <div className="d-flex flex-wrap gap-2 mb-3">
+              <button type="button" className="btn btn-outline-secondary" onClick={() => setRows([...rows, { productId: "", amount: "", cost: "" }])}>+ One more</button>
+              <button type="button" className="btn btn-outline-success" onClick={() => setAdding(true)}>+ New item (not in the list)</button>
+            </div>
+          )}
           <div className="fw-semibold">Signature of the receiver</div>
           <SignaturePad key={sigKey} onSignature={setSig} />
-          <button type="button" className="btn btn-success btn-lg w-100 mt-3" disabled={!ready} onClick={() => void saveIn()}>{busy ? "Please wait…" : "Receive"}</button>
+          <button type="button" className="btn btn-success btn-lg w-100 mt-3" disabled={!ready || overOrder} onClick={() => void saveIn()}>{busy ? "Please wait…" : "Receive"}</button>
         </div>
       </div>
 

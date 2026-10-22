@@ -1996,6 +1996,7 @@ model StockIn {
   location     Warehouse     @relation(fields: [locationId], references: [id], onDelete: Restrict)
   supplierName String?
   note         String?
+  purchaseOrderId String? // the purchase order this delivery was received against
   createdById  String
   createdAt    DateTime      @default(now())
   lines        StockInLine[]
@@ -2013,6 +2014,7 @@ model StockInLine {
   product       Product @relation(fields: [productId], references: [id], onDelete: Restrict)
   quantity      Int // sacks, or grams for loose rice
   unitCostMinor Int?
+  poLineId      String? // the purchase order line this fills
 
   @@index([storeId, stockInId])
 }
@@ -2261,4 +2263,57 @@ model CustomerPrice {
 
   @@unique([storeId, storeCustomerId, productId])
   @@index([storeId, storeCustomerId])
+}
+
+// ─────────────────────────────── Purchase orders ───────────────────────────────
+// What was ordered from a supplier. A delivery received against it (Stock in) fills the lines;
+// what arrived, at the agreed cost, is what the store owes the supplier until it is paid.
+
+model PurchaseOrder {
+  id           String              @id @default(cuid())
+  storeId      String
+  docNumber    String // PO-000001
+  supplierId   String
+  supplierName String
+  locationId   String // where the delivery is expected
+  status       String // OPEN | PARTLY | RECEIVED | CANCELLED
+  expectedAt   DateTime?
+  note         String?
+  createdById  String
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+  lines        PurchaseOrderLine[]
+
+  @@unique([storeId, docNumber])
+  @@index([storeId, status])
+  @@index([storeId, supplierId])
+}
+
+model PurchaseOrderLine {
+  id            String        @id @default(cuid())
+  storeId       String
+  orderId       String
+  order         PurchaseOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId     String
+  quantity      Int // ordered: sacks, or grams for loose rice
+  receivedQty   Int           @default(0)
+  unitCostMinor Int // agreed cost (loose rice: per kilo)
+
+  @@index([storeId, orderId])
+}
+
+/// Money paid to a supplier (positive), or the undo of a payment (negative, reversesId set).
+model SupplierPayment {
+  id          String   @id @default(cuid())
+  storeId     String
+  supplierId  String
+  docNumber   String // SPY-000001
+  amountMinor Int
+  note        String?
+  reversesId  String?  @unique
+  createdById String
+  createdAt   DateTime @default(now())
+
+  @@unique([storeId, docNumber])
+  @@index([storeId, supplierId, createdAt])
 }

@@ -25,6 +25,8 @@ import { PrismaOrderSequenceRepository } from "../persistence/prisma-repositorie
 import { randomId } from "../persistence/repositories.js";
 import { addForTrip, deductStock, InsufficientStockError, recordMovement, releaseForTrip, reserveForTrip, unreserveForTrip, type TripLeg } from "../domain/movements.js";
 import { chargeSale } from "../payable/charges.js";
+import { seesCost } from "../domain/cost-redact.js";
+import { applyReceipt, loadOpenOrder } from "../purchase-orders/receive.js";
 import { coverShortage, deductWithBuffer } from "../domain/buffer.js";
 import { formatOrderNumber } from "../domain/order-number.js";
 import { resolveLinePrice, PriceOverrideError } from "../domain/price-override.js";
@@ -501,16 +503,16 @@ export class BentaService {
   /** Inside a transaction: an IN- document with its lines, signed by the receiver, stock added. */
   private async writeStockIn(
     tx: Tx, storeId: string, actor: Actor, locationId: string,
-    data: { supplierName: string | null; note: string | null; lines: { product: P; quantity: number; unitCostMinor: number | null }[] },
+    data: { supplierName: string | null; note: string | null; purchaseOrderId?: string | null; lines: { product: P; quantity: number; unitCostMinor: number | null; poLineId?: string | null }[] },
     signatures: SignatureInput[] | undefined,
   ) {
     const docNumber = await nextDocNumber(tx, storeId, "IN");
-    const doc = await tx.stockIn.create({ data: { storeId, docNumber, locationId, supplierName: data.supplierName, note: data.note, createdById: actor.userId }, select: { id: true, docNumber: true } });
+    const doc = await tx.stockIn.create({ data: { storeId, docNumber, locationId, supplierName: data.supplierName, note: data.note, purchaseOrderId: data.purchaseOrderId ?? null, createdById: actor.userId }, select: { id: true, docNumber: true } });
     await captureSignatures(tx, storeId, actor, { documentType: "STOCK_IN", documentId: doc.id, step: "RECEIVE", locationId }, signatures);
     await requireSignatures(tx, storeId, { documentType: "STOCK_IN", documentId: doc.id, step: "RECEIVE" });
     const costMode = await costModeOf(tx, storeId);
     for (const l of data.lines) {
-      await tx.stockInLine.create({ data: { storeId, stockInId: doc.id, productId: l.product.id, quantity: l.quantity, unitCostMinor: l.unitCostMinor } });
+      await tx.stockInLine.create({ data: { storeId, stockInId: doc.id, productId: l.product.id, quantity: l.quantity, unitCostMinor: l.unitCostMinor, poLineId: l.poLineId ?? null } });
       await recordCostIn(tx, { storeId, productId: l.product.id, warehouseId: locationId }, l.quantity, l.unitCostMinor);
       // What was on hand BEFORE this stock-in, to blend the new cost with the old one.
       const levelsBefore = await tx.stockLevel.findMany({ where: { storeId, productId: l.product.id, ...(costMode === "PER_LOCATION" ? { warehouseId: locationId } : { warehouse: { type: { not: "BUFFER" } } }) }, select: { quantityOnHand: true } });
@@ -528,15 +530,18 @@ export class BentaService {
         await tx.product.update({ where: { id: l.product.id }, data: { costMinor: averaged } });
       }
     }
+    if (data.purchaseOrderId) await applyReceipt(tx, storeId, data.purchaseOrderId, data.lines.flatMap((l) => (l.poLineId ? [{ poLineId: l.poLineId, quantity: l.quantity }] : [])));
     return doc;
   }
 
   async stockIn(
     storeId: string, actor: Actor,
-    input: { locationId?: string; supplierName?: string; note?: string; lines?: { productId?: string; quantity?: unknown; unitCostMinor?: unknown }[]; signatures?: SignatureInput[] },
+    input: { locationId?: string; supplierName?: string; note?: string; purchaseOrderId?: string; lines?: { productId?: string; quantity?: unknown; unitCostMinor?: unknown }[]; signatures?: SignatureInput[] },
   ): Promise<BentaResult<{ id: string; docNumber: string }>> {
     return this.run(async () => {
       const loc = await this.location(storeId, actor, input.locationId);
+      // Received against a purchase order: the order decides the supplier and the cost, so counter staff never type a cost.
+      const po = input.purchaseOrderId ? await loadOpenOrder(storeId, input.purchaseOrderId, loc.id) : null;
       const lines = Array.isArray(input.lines) ? input.lines : [];
       if (lines.length === 0 || lines.length > 50) throw new SellingError("Enter what arrived (1–50)");
       const ids = lines.map((l) => l.productId ?? "");
@@ -546,12 +551,19 @@ export class BentaService {
         const p = products.get(l.productId ?? "");
         if (!p) throw new SellingError("Product not found");
         if (typeof l.quantity !== "number" || !Number.isInteger(l.quantity) || l.quantity <= 0 || l.quantity > 100_000_000) throw new SellingError(`How many ${p.name} arrived?`);
+        if (po) {
+          const pl = po.lines.find((x) => x.productId === p.id);
+          if (!pl) throw new SellingError(`${p.name} is not on ${po.docNumber}`);
+          const left = pl.quantity - pl.receivedQty;
+          if (l.quantity > left) throw new SellingError(left > 0 ? `${p.name}: only ${isLoose(p) ? formatKilos(left) : `${left} sack${left === 1 ? "" : "s"}`} left on ${po.docNumber}. Enter any extra as a separate Stock in.` : `${p.name} is already complete on ${po.docNumber}`);
+          return { product: p, quantity: l.quantity, unitCostMinor: pl.unitCostMinor as number | null, poLineId: pl.id as string | null };
+        }
         const cost = l.unitCostMinor === undefined || l.unitCostMinor === null ? null : l.unitCostMinor;
         if (cost !== null && (typeof cost !== "number" || !Number.isInteger(cost) || cost < 0 || cost > 100_000_000)) throw new SellingError("Wrong cost");
-        return { product: p, quantity: l.quantity, unitCostMinor: cost as number | null };
+        return { product: p, quantity: l.quantity, unitCostMinor: cost as number | null, poLineId: null as string | null };
       });
       const doc = await prisma.$transaction((tx) => this.writeStockIn(tx, storeId, actor, loc.id, {
-        supplierName: input.supplierName?.trim().slice(0, 80) || null, note: input.note?.trim().slice(0, 200) || null, lines: checked,
+        supplierName: po ? po.supplierName : input.supplierName?.trim().slice(0, 80) || null, note: input.note?.trim().slice(0, 200) || null, purchaseOrderId: po?.id ?? null, lines: checked,
       }, input.signatures), txOptions());
       await cacheBust(cacheKey("products", storeId));
       return doc;
@@ -601,7 +613,7 @@ export class BentaService {
       const loc = await this.location(storeId, actor, locationId);
       const docs = await prisma.stockIn.findMany({
         where: { storeId, locationId: loc.id }, orderBy: { createdAt: "desc" }, take: 30,
-        select: { id: true, docNumber: true, supplierName: true, note: true, createdAt: true, lines: { select: { productId: true, quantity: true, unitCostMinor: true } } },
+        select: { id: true, docNumber: true, supplierName: true, note: true, createdAt: true, lines: { select: { productId: true, quantity: true, unitCostMinor: true, poLineId: true } } },
       });
       const ids = [...new Set(docs.flatMap((d) => d.lines.map((l) => l.productId)))];
       const prods = new Map((await prisma.product.findMany({ where: { storeId, id: { in: ids } }, select: { id: true, name: true, stockBaseUnit: true, stockBaseQuantity: true } })).map((p) => [p.id, p]));
@@ -609,7 +621,7 @@ export class BentaService {
         location: { id: loc.id, name: loc.name },
         stockIns: docs.map((d) => ({
           id: d.id, docNumber: d.docNumber, supplierName: d.supplierName, note: d.note, createdAt: d.createdAt,
-          lines: d.lines.map((l) => { const p = prods.get(l.productId); return { name: p?.name ?? "", loose: p?.stockBaseUnit === "g" && p?.stockBaseQuantity === 1, quantity: l.quantity, unitCostMinor: l.unitCostMinor }; }),
+          lines: d.lines.map((l) => { const p = prods.get(l.productId); return { name: p?.name ?? "", loose: p?.stockBaseUnit === "g" && p?.stockBaseQuantity === 1, quantity: l.quantity, unitCostMinor: l.poLineId && !seesCost(actor.role) ? null : l.unitCostMinor }; }), // a cost agreed on a purchase order is not for counter staff
         })),
       };
     });

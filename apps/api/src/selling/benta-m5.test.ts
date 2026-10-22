@@ -14,6 +14,7 @@ import { prisma } from "../persistence/prisma-repositories.js";
 import { BentaService } from "./benta.service.js";
 import { PeopleService, type Actor, type SignatureInput } from "../people/people.service.js";
 import { PosService } from "../pos/pos.service.js";
+import { PurchaseOrderService } from "../purchase-orders/purchase-order.service.js";
 import { LoyaltyService } from "../loyalty/loyalty.service.js";
 
 const PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==";
@@ -38,6 +39,9 @@ after(async () => {
     await prisma.stockTransfer.deleteMany({ where });
     await prisma.stockInLine.deleteMany({ where });
     await prisma.stockIn.deleteMany({ where });
+    await prisma.purchaseOrder.deleteMany({ where });
+    await prisma.supplierPayment.deleteMany({ where });
+    await prisma.supplier.deleteMany({ where });
     if (orderIds.length) {
       await prisma.creditEntry.deleteMany({ where: { orderId: { in: orderIds } } });
       await prisma.orderStatusHistory.deleteMany({ where: { orderId: { in: orderIds } } });
@@ -387,4 +391,87 @@ test("Special price: a customer's own price beats the store price, and the sale 
   assert.equal(o.storeCustomerId, fx.customerId);
   const walkIn = await svc.sell(fx.storeId, fx.staff1, { idempotencyKey: key(), lines: [{ productId: fx.sin25.id, quantity: 1 }], payment: { method: "cash" } });
   assert.equal(walkIn.ok && walkIn.value.totalMinor, 130_000, "no customer: the store price");
+});
+
+test("a purchase order: receive against it at the agreed cost, owe the supplier, pay and undo", async () => {
+  const fx = await fixture();
+  const svc = new BentaService();
+  const po = new PurchaseOrderService();
+  const made = await po.create(fx.storeId, fx.owner.userId, {
+    supplierName: "Mang Tonyo", locationId: fx.s1, expectedAt: "2026-11-05", note: "Weekly",
+    lines: [{ productId: fx.sin25.id, quantity: 10, unitCostMinor: 100_000 }, { productId: fx.loose.id, quantity: 100_000, unitCostMinor: 4_000 }],
+  });
+  assert.ok(made.ok, msg(made));
+  assert.match(made.value.docNumber, /^PO-\d{6}$/);
+
+  // counter staff see the open order, but no cost
+  const seen = await po.list(fx.storeId, "STAFF", { locationId: fx.s1 });
+  assert.ok(seen.ok);
+  assert.equal(seen.value.orders.length, 1);
+  assert.equal(JSON.stringify(seen.value).includes("unitCostMinor"), false);
+  assert.equal(JSON.stringify(seen.value).includes("totalMinor"), false);
+
+  // a wrong place, a wrong item, and too many are all refused
+  const wrongPlace = await svc.stockIn(fx.storeId, fx.staff2, { locationId: fx.s2, purchaseOrderId: made.value.id, lines: [{ productId: fx.sin25.id, quantity: 1 }], signatures: staffSig });
+  assert.ok(!wrongPlace.ok);
+  const tooMany = await svc.stockIn(fx.storeId, fx.staff1, { purchaseOrderId: made.value.id, lines: [{ productId: fx.sin25.id, quantity: 11 }], signatures: staffSig });
+  assert.ok(!tooMany.ok);
+  assert.match(msg(tooMany), /only 10 sacks left/);
+
+  // part of it arrives: the cost comes from the order, whatever the phone sent
+  const before = await onHand(fx, fx.sin25.id, fx.s1);
+  const r1 = await svc.stockIn(fx.storeId, fx.staff1, { purchaseOrderId: made.value.id, lines: [{ productId: fx.sin25.id, quantity: 6, unitCostMinor: 1 }], signatures: staffSig });
+  assert.ok(r1.ok, msg(r1));
+  assert.equal(await onHand(fx, fx.sin25.id, fx.s1), (before ?? 0) + 6);
+  const lineRow = await prisma.stockInLine.findFirst({ where: { stockInId: r1.value.id } });
+  assert.equal(lineRow?.unitCostMinor, 100_000);
+  assert.ok(lineRow?.poLineId);
+  const after1 = await po.list(fx.storeId, "OWNER", { status: "all" });
+  assert.ok(after1.ok);
+  assert.equal(after1.value.orders[0]?.status, "PARTLY");
+  assert.equal(after1.value.orders[0]?.receivedMinor, 600_000);
+
+  // what we owe: 6 sacks at 1,000.00 = 6,000.00; 90,000 g still to come is "on order"
+  const owed1 = await po.balances(fx.storeId);
+  assert.ok(owed1.ok);
+  const sup = owed1.value.suppliers.find((x) => x.name === "Mang Tonyo");
+  assert.equal(sup?.owedMinor, 600_000);
+  assert.equal(sup?.pendingMinor, 400_000 + 400_000);
+
+  // the rest arrives: the order is complete
+  const r2 = await svc.stockIn(fx.storeId, fx.staff1, { purchaseOrderId: made.value.id, lines: [{ productId: fx.sin25.id, quantity: 4 }, { productId: fx.loose.id, quantity: 100_000 }], signatures: staffSig });
+  assert.ok(r2.ok, msg(r2));
+  const after2 = await po.list(fx.storeId, "OWNER", { status: "all" });
+  assert.ok(after2.ok);
+  assert.equal(after2.value.orders[0]?.status, "RECEIVED");
+  const closed = await svc.stockIn(fx.storeId, fx.staff1, { purchaseOrderId: made.value.id, lines: [{ productId: fx.sin25.id, quantity: 1 }], signatures: staffSig });
+  assert.ok(!closed.ok);
+  const owed2 = await po.balances(fx.storeId);
+  assert.ok(owed2.ok);
+  assert.equal(owed2.value.suppliers.find((x) => x.name === "Mang Tonyo")?.owedMinor, 1_000_000 + 400_000);
+
+  // pay part, refuse a slipped zero, undo
+  const supId = owed2.value.suppliers.find((x) => x.name === "Mang Tonyo")!.id;
+  const tooBig = await po.pay(fx.storeId, fx.owner.userId, { supplierId: supId, amountMinor: 99_999_900 });
+  assert.ok(!tooBig.ok);
+  const paid = await po.pay(fx.storeId, fx.owner.userId, { supplierId: supId, amountMinor: 500_000, note: "Cash" });
+  assert.ok(paid.ok, msg(paid));
+  assert.match(paid.value.docNumber, /^SPY-\d{6}$/);
+  const st = await po.statement(fx.storeId, supId);
+  assert.ok(st.ok);
+  assert.equal(st.value.owedMinor, 900_000);
+  const undone = await po.undoPayment(fx.storeId, fx.owner.userId, paid.value.id);
+  assert.ok(undone.ok, msg(undone));
+  const twice = await po.undoPayment(fx.storeId, fx.owner.userId, paid.value.id);
+  assert.ok(!twice.ok);
+  const st2 = await po.statement(fx.storeId, supId);
+  assert.ok(st2.ok);
+  assert.equal(st2.value.owedMinor, 1_400_000);
+
+  // an order nobody delivered on is cancelled; one partly delivered is closed short
+  const m2 = await po.create(fx.storeId, fx.owner.userId, { supplierId: supId, locationId: fx.s1, lines: [{ productId: fx.sin25.id, quantity: 5, unitCostMinor: 100_000 }] });
+  assert.ok(m2.ok);
+  const c = await po.cancel(fx.storeId, fx.owner.userId, m2.value.id);
+  assert.ok(c.ok);
+  assert.equal(c.value.status, "CANCELLED");
 });
