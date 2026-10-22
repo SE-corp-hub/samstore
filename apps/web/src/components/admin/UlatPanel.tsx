@@ -443,7 +443,7 @@ function CloseDay({ section, date, onCancel, onDone }: { section: DaySection; da
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const counted = Math.round(Number(cash || "0") * 100);
-  // Step 2 is done right here: the closing (top 5) count of this location, today.
+  // Step 2 (optional) is done right here: the closing count of this location, today (the 5 items that sold most).
   const [closingCount, setClosingCount] = useState<CountRow | null>(null);
   const [sheet, setSheet] = useState<CountDetail | null>(null);
   const manilaDay = (iso: string) => new Date(Date.parse(iso) + 8 * 3_600_000).toISOString().slice(0, 10);
@@ -483,17 +483,18 @@ function CloseDay({ section, date, onCancel, onDone }: { section: DaySection; da
         {error && <div className="alert alert-danger py-2">{error}</div>}
         <NumPad value={cash} onChange={setCash} decimals={2} label="Cash counted" unit="₱" />
         {cash && <div className={`fs-5 mt-2 ${counted - section.cash.expectedMinor < 0 ? "text-danger" : ""}`}>{counted - section.cash.expectedMinor === 0 ? "Correct" : counted - section.cash.expectedMinor < 0 ? `Short ${peso(section.cash.expectedMinor - counted)}` : `Over ${peso(counted - section.cash.expectedMinor)}`}</div>}
-        <h2 className="h5 mt-3">2. Count the top 5</h2>
+        <h2 className="h5 mt-3">2. Count 5 items <span className="fw-normal text-muted">(optional)</span></h2>
+        <p className="small text-muted mb-2">A quick check that the shelf matches the book, on the 5 items that sold most in the last day (or the biggest stock if nothing was sold). You can skip it: the day closes without it.</p>
         {sheet ? (
           <CountSheet count={sheet} owner={false} onClose={async () => { setSheet(null); await loadClosing(); }} onReload={() => void openSheet(sheet.id)} />
         ) : closingCount && closingCount.status !== "OPEN" ? (
           <p className="text-success mb-2"><i className="bi bi-check-circle me-1" aria-hidden="true"></i>Done — {closingCount.docNumber}{closingCount.kulangValueMinor > 0 ? <span className="text-danger"> · short {peso(closingCount.kulangValueMinor)}</span> : null}</p>
         ) : (
           <button type="button" className="btn btn-outline-dark btn-lg mb-2" onClick={() => void (closingCount ? openSheet(closingCount.id) : startClosingCount())}>
-            {closingCount ? `Continue the count (${closingCount.docNumber})` : "Count the top 5 now"}
+            {closingCount ? `Continue the count (${closingCount.docNumber})` : "Count the 5 items now"}
           </button>
         )}
-        <h2 className="h5">3. Still open</h2>
+        <h2 className="h5">3. Still open <span className="fw-normal text-muted small">(for your information)</span></h2>
         <p className="small">{(section.openHandOffs.trips.length + section.openHandOffs.resacks.length) === 0 ? "None." : [...section.openHandOffs.trips.map((t) => `${t.docNumber} ${t.product}`), ...section.openHandOffs.resacks.map((r) => `${r.docNumber} ${r.product}`)].join(" · ")}</p>
         <div className="fw-semibold">4. Your signature</div>
         <SignaturePad onSignature={setSig} />

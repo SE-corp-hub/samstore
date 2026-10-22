@@ -47,6 +47,7 @@ const QUICK = process.argv.includes("--quick");
 
 /** Rice Ops test files, in order. Missing files (later modules) are skipped. */
 const TEST_FILES = [
+  "scripts/backup-keep.test.mjs",
   "apps/api/src/domain/weight.test.ts",
   "apps/api/src/domain/stock-location.test.ts",
   "apps/api/src/domain/people.test.ts",
@@ -158,7 +159,7 @@ async function main() {
   let failed = 0;
   for (const f of TEST_FILES) {
     if (!existsSync(join(root, f))) continue;
-    if (QUICK && !(f.includes("/domain/") || f.startsWith("apps/web/"))) continue;
+    if (QUICK && !(f.includes("/domain/") || f.startsWith("apps/web/") || f.startsWith("scripts/"))) continue;
     let r = await run(`test ${f}`, `npx tsx --test ${f}`);
     // A dropped connection to the database is retried once; a real failure is not hidden.
     if (r.code !== 0 && /closed the connection|Can't reach database|ECONNRESET|EOF detected/i.test(r.text)) {

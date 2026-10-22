@@ -35,7 +35,7 @@ With nothing typed, the box lists **Not counted for the longest time**.
 
 ## Also on the Count screen
 - **Today's suggested list:** about 10 items to count today, with the reason for each. **Start counting these** starts the list.
-- **Closing count (top 5):** count all five items at closing. It posts when you submit.
+- **Quick count: 5 best sellers:** an optional quick count of the 5 items that sold most in the last day (the biggest stock if nothing was sold). Count all five. It posts when you submit. You do not have to do it to close the day.
 
 ## Other tabs
 - **Report:** past counts for the dates you choose.

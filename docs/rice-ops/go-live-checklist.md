@@ -21,20 +21,25 @@ reports by store, Needs a look, count accuracy, today's suggested list). Added 2
 
 1. [ ] **Run `verify-beta.bat` again** and confirm `VERIFY RESULT: PASS (BETA DATABASE)`. It now also runs the tests of the 22 Oct evening features. Send me the last lines if it fails.
 2. [ ] **Phone test** of the new screens on the beta site: sections G to L and the new section N of `claude/phone-test-checklist.md`, with a staff login and the owner login. Write down anything odd.
-3. [ ] **Backup decision (owner).** The shop database is on the Free plan, which has no automatic backups. Choose the paid plan (daily backups) or a nightly backup job. Do not go live without one.
-4. [ ] **Owner decision: how cost is counted.** "One cost for all locations" (simple) or "Each location has its own cost". Set it in Reports & closing, Stock book. Decide before the opening count.
+3. [ ] **Free nightly backup job (decided 22 Oct: free job, no paid plan; do not go live without it).** Built. On the Sam PC, double-click `setup-nightly-backup.bat` (it makes a first backup, then schedules one every day), set a second-copy folder (Google Drive or USB), then check with `backup-status.bat`. Details: `docs/rice-ops/backup.md`.
+4. [ ] **Cost (decided 22 Oct: one cost for all locations).** This is the default. Before the opening count, check that Reports & closing, Stock book shows "One cost for all locations". Nothing to build.
 5. [ ] **Real data.** Fill `products.csv`, `customers.csv`, `staff.csv` and `kargadors.csv` in `go-live/` (section A). The dry run must show 0 problems. Include the real cost per product.
 6. [ ] **Production settings** in the hosting dashboard (section A, System). Needs the owner; secrets never go in chat or the repo.
 7. [ ] **Back up, then apply the last migrations** to the shop database: `20261101090000_count_reasons` and `20261102090000_count_look`. They only add columns. Everything older is already applied there (22 Oct, after a backup).
-8. [ ] **SMS provider.** The owner picks one and approves real texts. Until then texts are recorded, not sent. (On a phone, credit-sale texts open the phone's own text app instead.)
+8. [x] **SMS (decided 22 Oct: no SMS provider; use the phone's own text app).** Nothing to buy or set. Leave `SMS_PROVIDER` unset. Credit texts go from the phone's text app (Credit, **Text the balance**; POS, **Text customer**). The app only records its automatic texts; it does not send them.
 9. [ ] **Locations.** `setup:locations` dry run, then `--apply` (S1, S2, S3, WH). Check which one is the main location. Add one Buffer store per store (Locations, type "Buffer store"). Tick "Consignment store" on Store 2.
 10. [ ] **Usability check** with one real staff member (`docs/rice-ops/usability-test.md`), then print the guides (`docs/rice-ops/guide/`).
 11. [ ] **Owner sign-off** on printed prices and credit balances (section A).
 12. [ ] **Deploy.** Only after the owner says "yes" in chat. Then section B (the opening count) on a slow day.
 
-**Not built yet, can wait until after go-live:** courier signature and cash page, phone sign-up, Team "created by" history, cost carried through resack and counts when cost is per location (they use the product cost for now), a USB or print-dialog fallback for the printer (only if "Check my printer" shows Bluetooth does not work from Chrome), SMS sending.
+**Not built yet, can wait until after go-live:** courier signature and cash page, phone sign-up, Team "created by" history, cost carried through resack and counts when cost is per location (they use the product cost for now), a USB or print-dialog fallback for the printer (only if "Check my printer" shows Bluetooth does not work from Chrome), SMS sending (not needed: the phone's text app is used).
 
-**Open owner decisions:** backup (step 3), SMS provider (step 8), whether staff may type a cost on Stock in and on a new item (today they can; the cost becomes the latest cost), and whether "Close the day" must insist on the top-5 count and no open items (today it only shows them).
+**Owner decisions (all made, 22 Oct):**
+- Backup: free nightly job, required before go-live (step 3, `docs/rice-ops/backup.md`).
+- Cost: one cost for all locations (step 4).
+- SMS: no provider; the phone's own text app is the channel (step 8).
+- Staff typing a cost on Stock in: keep. Staff can type an optional cost on Stock in and on a new item, and it becomes the item's latest cost.
+- "Close the day": does **not** insist on anything except the cash count and the signature, because the POS is not always used. The 5-item count is now labelled **optional** in plain words ("Count 5 items (optional)"), and "Still open" is "for your information".
 
 **Testing notes:** run `stop-dev.bat` before the full `verify.bat` (the running app locks a database file).
 `verify-beta.bat` runs the full check (migrations, types, every database test) on the separate beta database, so the shop's database is never touched and no backup is needed. It asks for the beta database address each time (Supabase beta project, Connect, Session pooler, port 5432), or reads it from `go-live\beta-verify-url.txt` (one line; git ignores it). It refuses the shop's address. Its log is `verify-logs\latest-beta.txt`, and the result line ends with `(BETA DATABASE)`. `verify.bat` and `update-and-verify-full.bat` use the database in `.env`.
@@ -53,8 +58,8 @@ Work top to bottom. Each box needs a name and a date. **Nothing in this list dep
   - `CORS_ORIGINS`: the web app's https address(es), comma-separated. The API refuses to start without it.
   - `DATABASE_URL`, `REDIS_URL`.
   - `ALLOW_OWNER_SIGNUP` unset (sign-up stays closed).
-  - SMS: leave `SMS_PROVIDER` unset until the owner picks a provider and approves real texts. Until then texts are recorded but **not sent**.
-- [ ] Backup plan chosen (paid daily backups or a nightly job) and one backup taken and restorable (`npm run db:backup`; the file opens).
+  - SMS: leave `SMS_PROVIDER` unset (decided: the phone's own text app is used). The app's automatic texts are recorded but **not sent**.
+- [ ] Nightly backup job set up (`setup-nightly-backup.bat`), `backup-status.bat` says OK, the second-copy folder has the file, and the backup file opens (the backup step checks it with `pg_restore --list`).
 - [ ] `npx prisma migrate deploy` run against the shop database after that backup (the last two migrations are `count_reasons` and `count_look`).
 - [ ] Locations set: `npm run setup:locations -- --store <slug>` (dry run), then `--apply`. S1, S2, S3 and WH with the right names and addresses. One Buffer store per store. Store 2 marked "Consignment store".
 - [ ] Old ledger rebased if the dry run asks for it: `npm run ledger:rebase -- --store <slug>` (dry run first).
@@ -81,7 +86,7 @@ Work top to bottom. Each box needs a name and a date. **Nothing in this list dep
 ## B. Go-live day (pick a slow day)
 
 - [ ] Before opening: **a full count at all 4 locations** (Count, Count a list, Everything here), signed. It posts at once and becomes the opening stock. Staff count blind; leave "Show the system numbers while counting" off.
-- [ ] Spot-check the shelves against Store report, Stock left for the top 5 items per location.
+- [ ] Spot-check the shelves against Store report, Stock left for 5 of the biggest items per location.
 - [ ] After the opening count: Reports & closing, **Stock check** shows all stocks agree. Pick one product in **Stock book** and read it from start to end.
 - [ ] A paper log runs **alongside** the app for the first 3 days (a safety net, not a replacement).
 - [ ] Each evening: every location does its closing in Reports & closing. The owner reviews the daily report, anything still open, **For your approval**, **Count, Needs a look**, and **Store payable**.
@@ -89,14 +94,14 @@ Work top to bottom. Each box needs a name and a date. **Nothing in this list dep
 ## C. End of week 1
 
 - [ ] Full count per location. Open **Count, Report** and **Count, Balance**: how close is the system to the shelves? Write the result in `docs/progress.md`.
-- [ ] Review: credit texts (or the decision to start real SMS), approvals waiting, Needs a look, write-offs over 1%, the Buffer store "to fix" list, what Store 2 owes and whether it paid.
+- [ ] Review: credit texts (are staff using the phone text app?), approvals waiting, Needs a look, write-offs over 1%, the Buffer store "to fix" list, what Store 2 owes and whether it paid.
 - [ ] Owner decides: stop the paper log, or run another week.
 
 ## If something goes badly wrong
 
 - Stop using the app for the affected flow and switch that location to paper. Nothing is lost: the paper is entered later.
 - Do **not** edit the database by hand. Wrong signed entries are voided by the owner or manager with a reason.
-- Restoring a backup or rolling back a deploy needs the owner's explicit approval.
+- Restoring a backup or rolling back a deploy needs the owner's explicit approval. Backups are in the `backups` folder and the second-copy folder (`docs/rice-ops/backup.md`).
 
 ## Sign-off
 

@@ -7,15 +7,15 @@
 1. Open **Reports & closing** (**More**, then **Other screens**). Stay on the **Closing** tab.
 2. On your store's card tap the green **Closing** button. It shows only for today, until the day is closed.
 3. **1. Count the cash in the drawer.** Type the amount on the pad. The screen says **Correct**, **Short** or **Over**. The change fund is not counted.
-4. **2. Count the top 5.** Tap **Count the top 5 now** and count (guide 09). Stopped half way? Tap **Continue the count**. It says **Done** at the end.
-5. **3. Still open.** Trips or resacks not finished. **None.** is good. Finish any resack first.
+4. **2. Count 5 items (optional).** This is a quick check that the shelf matches the book. It uses the 5 items that sold most in the last day (or the biggest stock if nothing was sold). If you want to do it, tap **Count the 5 items now** and count (guide 09). Stopped half way? Tap **Continue the count**. It says **Done** at the end. If you do not use it, skip it. The day closes without it.
+5. **3. Still open (for your information).** Trips or resacks not finished. **None.** is good. It does not stop you closing. Finish any resack first when you can.
 6. **4. Your signature.** Sign with your finger.
 7. Tap **Close the day**. It stays grey until the cash is typed and you have signed. You see "The day is closed — sent to the owner".
 
 ## What happens
 - The day's numbers lock. The owner sees your cash count next to what it should be.
-- The top 5 count changes the shelf numbers at once.
-- **Close the day** does not check steps 2 and 3. Do them first.
+- If you did the 5-item count, it changes the shelf numbers at once.
+- **Close the day** does not require steps 2 and 3. Only the cash count and your signature are needed (the shop does not always use the POS, so nothing else is forced).
 
 ## Made a mistake?
 - A closed day cannot be reopened in the app. Tell the owner.

@@ -21,7 +21,7 @@ The button turns red: **Not sent (1)**. Tap it. Each ✕ line says why, for exam
 An expired sign-in or a busy server is not a "no". The step stays in **Waiting to send** and goes after you sign in again.
 
 ## What needs a signal
-Everything else: **Count a list**, the **Closing count (top 5)**, **Close the day**, **For your approval**, reports, signing in.
+Everything else: **Count a list**, the **Quick count: 5 best sellers**, **Close the day**, **For your approval**, reports, signing in.
 - The app opens with no signal, but a screen you open fresh may stay empty. Open what you need while you still have signal.
 - "No signal and the phone is full — try again later": nothing was saved or sent. Do it again when you have signal.
 

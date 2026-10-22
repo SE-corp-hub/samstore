@@ -96,7 +96,7 @@ export default function CountHome({ locationId, owner, onOpen, onChanged, onErro
       <div className="d-flex flex-wrap gap-2 mb-3">
         <button type="button" className="btn btn-success btn-lg" disabled={!items} onClick={() => setSetup(true)}>Count a list</button>
         <button type="button" className="btn btn-outline-success btn-lg" onClick={() => setSuggest(true)}>Today&apos;s suggested list</button>
-        <button type="button" className="btn btn-outline-dark btn-lg" onClick={onClosing}>Closing count (top 5)</button>
+        <button type="button" className="btn btn-outline-dark btn-lg" onClick={onClosing} title="A quick count of the 5 items that sold most in the last day. Optional.">Quick count: 5 best sellers</button>
       </div>
       {children}
     </>

@@ -21,7 +21,7 @@ No PIN? Tap **No PIN yet, or forgot it? Make / change my PIN**. Type your passwo
 
 ## What happens to the stock
 - **Return:** good rice is on the shelf already. The line says "from order …" when staff named the sale.
-  - **Approve, sale named:** a credit sale lowers the customer's credit (the customer gets a text). A cash, GCash or other sale makes a refund note: hand the money back yourself. More than the customer still owed is also a note to hand back.
+  - **Approve, sale named:** a credit sale lowers the customer's credit (the app does not text the customer; use **Text the balance** in Credit if you want them to know). A cash, GCash or other sale makes a refund note: hand the money back yourself. More than the customer still owed is also a note to hand back.
   - **Approve, no sale named:** nothing changes in the money. Settle it with the customer yourself.
   - **Decline:** no money changes. The rice already moved when staff saved it.
 - **Resack, write-off:** the stock changed when staff saved it. Your answer is only the record.

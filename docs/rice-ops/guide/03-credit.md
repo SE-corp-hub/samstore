@@ -19,7 +19,7 @@ A new customer has **no limit** until the owner sets one.
 ## Text or print the balance
 - **Text the balance:** your phone's text app opens with the message ready. Press Send there. Nothing goes out until you do. No valid mobile number? The number is missing or wrong.
 - **Print statement (slip)** or **Print statement (A4)**.
-- **Texts** tab: **Text opened** means the text app opened. The app cannot tell if you pressed Send. **Failed** has **Send again**. Until the store has a text account, the app's own texts are test only.
+- **Texts** tab: **Text opened** means the text app opened. The app cannot tell if you pressed Send. **Failed** has **Send again**. The app does not send texts by itself: the shop uses your phone's own text app, so only **Text the balance** and **Text the customer** really reach people.
 
 ## At the limit
 The badge says **At limit — pay first**. The POS refuses a credit sale that would go over the limit (**Over the credit limit**). Take a payment first. Then the customer can buy on credit again. Staff cannot raise a limit.
@@ -30,4 +30,4 @@ This screen has no Undo for a customer or a payment. Tell the owner or manager. 
 ## Owner or manager
 - **Limit:** open the customer, type **Limit ₱**, tap **Save limit**. **No limit** removes it. 0 means no credit at all.
 - **Special prices:** choose a product, type the price, tap **Save price**. **Remove** deletes it. At the POS, pick the customer first and the prices show on the rice.
-- **Settings** tab: switches for the automatic texts and reminders.
+- **Settings** tab: switches for the automatic texts and reminders. The shop has no text account, so these are only recorded in the Texts tab, not sent.

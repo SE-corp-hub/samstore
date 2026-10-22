@@ -1,5 +1,21 @@
 # PINDIAN — Progress Log
 
+## Owner decisions made; free nightly backup built; closing count made optional (2026-10-22, night)
+
+**Owner decisions (22 Oct, 20:49 Manila):**
+- **Backup:** a free nightly backup job, no paid plan. Do not go live without it.
+- **Cost:** one cost for all locations (the default; nothing to build).
+- **SMS:** no provider. The phone's own text app is the channel. `SMS_PROVIDER` stays unset; the app's automatic texts are only recorded.
+- **Staff typing a cost on Stock in / a new item:** keep as is (optional; becomes the item's latest cost).
+- **Close the day:** does not insist on the closing count or on open items, because the POS is not always used. The owner also did not know what "top 5 count" meant and finds it not very useful.
+
+**Built:**
+- **Nightly backup job** (`scripts/backup-nightly.mjs`, `scripts/backup-keep.mjs`; `setup-nightly-backup.bat`, `run-nightly-backup.bat`, `backup-now.bat`, `backup-status.bat`; guide `docs/rice-ops/backup.md`). One double-click sets it up: it makes a first backup to prove it works, then schedules a daily one with Windows Task Scheduler (runs when the PC is next on if it was off). It keeps the last 14 backups plus one per month for 6 months, copies each backup to a second folder if one is set (Google Drive or USB; `go-live/backup-copy-folder.txt`), writes `backups/backup-log.txt`, retries once after 5 minutes, and shows a message box and `backups/BACKUP-FAILED.txt` if it fails. A half-written file is deleted so it is never mistaken for a backup. `backup-status.bat` says OK or WARNING (newest backup older than 36 hours, or last run failed). The database address is never printed or logged. Tested here: the keep/delete rule (`scripts/backup-keep.test.mjs`, 6 tests) and the whole job against a stand-in backup (success, second copy, failure with cleanup). Not yet run on the Sam PC: `setup-nightly-backup.bat` (needs the owner's time and folder choice).
+- **Close the day wording:** step 2 is now "Count 5 items (optional)" with one plain sentence on what it is (the 5 items that sold most in the last day, or the biggest stock if nothing was sold); the button says "Count the 5 items now"; "Still open" says "(for your information)"; the Count screen button is "Quick count: 5 best sellers". Behaviour is unchanged (it never blocked closing).
+- **Docs corrected:** guides 03, 09, 10, 13, 14 (no "the customer gets a text" from the app; the closing count is optional); go-live checklist (decisions recorded, steps 3, 4 and 8, production settings, backup tick-box).
+
+**Still for the owner/person:** run `setup-nightly-backup.bat` on the Sam PC; `verify-beta.bat`; phone test sections G to N; real data CSVs; production settings; apply the last two migrations after a backup; locations; usability check; sign-off; deploy only after "yes" in chat.
+
 ## Fixes from the guide review, and four new features (2026-10-22, evening)
 
 **Fixed** (commit `318b29f`): the Credit tile on the staff More screen; the REFUND label on approvals; the Excel Profit column no longer shows for staff; staff can change their own PIN (Counter settings); **Customer returns can name the sale** ("Which sale was it?"), so approving a return lowers credit or makes a refund note, and good rice at the consignment store takes its charge off.
@@ -13,7 +29,7 @@
 
 **Checks:** quick check on the Sam PC at this commit: types (contracts, api, web) OK and every database-free test passed (55 s, `verify-quick.bat`). The database tests written for these features (`transfers-m3`, `benta-m5` x2, `reports-m9` x2) have **not run**: they need `verify-beta.bat` (and the earlier beta re-run after `6c50588` is also still to do).
 
-**Decisions still open (owner):** backup for the shop database; SMS provider; whether staff may type a cost on Stock in and new items; whether "Close the day" should insist on the top-5 count and no open items.
+**Decisions that were open:** all made on 22 Oct night, see the entry above.
 
 ## Printed guides and go-live checklist rewritten (2026-10-22)
 
