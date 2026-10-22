@@ -1,5 +1,11 @@
 # PINDIAN — Progress Log
 
+## Printed guides and go-live checklist rewritten (2026-10-22)
+
+The Taglish guides in `docs/rice-ops/gabay/` described screens that no longer exist (Lipat at Ilabas, Tanggapin, Para sa iyo, Bilangin...). They are replaced by 16 English one-page guides in `docs/rice-ops/guide/` (00 read me first, 01 sign in, 02 POS, 03 Credit, 04 Move stock, 05 Customer returns, 06 Resack, 07 Stock in, 08 Supplier orders, 09 Count, 10 End of day and reports, 11 Store payable, 12 Agent orders, 13 For your approval, 14 Weak signal, 15 Printing). Every button name in them was checked against the code. `go-live-checklist.md` and `usability-test.md` were refreshed to match. Docs only: no app code changed.
+
+Found while writing them (app issues, not fixed here): the Credit tile is missing from the staff More screen; Customer returns cannot be linked to a sale, so approving a return does not lower credit and a good return at the consignment store does not take the charge off; the approvals list shows the raw word REFUND; Excel on the staff Closing tab writes NaN in a Profit column; staff have no screen to change their own PIN; staff can type a cost on Stock in.
+
 ## All screens in English (2026-10-16)
 
 The owner asked for every app screen in English. Every rice screen, the menu, dialogs, toasts and the API messages staff see are now plain English, and the Taglish/English switch is removed (English only; the old Taglish words stay in `lib/lang.ts` for reference). Wording: Sell, Credit, Agent orders, For your approval, Transfers & releases, Resack, Stock in & review, Count, Reports & closing, To finish, Porters; "kaha" → cash drawer. Tests that check messages now expect the English text.

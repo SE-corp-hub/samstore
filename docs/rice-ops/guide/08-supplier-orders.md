@@ -1,0 +1,29 @@
+# 08 · Supplier orders and what you owe suppliers
+
+**Who:** Owner and manager. Staff only receive the delivery on **Stock in** (guide 07).
+**When:** you order from a supplier, a delivery comes, or you pay a supplier.
+
+On a phone: **More**, then **Supplier orders**. Two tabs: **Orders** and **Suppliers owe**.
+
+## Make an order
+1. On **Orders** tap **+ New order**.
+2. Pick the **Supplier**, or **New supplier…** and type the name.
+3. Pick **Deliver to** and **Expected**.
+4. For each item: choose it, type **How many** (**Kilos** for loose rice) and the **Agreed cost**. **+ One more item** adds a row.
+5. Tap **Save order**.
+
+## When the rice comes
+- Staff pick the order on **Stock in**, change each number to what really came, and sign.
+- Some came: **Partly arrived**. **Left** shows what is still due. All came: **Complete**, by itself.
+- More than the order has left: refused. The extra goes in a separate Stock in.
+- **Late** (red) shows from the day after **Expected**, if the order is not complete.
+- The red button says **Close order** if some rice came (what arrived stays, the rest is no longer expected) or **Cancel order** if none came. You confirm first.
+- **Waiting** and **All** choose which orders show.
+
+## What you owe
+1. Open **Suppliers owe**. **You owe suppliers** is what arrived, at the agreed cost, minus what you paid. A delivery with no order adds nothing. **Still on order** is not owed yet.
+2. **Record payment**: type **Amount paid**, tap **Save payment**. Refused if it is more than you owe plus what is still on order.
+3. **Statement** lists deliveries and payments with the balance. **Print** prints it.
+
+## Made a mistake?
+Wrong payment: in the **Statement** tap **Undo**, then **Undo payment**. A new line takes it off and the old line stays. A payment can be undone once. A delivery cannot be undone.
