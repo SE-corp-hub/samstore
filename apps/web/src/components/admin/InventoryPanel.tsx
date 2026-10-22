@@ -39,6 +39,7 @@ export default function InventoryPanel() {
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [totalValue, setTotalValue] = useState(0);
+  const hasCost = items.length === 0 || typeof items[0]!.costMinor === "number";
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -314,9 +315,10 @@ export default function InventoryPanel() {
         </div>
       </div>
 
+      {/* Staff get no cost from the server; the cost columns are hidden for them. */}
       <div className="alert alert-primary py-2 small d-flex justify-content-between align-items-center flex-wrap gap-2">
         <span><strong>{items.length}</strong> products</span>
-        <span>Inventory value (cost): <strong>{toPesos(totalValue)}</strong></span>
+        {hasCost && <span>Inventory value (cost): <strong>{toPesos(totalValue)}</strong></span>}
         <div className="d-flex gap-2">
           <button type="button" className="btn btn-sm btn-outline-success" onClick={() => void openConversion()}>
             <i className="bi bi-arrow-left-right me-1"></i>Convert stock
@@ -388,8 +390,8 @@ export default function InventoryPanel() {
             <tr>
               <th>Product</th><th>SKU</th><th>Category</th>
               <th className="text-end">On hand</th><th className="text-end">Reserved</th>
-              <th className="text-end">Available</th><th className="text-end">Unit cost</th>
-              <th className="text-end">Value</th><th>Status</th><th></th>
+              <th className="text-end">Available</th>{hasCost && <th className="text-end">Unit cost</th>}
+              {hasCost && <th className="text-end">Value</th>}<th>Status</th><th></th>
             </tr>
           </thead>
           <tbody>
@@ -401,8 +403,8 @@ export default function InventoryPanel() {
                 <td className="text-end">{r.quantityOnHand}</td>
                 <td className="text-end text-muted">{r.quantityReserved}</td>
                 <td className="text-end fw-semibold">{r.availableQuantity}</td>
-                <td className="text-end">{toPesos(r.costMinor)}</td>
-                <td className="text-end">{toPesos(r.valueMinor)}</td>
+                {hasCost && <td className="text-end">{toPesos(r.costMinor)}</td>}
+                {hasCost && <td className="text-end">{toPesos(r.valueMinor)}</td>}
                 <td><span className={`badge ${STATUS_BADGE[r.status]}`}>{r.status}{r.reorderThreshold > 0 ? ` ≤${r.reorderThreshold}` : ""}</span></td>
                 <td className="text-end">
                   <button type="button" className="btn btn-sm btn-outline-primary"

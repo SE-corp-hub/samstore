@@ -310,7 +310,7 @@ test("M5: staff sell only at their own location; another store's product is not 
   assert.equal(reuse.ok && mine.ok && reuse.value.orderId !== mine.value.orderId && !mine.value.replayed, true, "keys never cross stores");
 });
 
-test("M5: Manual na pasok adds signed stock and records the latest cost", async () => {
+test("M5: Manual na pasok adds signed stock and averages the cost with what is on hand", async () => {
   const fx = await fixture();
   const noSig = await svc.stockIn(fx.storeId, fx.staff1, { lines: [{ productId: fx.sin25.id, quantity: 4, unitCostMinor: 112_000 }] });
   assert.equal(noSig.ok, false);
@@ -318,7 +318,8 @@ test("M5: Manual na pasok adds signed stock and records the latest cost", async 
   assert.equal(r.ok, true, msg(r));
   assert.match(r.ok ? r.value.docNumber : "", /^IN-\d{6}$/);
   assert.equal(await onHand(fx, fx.sin25.id, fx.s1), 14);
-  assert.equal((await prisma.product.findUniqueOrThrow({ where: { id: fx.sin25.id } })).costMinor, 112_000);
+  // 15 sacks on hand at 1,100.00 + 4 arriving at 1,120.00 → weighted average 1,104.21.
+  assert.equal((await prisma.product.findUniqueOrThrow({ where: { id: fx.sin25.id } })).costMinor, 110_421);
   const mv = await prisma.stockMovement.findFirstOrThrow({ where: { storeId: fx.storeId, type: "STOCK_IN" } });
   assert.deepEqual([mv.delta, mv.warehouseId, mv.documentType], [4, fx.s1, "STOCK_IN"]);
   const away = await svc.stockIn(fx.storeId, fx.staff2, { locationId: fx.s1, lines: [{ productId: fx.sin25.id, quantity: 1 }], signatures: staffSig });

@@ -138,6 +138,8 @@ function PriceHistoryList({ productId }: { productId: string }) {
 
 export default function ProductsPanel() {
   const [products, setProducts] = useState<AdminProduct[]>([]);
+  // Staff get no cost from the server, so the cost column and field are hidden for them.
+  const hasCost = products.length === 0 || typeof products[0]!.costMinor === "number";
   const [categories, setCategories] = useState<{ id: string; slug: string; name: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -207,7 +209,7 @@ export default function ProductsPanel() {
       soldByWeight: p.soldByWeight ?? false,
       trackStock: p.trackStock !== false,
       priceMinor: (p.priceMinor / 100).toString(),
-      costMinor: (p.costMinor / 100).toString(),
+      costMinor: typeof p.costMinor === "number" ? (p.costMinor / 100).toString() : "",
       conversionEnabled: Boolean(p.stockBaseUnit),
       packageSize: measure.packageSize,
       packageUnit: measure.packageUnit,
@@ -364,7 +366,7 @@ export default function ProductsPanel() {
               <th>Product</th>
               <th>SKU</th>
               <th className="text-end">Selling price</th>
-              <th className="text-end">Unit cost</th>
+              {hasCost && <th className="text-end">Unit cost</th>}
               <th className="text-end">Stock</th>
               <th>Category</th>
               <th>Status</th>
@@ -398,7 +400,7 @@ export default function ProductsPanel() {
                   {p.barcode && <div className="text-muted text-opacity-75" style={{ fontSize: "0.8em" }} title="Barcode">{p.barcode}</div>}
                 </td>
                 <td className="text-end">{toPesos(p.priceMinor)}</td>
-                <td className="text-end text-muted">{toPesos(p.costMinor)}</td>
+                {hasCost && <td className="text-end text-muted">{toPesos(p.costMinor)}</td>}
                 <td className={`text-end ${p.trackStock !== false && p.reorderThreshold > 0 && p.availableQuantity <= p.reorderThreshold ? "text-danger fw-semibold" : ""}`}>
                   {p.trackStock === false ? <span className="text-muted">—</span> : p.availableQuantity}
                   {p.trackStock !== false && p.reorderThreshold > 0 && <small className="text-muted"> ≤{p.reorderThreshold}</small>}
@@ -499,11 +501,13 @@ export default function ProductsPanel() {
                         <label className="form-label small" htmlFor="productSellingPrice">Selling price (₱) per unit *</label>
                         <PesoInput id="productSellingPrice" required value={form.priceMinor} onChange={(v) => setForm({ ...form, priceMinor: v })} placeholder="0.00" />
                       </div>
-                      <div className="col-6 mb-2">
-                        <label className="form-label small" htmlFor="productUnitCost">Unit acquisition cost (₱)</label>
-                        <PesoInput id="productUnitCost" value={form.costMinor} onChange={(v) => setForm({ ...form, costMinor: v })} placeholder="0.00" />
-                        <small className="text-muted">Purchases update this to the latest received cost.</small>
-                      </div>
+                      {hasCost && (
+                        <div className="col-6 mb-2">
+                          <label className="form-label small" htmlFor="productUnitCost">Unit acquisition cost (₱)</label>
+                          <PesoInput id="productUnitCost" value={form.costMinor} onChange={(v) => setForm({ ...form, costMinor: v })} placeholder="0.00" />
+                          <small className="text-muted">Purchases update this to the latest received cost.</small>
+                        </div>
+                      )}
                     </div>
                     {modal.editing && <PriceHistoryList productId={modal.editing.id} />}
                     <div className="row">

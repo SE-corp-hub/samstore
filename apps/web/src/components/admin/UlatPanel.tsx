@@ -393,9 +393,10 @@ function Daily({ owner }: { owner: boolean }) {
         {data && <button type="button" className="btn btn-outline-dark btn-sm" onClick={() => downloadCsv(`report-${date}.csv`, [["Location", "Sales", "Cash", "GCash", "Credit", "Profit", "Credit paid", "Expected cash", "Counted cash", "Write-offs", "Resack short", "Count short"], ...data.sections.map((s) => [s.location.name, s.sales.totalMinor / 100, s.sales.cashMinor / 100, s.sales.gcashMinor / 100, s.sales.utangMinor / 100, s.sales.grossProfitMinor / 100, s.utang.collectedMinor / 100, s.cash.expectedMinor / 100, s.cashCountedMinor === null ? "" : s.cashCountedMinor / 100, s.writeOffs.valueMinor / 100, s.resack.lossValueMinor / 100, s.counts.kulangMinor / 100])])}>Excel</button>}
       </div>
       {error && <div className="alert alert-danger py-2">{error}</div>}
-      {data && owner && data.sections.length > 1 && (
+      {data && owner && (
         <div className="alert alert-light border" style={{ fontVariantNumeric: "tabular-nums" }}>
           All: sales <strong>{peso(data.total.salesMinor ?? 0)}</strong> · profit <strong>{peso(data.total.grossProfitMinor ?? 0)}</strong> · credit paid {peso(data.total.utangCollectedMinor ?? 0)} · write-offs {peso(data.total.writeOffMinor ?? 0)}
+          {data.total.netProfitMinor !== undefined && <> · expenses {peso(data.total.expensesMinor ?? 0)} · <strong className={data.total.netProfitMinor < 0 ? "text-danger" : "text-success"}>net profit {peso(data.total.netProfitMinor)}</strong></>}
         </div>
       )}
       <div className="d-grid gap-3" style={{ maxWidth: 760 }}>
@@ -507,6 +508,7 @@ function Monthly() {
   const [error, setError] = useState<string | null>(null);
   useEffect(() => { void getJson(`/admin/rice/monthly?month=${month}`).then((r) => { if (!r.ok) setError(errText(r.data, "Could not load")); else { setError(null); setData(r.data); } }); }, [month]);
   const d = data as null | {
+    profit?: { grossProfitMinor: number; expensesMinor: number; netProfitMinor: number };
     locations: { location: Loc; salesMinor: number; grossProfitMinor: number; grams: number; resackLossPct: number; transitShortGrams: number; writeOffMinor: number }[];
     varieties: { variety: string; grams: number; salesMinor: number; grossProfitMinor: number }[];
     kargadorLoss: { name: string; resackLossPct: number; transitShortGrams: number }[];
@@ -519,6 +521,11 @@ function Monthly() {
       {error && <div className="alert alert-danger py-2">{error}</div>}
       {d && (
         <>
+          {d.profit && (
+            <div className="alert alert-light border">
+              Gross profit <strong>{peso(d.profit.grossProfitMinor)}</strong> − expenses <strong>{peso(d.profit.expensesMinor)}</strong> = <strong className={d.profit.netProfitMinor < 0 ? "text-danger" : "text-success"}>net profit {peso(d.profit.netProfitMinor)}</strong>
+            </div>
+          )}
           <h2 className="h6">Sales and profit by location <button type="button" className="btn btn-link btn-sm" onClick={() => downloadCsv(`month-${month}.csv`, [["Location", "Sales", "Profit", "Kilos", "Resack short %", "Transfer short (kg)", "Write-offs"], ...d.locations.map((l) => [l.location.name, l.salesMinor / 100, l.grossProfitMinor / 100, l.grams / 1000, l.resackLossPct, l.transitShortGrams / 1000, l.writeOffMinor / 100])])}>Excel</button></h2>
           <table className="table table-sm"><thead><tr><th>Location</th><th className="text-end">Sales</th><th className="text-end">Profit</th><th className="text-end">Kilos</th><th className="text-end">Resack short</th><th className="text-end">Write-offs</th></tr></thead>
             <tbody>{d.locations.map((l) => <tr key={l.location.id}><td>{l.location.name}</td><td className="text-end">{peso(l.salesMinor)}</td><td className="text-end">{peso(l.grossProfitMinor)}</td><td className="text-end">{kg(l.grams)}</td><td className="text-end">{l.resackLossPct}%</td><td className="text-end">{peso(l.writeOffMinor)}</td></tr>)}</tbody></table>

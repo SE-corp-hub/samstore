@@ -298,12 +298,18 @@ export class RiceReportsService {
         });
       }
       const sum = (f: (s: Section) => number) => sections.reduce((a, s) => a + f(s), 0);
+      const isOwnerRole = OWNERS.includes(actor.role);
+      const dayBounds = dayRange(date);
+      const expensesMinor = isOwnerRole ? (await prisma.expense.aggregate({ where: { storeId, spentAt: { gte: dayBounds.from, lt: dayBounds.to } }, _sum: { amountMinor: true } }))._sum.amountMinor ?? 0 : 0;
+      // Staff never see profit: it is taken out here, not just hidden on the screen.
+      const shown = isOwnerRole ? sections : sections.map((s) => ({ ...s, sales: { ...s.sales, grossProfitMinor: undefined as unknown as number } }));
       return {
-        date, sections,
+        date, sections: shown,
         total: {
           salesMinor: sum((s) => s.sales.totalMinor), cashMinor: sum((s) => s.sales.cashMinor), gcashMinor: sum((s) => s.sales.gcashMinor), utangMinor: sum((s) => s.sales.utangMinor),
           grossProfitMinor: sum((s) => s.sales.grossProfitMinor), utangCollectedMinor: sum((s) => s.utang.collectedMinor), writeOffMinor: sum((s) => s.writeOffs.valueMinor),
           resackLossMinor: sum((s) => s.resack.lossValueMinor), countKulangMinor: sum((s) => s.counts.kulangMinor),
+          ...(isOwnerRole ? { expensesMinor, netProfitMinor: sum((s) => s.sales.grossProfitMinor) - expensesMinor } : { grossProfitMinor: undefined as unknown as number }),
         },
       };
     });
@@ -418,8 +424,11 @@ export class RiceReportsService {
         agingTotal.d0_30 += a.d0_30; agingTotal.d31_60 += a.d31_60; agingTotal.d60plus += a.d60plus;
       }
       const stockValue = levels.reduce((s, l) => { const p = byProduct.get(l.productId); return s + (p ? costValue(p, Math.max(0, l.quantityOnHand)) : 0); }, 0);
+      const expensesMinor = (await prisma.expense.aggregate({ where: { storeId, spentAt: range }, _sum: { amountMinor: true } }))._sum.amountMinor ?? 0;
+      const grossMinor = [...perLoc.values()].reduce((s, L) => s + L.salesMinor - L.costMinor, 0);
       return {
         month: m,
+        profit: { grossProfitMinor: grossMinor, expensesMinor, netProfitMinor: grossMinor - expensesMinor },
         locations: [...perLoc.values()].map((L) => ({
           ...L, grossProfitMinor: L.salesMinor - L.costMinor, resackLossPct: pct(L.resackLossGrams, L.resackGramsIn),
         })),

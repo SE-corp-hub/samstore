@@ -17,6 +17,7 @@ import {
   Res,
   UseGuards,
 } from "@nestjs/common";
+import { redactCost, seesCost } from "../domain/cost-redact.js";
 import type { ApiError } from "@sam-store/contracts";
 import { JwtAuthGuard, type AuthPrincipal } from "../auth/auth.guard.js";
 import { requireUser, resolveTenant, TENANT_ROLES } from "../auth/tenant-context.js";
@@ -527,11 +528,12 @@ export class AdminController {
   ) {
     const user = req.user;
     requireUser(user);
-        const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
+        const { storeId, role } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
         const unfiltered = !search && !categoryId && minPrice === undefined && maxPrice === undefined && active === undefined;
+        const shownTo = <T,>(items: T): T => (seesCost(role) ? items : redactCost(items));
         if (unfiltered) {
           const hit = await cacheGet<unknown[]>(cacheKey("products", storeId));
-          if (hit) return { products: hit, storeId };
+          if (hit) return { products: shownTo(hit), storeId };
         }
         const items = await this.productsAdmin.listFiltered(storeId, {
           search,
@@ -541,7 +543,7 @@ export class AdminController {
           active: active === undefined ? undefined : active === "true",
         });
         if (unfiltered) await cacheSet(cacheKey("products", storeId), items, 30_000);
-        return { products: items, storeId };
+        return { products: shownTo(items), storeId };
   }
 
   /** GET /admin/products/categories — store categories. */
@@ -593,10 +595,11 @@ export class AdminController {
   async productPriceHistory(@Req() req: Request & { user?: AuthPrincipal }, @Param("id") id: string, @Headers("x-store-id") headerStoreId?: string) {
     const user = req.user;
     requireUser(user);
-    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
+    const { storeId, role } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
     const result = await this.productsAdmin.priceHistory(storeId, id);
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
-    return result.value;
+    // Staff see price changes, never cost changes.
+    return seesCost(role) ? result.value : { rows: result.value.rows.filter((r) => r.field !== "COST") };
   }
 
   /** DELETE /admin/products/:id — soft delete. */

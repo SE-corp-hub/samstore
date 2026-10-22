@@ -1,4 +1,5 @@
 import { Controller, Get, Headers, HttpException, HttpStatus, Inject, Post, Body, Query, Req, UseGuards } from "@nestjs/common";
+import { redactCost, seesCost } from "../domain/cost-redact.js";
 import { JwtAuthGuard, type AuthPrincipal } from "../auth/auth.guard.js";
 import { resolveTenant, TENANT_ROLES } from "../auth/tenant-context.js";
 import { prisma } from "../persistence/prisma-repositories.js";
@@ -32,19 +33,20 @@ export class InventoryController {
     @Headers("x-store-id") headerStoreId?: string,
   ) {
     const user = req.user;
-    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
+    const { storeId, role } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
+    const shownTo = <T,>(d: T): T => (seesCost(role) ? d : redactCost(d));
     // The inventory list aggregates every product's stock levels (expensive) and the admin
     // dashboard fires ~10 queries in parallel — a saturated Prisma pool turns that into 10s
     // pool waits and 500s. A short store-scoped cache keeps the panel cheap; adjustments bust it.
     const key = cacheKey("inventory", storeId, search ?? "", categoryId ?? "", warehouseId ?? "", status ?? "");
     const hit = await cacheGet<Record<string, unknown>>(key);
-    if (hit) return hit;
+    if (hit) return shownTo(hit);
     const data = await this.inventorySvc.list(storeId, { search, categoryId, warehouseId, status });
     const warehouses = await prisma.warehouse.findMany({ where: { storeId }, select: { id: true, name: true, isDefault: true } });
     const categories = await prisma.category.findMany({ where: { storeId, isActive: true }, select: { id: true, name: true } });
     const payload = { ...data, warehouses, categories };
     await cacheSet(key, payload, 15_000);
-    return payload;
+    return shownTo(payload);
   }
 
   /** POST /admin/stock/adjust — reasoned stock adjustment (manager+). */
