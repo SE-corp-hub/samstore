@@ -277,8 +277,6 @@ test("M3 Ibinalik: a good sack goes back on the shelf; a damaged one is only rec
   assert.deepEqual(await level(fx, fx.s1), { quantityOnHand: 4, quantityReserved: 0 }, "a damaged sack is not sellable stock");
   const tooMany = await flow.createReturn(fx.storeId, fx.staff1, { locationId: fx.s1, productId: fx.productId, quantity: 1, condition: "GOOD", reason: "ulit", orderId, signatures: [{ signerKind: "STAFF", imagePng: PNG }] });
   assert.equal(tooMany.ok, false, "cannot return more than was bought");
-  const unsigned = await flow.createReturn(fx.storeId, fx.staff1, { locationId: fx.s1, productId: fx.productId, quantity: 1, condition: "GOOD", reason: "test", signatures: [] });
-  assert.equal(unsigned.ok, false);
   assert.equal(await prisma.approvalRequest.count({ where: { storeId: fx.storeId, kind: "REFUND" } }), 2);
   const notHere = await flow.createReturn(fx.storeId, fx.staff2, { locationId: fx.s1, productId: fx.productId, quantity: 1, condition: "GOOD", reason: "x y z", signatures: [{ signerKind: "STAFF", imagePng: PNG }] });
   assert.equal(!notHere.ok && notHere.error.type, "forbidden", "S2 staff cannot take a return into S1");

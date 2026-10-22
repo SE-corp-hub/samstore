@@ -197,7 +197,7 @@ test("M5: a pre-order item can be added with a cost and a price and nothing on h
   assert.equal(m.ok, true, msg(m));
   if (!m.ok) return;
   assert.equal(m.value.stockInDocNumber, "", "no stock-in was written");
-  assert.equal(await onHand(fx, m.value.productId, fx.s1), 0);
+  assert.equal((await onHand(fx, m.value.productId, fx.s1)) ?? 0, 0, "nothing on hand (no stock row, or a zero one)");
   const p = await prisma.product.findUniqueOrThrow({ where: { id: m.value.productId } });
   assert.deepEqual([p.priceMinor, p.costMinor, p.reviewStatus], [180_000, 150_000, "ACTIVE"]);
 });

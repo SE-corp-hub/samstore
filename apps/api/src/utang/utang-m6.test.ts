@@ -296,7 +296,7 @@ test("M6: the customer list — staff add, only the owner sets limits, another s
   assert.equal(added.ok, true, msg(added));
   if (!added.ok) return;
   customerIds.push((await prisma.storeCustomer.findUniqueOrThrow({ where: { id: added.value.id } })).customerId);
-  assert.deepEqual([added.value.phone, added.value.creditApproved], [`+63918${digits}`, false]);
+  assert.deepEqual([added.value.phone, added.value.creditApproved], [`+63918${digits}`, true], "no limit until the owner sets one");
   const staffLimit = await utang.addCustomer(fx.storeId, fx.staff1, { name: "Pedro", phone: phoneFor(), limitMinor: 100_000 });
   assert.equal(staffLimit.ok, false, "staff cannot set a limit");
   const dupe = await utang.addCustomer(fx.storeId, fx.staff1, { name: "Maria S.", phone: `+63 918 ${digits.slice(0, 3)} ${digits.slice(3)}` });

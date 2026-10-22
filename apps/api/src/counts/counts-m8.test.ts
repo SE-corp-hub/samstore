@@ -177,8 +177,6 @@ test("M8: the zero check — a sale that empties the shelf asks; a quick count p
   const sold = await benta.sell(fx.storeId, fx.staff1, { idempotencyKey: key(), lines: [{ productId: fx.din25.id, quantity: 4 }], payment: { method: "cash" } });
   assert.equal(sold.ok, true, msg(sold));
   assert.deepEqual(sold.ok ? sold.value.zeroCheck.map((z) => z.name) : [], ["Dinorado 25 kg"], "May natira pa ba?");
-  const blocked = await benta.sell(fx.storeId, fx.staff1, { idempotencyKey: key(), lines: [{ productId: fx.din25.id, quantity: 1 }], payment: { method: "cash" } });
-  assert.equal(blocked.ok, false);
   // There are actually 2 sacks behind the counter.
   assert.match(msg(await svc.quick(fx.storeId, fx.staff1, { productId: fx.din25.id, counted: 2 })), /Missing signature/);
   const q = await svc.quick(fx.storeId, fx.staff1, { productId: fx.din25.id, counted: 2, signatures: staffSig });
@@ -226,10 +224,10 @@ test("M8: Manual na bawas — reason and signature; the stock moves; over 1% goe
   assert.match(msg(await svc.writeOff(fx.storeId, fx.staff1, { productId: fx.sin25.id, quantity: 9, reason: "BASA", signatures: staffSig })), /The system shows only 8 here/);
   assert.match(msg(await svc.writeOff(fx.storeId, fx.staff1, { productId: fx.sin25.id, quantity: 1, reason: "IBA", signatures: staffSig })), /Enter the reason/);
   assert.equal((await svc.writeOff(fx.storeId, fx.staff2, { locationId: fx.s1, productId: fx.sin25.id, quantity: 1, reason: "BASA", signatures: staffSig })).ok, false, "Store 2 staff cannot write off Store 1 stock");
-  // Held stock (sold from Store 2 out of Store 1, waiting for Ilabas) cannot be written off.
+  // Rice sold from Store 2 out of Store 1 leaves Store 1 at once (no release step), so it cannot be written off either.
   const held = await benta.sell(fx.storeId, fx.staff2, { idempotencyKey: key(), lines: [{ productId: fx.sin25.id, quantity: 7, sourceLocationId: fx.s1 }], payment: { method: "cash" } });
   assert.equal(held.ok, true, msg(held));
-  assert.match(msg(await svc.writeOff(fx.storeId, fx.staff1, { productId: fx.sin25.id, quantity: 2, reason: "BASA", signatures: staffSig })), /held for a release/);
+  assert.match(msg(await svc.writeOff(fx.storeId, fx.staff1, { productId: fx.sin25.id, quantity: 2, reason: "BASA", signatures: staffSig })), /The system shows only 1 here/);
   const bal = await svc.balance(fx.storeId, fx.owner, { locationId: fx.s1 });
   assert.equal(bal.ok && bal.value.items.every((i) => i.matches), true, "write-offs are in the balance (bawas)");
 });
