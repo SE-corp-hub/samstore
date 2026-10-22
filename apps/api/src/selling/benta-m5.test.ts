@@ -355,3 +355,21 @@ test("Consignment store: each sale at Store 2 charges Store 1's cost; a sale at 
   assert.equal(own.ok, true, msg(own));
   assert.equal(await prisma.storePayableEntry.count({ where: { storeId: fx.storeId } }), 1, "only the Store 2 sale was charged");
 });
+
+test("Split payment: part cash, part GCash pays one sale; the parts must add up and GCash needs its reference", async () => {
+  const fx = await fixture();
+  const sale = (parts: { method: string; amountMinor: number; reference?: string }[]) =>
+    svc.sell(fx.storeId, fx.staff1, { idempotencyKey: key(), lines: [{ productId: fx.sin25.id, quantity: 1 }], payment: { method: "split", tenders: parts } });
+  const short = await sale([{ method: "cash", amountMinor: 80_000 }, { method: "gcash", amountMinor: 40_000, reference: "123456" }]);
+  assert.equal(short.ok, false, "the parts add up to less than the sale");
+  const noRef = await sale([{ method: "cash", amountMinor: 80_000 }, { method: "gcash", amountMinor: 50_000 }]);
+  assert.equal(noRef.ok, false, "GCash needs a reference");
+  const ok = await sale([{ method: "cash", amountMinor: 80_000 }, { method: "gcash", amountMinor: 50_000, reference: "123456" }]);
+  assert.equal(ok.ok, true, msg(ok));
+  if (!ok.ok) return;
+  const pays = await prisma.payment.findMany({ where: { orderId: ok.value.orderId, type: "payment" }, orderBy: { amountMinor: "asc" } });
+  assert.deepEqual(pays.map((p) => [p.method, p.amountMinor]), [["gcash", 50_000], ["cash", 80_000]]);
+  assert.equal(await onHand(fx, fx.sin25.id, fx.s1), 9);
+  const maya = await svc.sell(fx.storeId, fx.staff1, { idempotencyKey: key(), lines: [{ productId: fx.sin25.id, quantity: 1 }], payment: { method: "maya", reference: "998877" } });
+  assert.equal(maya.ok, true, msg(maya));
+});
