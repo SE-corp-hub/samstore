@@ -14,8 +14,8 @@ import { askText } from "../../lib/ask";
 import { toast } from "../../lib/toast";
 import { printSlip } from "../../lib/slip-print";
 import { PesoInput, KiloInput, WholeInput } from "../NumberBoxes";
+import { peso } from "../../lib/number-format";
 
-const peso = (m: number) => `₱${(m / 100).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const qtyText = (loose: boolean, q: number) => (loose ? `${(q / 1000).toLocaleString("en-PH", { maximumFractionDigits: 3 })} kg` : `${q.toLocaleString("en-PH")} pcs`);
 
 interface Bal { id: string; name: string; code: string | null; isMain: boolean; chargesMinor: number; paymentsMinor: number; reversedMinor: number; owesMinor: number; consignment?: boolean; lastPaymentAt?: string | null; lastCountAt?: string | null; weeklyDue?: boolean; countDue?: boolean }

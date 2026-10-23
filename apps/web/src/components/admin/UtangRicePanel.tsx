@@ -18,6 +18,7 @@ import { PesoInput } from "../NumberBoxes";
 import { buildText, openTextApp, type TextKind } from "../../lib/text-message";
 import { creditStatusWords, limitPhrase } from "../../lib/credit-status";
 import { printSlip } from "../../lib/slip-print";
+import { peso } from "../../lib/number-format";
 
 interface Cust {
   id: string; name: string; phone: string | null; balanceMinor: number; creditApproved: boolean; limitMinor: number | null; unlimited: boolean; ownLimit: boolean; status: string; availableMinor: number | null;
@@ -40,7 +41,6 @@ function overdueDays(entries: { type: string; amountMinor: number; startAt: stri
   return 0;
 }
 
-const peso = (m: number) => `₱${(m / 100).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const errText = (d: ApiBody | null, f: string) => d?.errors?.join(", ") ?? d?.message ?? f;
 const toMinor = (s: string) => Math.round(Number(s || "0") * 100);
 const days = (iso: string | null) => (iso ? Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000) : 0);

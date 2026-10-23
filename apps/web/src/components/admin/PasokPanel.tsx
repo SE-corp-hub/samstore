@@ -14,6 +14,7 @@ import StoreBar from "./StoreBar";
 import { printSlip, type Slip } from "../../lib/slip-print";
 import { getPrinterSettings } from "../../lib/printer-settings";
 import { NewItemForm } from "./BentaPanel";
+import { peso } from "../../lib/number-format";
 
 interface Loc { id: string; name: string; code: string | null; isActive: boolean }
 interface Product { id: string; name: string; stockBaseUnit: string | null; stockBaseQuantity: number | null; isActive?: boolean; reviewStatus?: string }
@@ -23,7 +24,6 @@ interface Row { productId: string; amount: string; cost: string }
 interface PoOrder { id: string; docNumber: string; supplierName: string; expectedAt: string | null; overdue: boolean; lines: { id: string; productId: string; name: string; loose: boolean; quantity: number; receivedQty: number }[] }
 type ApiBody = { message?: string; errors?: string[] } & Record<string, unknown>;
 
-const peso = (m: number) => `₱${(m / 100).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const isLoose = (p?: { stockBaseUnit: string | null; stockBaseQuantity: number | null }) => !!p && p.stockBaseUnit === "g" && p.stockBaseQuantity === 1;
 const errText = (d: ApiBody | null, f: string) => d?.errors?.join(", ") ?? d?.message ?? f;
 const num = (v: string) => v.replace(/[^\d.]/g, "").replace(/(\..*)\./g, "$1").slice(0, 10);

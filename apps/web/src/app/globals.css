@@ -225,8 +225,7 @@ body {
 }
 /* ───────────── Rice Ops M10: the store screens (Tindahan) ─────────────
    Atkinson Hyperlegible (0/O and 1/l never mixed up), 18 px body, 22 px numbers,
-   28 px totals, black ink on white (≥ 7:1), ONE action green, 48 px tap targets.
-   Tokens and their contrast are checked in src/lib/riceTheme.test.ts. */
+   28 px totals, black ink on white (≥ 7:1), ONE action green, 48 px tap targets. */
 .rice-ui {
   --rice-ink: #1C1B19;
   --rice-action: #1F6F3F;

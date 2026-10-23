@@ -14,13 +14,13 @@ import SignaturePad from "./SignaturePad";
 import { CountSheet, type CountDetail, type CountRow } from "./BilanginPanel";
 import MovementSummary from "./MovementSummary";
 import WeeklySummary from "./WeeklySummary";
+import { peso } from "../../lib/number-format";
 
 type ApiBody = { message?: string; errors?: string[] } & Record<string, unknown>;
 interface Loc { id: string; name: string; code: string | null; type: string }
 interface Cell { onHand: number; reserved: number; available: number; flag: "ZERO" | "LOW" | "OK" }
 interface LiveRow { productId: string; name: string; loose: boolean; gramsPerUnit: number | null; cells: Record<string, Cell>; inTransit: number; inResack: number; total: number; totalGrams: number | null }
 
-const peso = (m: number) => `₱${(m / 100).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const kg = (g: number) => `${(g / 1000).toLocaleString("en-PH", { maximumFractionDigits: 1 })} kg`;
 const qty = (loose: boolean, n: number) => (loose ? kg(n) : `${n}`);
 const errText = (d: ApiBody | null, f: string) => d?.errors?.join(", ") ?? d?.message ?? f;

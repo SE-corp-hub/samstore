@@ -1,6 +1,6 @@
 // Rice Ops M11: public owner sign-up is closed. The platform admin creates stores and
-// owners; owners add their own staff (Team). The old form stays in AdminRegister.tsx
-// for the day sign-up is reopened (ALLOW_OWNER_SIGNUP=true on the API).
+// owners; owners add their own staff (Team). The old form is in git history
+// (AdminRegister.tsx) for the day sign-up is reopened (ALLOW_OWNER_SIGNUP=true on the API).
 
 export default function RegisterPage() {
   return (

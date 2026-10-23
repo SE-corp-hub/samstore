@@ -12,6 +12,7 @@ import { adminHeaders } from "../../lib/admin";
 import { toast } from "../../lib/toast";
 import { newSaleKey } from "../../lib/saleKey";
 import NumPad from "./NumPad";
+import { peso, kg } from "../../lib/number-format";
 
 interface Loc { id: string; name: string; code: string | null; type: string }
 interface Item { id: string; name: string; loose: boolean; priceMinor: number; stock: Record<string, number> }
@@ -24,8 +25,6 @@ interface Order {
 }
 type ApiBody = { message?: string; errors?: string[] } & Record<string, unknown>;
 
-const peso = (m: number) => `₱${(m / 100).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-const kg = (g: number) => `${(g / 1000).toLocaleString("en-PH", { maximumFractionDigits: 3 })} kg`;
 const errText = (d: ApiBody | null, f: string) => d?.errors?.join(", ") ?? d?.message ?? f;
 const toMinor = (s: string) => Math.round(Number(s || "0") * 100);
 const STATUS_CLASS: Record<string, string> = {

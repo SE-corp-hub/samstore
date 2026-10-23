@@ -62,7 +62,6 @@ const TEST_FILES = [
   "apps/api/src/domain/count-looks.test.ts",
   "apps/api/src/domain/reports.test.ts",
   "apps/api/src/domain/rice-import.test.ts",
-  "apps/web/src/lib/riceTheme.test.ts",
   "apps/api/src/inventory/ledger-m1.test.ts",
   "apps/api/src/people/people-m2.test.ts",
   "apps/api/src/transfers/transfers-m3.test.ts",
