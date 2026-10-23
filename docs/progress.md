@@ -1,5 +1,21 @@
 # PINDIAN — Progress Log
 
+## Shop locations finished, import files ready (2026-10-23, morning)
+
+Done on the shop database by Claude through the Sam PC (read-only report first, then applied, then a read-only report again):
+- **Buffer store BUF** created (type BUFFER). There is **one Buffer store for the whole business**, not one per store: `warehouse.service.ts` refuses a second one ("There is already a Buffer store"). Earlier notes that said "one Buffer per store" were wrong and are corrected in the go-live checklist and the phone-test checklist.
+- **Store 2 is marked "Consignment store".** Locations now: S1 Store 1 (main), S2 Store 2 (consignment), S3 Store 3, WH Warehouse, BUF Buffer store, plus two older ones, "Satellite" (1 item with stock, 11 movements) and "Tmp" (empty), which the owner must explain or switch off. No location has an address yet.
+- Cost setting confirmed: **one cost for all locations**.
+- Reconcile (read-only) shows one old known difference: KAPE-001 on hand 42 vs ledger 121. Planned fix: `npm run ledger:rebase -- --store sam-store` (dry run first) together with the opening count. Not applied.
+
+New tools (read-only unless noted):
+- `scripts/setup-locations.ts` now also takes `--buffer` and `--consignment "<name>"` (dry run by default; refuses clashing names or codes, and will not mark the main store or the Buffer as consignment).
+- `scripts/shop-locations.ts` (read-only): for each location, its code, type, address, items with stock, stock movements, sales, and flags. `check-shop-state.bat` now shows it too.
+- `import-dry-run.bat`: checks the four lists and writes `go-live\import-check.txt` (nothing is saved).
+- `docs/rice-ops/import-templates/README.md`: plain-English guide to filling products, customers, staff and kargadors, with the Excel traps. Header-only copies and `go-live\HOW-TO-FILL-THE-LISTS.txt` are on the Sam PC. A dry run on the empty files passes ("new 0, changed 0, same 0").
+
+**What only the owner can do now:** fill the real lists; phone-test the beta site (sections G to O of the phone-test checklist); production settings in the hosting dashboard; choose the backup's second-copy folder and run `backup-status.bat` after the first 21:30 run; type location addresses and decide about "Satellite" and "Tmp"; usability check and sign-off; the deploy "yes".
+
 ## Full check on the beta database: PASS (2026-10-23, 07:28)
 
 `verify-beta.bat` on the Sam PC (the owner started it; 725 s) at the latest pushed code: **VERIFY RESULT: PASS (BETA DATABASE)**. Migrations pending: no. Types OK. All 51 test files passed with 0 failures, including the database tests written for the 22 Oct evening features (`transfers-m3`, `benta-m5` price watch and reorder, `reports-m9` movement and weekly summary) and the PIN-lock test that failed earlier on a clock difference. The shop database was not touched.

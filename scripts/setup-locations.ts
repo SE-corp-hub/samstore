@@ -5,6 +5,10 @@
 //   Options: --default-name "Store 1"   rename the current default location
 //            --off "<name>"             switch off a location (repeatable; e.g. demo data).
 //                                       Its history stays; it takes no new stock.
+//            --buffer                   create the Buffer store (one for the whole business: shortages
+//                                       are taken from it; its negative count is the "to fix" list).
+//            --consignment "<name>"     mark a store as a consignment store (it sells the main store's
+//                                       rice and owes the main store's cost; repeatable)
 // More stores and warehouses (S4, WH2, …) are added any time in Admin → Locations.
 //
 // Idempotent: run it again and it reports "nothing to change".
@@ -27,6 +31,9 @@ const TARGETS: { code: string; name: string; type: LocationType }[] = [
   { code: "WH", name: "Warehouse", type: LocationType.WAREHOUSE },
 ];
 
+const BUFFER_NAME = "Buffer store";
+const BUFFER_CODE = "BUF";
+
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(name);
   return i >= 0 ? process.argv[i + 1] : undefined;
@@ -43,6 +50,8 @@ async function main(): Promise<number> {
   const apply = process.argv.includes("--apply");
   const defaultName = arg("--default-name")?.trim();
   const offNames = args("--off").map((n) => n.trim().toLowerCase());
+  const wantBuffer = process.argv.includes("--buffer");
+  const consignNames = args("--consignment").map((n) => n.trim().toLowerCase());
   if (!slug) {
     console.error("usage: npx tsx scripts/setup-locations.ts --store <slug> [--apply]");
     return 2;
@@ -72,6 +81,18 @@ async function main(): Promise<number> {
   for (const w of toSwitchOff) if (w.isActive) plan.push(`switch off "${w.name}" (history kept, no new stock)`);
   for (const t of TARGETS.slice(1)) {
     if (!existing.some((w) => w.code === t.code || w.name === t.name) && !(t.code === "S1")) plan.push(`create ${t.code} "${t.name}" (${t.type})`);
+  }
+  if (wantBuffer && !existing.some((w) => w.type === LocationType.BUFFER)) {
+    const clash = existing.find((w) => w.name === BUFFER_NAME || w.code === BUFFER_CODE);
+    if (clash) { console.error(`Cannot create the Buffer store: "${clash.name}" already uses that name or the code ${BUFFER_CODE}.`); return 2; }
+    plan.push(`create the Buffer store "${BUFFER_NAME}" (code ${BUFFER_CODE}; one for the whole business)`);
+  }
+  const toConsign: typeof existing = [];
+  for (const n of consignNames) {
+    const w = existing.find((x) => x.name.toLowerCase() === n);
+    if (!w) { console.error(`No location named "${n}" (run the plain setup first so Store 2 exists).`); return 2; }
+    if (w.isDefault || w.type === LocationType.BUFFER) { console.error(`"${w.name}" is the main store or the Buffer and cannot be a consignment store.`); return 2; }
+    if (!w.consignment) { toConsign.push(w); plan.push(`mark "${w.name}" as a consignment store`); }
   }
   const nullLevels = await prisma.stockLevel.count({ where: { storeId, warehouseId: null } });
   const nullMoves = await prisma.stockMovement.count({ where: { storeId, warehouseId: null, variantId: null } });
@@ -106,6 +127,10 @@ async function main(): Promise<number> {
       await tx.warehouse.create({ data: { storeId, name: t.name, code: t.code, type: t.type } });
     }
     for (const w of toSwitchOff) if (w.isActive) await tx.warehouse.update({ where: { id: w.id }, data: { isActive: false } });
+    if (wantBuffer && !existing.some((w) => w.type === LocationType.BUFFER)) {
+      await tx.warehouse.create({ data: { storeId, name: BUFFER_NAME, code: BUFFER_CODE, type: LocationType.BUFFER } });
+    }
+    for (const w of toConsign) await tx.warehouse.update({ where: { id: w.id }, data: { consignment: true } });
     const defaultId = def.id;
     // A location-less row for a product that ALREADY has a row at the default
     // location is merged into it (quantities summed — the ledger counts both);

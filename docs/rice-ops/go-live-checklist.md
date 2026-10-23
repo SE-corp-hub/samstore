@@ -1,6 +1,6 @@
 # Rice Ops: go-live checklist
 
-## Status: 22 Oct 2026 (Claude)
+## Status: 23 Oct 2026 (Claude)
 
 **Built and pushed** (branch `release/rice-ops`, last commit `0178358` plus the docs commit after it):
 staying signed in, staff bottom bar, offline selling, Stock check, Stock book, cost and price history, the one POS, Move stock,
@@ -22,12 +22,12 @@ reports by store, Needs a look, count accuracy, today's suggested list). Added 2
 1. [x] **`verify-beta.bat`** (DONE 23 Oct 2026: PASS on the beta database, 51 test files, 0 failures). Run it again after any further code change.
 2. [ ] **Phone test** of the new screens on the beta site: sections G to L and the new section N of `claude/phone-test-checklist.md`, with a staff login and the owner login. Write down anything odd.
 3. [ ] **Free nightly backup job (decided 22 Oct: free job, no paid plan; do not go live without it).** Built, and **set up on the Sam PC on 22 Oct at 22:27** (Claude ran it with the defaults): the first backup worked (`samstore-20261022-2227.dump`, 0.7 MB, readable) and a daily task runs at **21:30** (next run 23 Oct, 21:30). **Still to do:** choose a second-copy folder (Google Drive or USB; run `setup-nightly-backup.bat` again and type the folder, or write it in `go-live\backup-copy-folder.txt`), and check next day with `backup-status.bat` that the 21:30 backup ran. Details: `docs/rice-ops/backup.md`.
-4. [ ] **Cost (decided 22 Oct: one cost for all locations).** This is the default. Before the opening count, check that Reports & closing, Stock book shows "One cost for all locations". Nothing to build.
-5. [ ] **Real data.** Fill `products.csv`, `customers.csv`, `staff.csv` and `kargadors.csv` in `go-live/` (section A). The dry run must show 0 problems. Include the real cost per product.
+4. [x] **Cost (decided 22 Oct: one cost for all locations).** Confirmed on the shop database on 23 Oct (`check-shop-state.bat` shows "One cost for all locations"). Nothing to build.
+5. [ ] **Real data.** Fill `products.csv`, `customers.csv`, `staff.csv` and `kargadors.csv` in `go-live/` (section A). Include the real cost per product. **Ready for you (23 Oct):** the four files are in `go-live` with only their top row, `go-live\HOW-TO-FILL-THE-LISTS.txt` explains them, and the full guide is `docs/rice-ops/import-templates/README.md`. Double-click **`import-dry-run.bat`** to check them (nothing is saved); it must show 0 problems. A dry run on the empty files already works ("new 0, changed 0, same 0"). Then tell Claude "files are ready" and Claude runs the real import and makes the sheet you print and sign.
 6. [ ] **Production settings** in the hosting dashboard (section A, System). Needs the owner; secrets never go in chat or the repo.
 7. [x] **Back up, then apply the last migrations** (DONE 22 Oct, 23:13, after the owner's yes: backup `samstore-20261022-2227.dump`, then both applied; `prisma migrate status` says "Database schema is up to date!") to the shop database: `20261101090000_count_reasons` and `20261102090000_count_look`. They only add columns. Everything older is already applied there (22 Oct, after a backup). **Checked read-only on 22 Oct, 23:02 (`check-shop-state.bat`):** 87 of 89 migrations are applied and the 2 pending are exactly those two. A fresh backup exists (`samstore-20261022-2227.dump`). Waiting for the owner's yes to apply them.
 8. [x] **SMS (decided 22 Oct: no SMS provider; use the phone's own text app).** Nothing to buy or set. Leave `SMS_PROVIDER` unset. Credit texts go from the phone's text app (Credit, **Text the balance**; POS, **Text customer**). The app only records its automatic texts; it does not send them.
-9. [ ] **Locations.** (**S1, S2, S3 and WH are in place since 22 Oct, 23:13**: the owner said "Main Warehouse" is really Store 1, so it was renamed Store 1 with code S1 and Store 2, Store 3 and Warehouse were created. **Still to do:** addresses, one Buffer store per store, "Consignment store" ticked on Store 2, and checking which one is the main location.) `setup:locations` dry run, then `--apply` (S1, S2, S3, WH). Check which one is the main location. **Dry run 22 Oct, 23:02:** the shop's default location is called "Main Warehouse". The script would give it code S1 (type STORE), keep its name, and create S2 "Store 2", S3 "Store 3" and WH "Warehouse". The owner must say whether "Main Warehouse" is really Store 1 (then add `--default-name "Store 1"`) or the real warehouse (then the plan changes) before `--apply`. Add one Buffer store per store (Locations, type "Buffer store"). Tick "Consignment store" on Store 2.
+9. [ ] **Locations.** **Done on the shop database (22 to 23 Oct):** S1 Store 1 (the main store), S2 Store 2 (**marked "Consignment store"**), S3 Store 3, WH Warehouse, and **BUF "Buffer store"** (the one Buffer store for the whole business; the system allows only one). **Still to do (owner):** (a) type the real address of each location (Locations screen; nothing has an address yet); (b) two older locations are still there, **"Satellite"** (it has 1 item with stock and 11 stock movements) and **"Tmp"** (empty): tell Claude what they are, or switch them off in Locations if they are not real; (c) glance at the list in Locations once. To see the current list at any time, double-click `check-shop-state.bat`. (Scripts: `setup:locations` for S1/S2/S3/WH, `--buffer` and `--consignment "Store 2"` for the rest; all already applied.)
 10. [ ] **Usability check** with one real staff member (`docs/rice-ops/usability-test.md`), then print the guides (`docs/rice-ops/guide/`).
 11. [ ] **Owner sign-off** on printed prices and credit balances (section A).
 12. [ ] **Deploy.** Only after the owner says "yes" in chat. Then section B (the opening count) on a slow day.
@@ -38,6 +38,7 @@ reports by store, Needs a look, count accuracy, today's suggested list). Added 2
 - Backup: free nightly job, required before go-live (step 3, `docs/rice-ops/backup.md`).
 - Cost: one cost for all locations (step 4).
 - SMS: no provider; the phone's own text app is the channel (step 8).
+- Locations: "Main Warehouse" was really Store 1, so it is now S1 Store 1 (22 Oct).
 - Staff typing a cost on Stock in: keep. Staff can type an optional cost on Stock in and on a new item, and it becomes the item's latest cost.
 - "Close the day": does **not** insist on anything except the cash count and the signature, because the POS is not always used. The 5-item count is now labelled **optional** in plain words ("Count 5 items (optional)"), and "Still open" is "for your information".
 
@@ -60,8 +61,8 @@ Work top to bottom. Each box needs a name and a date. **Nothing in this list dep
   - `ALLOW_OWNER_SIGNUP` unset (sign-up stays closed).
   - SMS: leave `SMS_PROVIDER` unset (decided: the phone's own text app is used). The app's automatic texts are recorded but **not sent**.
 - [ ] Nightly backup job set up (`setup-nightly-backup.bat`), `backup-status.bat` says OK, the second-copy folder has the file, and the backup file opens (the backup step checks it with `pg_restore --list`).
-- [ ] `npx prisma migrate deploy` run against the shop database after that backup (the last two migrations are `count_reasons` and `count_look`).
-- [ ] Locations set: `npm run setup:locations -- --store <slug>` (dry run), then `--apply`. S1, S2, S3 and WH with the right names and addresses. One Buffer store per store. Store 2 marked "Consignment store".
+- [x] `npx prisma migrate deploy` run against the shop database after that backup (DONE 22 Oct: 89 of 89 migrations applied, including `count_reasons` and `count_look`).
+- [ ] Locations set: `npm run setup:locations -- --store <slug>` (dry run), then `--apply`. S1, S2, S3 and WH with the right names and addresses. One Buffer store for the whole business (BUF, done). Store 2 marked "Consignment store" (done).
 - [ ] Old ledger rebased if the dry run asks for it: `npm run ledger:rebase -- --store <slug>` (dry run first).
 
 **Lists (M12 import).** Fill the four files from `docs/rice-ops/import-templates/` into a `go-live/` folder (git ignores it):

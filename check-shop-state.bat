@@ -12,6 +12,13 @@ echo. >> %OUT%
 echo --- locations: dry run --- >> %OUT%
 call npx tsx scripts/setup-locations.ts --store sam-store >> %OUT% 2>&1
 echo. >> %OUT%
+echo. >> %OUT%
+echo --- locations list and cost setting --- >> %OUT%
+call npx tsx scripts/shop-locations.ts --store sam-store >> %OUT% 2>&1
+echo. >> %OUT%
+echo --- Buffer store and consignment: dry run --- >> %OUT%
+call npx tsx scripts/setup-locations.ts --store sam-store --buffer --consignment "Store 2" >> %OUT% 2>&1
+echo. >> %OUT%
 echo FINISHED >> %OUT%
 type %OUT%
 echo.
