@@ -14,6 +14,8 @@ New tools (read-only unless noted):
 - `import-dry-run.bat`: checks the four lists and writes `go-live\import-check.txt` (nothing is saved).
 - `docs/rice-ops/import-templates/README.md`: plain-English guide to filling products, customers, staff and kargadors, with the Excel traps. Header-only copies and `go-live\HOW-TO-FILL-THE-LISTS.txt` are on the Sam PC. A dry run on the empty files passes ("new 0, changed 0, same 0").
 
+**Quick check on the Sam PC (23 Oct, 08:34) with the new scripts in place: VERIFY RESULT: PASS** (types for api, web and contracts, and every database-free test, 0 failures).
+
 **What only the owner can do now:** fill the real lists; phone-test the beta site (sections G to O of the phone-test checklist); production settings in the hosting dashboard; choose the backup's second-copy folder and run `backup-status.bat` after the first 21:30 run; type location addresses and decide about "Satellite" and "Tmp"; usability check and sign-off; the deploy "yes".
 
 ## Full check on the beta database: PASS (2026-10-23, 07:28)
