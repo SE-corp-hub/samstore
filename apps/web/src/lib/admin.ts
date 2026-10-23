@@ -215,7 +215,7 @@ export function navItemFor(id: string): NavItem | undefined {
   return undefined;
 }
 
-const OWNER_TABS = ["overview", "pos", "preorders", "orders", "utang", "products", "inventory", "expenses", "purchases", "team", "customers", "vouchers", "crm", "erp", "analytics", "reports", "settings", "storelink", "warehouses", "approvals", "moves", "returns", "resack", "drafts", "kargadors", "pasok", "purchaseorders", "utangrice", "agentorders", "bilangin", "storereport", "payable", "ulat"];
+const OWNER_TABS = ["overview", "pos", "preorders", "orders", "utang", "products", "inventory", "expenses", "purchases", "team", "customers", "analytics", "reports", "settings", "storelink", "warehouses", "approvals", "moves", "returns", "resack", "drafts", "kargadors", "pasok", "purchaseorders", "utangrice", "agentorders", "bilangin", "storereport", "payable", "ulat"];
 
 /** Tab visibility per staff role (GET-level permissions from live API probes). */
 export const TABS_BY_ROLE: Record<string, string[]> = {
@@ -227,7 +227,7 @@ export const TABS_BY_ROLE: Record<string, string[]> = {
   PLATFORM_ADMIN: ["overview", "stores", "useraccess", "maintenance", "analytics", "reports", "settings"],
   MANAGER: OWNER_TABS.filter((t) => t !== "storelink"),
   STAFF: ["overview", "pos", "preorders", "orders", "utang", "products", "inventory", "expenses", "purchases", "customers", "reports", "countersettings", "moves", "returns", "resack", "drafts", "kargadors", "pasok", "utangrice", "agentorders", "bilangin", "storereport", "ulat"],
-  SALES_AGENT: ["agent", "overview", "orders", "customers", "crm", "reports"],
+  SALES_AGENT: ["agent", "overview", "orders", "customers", "reports"],
   DELIVERY: [],
 };
 
