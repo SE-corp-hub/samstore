@@ -179,7 +179,7 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
   const [finalizeBusy, setFinalizeBusy] = useState(false);
   const [finalizeError, setFinalizeError] = useState<string | null>(null);
 
-  // Build sub-tab state (embedded POS product-selection flow, copied from PosPanel)
+  // Build sub-tab state (embedded POS product-selection flow)
   const [buildProducts, setBuildProducts] = useState<PosProduct[]>([]);
   const [buildCustomers, setBuildCustomers] = useState<PosCustomer[]>([]);
   const [buildCart, setBuildCart] = useState<CartLine[]>([]);
@@ -394,7 +394,7 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
     } finally { setFinalizeBusy(false); }
   };
 
-  // ── Build sub-tab: embedded POS product-selection flow (copied from PosPanel) ──
+  // ── Build sub-tab: embedded POS product-selection flow ──
   const buildSubtotal = buildCart.reduce((s, l) => s + unitOf(l) * l.quantity, 0);
 
   const addProduct = (product: PosProduct) => {

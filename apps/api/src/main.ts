@@ -73,20 +73,13 @@ async function bootstrap() {
   if (docsEnabled) {
     const http = app.getHttpAdapter().getInstance();
     http.get("/docs/openapi.yaml", async (_req: Request, res: Response) => {
-      try {
-        const candidates = [
-          path.resolve(process.cwd(), "docs/openapi.yaml"),
-          path.resolve(process.cwd(), "../../docs/openapi.yaml"),
-        ];
-        let body: string | null = null;
-        for (const file of candidates) {
-          try { body = await readFile(file, "utf8"); break; } catch { /* try next location */ }
-        }
-        if (body === null) { res.status(404).type("text").send("OpenAPI contract not found"); return; }
+      for (const rel of ["docs/openapi.yaml", "../../docs/openapi.yaml"]) {
+        let body: string;
+        try { body = await readFile(path.resolve(rel), "utf8"); } catch { continue; /* try next location */ }
         res.type("text/yaml").send(body);
-      } catch {
-        res.status(500).type("text").send("OpenAPI contract unavailable");
+        return;
       }
+      res.status(404).type("text").send("OpenAPI contract not found");
     });
     http.get("/docs", (_req: Request, res: Response) => {
       res.type("html").send(`<!doctype html><html><head><title>PINDIAN API Docs</title><link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css"></head><body><div id="swagger-ui"></div><script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script><script>window.ui=SwaggerUIBundle({url:'/docs/openapi.yaml',dom_id:'#swagger-ui'});</script></body></html>`);

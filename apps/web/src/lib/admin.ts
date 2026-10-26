@@ -178,6 +178,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { id: "purchases", label: "Purchases", icon: "bi-cart4" },
       { id: "team", label: "Team", icon: "bi-people" },
       { id: "customers", label: "Customers", icon: "bi-people-fill" },
+      // Vouchers, CRM and ERP & BIR are hidden: no role list includes them. Add the id to OWNER_TABS to show one again.
       { id: "vouchers", label: "Vouchers", icon: "bi-ticket-perforated" },
       { id: "crm", label: "CRM", icon: "bi-people-heart" },
       { id: "erp", label: "ERP & BIR", icon: "bi-journal-check" },

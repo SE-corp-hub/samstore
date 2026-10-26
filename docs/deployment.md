@@ -42,8 +42,7 @@ at Vercel and share `https://yourdomain.com/sam-store` as the canonical public o
 1. Create the Facebook App (Meta for Developers), add Messenger product.
 2. Add `pages_messaging` permission; complete App Review for production.
 3. Set the webhook to `https://<api-host>/messenger/webhook` with a verify token from env;
-   the GET challenge + `X-Hub-Signature-256` verification and the HTTP route still need
-   to be built behind the real provider once credentials exist.
+   the GET challenge and `X-Hub-Signature-256` handling still have to be built.
 4. Until then the bridge **suppresses sends** by design.
 
 ## 5. Post-deploy checks

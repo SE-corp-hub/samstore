@@ -1,6 +1,8 @@
 // Rice Ops — pure helpers for the Count screen (no browser): searching the item list,
 // the "last counted" wording, and grouping a count sheet by kind of rice with a live kilo total.
 
+import { kg, peso } from "./number-format";
+
 export interface CountItem {
   productId: string;
   name: string;
@@ -117,7 +119,7 @@ export const formatKg = (kg: number) => `${kg.toLocaleString("en-PH", { maximumF
 export function differenceText(loose: boolean, variance: number): string {
   if (variance === 0) return "Correct";
   const abs = Math.abs(variance);
-  const amount = loose ? `${(abs / 1000).toLocaleString("en-PH", { maximumFractionDigits: 3 })} kg` : `${abs} ${abs === 1 ? "sack" : "sacks"}`;
+  const amount = loose ? kg(abs) : `${abs} ${abs === 1 ? "sack" : "sacks"}`;
   return `${variance < 0 ? "Short" : "Over"} ${amount}`;
 }
 
@@ -130,7 +132,7 @@ export const BUCKET_LABEL: Record<string, string> = {
 };
 const BUCKET_ORDER = ["pumasok", "lipat_papasok", "ibinalik", "resack_lumabas", "nabenta", "lipat_palabas", "resack_pumasok", "bawas", "bilang", "iba"];
 
-const unitText = (loose: boolean, n: number) => (loose ? `${(n / 1000).toLocaleString("en-PH", { maximumFractionDigits: 3 })} kg` : `${n}`);
+const unitText = (loose: boolean, n: number) => (loose ? kg(n) : `${n}`);
 
 /** "Stock in +20 · Sold −18" (empty buckets are left out; "nothing moved" when there are none). */
 export function sinceText(loose: boolean, buckets: Record<string, number>): string {
@@ -158,7 +160,7 @@ export function downloadCsv(name: string, rows: (string | number | null | undefi
   setTimeout(() => URL.revokeObjectURL(a.href), 2_000);
 }
 
-export const pesoText = (minor: number) => `₱${(Math.abs(minor) / 100).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+export const pesoText = (minor: number) => peso(Math.abs(minor));
 
 export interface OverviewItem { productId: string; name: string; variety: string; loose: boolean; cells: Record<string, { lastCountedAt: string | null; onHand: number }> }
 

@@ -6,7 +6,7 @@
 import { useState } from "react";
 import { API_URL } from "../../config";
 import { adminHeaders } from "../../lib/admin";
-import { differenceText } from "../../lib/count-view";
+import { differenceText, pesoText } from "../../lib/count-view";
 import { toast } from "../../lib/toast";
 import { sendStep } from "../../lib/offlineQueue";
 import NumPad from "./NumPad";
@@ -62,7 +62,7 @@ export default function QuickCount({ productId, name, loose, locationId, onDone,
       <div className="card border-warning mb-3" style={{ maxWidth: 520, fontSize: 18 }}>
         <div className="card-body">
           <h2 className="h5">{name}</h2>
-          <p className="mb-2"><span className={`badge ${saved.varianceQty < 0 ? "text-bg-danger" : "text-bg-warning"}`}>{differenceText(loose, saved.varianceQty)}</span> <span className="small">₱{(Math.abs(saved.varianceValueMinor) / 100).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span> — saved. Why?</p>
+          <p className="mb-2"><span className={`badge ${saved.varianceQty < 0 ? "text-bg-danger" : "text-bg-warning"}`}>{differenceText(loose, saved.varianceQty)}</span> <span className="small">{pesoText(saved.varianceValueMinor)}</span> — saved. Why?</p>
           <div className="d-flex flex-wrap gap-1 mb-2">
             {saved.reasons.map((r) => <button key={r.code} type="button" className={`btn btn-sm ${reason === r.code ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setReason(r.code)}>{r.label}</button>)}
           </div>

@@ -10,6 +10,7 @@ import { adminHeaders } from "../../lib/admin";
 import { toast } from "../../lib/toast";
 import { sendStep } from "../../lib/offlineQueue";
 import StoreBar from "./StoreBar";
+import { kg } from "../../lib/number-format";
 
 interface Place { id: string; name: string; code: string | null; isActive: boolean }
 interface ProductOption { id: string; name: string }
@@ -18,7 +19,7 @@ interface SaleChoice { orderId: string; orderNumber: string; at: string; custome
 type Body = { message?: string; errors?: string[]; docNumber?: string };
 
 /** Loose rice is counted in grams: show kilos. */
-const amountText = (loose: boolean, v: number) => (loose ? `${(v / 1000).toLocaleString("en-PH", { maximumFractionDigits: 3 })} kg` : String(v));
+const amountText = (loose: boolean, v: number) => (loose ? kg(v) : String(v));
 
 export default function ReturnsPanel() {
   const [places, setPlaces] = useState<Place[]>([]);

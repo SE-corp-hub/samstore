@@ -7,15 +7,15 @@
 import { useCallback, useEffect, useState } from "react";
 import { API_URL } from "../../config";
 import { adminHeaders } from "../../lib/admin";
-import { differenceText } from "../../lib/count-view";
+import { differenceText, pesoText as peso } from "../../lib/count-view";
+import { kg } from "../../lib/number-format";
 import { photoToJpeg } from "../../lib/photo";
 import { toast } from "../../lib/toast";
 import SignaturePad from "./SignaturePad";
 
 type ApiBody = { message?: string; errors?: string[] } & Record<string, unknown>;
 const errText = (d: ApiBody | null, f: string) => d?.errors?.join(", ") ?? d?.message ?? f;
-const peso = (m: number) => `₱${(Math.abs(m) / 100).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-const qty = (loose: boolean, n: number) => (loose ? `${(n / 1000).toLocaleString("en-PH", { maximumFractionDigits: 3 })} kg` : `${n}`);
+const qty = (loose: boolean, n: number) => (loose ? kg(n) : `${n}`);
 
 async function call(method: "GET" | "POST", path: string, body?: unknown) {
   const res = await fetch(`${API_URL}${path}`, { method, headers: { ...(body === undefined ? {} : { "Content-Type": "application/json" }), ...adminHeaders() }, body: body === undefined ? undefined : JSON.stringify(body) });

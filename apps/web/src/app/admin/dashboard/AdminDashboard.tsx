@@ -15,7 +15,7 @@ import StaffHome from "../../../components/admin/StaffHome";
 /** Rice Ops M10: the store screens get the large, high-contrast look (globals.css .rice-ui). */
 const RICE_TABS = new Set(["pos", "utang", "utangrice", "agentorders", "agent", "approvals", "moves", "returns", "resack", "pasok", "purchaseorders", "bilangin", "storereport", "payable", "ulat", "drafts", "kargadors"]);
 // The landing panel stays eager (it is the first paint); every other panel loads when
-// its tab opens. Shipping all 22 at once cost ~95 kB of route JS for one visible screen,
+// its tab opens. Shipping every panel at once cost ~95 kB of route JS for one visible screen,
 // and dragged jsbarcode/qrcode (used by two panels) into the initial payload.
 import OverviewPanel from "../../../components/admin/OverviewPanel";
 
@@ -82,7 +82,7 @@ const STAFF_BAR: { id: string; label: string; icon: string }[] = [
 
 /** Roles that get the phone bottom bar: the same five jobs for staff, manager and owner. */
 const BAR_ROLES = ["STAFF", "MANAGER", "OWNER", "STORE_OWNER"];
-/** The older screen ids that open the same screen as a bar button. */
+/** Menu ids that open the same screen as a bar button. */
 const BAR_ALIAS: Record<string, string> = { utangrice: "utang" };
 
 /** Screens opened by a bar button that the menu lists under another id (for the page title and icon). */
@@ -262,7 +262,8 @@ export default function AdminDashboard() {
       // One POS: the rice-ready counter screen.
       case "pos": return <BentaPanel />;
       case "preorders": return <PreOrdersPanel onNavigate={setTab} />;
-      case "utang": return <UtangRicePanel role={role} />; // one merged Credit screen
+      case "utang": // the bar id; the menu id is "utangrice" (one merged Credit screen)
+      case "utangrice": return <UtangRicePanel role={role} />;
       case "inventory": return <InventoryPanel />;
       case "expenses": return <ExpensesPanel />;
       case "purchases": return <PurchasesPanel />;
@@ -275,8 +276,8 @@ export default function AdminDashboard() {
       case "vouchers": return <VouchersPanel />;
       case "team": return <TeamPanel />;
       case "customers": return <CustomersPanel />;
-case "crm": return <CrmPanel />;
-case "erp": return <ErpPanel />;
+      case "crm": return <CrmPanel />;
+      case "erp": return <ErpPanel />;
       case "analytics": return <AnalyticsPanel />;
       case "maintenance": return <MaintenancePanel />;
       case "useraccess": return <UserAccessPanel />;
@@ -288,7 +289,6 @@ case "erp": return <ErpPanel />;
       case "returns": return <ReturnsPanel />;
       case "resack": return <ResackPanel />;
       case "pasok": return <PasokPanel role={role} />;
-      case "utangrice": return <UtangRicePanel role={role} />;
       case "agent": return <AgentPanel />;
       case "agentorders": return <AgentOrdersPanel />;
       case "bilangin": return <BilanginPanel role={role} onNavigate={setTab} />;

@@ -8,8 +8,6 @@ import { API_URL } from "../config";
 import { adminHeaders } from "./admin";
 import { peso } from "./number-format";
 
-
-
 /** Philippine mobile → "+639XXXXXXXXX" for the link; "" when it is not a valid mobile. */
 export function phoneForLink(raw: string | null | undefined): string {
   const digits = (raw ?? "").replace(/[\s\-().]/g, "");

@@ -14,7 +14,7 @@ import StoreBar from "./StoreBar";
 import { printSlip, type Slip } from "../../lib/slip-print";
 import { getPrinterSettings } from "../../lib/printer-settings";
 import { NewItemForm } from "./BentaPanel";
-import { peso } from "../../lib/number-format";
+import { peso, kg } from "../../lib/number-format";
 
 interface Loc { id: string; name: string; code: string | null; isActive: boolean }
 interface Product { id: string; name: string; stockBaseUnit: string | null; stockBaseQuantity: number | null; isActive?: boolean; reviewStatus?: string }
@@ -99,7 +99,7 @@ export default function PasokPanel(_props: { role?: string; onNavigate?: (tab: s
   const slipOf = (d: StockInDoc): Slip => ({
     storeName: storeName || "SAM STORE", title: "STOCK IN RECEIPT", reference: d.docNumber, when: new Date(d.createdAt).toLocaleString("en-PH"),
     lines: [{ label: "Store", value: here?.name ?? "" }, ...(d.supplierName ? [{ label: "From", value: d.supplierName }] : [])],
-    rows: d.lines.map((l) => ({ name: l.name, qty: `${l.loose ? `${(l.quantity / 1000).toLocaleString("en-PH", { maximumFractionDigits: 3 })} kg` : `${l.quantity}`}${l.unitCostMinor ? `  @ ${peso(l.unitCostMinor)}` : ""}` })),
+    rows: d.lines.map((l) => ({ name: l.name, qty: `${l.loose ? kg(l.quantity) : `${l.quantity}`}${l.unitCostMinor ? `  @ ${peso(l.unitCostMinor)}` : ""}` })),
     signatures: [{ role: "Received by", name: "" }],
   });
 
@@ -180,7 +180,7 @@ export default function PasokPanel(_props: { role?: string; onNavigate?: (tab: s
               const over = units(r) > left;
               return (
                 <div key={r.productId || i} className="row g-2 mb-2 align-items-center">
-                  <div className="col-12 col-sm-6"><div className="fw-semibold">{poLine(r.productId)?.name ?? p?.name ?? ""}</div><div className="small text-muted">{left > 0 ? `${isLoose(p) ? `${(left / 1000).toLocaleString("en-PH", { maximumFractionDigits: 3 })} kg` : left} still to arrive` : "complete"}</div></div>
+                  <div className="col-12 col-sm-6"><div className="fw-semibold">{poLine(r.productId)?.name ?? p?.name ?? ""}</div><div className="small text-muted">{left > 0 ? `${isLoose(p) ? kg(left) : left} still to arrive` : "complete"}</div></div>
                   <div className="col-8 col-sm-4">
                     <input className={`form-control form-control-lg text-center ${over ? "is-invalid" : ""}`} aria-label={isLoose(p) ? "How many kilos arrived" : "How many arrived"} placeholder={isLoose(p) ? "kilos" : "how many"} inputMode="decimal" value={r.amount} onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, amount: num(e.target.value) } : x)))} />
                     {over && <div className="invalid-feedback">More than is left on the order</div>}
@@ -226,7 +226,7 @@ export default function PasokPanel(_props: { role?: string; onNavigate?: (tab: s
             <div key={d.id} className="list-group-item d-flex justify-content-between align-items-center gap-2">
               <div>
                 <div className="fw-semibold">{d.docNumber}{d.supplierName ? ` · ${d.supplierName}` : ""}</div>
-                <div className="small text-muted">{d.lines.map((l) => `${l.loose ? `${(l.quantity / 1000).toLocaleString("en-PH", { maximumFractionDigits: 3 })} kg` : l.quantity} ${l.name}`).join(", ")} · {new Date(d.createdAt).toLocaleString("en-PH")}</div>
+                <div className="small text-muted">{d.lines.map((l) => `${l.loose ? kg(l.quantity) : l.quantity} ${l.name}`).join(", ")} · {new Date(d.createdAt).toLocaleString("en-PH")}</div>
               </div>
               <button type="button" className="btn btn-outline-dark btn-sm text-nowrap" onClick={() => printSlip(slipOf(d))}><i className="bi bi-receipt me-1"></i>Receipt</button>
             </div>

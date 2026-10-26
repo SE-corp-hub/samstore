@@ -12,7 +12,6 @@ const EVENT = "rice-lang";
 
 const WORDS: Record<string, [tl: string, en: string]> = {
   // navigation
-  "nav.benta": ["Benta", "Sell"],
   "nav.utangrice": ["Utang", "Credit"],
   "nav.agentorders": ["Order ng agent", "Agent orders"],
   "nav.agent": ["Bagong order (agent)", "New order (agent)"],

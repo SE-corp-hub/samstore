@@ -14,9 +14,9 @@ import { askText } from "../../lib/ask";
 import { toast } from "../../lib/toast";
 import { printSlip } from "../../lib/slip-print";
 import { PesoInput, KiloInput, WholeInput } from "../NumberBoxes";
-import { peso } from "../../lib/number-format";
+import { peso, kg } from "../../lib/number-format";
 
-const qtyText = (loose: boolean, q: number) => (loose ? `${(q / 1000).toLocaleString("en-PH", { maximumFractionDigits: 3 })} kg` : `${q.toLocaleString("en-PH")} pcs`);
+const qtyText = (loose: boolean, q: number) => (loose ? kg(q) : `${q.toLocaleString("en-PH")} pcs`);
 
 interface Bal { id: string; name: string; code: string | null; isMain: boolean; chargesMinor: number; paymentsMinor: number; reversedMinor: number; owesMinor: number; consignment?: boolean; lastPaymentAt?: string | null; lastCountAt?: string | null; weeklyDue?: boolean; countDue?: boolean }
 interface ToCharge { lineId: string; countDoc: string; countedAt: string | null; atId: string; at: string; productId: string; name: string; loose: boolean; quantity: number; unitCostMinor: number; amountMinor: number }
