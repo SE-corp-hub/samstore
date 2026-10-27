@@ -1,0 +1,27 @@
+name: Seed database
+
+# Manual only: applies migrations, then loads the demo store, products, cart and
+# demo logins (prisma/seed.ts) into the database in the DATABASE_URL secret.
+# The seed upserts by stable keys, so running it again is safe.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  seed:
+    name: migrate + demo seed
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate
+      - name: Apply migrations
+        run: npx prisma migrate deploy
+      - name: Demo seed
+        run: npm run db:seed
