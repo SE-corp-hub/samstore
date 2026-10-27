@@ -120,7 +120,7 @@ async function main() {
         description: p.description,
         priceMinor: p.priceMinor,
         categoryId: p.categoryId,
-        stockLevels: { create: { storeId: store.id, quantityOnHand: p.stock } },
+        stockLevels: { create: { quantityOnHand: p.stock } }, // storeId comes from the product relation
       },
     });
     productIds.push(product.id);
