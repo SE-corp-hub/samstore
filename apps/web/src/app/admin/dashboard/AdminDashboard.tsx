@@ -8,6 +8,7 @@ import {
 } from "../../../lib/admin";
 import dynamic from "next/dynamic";
 import { API_URL } from "../../../config";
+import { resumePendingReceipt } from "../../../lib/slip-print";
 import { useLang, LANG_WORDS } from "../../../lib/lang";
 import QueueBadge from "../../../components/admin/QueueBadge";
 import StaffHome from "../../../components/admin/StaffHome";
@@ -162,6 +163,8 @@ export default function AdminDashboard() {
     }
   }, [router]);
 
+  // A receipt that could not print before the app was closed is offered again.
+  useEffect(() => { resumePendingReceipt(); }, []);
   useEffect(() => {
     const token = getAdminToken();
     if (!token) {

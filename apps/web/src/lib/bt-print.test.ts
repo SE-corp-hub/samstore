@@ -42,6 +42,9 @@ test("Bluetooth errors are explained in plain words", () => {
   assert.equal(btErrorText(err("NotFoundError", "User cancelled the requestDevice() chooser.")), "No printer was chosen");
   assert.match(btErrorText(err("NotFoundError", "Bluetooth adapter not available.")), /Nearby devices.*\(Bluetooth adapter not available\.\)/);
   assert.match(btErrorText(err("NetworkError", "GATT Server is disconnected.")), /did not answer/);
+  // A connect that never answers (tablet after Bluetooth off/on): only closing the app clears it.
+  assert.match(btErrorText(err("TimeoutError", "No answer from the printer")), /close this app completely.*receipt is kept/);
+  assert.match(btErrorText(err("PendingReceipt", "")), /not printed yet/);
   assert.match(btErrorText(err("SecurityError", "x")), /Nearby devices/);
   // The printer connected, but none of its services is on the app's list: not a Bluetooth-off problem.
   assert.match(btErrorText(err("NotFoundError", "No Services found in device.")), /Check my printer/);
