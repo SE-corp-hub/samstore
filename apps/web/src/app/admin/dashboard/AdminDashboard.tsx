@@ -69,7 +69,7 @@ const UlatPanel = panel(() => import("../../../components/admin/UlatPanel"));
 
 /**
  * Bottom bar for counter staff: the five jobs they do all day, one tap each, plus
- * "More" for the full menu. Phones and tablets held upright (hidden from lg up, where the sidebar shows). It only changes what is easy to
+ * "More" for the full menu. Phones and tablets held either way (hidden only on a PC with a mouse, where the sidebar shows). It only changes what is easy to
  * reach: the server still decides what each role may do.
  */
 const STAFF_BAR: { id: string; label: string; icon: string }[] = [
@@ -345,22 +345,22 @@ export default function AdminDashboard() {
 
   return (
     <div key={activeStore ?? "none"} className="admin-shell d-flex min-vh-100">
-      {/* Sidebar: PC, and a tablet held sideways */}
+      {/* Sidebar: PC with a mouse only. Touch screens (phone, tablet either way) get the bottom bar. */}
       <aside className="admin-sidebar d-none d-lg-flex flex-column" style={{ width: 240, position: "sticky", top: 0, height: "100vh" }}>
         {sidebar}
       </aside>
 
-      {/* Drawer: phones, and a tablet held upright */}
+      {/* Drawer: phones and tablets (either way), from the menu button; same dark look as the sidebar */}
       {mobileNav && (
         <>
-          <div className="modal fade show d-block d-lg-none" tabIndex={-1}>
+          <div className="modal fade show d-block d-lg-none touch-show-block" tabIndex={-1}>
             <div className="modal-dialog modal-dialog-scrollable" style={{ maxWidth: "min(320px, 85vw)", margin: 0 }}>
-              <div className="modal-content rounded-0 border-end min-vh-100" style={{ minHeight: "100vh" }}>
+              <div className="modal-content admin-sidebar admin-drawer rounded-0 border-end min-vh-100" style={{ minHeight: "100vh" }}>
                 {sidebar}
               </div>
             </div>
           </div>
-          <div className="modal-backdrop fade show d-lg-none" onClick={() => setMobileNav(false)}></div>
+          <div className="modal-backdrop fade show d-lg-none touch-show-block" onClick={() => setMobileNav(false)}></div>
         </>
       )}
 
@@ -369,7 +369,7 @@ export default function AdminDashboard() {
         {/* Topbar */}
         <nav className="admin-topbar navbar navbar-expand py-2">
           <div className="container-fluid">
-            <button className="btn btn-outline-secondary btn-sm d-lg-none me-2" onClick={() => setMobileNav(true)} aria-label="Menu">
+            <button className="btn btn-outline-secondary btn-sm d-lg-none touch-show me-2" onClick={() => setMobileNav(true)} aria-label="Menu">
               <i className="bi bi-list"></i>
             </button>
             <span className="navbar-brand fw-semibold fs-6 mb-0 d-flex align-items-center gap-2">
@@ -396,7 +396,7 @@ export default function AdminDashboard() {
                   <i className="bi bi-box-arrow-up-right"></i>
                 </a>
               )}
-              <button className="btn btn-sm btn-outline-secondary d-lg-none" onClick={logout} title="Log out" aria-label="Log out">
+              <button className="btn btn-sm btn-outline-secondary d-lg-none touch-show" onClick={logout} title="Log out" aria-label="Log out">
                 <i className="bi bi-box-arrow-right"></i>
               </button>
             </div>
@@ -425,7 +425,7 @@ export default function AdminDashboard() {
               type="button"
               className={!STAFF_BAR.some((b) => b.id === (BAR_ALIAS[tab] ?? tab)) ? "active" : ""}
               aria-current={!STAFF_BAR.some((b) => b.id === (BAR_ALIAS[tab] ?? tab)) ? "page" : undefined}
-              onClick={() => { userNavigated.current = true; if (role === "STAFF") { setTab("home"); setMobileNav(false); } else setMobileNav(true); }}
+              onClick={() => { userNavigated.current = true; setTab("home"); setMobileNav(false); }}
             >
               <i className="bi bi-grid-3x3-gap"></i>
               <span>More</span>
