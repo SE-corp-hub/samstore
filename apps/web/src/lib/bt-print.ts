@@ -108,6 +108,13 @@ export const bluetoothSupported = () => api() !== null;
 let device: BtDevice | null = null;
 let writer: BtChar | null = null;
 
+// When Bluetooth is switched off, the printer link is gone: drop it so the next print reconnects cleanly.
+if (typeof navigator !== "undefined") {
+  (navigator as unknown as { bluetooth?: EventTarget }).bluetooth?.addEventListener?.("availabilitychanged", (ev) => {
+    if (!(ev as Event & { value?: boolean }).value) { writer = null; try { device?.gatt?.disconnect(); } catch { /* already closed */ } }
+  });
+}
+
 // Every Bluetooth device has these (name, battery, maker info). Some let you write the device name, which
 // the old code picked by mistake: the receipt went there and nothing printed. They are never the print channel.
 const STANDARD = new Set([0x1800, 0x1801, 0x180a, 0x180f].map(short));
@@ -160,13 +167,17 @@ const timeout = <T>(p: Promise<T>, ms: number): Promise<T> => Promise.race([
 /** Android often fails the first Bluetooth connection, so try up to 3 times before giving up. */
 async function connectGatt(d: BtDevice): Promise<BtServer> {
   let last: unknown;
+  let silent = 0;
   for (let i = 0; i < 3; i++) {
-    // Some printers take 10+ seconds to accept the first connection, so give it 20 seconds before giving up.
-    try { return await timeout(d.gatt!.connect(), 20000); }
+    // Clear any half-open link first: after Bluetooth is switched off and on, Chrome keeps a dead one
+    // and a new connect on top of it never answers.
+    if (!d.gatt!.connected) { try { d.gatt!.disconnect(); } catch { /* nothing to close */ } }
+    // Some printers take 10+ seconds to accept the first connection, so give it 15 seconds before giving up.
+    try { return await timeout(d.gatt!.connect(), 15000); }
     catch (e) {
       last = e;
       try { d.gatt!.disconnect(); } catch { /* already closed */ }
-      if (e instanceof Error && e.name === "TimeoutError") break; // no answer at all: retrying only makes staff wait longer
+      if (e instanceof Error && e.name === "TimeoutError" && ++silent >= 2) break; // twice no answer: stop making staff wait
       await sleep(600);
     }
   }
@@ -221,7 +232,15 @@ export const connectedPrinterName = (): string | null => (writer && device ? dev
 
 async function ready(): Promise<BtChar> {
   if (writer && device?.gatt?.connected) return writer;
-  if (device) { writer = await findWriter(device); return writer; }
+  if (device) {
+    try { writer = await findWriter(device); return writer; }
+    catch (e) {
+      // This printer link is dead (for example Bluetooth was switched off and on). Forget it, so the next
+      // tap on Try again or Connect printer picks the printer fresh from Chrome's list.
+      device = null; writer = null;
+      throw e;
+    }
+  }
   // After the app restarts the picked printer is gone from memory. Chrome can hand it back without asking
   // (when its remembered-devices feature is on); prefer the one picked last time.
   const known = (await api()?.getDevices?.().catch(() => [])) ?? [];
