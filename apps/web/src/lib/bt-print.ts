@@ -140,6 +140,8 @@ export function btErrorText(e: unknown): string {
   const msg = e instanceof Error ? e.message : String(e);
   if (name === "NeedsTapError" || /gesture/i.test(msg)) return "The printer is not connected yet. Tap Connect printer.";
   if (name === "NotFoundError" && (/cancel/i.test(msg) || !msg)) return "No printer was chosen";
+  // Chrome found the printer but none of its print channels is one this app may use.
+  if (/service/i.test(msg)) return `The printer was found, but the app cannot use its print channel. In Printer settings tap "Check my printer" and send the report to Claude.${msg ? ` (${msg})` : ""}`;
   // Chrome's own words go at the end so a screenshot tells Claude exactly what happened.
   const raw = msg ? ` (${msg})` : "";
   // "Bluetooth adapter not available" also shows when Bluetooth is on but Chrome lacks the Nearby devices permission.
@@ -159,8 +161,14 @@ const timeout = <T>(p: Promise<T>, ms: number): Promise<T> => Promise.race([
 async function connectGatt(d: BtDevice): Promise<BtServer> {
   let last: unknown;
   for (let i = 0; i < 3; i++) {
-    try { return await timeout(d.gatt!.connect(), 8000); }
-    catch (e) { last = e; try { d.gatt!.disconnect(); } catch { /* already closed */ } await sleep(600); }
+    // Some printers take 10+ seconds to accept the first connection, so give it 20 seconds before giving up.
+    try { return await timeout(d.gatt!.connect(), 20000); }
+    catch (e) {
+      last = e;
+      try { d.gatt!.disconnect(); } catch { /* already closed */ }
+      if (e instanceof Error && e.name === "TimeoutError") break; // no answer at all: retrying only makes staff wait longer
+      await sleep(600);
+    }
   }
   throw last;
 }
