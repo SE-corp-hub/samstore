@@ -351,83 +351,85 @@ export default function ProductsPanel() {
       ) : products.length === 0 ? (
         <p className="text-muted">No products yet. Create your first one!</p>
       ) : (
-        <table className="table table-hover align-middle">
-          <thead>
-            <tr>
-              <th style={{ width: 32 }}>
-                <input
-                  type="checkbox"
-                  className="form-check-input"
-                  aria-label="Select all products"
-                  checked={products.length > 0 && selected.length === products.length}
-                  onChange={(e) => setSelected(e.target.checked ? products.map((p) => p.id) : [])}
-                />
-              </th>
-              <th>Product</th>
-              <th>SKU</th>
-              <th className="text-end">Selling price</th>
-              {hasCost && <th className="text-end">Unit cost</th>}
-              <th className="text-end">Stock</th>
-              <th>Category</th>
-              <th>Status</th>
-              <th className="text-end">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {products.map((p) => (
-              <tr key={p.id} className={p.isActive ? "" : "table-secondary"}>
-                <td>
+        <div className="table-responsive">
+          <table className="table table-hover align-middle">
+            <thead>
+              <tr>
+                <th style={{ width: 32 }}>
                   <input
                     type="checkbox"
                     className="form-check-input"
-                    aria-label={`Select ${p.name}`}
-                    checked={selected.includes(p.id)}
-                    onChange={(e) =>
-                      setSelected((s) => (e.target.checked ? [...s, p.id] : s.filter((id) => id !== p.id)))
-                    }
+                    aria-label="Select all products"
+                    checked={products.length > 0 && selected.length === products.length}
+                    onChange={(e) => setSelected(e.target.checked ? products.map((p) => p.id) : [])}
                   />
-                </td>
-                <td className="fw-semibold">
-                    {p.name}
-                    {p.unit && <span className="badge text-bg-light border ms-1">{p.unit}</span>}
-                    {p.stockBaseUnit && p.stockBaseQuantity && <span className="badge text-bg-light border ms-1">{formatStockSize(p.stockBaseQuantity, p.stockBaseUnit)}</span>}
-                    {p.stockConversionFamily && <span className="badge text-bg-info ms-1">{p.stockConversionFamily}</span>}
-                    {p.soldByWeight && <span className="badge text-bg-secondary ms-1" title="Sold by weight">per-kilo</span>}
-                    {p.trackStock === false && <span className="badge text-bg-warning ms-1" title="Sells at any time — stock is not counted">Not tracked</span>}
-                  </td>
-                <td className="text-muted small">
-                  {p.sku}
-                  {p.barcode && <div className="text-muted text-opacity-75" style={{ fontSize: "0.8em" }} title="Barcode">{p.barcode}</div>}
-                </td>
-                <td className="text-end">{toPesos(p.priceMinor)}</td>
-                {hasCost && <td className="text-end text-muted">{toPesos(p.costMinor)}</td>}
-                <td className={`text-end ${p.trackStock !== false && p.reorderThreshold > 0 && p.availableQuantity <= p.reorderThreshold ? "text-danger fw-semibold" : ""}`}>
-                  {p.trackStock === false ? <span className="text-muted">—</span> : p.availableQuantity}
-                  {p.trackStock !== false && p.reorderThreshold > 0 && <small className="text-muted"> ≤{p.reorderThreshold}</small>}
-                  {p.quantityReserved > 0 && <small className="text-muted"> ({p.quantityReserved} reserved)</small>}
-                </td>
-                <td className="small">{p.category?.name ?? "—"}</td>
-                <td>
-                  <span className={`badge ${p.isActive ? "text-bg-success" : "text-bg-secondary"}`}>
-                    {p.isActive ? "Active" : "Hidden"}
-                      {p.taxExempt && <span className="badge text-bg-info ms-1" title="VAT-exempt">VAT-exempt</span>}
-                  </span>
-                </td>
-                <td className="text-end">
-                  <button className="btn btn-sm btn-outline-secondary me-1" title="Variants & add-ons" onClick={() => setOptionsFor(p)}>
-                    <i className="bi bi-sliders"></i>
-                  </button>
-                  <button className="btn btn-sm btn-outline-secondary me-1" onClick={() => openEdit(p)}>
-                    <i className="bi bi-pencil"></i>
-                  </button>
-                  <button className="btn btn-sm btn-outline-secondary" onClick={() => toggleActive(p)}>
-                    <i className={`bi ${p.isActive ? "bi-eye-slash" : "bi-eye"}`}></i>
-                  </button>
-                </td>
+                </th>
+                <th>Product</th>
+                <th>SKU</th>
+                <th className="text-end">Selling price</th>
+                {hasCost && <th className="text-end">Unit cost</th>}
+                <th className="text-end">Stock</th>
+                <th>Category</th>
+                <th>Status</th>
+                <th className="text-end">Actions</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {products.map((p) => (
+                <tr key={p.id} className={p.isActive ? "" : "table-secondary"}>
+                  <td>
+                    <input
+                      type="checkbox"
+                      className="form-check-input"
+                      aria-label={`Select ${p.name}`}
+                      checked={selected.includes(p.id)}
+                      onChange={(e) =>
+                        setSelected((s) => (e.target.checked ? [...s, p.id] : s.filter((id) => id !== p.id)))
+                      }
+                    />
+                  </td>
+                  <td className="fw-semibold">
+                      {p.name}
+                      {p.unit && <span className="badge text-bg-light border ms-1">{p.unit}</span>}
+                      {p.stockBaseUnit && p.stockBaseQuantity && <span className="badge text-bg-light border ms-1">{formatStockSize(p.stockBaseQuantity, p.stockBaseUnit)}</span>}
+                      {p.stockConversionFamily && <span className="badge text-bg-info ms-1">{p.stockConversionFamily}</span>}
+                      {p.soldByWeight && <span className="badge text-bg-secondary ms-1" title="Sold by weight">per-kilo</span>}
+                      {p.trackStock === false && <span className="badge text-bg-warning ms-1" title="Sells at any time — stock is not counted">Not tracked</span>}
+                    </td>
+                  <td className="text-muted small">
+                    {p.sku}
+                    {p.barcode && <div className="text-muted text-opacity-75" style={{ fontSize: "0.8em" }} title="Barcode">{p.barcode}</div>}
+                  </td>
+                  <td className="text-end">{toPesos(p.priceMinor)}</td>
+                  {hasCost && <td className="text-end text-muted">{toPesos(p.costMinor)}</td>}
+                  <td className={`text-end ${p.trackStock !== false && p.reorderThreshold > 0 && p.availableQuantity <= p.reorderThreshold ? "text-danger fw-semibold" : ""}`}>
+                    {p.trackStock === false ? <span className="text-muted">—</span> : p.availableQuantity}
+                    {p.trackStock !== false && p.reorderThreshold > 0 && <small className="text-muted"> ≤{p.reorderThreshold}</small>}
+                    {p.quantityReserved > 0 && <small className="text-muted"> ({p.quantityReserved} reserved)</small>}
+                  </td>
+                  <td className="small">{p.category?.name ?? "—"}</td>
+                  <td>
+                    <span className={`badge ${p.isActive ? "text-bg-success" : "text-bg-secondary"}`}>
+                      {p.isActive ? "Active" : "Hidden"}
+                        {p.taxExempt && <span className="badge text-bg-info ms-1" title="VAT-exempt">VAT-exempt</span>}
+                    </span>
+                  </td>
+                  <td className="text-end">
+                    <button className="btn btn-sm btn-outline-secondary me-1" title="Variants & add-ons" onClick={() => setOptionsFor(p)}>
+                      <i className="bi bi-sliders"></i>
+                    </button>
+                    <button className="btn btn-sm btn-outline-secondary me-1" onClick={() => openEdit(p)}>
+                      <i className="bi bi-pencil"></i>
+                    </button>
+                    <button className="btn btn-sm btn-outline-secondary" onClick={() => toggleActive(p)}>
+                      <i className={`bi ${p.isActive ? "bi-eye-slash" : "bi-eye"}`}></i>
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
 
       {/* Create/Edit modal */}

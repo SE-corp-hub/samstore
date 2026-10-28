@@ -3,6 +3,7 @@ import type { ApiError } from "@sam-store/contracts";
 import { JwtAuthGuard, type AuthPrincipal } from "../auth/auth.guard.js";
 import { resolveTenant, TENANT_ROLES } from "../auth/tenant-context.js";
 import { prisma } from "../persistence/prisma-repositories.js";
+import { loadActor } from "../people/people.service.js";
 import { DELIVERY_SERVICE, DeliveryService } from "./delivery.service.js";
 
 function statusFor(error: ApiError): HttpStatus {
@@ -44,15 +45,25 @@ export class DeliveryController {
   async markStatus(
     @Req() req: Request & { user?: AuthPrincipal },
     @Param("id") id: string,
-    @Body() body: { toStatus: "DELIVERED" | "FAILED_DELIVERY"; reason?: string },
+    @Body() body: { toStatus: "DELIVERED" | "FAILED_DELIVERY"; reason?: string; cashCollectedMinor?: unknown; receivedBy?: unknown; signature?: unknown },
     @Headers("x-store-id") headerStoreId?: string,
   ) {
     const user = req.user;
     if (!["DELIVERED", "FAILED_DELIVERY"].includes(body?.toStatus ?? "")) {
       throw new HttpException({ type: "validation", errors: ["toStatus must be DELIVERED or FAILED_DELIVERY"] }, HttpStatus.UNPROCESSABLE_ENTITY);
     }
-    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.DELIVERY);
-    const result = await this.deliverySvc.markStatus(storeId, id, body.toStatus, body.reason);
+    const cash = body.cashCollectedMinor;
+    if (cash !== undefined && (typeof cash !== "number" || !Number.isInteger(cash) || cash < 0 || cash > 100_000_000)) {
+      throw new HttpException({ type: "validation", errors: ["cashCollectedMinor must be a whole number of centavos"] }, HttpStatus.UNPROCESSABLE_ENTITY);
+    }
+    const { storeId, role } = await resolveTenant(user, headerStoreId, TENANT_ROLES.DELIVERY);
+    const proof = {
+      actor: await loadActor(storeId, user!.sub, role),
+      cashCollectedMinor: cash as number | undefined,
+      receivedBy: typeof body.receivedBy === "string" ? body.receivedBy : undefined,
+      signaturePng: typeof body.signature === "string" && body.signature ? body.signature : undefined,
+    };
+    const result = await this.deliverySvc.markStatus(storeId, id, body.toStatus, body.reason, proof);
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
     return result.value;
   }

@@ -19,7 +19,11 @@ interface Member {
   homeLocationId?: string | null;
   hasPin?: boolean;
   pinLocked?: boolean;
+  addedBy?: string | null;
+  lastReset?: { kind: "PIN" | "password"; by: string | null; at: string } | null;
 }
+
+const day = (iso: string) => new Date(iso).toLocaleDateString("en-PH", { month: "short", day: "numeric", year: "numeric" });
 
 interface Location { id: string; name: string; code: string | null; isActive: boolean }
 
@@ -233,7 +237,13 @@ export default function TeamPanel() {
             <tbody>
               {members.map((m) => (
                 <tr key={m.userId}>
-                  <td className="fw-semibold">{m.name ?? "—"}</td>
+                  <td>
+                    <div className="fw-semibold">{m.name ?? "—"}</div>
+                    <div className="small text-muted">
+                      {m.addedBy ? `Added by ${m.addedBy}` : "Joined"}{m.joinedAt ? ` · ${day(m.joinedAt)}` : ""}
+                      {m.lastReset && <><br />{m.lastReset.kind === "PIN" ? "PIN set" : "Password reset"}{m.lastReset.by ? ` by ${m.lastReset.by}` : ""} · {day(m.lastReset.at)}</>}
+                    </div>
+                  </td>
                   <td className="small">{m.phone ?? ""}{m.phone && m.email ? <br /> : null}{m.email ?? ""}</td>
                   <td>
                     <select

@@ -201,7 +201,7 @@ export class AdminController {
         const user = req.user;
     requireUser(user);
         await this.requireStoreManager(user, storeId);
-        const result = await this.team.invite(storeId, body?.email ?? "", body?.name ?? null, body?.role ?? "STAFF");
+        const result = await this.team.invite(storeId, body?.email ?? "", body?.name ?? null, body?.role ?? "STAFF", null, undefined, user.sub);
         if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
         return result.value;
       }
@@ -1419,6 +1419,7 @@ export class AdminController {
       body?.role,
       typeof body?.phone === "string" ? body.phone : null,
       typeof body?.homeLocationId === "string" ? body.homeLocationId : undefined,
+      user.sub,
     );
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
     return result.value;

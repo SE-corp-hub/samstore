@@ -18,13 +18,45 @@ export type TeamResult<T> = { ok: true; value: T } | { ok: false; error: ApiErro
 export const INVITABLE_STORE_ROLES = ["MANAGER", "STAFF", "SALES_AGENT", "DELIVERY"] as const;
 
 export class TeamService {
-  /** List active members of a store (with user + role). */
+  /**
+   * List active members of a store (with user + role), and who added each one and who last
+   * reset their PIN or password (from the audit log and the reset history; older members
+   * added before this was recorded show only when they joined).
+   */
   async list(storeId: string) {
-    return prisma.userStore.findMany({
+    const rows = await prisma.userStore.findMany({
       where: { storeId, status: "ACTIVE" },
       include: { user: { select: { id: true, email: true, name: true } } },
       orderBy: { createdAt: "asc" },
-    }).then((rows) => rows.map((m) => ({ userId: m.user.id, email: m.user.email, name: m.user.name, role: m.role, joinedAt: m.createdAt })));
+    });
+    const ids = rows.map((m) => m.user.id);
+    const [invites, pinSets, resets] = await Promise.all([
+      prisma.auditLog.findMany({ where: { storeId, action: "member.invite", entityId: { in: ids } }, orderBy: { createdAt: "asc" }, select: { entityId: true, actorId: true, createdAt: true } }),
+      prisma.auditLog.findMany({ where: { storeId, action: "member.people.update", entityId: { in: ids }, after: { path: ["pinChanged"], equals: true } }, select: { entityId: true, actorId: true, createdAt: true } }),
+      prisma.passwordResetHistory.findMany({ where: { storeId, userId: { in: ids } }, select: { userId: true, resetBy: true, createdAt: true } }),
+    ]);
+    const actorIds = [...new Set([...invites, ...pinSets].map((a) => a.actorId).concat(resets.map((r) => r.resetBy)).filter((x): x is string => !!x))];
+    const actors = await prisma.user.findMany({ where: { id: { in: actorIds } }, select: { id: true, name: true, phone: true, email: true } });
+    const who = (id: string | null) => {
+      const u = actors.find((a) => a.id === id);
+      return u ? u.name || u.phone || u.email || "someone" : null;
+    };
+    const lastReset = (userId: string) => {
+      const all = [
+        ...pinSets.filter((p) => p.entityId === userId).map((p) => ({ kind: "PIN" as const, by: p.actorId, at: p.createdAt })),
+        ...resets.filter((r) => r.userId === userId).map((r) => ({ kind: "password" as const, by: r.resetBy, at: r.createdAt })),
+      ].sort((a, b) => b.at.getTime() - a.at.getTime());
+      const last = all[0];
+      return last ? { kind: last.kind, by: who(last.by), at: last.at } : null;
+    };
+    return rows.map((m) => {
+      const invite = invites.find((i) => i.entityId === m.user.id);
+      return {
+        userId: m.user.id, email: m.user.email, name: m.user.name, role: m.role, joinedAt: m.createdAt,
+        addedBy: invite ? who(invite.actorId) : null,
+        lastReset: lastReset(m.user.id),
+      };
+    });
   }
 
   /**
@@ -40,6 +72,7 @@ export class TeamService {
     role: string,
     phone?: string | null,
     homeLocationId?: string | null,
+    invitedBy?: string,
   ): Promise<TeamResult<{ userId: string; role: string; tempPassword?: string }>> {
     // Rice Ops M2: staff often have no email — a PH mobile number is enough.
     const cleanEmail = email?.trim().toLowerCase() ?? "";
@@ -92,6 +125,10 @@ export class TeamService {
     // Align the account-wide role only when this store is the account's only store
     // (M11: inviting someone from another store must not rewrite their account).
     await alignGlobalRole(prisma, user.id, storeId, role);
+    // Shown in Team as "Added by …".
+    await prisma.auditLog.create({
+      data: { storeId, actorType: "USER", actorId: invitedBy ?? null, action: "member.invite", entityType: "User", entityId: user.id, after: { role, newAccount: !!tempPassword } },
+    });
 
     await bustMemberships();
     return { ok: true, value: { userId: user.id, role: membership.role, ...(tempPassword ? { tempPassword } : {}) } };

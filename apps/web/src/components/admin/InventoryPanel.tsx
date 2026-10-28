@@ -353,31 +353,33 @@ export default function InventoryPanel() {
           {history.length === 0 ? (
             <p className="text-muted">No stock movements yet.</p>
           ) : (
-            <table className="table table-sm table-hover align-middle">
-              <thead>
-                <tr>
-                  <th>When</th><th>Product</th><th>Type</th>
-                  <th className="text-end">Change</th><th className="text-end">Balance</th>
-                  <th>Reason / note</th><th>By</th>
-                </tr>
-              </thead>
-              <tbody>
-                {history.map((m) => (
-                  <tr key={m.id}>
-                    <td className="small text-muted">{new Date(m.createdAt).toLocaleString()}</td>
-                    <td className="small">{m.productName}{m.variantName ? ` — ${m.variantName}` : ""}{(m.variantSku ?? m.sku) ? <span className="text-muted"> · {m.variantSku ?? m.sku}</span> : null}</td>
-                    <td>
-                      <span className="badge text-bg-secondary">{m.type}</span>
-                      {m.conversionId && <small className="d-block text-muted" title={m.conversionId}>Conv. {m.conversionId.slice(0, 8)}</small>}
-                    </td>
-                    <td className={`text-end fw-semibold ${m.delta < 0 ? "text-danger" : "text-success"}`}>{m.delta > 0 ? `+${m.delta}` : m.delta}</td>
-                    <td className="text-end">{m.balanceAfter ?? "—"}</td>
-                    <td className="small">{m.note ?? "—"}</td>
-                    <td className="small text-muted">{m.actor ?? "—"}</td>
+            <div className="table-responsive">
+              <table className="table table-sm table-hover align-middle">
+                <thead>
+                  <tr>
+                    <th>When</th><th>Product</th><th>Type</th>
+                    <th className="text-end">Change</th><th className="text-end">Balance</th>
+                    <th>Reason / note</th><th>By</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {history.map((m) => (
+                    <tr key={m.id}>
+                      <td className="small text-muted">{new Date(m.createdAt).toLocaleString()}</td>
+                      <td className="small">{m.productName}{m.variantName ? ` — ${m.variantName}` : ""}{(m.variantSku ?? m.sku) ? <span className="text-muted"> · {m.variantSku ?? m.sku}</span> : null}</td>
+                      <td>
+                        <span className="badge text-bg-secondary">{m.type}</span>
+                        {m.conversionId && <small className="d-block text-muted" title={m.conversionId}>Conv. {m.conversionId.slice(0, 8)}</small>}
+                      </td>
+                      <td className={`text-end fw-semibold ${m.delta < 0 ? "text-danger" : "text-success"}`}>{m.delta > 0 ? `+${m.delta}` : m.delta}</td>
+                      <td className="text-end">{m.balanceAfter ?? "—"}</td>
+                      <td className="small">{m.note ?? "—"}</td>
+                      <td className="small text-muted">{m.actor ?? "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
       ) : loading ? (
@@ -385,37 +387,39 @@ export default function InventoryPanel() {
       ) : items.length === 0 ? (
         <p className="text-muted">No products match.</p>
       ) : (
-        <table className="table table-hover align-middle">
-          <thead>
-            <tr>
-              <th>Product</th><th>SKU</th><th>Category</th>
-              <th className="text-end">On hand</th><th className="text-end">Reserved</th>
-              <th className="text-end">Available</th>{hasCost && <th className="text-end">Unit cost</th>}
-              {hasCost && <th className="text-end">Value</th>}<th>Status</th><th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((r) => (
-              <tr key={r.id}>
-                <td className="fw-semibold">{r.name}</td>
-                <td className="small text-muted">{r.sku}</td>
-                <td className="small text-muted">{r.category ?? "—"}</td>
-                <td className="text-end">{r.quantityOnHand}</td>
-                <td className="text-end text-muted">{r.quantityReserved}</td>
-                <td className="text-end fw-semibold">{r.availableQuantity}</td>
-                {hasCost && <td className="text-end">{toPesos(r.costMinor)}</td>}
-                {hasCost && <td className="text-end">{toPesos(r.valueMinor)}</td>}
-                <td><span className={`badge ${STATUS_BADGE[r.status]}`}>{r.status}{r.reorderThreshold > 0 ? ` ≤${r.reorderThreshold}` : ""}</span></td>
-                <td className="text-end">
-                  <button type="button" className="btn btn-sm btn-outline-primary"
-                    onClick={() => { setAdjust(r); setAdjustMode("delta"); setAdjustQty(""); setAdjustReason(""); setAdjustAllowNegative(false); setAdjustError(null); }}>
-                    <i className="bi bi-sliders me-1"></i>Adjust
-                  </button>
-                </td>
+        <div className="table-responsive">
+          <table className="table table-hover align-middle">
+            <thead>
+              <tr>
+                <th>Product</th><th>SKU</th><th>Category</th>
+                <th className="text-end">On hand</th><th className="text-end">Reserved</th>
+                <th className="text-end">Available</th>{hasCost && <th className="text-end">Unit cost</th>}
+                {hasCost && <th className="text-end">Value</th>}<th>Status</th><th></th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {items.map((r) => (
+                <tr key={r.id}>
+                  <td className="fw-semibold">{r.name}</td>
+                  <td className="small text-muted">{r.sku}</td>
+                  <td className="small text-muted">{r.category ?? "—"}</td>
+                  <td className="text-end">{r.quantityOnHand}</td>
+                  <td className="text-end text-muted">{r.quantityReserved}</td>
+                  <td className="text-end fw-semibold">{r.availableQuantity}</td>
+                  {hasCost && <td className="text-end">{toPesos(r.costMinor)}</td>}
+                  {hasCost && <td className="text-end">{toPesos(r.valueMinor)}</td>}
+                  <td><span className={`badge ${STATUS_BADGE[r.status]}`}>{r.status}{r.reorderThreshold > 0 ? ` ≤${r.reorderThreshold}` : ""}</span></td>
+                  <td className="text-end">
+                    <button type="button" className="btn btn-sm btn-outline-primary"
+                      onClick={() => { setAdjust(r); setAdjustMode("delta"); setAdjustQty(""); setAdjustReason(""); setAdjustAllowNegative(false); setAdjustError(null); }}>
+                      <i className="bi bi-sliders me-1"></i>Adjust
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
 
       {/* M2: the 5-step adjustment — product → current stock → delta/count + reason → confirm */}

@@ -257,10 +257,11 @@ body {
 .rice-ui .badge.text-bg-danger { background: #FDE8E7 !important; color: #A3201B !important; border: 1px solid #A3201B; }
 .rice-ui .badge.text-bg-success { background: #E4F3EA !important; color: #1F6F3F !important; border: 1px solid #1F6F3F; }
 
-/* Mobile tap targets (SAM Store mobile UX plan, step 2): on a phone every button and field is at
-   least 44px tall, so a thumb can hit it. Desktop keeps Bootstrap's compact sizes.
+/* Touch tap targets (SAM Store mobile UX plan, step 2): on a phone or any touch screen (the
+   MatePad tablet in either direction) every button and field is at least 44px tall, so a finger
+   can hit it. A PC with a mouse keeps Bootstrap's compact sizes.
    The .rice-ui store screens already go further (see above). */
-@media (max-width: 767.98px) {
+@media (max-width: 767.98px), (pointer: coarse) {
   .btn, .btn-sm { min-height: 44px; }
   .form-control, .form-control-sm, .form-select, .form-select-sm { min-height: 44px; }
   .form-check-input { width: 1.4em; height: 1.4em; }
@@ -268,7 +269,7 @@ body {
   .btn-sm, .form-control-sm, .form-select-sm { font-size: 1rem; }
 }
 
-/* Staff bottom bar (phone only): the five daily jobs, one tap each, plus More for the full menu. */
+/* Staff bottom bar (phones and upright tablets): the five daily jobs, one tap each, plus More for the full menu. */
 .staff-bar {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 1030;
   display: flex; background: #fff; border-top: 2px solid #1f1d1a;
@@ -282,7 +283,7 @@ body {
 .staff-bar button i { font-size: 1.5rem; line-height: 1; }
 .staff-bar button.active { background: #1f1d1a; color: #fff; }
 .staff-bar button:focus-visible { outline: 3px solid #0b4f8a; outline-offset: -3px; }
-@media (max-width: 767.98px) {
+@media (max-width: 991.98px) {
   /* Keep the last content row clear of the fixed bar. */
   main.has-staff-bar { padding-bottom: calc(80px + env(safe-area-inset-bottom)) !important; --staff-bar-h: calc(66px + env(safe-area-inset-bottom)); }
 }
@@ -301,3 +302,21 @@ body {
 
 /* Pay / Hold bars that stick to the bottom of a screen sit above the staff bar on a phone. */
 .sticky-above-bar { bottom: var(--staff-bar-h, 0px) !important; }
+
+/* ───────────── Tablet (Huawei MatePad SE 11: 800 px wide upright, 1280 px sideways) ───────────── */
+/* Upright: the bottom bar gets room for bigger icons and words. */
+@media (min-width: 768px) and (max-width: 991.98px) {
+  .staff-bar button { min-height: 72px; font-size: 0.95rem; }
+  .staff-bar button i { font-size: 1.75rem; }
+  main.has-staff-bar { padding-bottom: calc(92px + env(safe-area-inset-bottom)) !important; --staff-bar-h: calc(74px + env(safe-area-inset-bottom)); }
+}
+/* Touch screens: sidebar rows and tabs a finger can hit without zooming. */
+@media (pointer: coarse) {
+  .admin-sidebar .nav-link { min-height: 48px; }
+  .admin-shell .nav-tabs .nav-link, .admin-shell .nav-pills .nav-link { min-height: 44px; }
+}
+/* POS sideways: the sale panel stays in view while the product list scrolls. */
+/* 6rem keeps the panel bottom (and its Add button) above the screen edge under the top bar. */
+.pos-side { position: sticky; top: 1rem; max-height: calc(100vh - 6rem); overflow-y: auto; }
+/* Back / Add stay on screen at the bottom of the sale panel, even when the panel scrolls. */
+.pos-side .pos-actions { position: sticky; bottom: 0; background: #fff; padding: 8px 0; margin-bottom: -8px; }
