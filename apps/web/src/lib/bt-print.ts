@@ -84,10 +84,10 @@ export function slipToEscPos(s: Slip, w: number): Uint8Array {
 // ───────────────────────── browser side (Web Bluetooth) ─────────────────────────
 
 /* The parts of Web Bluetooth we use (TypeScript's DOM types do not include it). */
-interface BtChar { properties: { write: boolean; writeWithoutResponse: boolean }; writeValue(v: BufferSource): Promise<void>; writeValueWithoutResponse?(v: BufferSource): Promise<void> }
-interface BtService { getCharacteristics(): Promise<BtChar[]> }
+interface BtChar { uuid?: string; properties: { write: boolean; writeWithoutResponse: boolean }; writeValue(v: BufferSource): Promise<void>; writeValueWithoutResponse?(v: BufferSource): Promise<void> }
+interface BtService { uuid?: string; getCharacteristics(): Promise<BtChar[]> }
 interface BtServer { connected: boolean; getPrimaryServices(): Promise<BtService[]> }
-interface BtDevice { name?: string; gatt?: { connected: boolean; connect(): Promise<BtServer> }; addEventListener(t: string, f: () => void): void }
+interface BtDevice { name?: string; gatt?: { connected: boolean; connect(): Promise<BtServer>; disconnect(): void }; addEventListener(t: string, f: () => void): void }
 interface BtApi { requestDevice(o: unknown): Promise<BtDevice>; getDevices?: () => Promise<BtDevice[]> }
 
 // Services that common BLE receipt printers use for printing (Chrome only lets a page use the ones it lists here).
@@ -108,14 +108,70 @@ export const bluetoothSupported = () => api() !== null;
 let device: BtDevice | null = null;
 let writer: BtChar | null = null;
 
-async function findWriter(d: BtDevice): Promise<BtChar> {
-  const server = await d.gatt!.connect();
+// Every Bluetooth device has these (name, battery, maker info). Some let you write the device name, which
+// the old code picked by mistake: the receipt went there and nothing printed. They are never the print channel.
+const STANDARD = new Set([0x1800, 0x1801, 0x180a, 0x180f].map(short));
+// Where well-known printers take the receipt bytes: service → characteristic.
+const KNOWN_PRINT: Record<string, string> = {
+  [short(0x18f0)]: short(0x2af1),
+  [short(0xff00)]: short(0xff02),
+  [short(0xae30)]: short(0xae01),
+  "e7810a71-73ae-499d-8c15-faa9aef0c3f2": "bef8d6c9-9c21-4c9e-b632-bd58c1009f9f",
+  "49535343-fe7d-4ae5-8fa9-9fafd205e455": "49535343-8841-43f4-a8d4-ecbe34729bb3",
+};
+
+export interface CharInfo { service: string; uuid: string; write: boolean; writeWithoutResponse: boolean }
+
+/** Which characteristic takes the receipt: a known print channel first, then any writable one outside the standard services. -1 = none. */
+export function pickWriter(chars: CharInfo[]): number {
+  let best = -1, bestScore = 0;
+  chars.forEach((c, i) => {
+    const service = c.service.toLowerCase(), uuid = c.uuid.toLowerCase();
+    if (STANDARD.has(service) || !(c.write || c.writeWithoutResponse)) return;
+    const score = (KNOWN_PRINT[service] === uuid ? 10 : 1) + (c.writeWithoutResponse ? 1 : 0);
+    if (score > bestScore) { best = i; bestScore = score; }
+  });
+  return best;
+}
+
+/** A plain-words reason for a Bluetooth error, with what to do next. */
+export function btErrorText(e: unknown): string {
+  const name = e instanceof Error ? e.name : "";
+  const msg = e instanceof Error ? e.message : String(e);
+  if (name === "NotFoundError") return /cancel/i.test(msg) || !msg ? "No printer was chosen" : "Bluetooth is off or no printer was found. Turn on Bluetooth and Location, and turn the printer on.";
+  if (name === "SecurityError" || name === "NotAllowedError") return "Chrome is not allowed to use Bluetooth. Allow \"Nearby devices\" for Chrome in the phone's Settings, then try again.";
+  if (name === "NetworkError" || /gatt|connect/i.test(msg)) return "The printer did not answer. Turn it off and on, close RawBT or any other printing app, then try again.";
+  return msg || "error";
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Android often fails the first Bluetooth connection, so try up to 3 times before giving up. */
+async function connectGatt(d: BtDevice): Promise<BtServer> {
+  let last: unknown;
+  for (let i = 0; i < 3; i++) {
+    try { return await d.gatt!.connect(); }
+    catch (e) { last = e; try { d.gatt!.disconnect(); } catch { /* already closed */ } await sleep(600); }
+  }
+  throw last;
+}
+
+async function listChars(server: BtServer): Promise<{ info: CharInfo[]; chars: BtChar[] }> {
+  const info: CharInfo[] = [], chars: BtChar[] = [];
   for (const svc of await server.getPrimaryServices()) {
-    for (const ch of await svc.getCharacteristics()) {
-      if (ch.properties.write || ch.properties.writeWithoutResponse) return ch;
+    for (const ch of await svc.getCharacteristics().catch(() => [] as BtChar[])) {
+      info.push({ service: svc.uuid ?? "", uuid: ch.uuid ?? "", write: ch.properties.write, writeWithoutResponse: ch.properties.writeWithoutResponse });
+      chars.push(ch);
     }
   }
-  throw new Error("This printer is not a Bluetooth Low Energy printer");
+  return { info, chars };
+}
+
+async function findWriter(d: BtDevice): Promise<BtChar> {
+  const { info, chars } = await listChars(await connectGatt(d));
+  const i = pickWriter(info);
+  if (i < 0) throw new Error("This printer has no print channel Chrome can use. Tap \"Check my printer\" and send the report to Claude.");
+  return chars[i]!;
 }
 
 /** Pick the printer once (Chrome asks), remember it for this session. Needs a tap (a user gesture). */
@@ -139,8 +195,6 @@ async function ready(): Promise<BtChar> {
   await connectPrinter();
   return writer!;
 }
-
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** Send the slip to the connected printer in small pieces (a BLE write is only about 20 bytes safely). */
 export async function printViaBluetooth(s: Slip, widthMm: 58 | 80): Promise<void> {
@@ -168,24 +222,18 @@ export async function diagnosePrinter(): Promise<string> {
   }
   out.push(`Device name: ${d.name || "(no name)"}`);
   try {
-    const server = await d.gatt!.connect();
-    const services = await server.getPrimaryServices();
-    out.push(`Connected. Services found: ${services.length}`);
-    let writable = 0;
-    for (const svc of services) {
-      out.push(`- service ${(svc as unknown as { uuid?: string }).uuid ?? "?"}`);
-      for (const ch of await svc.getCharacteristics()) {
-        const c = ch as unknown as { uuid?: string; properties: Record<string, boolean> };
-        const flags = Object.entries(c.properties).filter(([, v]) => v).map(([k]) => k).join(", ");
-        if (c.properties.write || c.properties.writeWithoutResponse) writable++;
-        out.push(`    characteristic ${c.uuid ?? "?"}: ${flags}`);
-      }
-    }
-    out.push(writable > 0 ? `RESULT: usable — ${writable} writable characteristic(s). Direct printing should work.` : "RESULT: connected, but nothing to write to was found. Send this report to Claude.");
-    device = d;
-    writer = await findWriter(d).catch(() => null);
+    const { info, chars } = await listChars(await connectGatt(d));
+    out.push(`Connected. Characteristics found: ${info.length}`);
+    for (const c of info) out.push(`- ${c.service} / ${c.uuid}: ${[c.write && "write", c.writeWithoutResponse && "writeWithoutResponse"].filter(Boolean).join(", ") || "read only"}`);
+    const i = pickWriter(info);
+    if (i >= 0) {
+      out.push(`Print channel: ${info[i]!.uuid}`, "RESULT: usable. Direct printing should work.");
+      device = d;
+      writer = chars[i]!;
+      d.addEventListener("gattserverdisconnected", () => { writer = null; });
+    } else out.push("RESULT: connected, but no print channel was found. Send this report to Claude.");
   } catch (e) {
-    out.push(`Could not read the printer: ${e instanceof Error ? e.message : e}`);
+    out.push(`Could not read the printer: ${btErrorText(e)} (${e instanceof Error ? `${e.name}: ${e.message}` : e})`);
     out.push("RESULT: not usable directly. Send this report to Claude.");
   }
   return out.join("\n");
