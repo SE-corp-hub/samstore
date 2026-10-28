@@ -310,6 +310,21 @@ body {
   .staff-bar button i { font-size: 1.75rem; }
   main.has-staff-bar { padding-bottom: calc(92px + env(safe-area-inset-bottom)) !important; --staff-bar-h: calc(74px + env(safe-area-inset-bottom)); }
 }
+/* Any touch screen, sideways tablet included: the same bottom bar, menu button and drawer as upright,
+   so the screens look and work the same both ways. Only a PC with a mouse keeps the sidebar.
+   (The classes beat Bootstrap's d-lg-none / d-lg-flex, which only look at the width.) */
+@media (pointer: coarse) {
+  .admin-shell aside.admin-sidebar { display: none !important; }
+  .admin-shell .touch-show { display: inline-block !important; }
+  .admin-shell .touch-show-block { display: block !important; }
+  .admin-shell .staff-bar { display: flex !important; }
+}
+/* Sideways: icon and word side by side, so the bar stays low and the screen keeps its height. */
+@media (pointer: coarse) and (min-width: 992px) {
+  .staff-bar button { flex-direction: row; gap: 10px; min-height: 64px; font-size: 1.05rem; }
+  .staff-bar button i { font-size: 1.6rem; }
+  main.has-staff-bar { padding-bottom: calc(80px + env(safe-area-inset-bottom)) !important; --staff-bar-h: calc(66px + env(safe-area-inset-bottom)); }
+}
 /* Touch screens: sidebar rows and tabs a finger can hit without zooming. */
 @media (pointer: coarse) {
   .admin-sidebar .nav-link { min-height: 48px; }
@@ -317,6 +332,7 @@ body {
 }
 /* POS sideways: the sale panel stays in view while the product list scrolls. */
 /* 6rem keeps the panel bottom (and its Add button) above the screen edge under the top bar. */
-.pos-side { position: sticky; top: 1rem; max-height: calc(100vh - 6rem); overflow-y: auto; }
+/* --staff-bar-h: room for the bottom bar when it shows sideways (touch screens). */
+.pos-side { position: sticky; top: 1rem; max-height: calc(100vh - 6rem - var(--staff-bar-h, 0px)); overflow-y: auto; }
 /* Back / Add stay on screen at the bottom of the sale panel, even when the panel scrolls. */
 .pos-side .pos-actions { position: sticky; bottom: 0; background: #fff; padding: 8px 0; margin-bottom: -8px; }

@@ -1,12 +1,13 @@
 "use client";
 
-// Staff home — big buttons instead of a long menu. The six daily jobs come first; every
-// other screen the role may open is one tap away under "Other screens". It only changes what
+// Home (the bottom bar's "More" for staff, manager and owner) — big buttons instead of a long
+// menu. The daily jobs come first; every other screen the role may open (owner screens such as
+// Team and Settings too) is one tap away under "Other screens". It only changes what
 // is easy to reach: the server still decides what each role may do (allowedTabs mirrors it).
 
 import { allowedTabs, navItemFor } from "../../lib/admin";
 
-const DAILY = ["pos", "preorders", "resack", "utang", "orders", "moves", "returns"];
+const DAILY = ["pos", "preorders", "resack", "utang", "orders", "moves", "returns", "approvals"];
 // Stock screens are always in view (not hidden under "Other screens").
 const STOCK = ["pasok", "bilangin", "storereport", "inventory", "products"];
 const OTHER = ["agentorders", "drafts", "kargadors", "ulat", "customers", "expenses", "purchases", "reports", "countersettings", "overview"];
@@ -31,7 +32,8 @@ export default function StaffHome({ role, onNavigate, labelFor }: Props) {
 
   const daily = items(DAILY);
   const stock = items(STOCK);
-  const other = items(OTHER);
+  const listed = new Set([...DAILY, ...STOCK, ...OTHER, "utangrice"]);
+  const other = items([...OTHER, ...allowedTabs(role).filter((id) => !listed.has(id))]);
 
   const Tile = ({ id, icon, label }: { id: string; icon: string; label: string }) => (
     <div className="col-6 col-md-4 col-xl-3">
