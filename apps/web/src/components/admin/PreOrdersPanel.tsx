@@ -20,6 +20,8 @@ import { buildText, openTextApp } from "../../lib/text-message";
 import { useMediaQuery, WIDE } from "../../lib/use-media-query";
 import { quickCash } from "../../lib/quick-cash";
 import { peso } from "../../lib/number-format";
+import ProductFinder from "./ProductFinder";
+import { noteUse } from "../../lib/product-find";
 
 interface Preorder {
   id: string; orderNumber: string; customerName: string; storeCustomerId: string | null;
@@ -184,8 +186,6 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
   const [buildCustomerId, setBuildCustomerId] = useState("");
   const [buildNewName, setBuildNewName] = useState("");
   const [buildNewPhone, setBuildNewPhone] = useState("");
-  const [buildSearch, setBuildSearch] = useState("");
-  const [buildCategory, setBuildCategory] = useState("");
   const [buildBusy, setBuildBusy] = useState(false);
   const [hidePrice, setHidePrice] = useState(false); // StoreSettings.hidePricePreOrder
   const wide = useMediaQuery(WIDE);
@@ -233,7 +233,7 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
 
   const clearBuild = () => {
     setBuildCart([]); setBuildCustomerId(""); setBuildNewName(""); setBuildNewPhone("");
-    setBuildSearch(""); setBuildCategory(""); setNewItemOpen(false); setEditingPre(null);
+    setNewItemOpen(false); setEditingPre(null);
   };
   const newPreorder = () => { if (editingPre) clearBuild(); setError(null); setSubTab("build"); };
   const backToList = () => { if (editingPre) clearBuild(); setNewItemOpen(false); setError(null); setSubTab("list"); };
@@ -406,13 +406,6 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
     } finally { setBuildBusy(false); }
   };
 
-  const buildCategories = [...new Set(buildProducts.map((p) => p.category?.name).filter(Boolean))] as string[];
-  const buildFiltered = buildProducts.filter((p) => {
-    const q = buildSearch.trim().toLowerCase();
-    const inSearch = !q || (p.name + p.sku).toLowerCase().includes(q);
-    const inCat = !buildCategory || p.category?.name === buildCategory;
-    return inSearch && inCat;
-  });
 
   /**
    * Items WITH their quantity ("3 × Dinorado") instead of a bare count, so staff can
@@ -587,33 +580,20 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
         <NewItemForm preorder onCancel={() => setNewItemOpen(false)} onDone={async () => { setNewItemOpen(false); await loadBuilder(); }} />
       ) : (
         <>
-          <input className="form-control form-control-lg mb-2" placeholder="Search (name or first letters)" aria-label="Search items" value={buildSearch} onChange={(e) => setBuildSearch(e.target.value)} />
-          {buildCategories.length > 1 && (
-            <div className="d-flex flex-wrap justify-content-center gap-2 mb-2">
-              <button className={`btn ${buildCategory === "" ? "btn-dark" : "btn-outline-dark"}`} aria-pressed={buildCategory === ""} onClick={() => setBuildCategory("")}>All</button>
-              {buildCategories.map((c) => (
-                <button key={c} className={`btn ${buildCategory === c ? "btn-dark" : "btn-outline-dark"}`} aria-pressed={buildCategory === c} onClick={() => setBuildCategory(buildCategory === c ? "" : c)}>{c}</button>
-              ))}
-            </div>
-          )}
           {buildProducts.length === 0 && <p className="text-muted text-center py-4">Loading products…</p>}
-          {buildFiltered.length === 0 && buildProducts.length > 0 && <p className="text-muted text-center py-4">No products match.</p>}
-          <div className="row g-2 mb-3">
-            {buildFiltered.map((p) => {
+          <ProductFinder list="preorder" items={buildProducts} colClass={wide ? "col-6 col-xl-4" : "col-6 col-md-4"}
+            renderTile={(p) => {
               const n = inOrder(p.id);
               return (
-                <div className={wide ? "col-6 col-xl-4" : "col-6 col-md-4"} key={p.id}>
-                  <button type="button" className={`btn ${n > 0 ? "btn-dark" : "btn-outline-dark"} w-100 h-100 p-2 text-center position-relative`} style={{ minHeight: 112 }}
-                    aria-label={`Add ${p.name}${n > 0 ? `, ${n} in this order` : ""}`} onClick={() => addProduct(p)}>
-                    {n > 0 && <span className="position-absolute top-0 end-0 badge rounded-pill text-bg-success m-1 fs-6">{n}</span>}
-                    <div className="fw-semibold">{p.name}</div>
-                    <div style={{ fontSize: 22, fontVariantNumeric: "tabular-nums" }}>{maybePrice(p.priceMinor)}</div>
-                    <div className="small">{p.availableQuantity <= 0 ? "None in stock yet" : `${p.availableQuantity} in stock`}</div>
-                  </button>
-                </div>
+                <button type="button" className={`btn ${n > 0 ? "btn-dark" : "btn-outline-dark"} w-100 h-100 p-2 text-center position-relative`} style={{ minHeight: 104 }}
+                  aria-label={`Add ${p.name}${n > 0 ? `, ${n} in this order` : ""}`} onClick={() => { noteUse("preorder", p.id); addProduct(p); }}>
+                  {n > 0 && <span className="position-absolute top-0 end-0 badge rounded-pill text-bg-success m-1 fs-6">{n}</span>}
+                  <div className="fw-semibold">{p.name}</div>
+                  <div style={{ fontSize: 22, fontVariantNumeric: "tabular-nums" }}>{maybePrice(p.priceMinor)}</div>
+                  <div className="small">{p.availableQuantity <= 0 ? "None in stock yet" : `${p.availableQuantity} in stock`}</div>
+                </button>
               );
-            })}
-          </div>
+            }} />
           <div className="text-center">
             <button type="button" className="btn btn-outline-secondary" onClick={() => setNewItemOpen(true)}>+ New item (not on the list yet)</button>
           </div>
