@@ -6,7 +6,7 @@ Operator steps (each needs a real account login — cannot be done from the agen
 
 | Var | Where | Notes |
 |---|---|---|
-| `DATABASE_URL` | API host | Supabase **session** pooler :5432 (Prisma needs non-transactional pooler), `?sslmode=require`. Host pin via `hostaddr` if IPv6 issues. |
+| `DATABASE_URL` | API host + GitHub secret | Neon (project `samstore`, Singapore) **direct** connection string, connection pooling off (Prisma needs a non-transactional connection), `?sslmode=require`. Prepare an empty database with Actions > Set up database (tick "demo" only on a test database). |
 | `JWT_SECRET` | API host | 32+ random chars |
 | `CLAIM_SIGNING_SECRET` | API host | 32+ random chars |
 | `NEXT_PUBLIC_API_URL` | Vercel | https://<api-host> (no trailing slash) |

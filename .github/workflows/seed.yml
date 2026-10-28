@@ -1,0 +1,45 @@
+name: Set up database
+
+# Manual only. Prepares the database in the DATABASE_URL secret (Neon):
+#  1. creates the anon/authenticated roles if missing (a Supabase database has them;
+#     the lock-down migration revokes from them, so a fresh Neon database needs them),
+#  2. applies migrations,
+#  3. only when "demo" is ticked: loads the demo store and demo logins (known
+#     passwords; never on the shop's real database).
+# Every step is safe to run again.
+
+on:
+  workflow_dispatch:
+    inputs:
+      demo:
+        description: "Also load the demo store and demo logins (test databases only)"
+        type: boolean
+        default: false
+
+jobs:
+  setup:
+    name: roles + migrations (+ demo seed)
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate
+      - name: Roles the lock-down migration expects
+        run: |
+          npx prisma db execute --schema prisma/schema.prisma --stdin <<'SQL'
+          DO $$ BEGIN CREATE ROLE anon NOLOGIN; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+          DO $$ BEGIN CREATE ROLE authenticated NOLOGIN; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+          SQL
+      - name: Apply migrations
+        run: npx prisma migrate deploy
+      - name: Demo seed
+        if: ${{ inputs.demo }}
+        env:
+          ALLOW_DEMO_SEED: "true"
+        run: npm run db:seed
