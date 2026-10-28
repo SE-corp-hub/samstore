@@ -150,7 +150,7 @@ export const NAV_GROUPS: NavGroup[] = [
     group: "rice",
     label: "Rice",
     items: [
-      { id: "utangrice", label: "Credit", icon: "bi-journal-text" }, // Credit + Credit Ledger, merged (the old ledger screen is reachable as "utangold")
+      { id: "utangrice", label: "Credit", icon: "bi-journal-text" }, // Credit + Credit Ledger, merged
       { id: "agentorders", label: "Agent orders", icon: "bi-person-lines-fill" },
       { id: "agent", label: "New order (agent)", icon: "bi-phone" },
       { id: "approvals", label: "For your approval", icon: "bi-inbox" },
@@ -178,6 +178,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { id: "purchases", label: "Purchases", icon: "bi-cart4" },
       { id: "team", label: "Team", icon: "bi-people" },
       { id: "customers", label: "Customers", icon: "bi-people-fill" },
+      // Vouchers, CRM and ERP & BIR are hidden: no role list includes them. Add the id to OWNER_TABS to show one again.
       { id: "vouchers", label: "Vouchers", icon: "bi-ticket-perforated" },
       { id: "crm", label: "CRM", icon: "bi-people-heart" },
       { id: "erp", label: "ERP & BIR", icon: "bi-journal-check" },
@@ -215,17 +216,19 @@ export function navItemFor(id: string): NavItem | undefined {
   return undefined;
 }
 
+const OWNER_TABS = ["overview", "pos", "preorders", "orders", "utang", "products", "inventory", "expenses", "purchases", "team", "customers", "analytics", "reports", "settings", "storelink", "warehouses", "approvals", "moves", "returns", "resack", "drafts", "kargadors", "pasok", "purchaseorders", "utangrice", "agentorders", "bilangin", "storereport", "payable", "ulat"];
+
 /** Tab visibility per staff role (GET-level permissions from live API probes). */
 export const TABS_BY_ROLE: Record<string, string[]> = {
   // M7: OWNER is the tenant (store membership) role; STORE_OWNER is the legacy global
   // role — both are store owners and must see the same surface.
-  STORE_OWNER: ["overview", "pos", "preorders", "orders", "utang", "products", "inventory", "expenses", "purchases", "team", "customers", "vouchers", "crm", "erp", "analytics", "reports", "settings", "storelink", "warehouses", "approvals", "moves", "returns", "resack", "drafts", "kargadors", "benta", "posold", "utangold", "pasok", "purchaseorders", "utangrice", "agentorders", "bilangin", "storereport", "payable", "ulat"],
-  OWNER: ["overview", "pos", "preorders", "orders", "utang", "products", "inventory", "expenses", "purchases", "team", "customers", "vouchers", "crm", "erp", "analytics", "reports", "settings", "storelink", "warehouses", "approvals", "moves", "returns", "resack", "drafts", "kargadors", "benta", "posold", "utangold", "pasok", "purchaseorders", "utangrice", "agentorders", "bilangin", "storereport", "payable", "ulat"],
+  STORE_OWNER: OWNER_TABS,
+  OWNER: OWNER_TABS,
   // Platform operators manage tenants/access and monitor the platform; daily POS/catalog tabs belong to store roles.
   PLATFORM_ADMIN: ["overview", "stores", "useraccess", "maintenance", "analytics", "reports", "settings"],
-  MANAGER: ["overview", "pos", "preorders", "orders", "utang", "products", "inventory", "expenses", "purchases", "team", "customers", "vouchers", "crm", "erp", "analytics", "reports", "settings", "warehouses", "approvals", "moves", "returns", "resack", "drafts", "kargadors", "benta", "posold", "utangold", "pasok", "purchaseorders", "utangrice", "agentorders", "bilangin", "storereport", "payable", "ulat"],
-  STAFF: ["overview", "pos", "preorders", "orders", "utang", "products", "inventory", "expenses", "purchases", "customers", "reports", "countersettings", "moves", "returns", "resack", "drafts", "kargadors", "benta", "pasok", "utangrice", "agentorders", "bilangin", "storereport", "ulat"],
-  SALES_AGENT: ["agent", "overview", "orders", "customers", "crm", "reports"],
+  MANAGER: OWNER_TABS.filter((t) => t !== "storelink"),
+  STAFF: ["overview", "pos", "preorders", "orders", "utang", "products", "inventory", "expenses", "purchases", "customers", "reports", "countersettings", "moves", "returns", "resack", "drafts", "kargadors", "pasok", "utangrice", "agentorders", "bilangin", "storereport", "ulat"],
+  SALES_AGENT: ["agent", "overview", "orders", "customers", "reports"],
   DELIVERY: [],
 };
 

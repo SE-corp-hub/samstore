@@ -6,7 +6,7 @@ Operator steps (each needs a real account login — cannot be done from the agen
 
 | Var | Where | Notes |
 |---|---|---|
-| `DATABASE_URL` | API host | Supabase **session** pooler :5432 (Prisma needs non-transactional pooler), `?sslmode=require`. Host pin via `hostaddr` if IPv6 issues. |
+| `DATABASE_URL` | API host + GitHub secret | Neon (project `samstore`, Singapore) **direct** connection string, connection pooling off (Prisma needs a non-transactional connection), `?sslmode=require`. Prepare an empty database with Actions > Set up database (tick "demo" only on a test database). |
 | `JWT_SECRET` | API host | 32+ random chars |
 | `CLAIM_SIGNING_SECRET` | API host | 32+ random chars |
 | `NEXT_PUBLIC_API_URL` | Vercel | https://<api-host> (no trailing slash) |
@@ -42,9 +42,7 @@ at Vercel and share `https://yourdomain.com/sam-store` as the canonical public o
 1. Create the Facebook App (Meta for Developers), add Messenger product.
 2. Add `pages_messaging` permission; complete App Review for production.
 3. Set the webhook to `https://<api-host>/messenger/webhook` with a verify token from env;
-   the GET challenge + `X-Hub-Signature-256` verification are already implemented in
-   `apps/api/src/messenger/webhook-verification.ts` (currently used only via tests — the HTTP
-   route is added behind the real provider once credentials exist).
+   the GET challenge and `X-Hub-Signature-256` handling still have to be built.
 4. Until then the bridge **suppresses sends** by design.
 
 ## 5. Post-deploy checks
@@ -69,14 +67,3 @@ at Vercel and share `https://yourdomain.com/sam-store` as the canonical public o
 - Phase 10: review `docs/security-checklist.md` before production. Configure Redis
   for shared rate limits and resolve the pre-existing Prisma migration checksum
   drift before using `migrate dev/reset`.
-
-## 7. Container topology (operator-only)
-
-`docker-compose.yml` defines `nginx`, `web`, `api`, and a separate `worker` for the transactional outbox. The API disables its embedded worker in this topology via `OUTBOX_WORKER_EMBEDDED=false`.
-
-- The Compose file intentionally has **no local Postgres or Redis service**. Set managed `DATABASE_URL` and optional `REDIS_URL` through the operator's secret manager.
-- Build files: `docker/api.Dockerfile`, `docker/web.Dockerfile`, `docker/worker.Dockerfile`; reverse proxy: `docker/nginx.conf`.
-- Do not run this topology against production until migrations, backups, TLS termination, health checks, and secret injection are operator-reviewed.
-- Run `npm run audit:openapi` before releases to see controller routes that still need detailed OpenAPI path/schema documentation. The command is an audit report, not a fabricated pass.
-- Run `npm run generate:openapi-inventory` to refresh `docs/openapi-route-inventory.yaml`; this generated artifact contains every discovered controller route with generic responses, while `docs/openapi.yaml` remains the hand-authored high-risk contract.
-- Run `npm run check:deployment` in CI to validate required Docker/nginx/Compose artifacts without starting containers. Operator validation still requires managed infrastructure, TLS, backups, and secret-manager review.

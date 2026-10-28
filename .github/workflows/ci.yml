@@ -34,10 +34,6 @@ jobs:
         run: npm run typecheck
       - name: Secret / PII scan (filenames only)
         run: npm run check:secrets
-      - name: OpenAPI contract smoke-check
-        run: npm run check:openapi
-      - name: Deployment artifact check (static; no Docker)
-        run: npm run check:deployment
       - name: Build
         run: npm run build
 

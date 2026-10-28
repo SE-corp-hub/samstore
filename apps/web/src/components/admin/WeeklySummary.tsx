@@ -7,6 +7,7 @@ import { useCallback, useEffect, useState } from "react";
 import { API_URL } from "../../config";
 import { adminHeaders } from "../../lib/admin";
 import { printSlip } from "../../lib/slip-print";
+import { pesoText as peso } from "../../lib/count-view";
 
 interface Store { id: string; name: string; thisMinor: number; lastMinor: number; changePct: number | null; count: number; profitMinor: number }
 interface Consignment { id: string; name: string; owesMinor: number; paidThisWeekMinor: number; lastPaymentAt: string | null; daysSincePayment: number | null; late: boolean }
@@ -23,7 +24,6 @@ interface Data {
   running: { total: number; items: Running[] };
 }
 
-const peso = (m: number) => `₱${(Math.abs(m) / 100).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const todayStr = () => new Date(Date.now() + 8 * 3_600_000).toISOString().slice(0, 10);
 const nice = (d: string) => new Date(`${d}T12:00:00+08:00`).toLocaleDateString("en-PH", { day: "numeric", month: "short" });
 const when = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString("en-PH", { day: "numeric", month: "short", year: "numeric" }) : "never");

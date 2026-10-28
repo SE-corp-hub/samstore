@@ -14,6 +14,7 @@ import { toast } from "../../lib/toast";
 import NumPad from "./NumPad";
 import SignaturePad from "./SignaturePad";
 import { askText } from "../../lib/ask";
+import { peso, kg } from "../../lib/number-format";
 
 interface Loc { id: string; name: string; code: string | null; type: string }
 interface Order {
@@ -24,8 +25,6 @@ interface Order {
 }
 type ApiBody = { message?: string; errors?: string[] } & Record<string, unknown>;
 
-const peso = (m: number) => `₱${(m / 100).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-const kg = (g: number) => `${(g / 1000).toLocaleString("en-PH", { maximumFractionDigits: 3 })} kg`;
 const errText = (d: ApiBody | null, f: string) => d?.errors?.join(", ") ?? d?.message ?? f;
 const toMinor = (s: string) => Math.round(Number(s || "0") * 100);
 const lineText = (l: Order["lines"][number]) => (l.soldBy === "PIECE" || !l.grams ? `${l.quantity} × ${l.name}` : `${kg(l.grams)} ${l.name}`);

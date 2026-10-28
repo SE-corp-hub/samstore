@@ -16,9 +16,9 @@ import { toast } from "../../lib/toast";
 import { printSlip } from "../../lib/slip-print";
 import { PesoInput, KiloInput, WholeInput } from "../NumberBoxes";
 import { costMove, draftFromReorder, moveText, type CostMove } from "../../lib/po-view";
+import { peso, kg } from "../../lib/number-format";
 
-const peso = (m: number) => `₱${(m / 100).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-const qtyText = (loose: boolean, q: number) => (loose ? `${(q / 1000).toLocaleString("en-PH", { maximumFractionDigits: 3 })} kg` : q.toLocaleString("en-PH"));
+const qtyText = (loose: boolean, q: number) => (loose ? kg(q) : q.toLocaleString("en-PH"));
 const dateText = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString("en-PH", { day: "numeric", month: "short", year: "numeric" }) : "");
 
 interface Line { id: string; productId: string; name: string; loose: boolean; quantity: number; receivedQty: number; unitCostMinor?: number; lineTotalMinor?: number; move?: CostMove }

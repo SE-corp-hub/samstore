@@ -6,9 +6,7 @@
 
 import { API_URL } from "../config";
 import { adminHeaders } from "./admin";
-
-
-const peso = (minor: number) => `₱${(minor / 100).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+import { peso } from "./number-format";
 
 /** Philippine mobile → "+639XXXXXXXXX" for the link; "" when it is not a valid mobile. */
 export function phoneForLink(raw: string | null | undefined): string {

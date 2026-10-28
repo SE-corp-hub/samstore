@@ -4,6 +4,15 @@
 //   Whole boxes  sacks and pieces, no decimals (3.7 → 3)
 // Pure helpers so the rule is unit-tested without a browser.
 
+const PESO = new Intl.NumberFormat("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const KILO = new Intl.NumberFormat("en-PH", { maximumFractionDigits: 3 });
+
+/** Centavos as "₱1,234.50". */
+export const peso = (minor: number) => `₱${PESO.format(minor / 100)}`;
+
+/** Grams as "12.5 kg". */
+export const kg = (g: number) => `${KILO.format(g / 1000)} kg`;
+
 export type NumberKind = "peso" | "kilo" | "whole";
 
 export const DECIMALS: Record<NumberKind, number> = { peso: 2, kilo: 3, whole: 0 };

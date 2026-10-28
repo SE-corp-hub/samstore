@@ -12,10 +12,9 @@ import { API_URL } from "../../config";
 import { adminHeaders } from "../../lib/admin";
 import { printSlip, type Slip } from "../../lib/slip-print";
 import StoreBar from "./StoreBar";
+import { peso, kg } from "../../lib/number-format";
 
-const peso = (m: number) => `₱${(m / 100).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const today = () => new Date(Date.now() + 8 * 3_600_000).toISOString().slice(0, 10);
-const kgText = (g: number) => `${(g / 1000).toLocaleString("en-PH", { maximumFractionDigits: 3 })} kg`;
 
 interface Place { id: string; name: string; code: string | null; isActive: boolean; type?: string }
 type Tab = "stock" | "sales" | "records" | "compare" | "day" | "buffer";
@@ -52,7 +51,7 @@ function groupDays(days: { date: string; count: number; totalMinor: number }[], 
   return [...out.entries()].sort((a, b) => (a[0] < b[0] ? 1 : -1)).map(([, v]) => v);
 }
 
-const qtyText = (r: StockRow) => (r.loose ? kgText(r.onHand) : `${r.onHand.toLocaleString("en-PH")} pcs`);
+const qtyText = (r: StockRow) => (r.loose ? kg(r.onHand) : `${r.onHand.toLocaleString("en-PH")} pcs`);
 const flagBadge = (f: StockRow["flag"]) => (f === "ZERO" ? <span className="badge text-bg-danger">Out</span> : f === "LOW" ? <span className="badge text-bg-warning">Low</span> : null);
 
 async function getJson<T>(path: string): Promise<{ ok: boolean; data: (T & { message?: string; errors?: string[] }) | null }> {
@@ -148,7 +147,7 @@ export default function StoreReportPanel({ role, onNavigate }: { role?: string; 
     if (!stock) return;
     const s: Slip = {
       storeName: stock.location.name, title: "STOCK LEFT", when: new Date().toLocaleString(),
-      rows: stock.rows.map((r) => ({ name: r.name, qty: r.loose ? kgText(r.onHand) : String(r.onHand), note: `${peso(r.unitPriceMinor)}${r.loose ? "/kg" : ""} = ${peso(r.valueMinor)}` })),
+      rows: stock.rows.map((r) => ({ name: r.name, qty: r.loose ? kg(r.onHand) : String(r.onHand), note: `${peso(r.unitPriceMinor)}${r.loose ? "/kg" : ""} = ${peso(r.valueMinor)}` })),
       totals: [{ label: "Worth", value: peso(stock.totals.valueMinor) }],
     };
     printSlip(s);
@@ -167,7 +166,7 @@ export default function StoreReportPanel({ role, onNavigate }: { role?: string; 
     printSlip({
       storeName: day.location.name, title: "END OF DAY", when: from,
       lines: [{ label: "Sales", value: String(day.sales.count) }, { label: "Stock in", value: String(day.stockIn.documents) }],
-      rows: day.kilosByVariety.map((v) => ({ name: v.variety, qty: kgText(v.grams), note: peso(v.salesMinor) })),
+      rows: day.kilosByVariety.map((v) => ({ name: v.variety, qty: kg(v.grams), note: peso(v.salesMinor) })),
       totals: [
         { label: "Cash sales", value: peso(day.sales.cashMinor) }, { label: "GCash", value: peso(day.sales.gcashMinor) }, { label: "Credit given", value: peso(day.utang.givenMinor) },
         { label: "Credit collected", value: peso(day.utang.collectedMinor) }, { label: "Cash expected", value: peso(day.cash.expectedMinor) }, { label: "Total sales", value: peso(day.sales.totalMinor) },
@@ -230,7 +229,7 @@ export default function StoreReportPanel({ role, onNavigate }: { role?: string; 
                 <tbody>
                   {stock.rows.map((r) => (
                     <tr key={r.productId}>
-                      <td>{r.name} {flagBadge(r.flag)}{r.reserved > 0 && <div className="small text-muted">{r.loose ? kgText(r.reserved) : r.reserved} held</div>}</td>
+                      <td>{r.name} {flagBadge(r.flag)}{r.reserved > 0 && <div className="small text-muted">{r.loose ? kg(r.reserved) : r.reserved} held</div>}</td>
                       <td className={`text-end fw-semibold ${r.onHand < 0 ? "text-danger" : ""}`}>{qtyText(r)}</td>
                       <td className={`text-end ${r.daysLeft != null && r.daysLeft <= 3 ? "text-danger fw-semibold" : ""}`}>{r.daysLeft == null ? <span className="text-muted">—</span> : r.daysLeft > 99 ? "99+" : `~${r.daysLeft}`}</td>
                       <td className="text-end">{peso(r.unitPriceMinor)}{r.loose ? <span className="small text-muted"> /kg</span> : ""}</td>
@@ -382,7 +381,7 @@ export default function StoreReportPanel({ role, onNavigate }: { role?: string; 
               <li>Stock in today: {day.stockIn.documents} document(s)</li>
               {(owesMap[locationId] ?? 0) > 0 && <li className="text-danger fw-semibold">Owes the main store: {peso(owesMap[locationId] ?? 0)} (Store payable)</li>}
               {buffer?.buffer && buffer.totals.owedItems > 0 && <li className="text-warning-emphasis">Buffer still to fix: {buffer.totals.owedItems} item(s), about {peso(buffer.totals.owedMinor)}</li>}
-              {day.kilosByVariety.map((v) => <li key={v.variety} className="small text-muted">{v.variety}: {kgText(v.grams)} · {peso(v.salesMinor)}</li>)}
+              {day.kilosByVariety.map((v) => <li key={v.variety} className="small text-muted">{v.variety}: {kg(v.grams)} · {peso(v.salesMinor)}</li>)}
             </ul>
           </div>
           <div className="d-flex gap-2">

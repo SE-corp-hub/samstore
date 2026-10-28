@@ -13,9 +13,9 @@ import QueueBadge from "../../../components/admin/QueueBadge";
 import StaffHome from "../../../components/admin/StaffHome";
 
 /** Rice Ops M10: the store screens get the large, high-contrast look (globals.css .rice-ui). */
-const RICE_TABS = new Set(["pos", "benta", "utang", "utangrice", "agentorders", "agent", "approvals", "moves", "returns", "resack", "pasok", "purchaseorders", "bilangin", "storereport", "payable", "ulat", "drafts", "kargadors"]);
+const RICE_TABS = new Set(["pos", "utang", "utangrice", "agentorders", "agent", "approvals", "moves", "returns", "resack", "pasok", "purchaseorders", "bilangin", "storereport", "payable", "ulat", "drafts", "kargadors"]);
 // The landing panel stays eager (it is the first paint); every other panel loads when
-// its tab opens. Shipping all 22 at once cost ~95 kB of route JS for one visible screen,
+// its tab opens. Shipping every panel at once cost ~95 kB of route JS for one visible screen,
 // and dragged jsbarcode/qrcode (used by two panels) into the initial payload.
 import OverviewPanel from "../../../components/admin/OverviewPanel";
 
@@ -43,9 +43,7 @@ const MaintenancePanel = panel(() => import("../../../components/admin/Maintenan
 const TeamPanel = panel(() => import("../../../components/admin/TeamPanel"));
 const WarehousesPanel = panel(() => import("../../../components/admin/WarehousesPanel"));
 const UserAccessPanel = panel(() => import("../../../components/admin/UserAccessPanel"));
-const PosPanel = panel(() => import("../../../components/admin/PosPanel"));
 const PreOrdersPanel = panel(() => import("../../../components/admin/PreOrdersPanel"));
-const UtangPanel = panel(() => import("../../../components/admin/UtangPanel"));
 const CounterSettingsPanel = panel(() => import("../../../components/admin/CounterSettingsPanel"));
 const ExpensesPanel = panel(() => import("../../../components/admin/ExpensesPanel"));
 const PurchasesPanel = panel(() => import("../../../components/admin/PurchasesPanel"));
@@ -84,8 +82,8 @@ const STAFF_BAR: { id: string; label: string; icon: string }[] = [
 
 /** Roles that get the phone bottom bar: the same five jobs for staff, manager and owner. */
 const BAR_ROLES = ["STAFF", "MANAGER", "OWNER", "STORE_OWNER"];
-/** The older screen ids that open the same screen as a bar button. */
-const BAR_ALIAS: Record<string, string> = { benta: "pos", utangrice: "utang", utangold: "utang", posold: "pos" };
+/** Menu ids that open the same screen as a bar button. */
+const BAR_ALIAS: Record<string, string> = { utangrice: "utang" };
 
 /** Screens opened by a bar button that the menu lists under another id (for the page title and icon). */
 const NAV_ID: Record<string, string> = { utang: "utangrice" };
@@ -261,12 +259,11 @@ export default function AdminDashboard() {
     switch (tab) {
       case "home": return <StaffHome role={role} onNavigate={(id) => { userNavigated.current = true; setTab(id); }} labelFor={navLabel} />;
       case "overview": return <OverviewPanel onNavigate={setTab} storeSlug={active?.slug} storeName={active?.name} />;
-      // One POS: the rice-ready counter screen. The older POS stays reachable as "posold" for one release (roll-back).
+      // One POS: the rice-ready counter screen.
       case "pos": return <BentaPanel />;
-      case "posold": return <PosPanel onNavigate={setTab} />;
       case "preorders": return <PreOrdersPanel onNavigate={setTab} />;
-      case "utang": return <UtangRicePanel role={role} />; // one merged Credit screen
-      case "utangold": return <UtangPanel />; // the old ledger, kept hidden for one release (roll-back)
+      case "utang": // the bar id; the menu id is "utangrice" (one merged Credit screen)
+      case "utangrice": return <UtangRicePanel role={role} />;
       case "inventory": return <InventoryPanel />;
       case "expenses": return <ExpensesPanel />;
       case "purchases": return <PurchasesPanel />;
@@ -279,8 +276,8 @@ export default function AdminDashboard() {
       case "vouchers": return <VouchersPanel />;
       case "team": return <TeamPanel />;
       case "customers": return <CustomersPanel />;
-case "crm": return <CrmPanel />;
-case "erp": return <ErpPanel />;
+      case "crm": return <CrmPanel />;
+      case "erp": return <ErpPanel />;
       case "analytics": return <AnalyticsPanel />;
       case "maintenance": return <MaintenancePanel />;
       case "useraccess": return <UserAccessPanel />;
@@ -291,9 +288,7 @@ case "erp": return <ErpPanel />;
       case "moves": return <MovePanel />;
       case "returns": return <ReturnsPanel />;
       case "resack": return <ResackPanel />;
-      case "benta": return <BentaPanel />;
       case "pasok": return <PasokPanel role={role} />;
-      case "utangrice": return <UtangRicePanel role={role} />;
       case "agent": return <AgentPanel />;
       case "agentorders": return <AgentOrdersPanel />;
       case "bilangin": return <BilanginPanel role={role} onNavigate={setTab} />;

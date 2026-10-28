@@ -25,6 +25,7 @@ import SignaturePad from "./SignaturePad";
 import { askConfirm } from "../../lib/ask";
 import { printSlip } from "../../lib/slip-print";
 import { getPrinterSettings } from "../../lib/printer-settings";
+import { peso, kg } from "../../lib/number-format";
 
 interface Loc { id: string; name: string; code: string | null; isActive: boolean }
 export interface CountRow { id: string; docNumber: string; kind: string; status: string; location: string; locationId: string; lines: number; startedAt: string; kulangValueMinor: number; sobraValueMinor: number; mine?: boolean }
@@ -34,8 +35,6 @@ interface Product { id: string; name: string; stockBaseUnit: string | null; stoc
 interface BalanceItem { productId: string; name: string; loose: boolean; lastCount: { docNumber: string; countedQty: number; countedAt: string } | null; buckets: Record<string, number>; expected: number; onHand: number; reserved: number; matches: boolean; valueMinor: number }
 type ApiBody = { message?: string; errors?: string[] } & Record<string, unknown>;
 
-const peso = (m: number) => `₱${(m / 100).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-const kg = (g: number) => `${(g / 1000).toLocaleString("en-PH", { maximumFractionDigits: 3 })} kg`;
 const errText = (d: ApiBody | null, f: string) => d?.errors?.join(", ") ?? d?.message ?? f;
 const qty = (loose: boolean, n: number) => (loose ? kg(n) : `${n}`);
 const isLoose = (p?: Product) => !!p && p.stockBaseUnit === "g" && p.stockBaseQuantity === 1;

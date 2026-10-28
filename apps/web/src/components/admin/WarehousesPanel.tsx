@@ -8,6 +8,7 @@ import { API_URL } from "../../config";
 import { adminHeaders } from "../../lib/admin";
 import { toast } from "../../lib/toast";
 import SignCapture, { type SignatureOut } from "./SignCapture";
+import { peso } from "../../lib/number-format";
 
 type LocationType = "STORE" | "WAREHOUSE" | "BUFFER";
 interface Location {
@@ -46,7 +47,6 @@ interface PriceRow {
 }
 type ApiBody = { message?: string; errors?: string[]; prices?: PriceRow[] };
 
-const peso = (minor: number) => `₱${(minor / 100).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const label = (l: { name: string; code: string | null }) => (l.code ? `${l.code} · ${l.name}` : l.name);
 const emptyForm = { name: "", code: "", type: "STORE" as LocationType, address: "", consignment: false };
 const errorText = (d: ApiBody, fallback: string) => d?.errors?.join(", ") ?? d?.message ?? fallback;
