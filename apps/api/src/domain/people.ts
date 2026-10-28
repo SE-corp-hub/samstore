@@ -76,6 +76,8 @@ export const SIGNATURE_RULES: Record<string, StepRule> = {
   "STOCK_IN:RECEIVE": { always: ["STAFF"] },
   "PAPER_SLIP:ENCODE": { always: ["STAFF", "SLIP_PHOTO"] },
   "CLOSE:DAY": { always: ["STAFF"] },
+  // Courier page: the person who received an online order signs on the courier's phone.
+  "ORDER:DELIVERED": { always: ["CUSTOMER"] },
 };
 
 export const SIGNABLE_DOCUMENT_TYPES = [...new Set(Object.keys(SIGNATURE_RULES).map((k) => k.split(":")[0]))];

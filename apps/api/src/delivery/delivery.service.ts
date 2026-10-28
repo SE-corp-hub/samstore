@@ -4,11 +4,23 @@
 import { prisma } from "../persistence/prisma-repositories.js";
 import { settleForStatus } from "../domain/stock-settlement.js";
 import { LoyaltyService } from "../loyalty/loyalty.service.js";
+import { cashNote } from "../domain/delivery-proof.js";
+import { captureSignatures, signatureErrorResult, type Actor } from "../people/people.service.js";
 import type { ApiError } from "@sam-store/contracts";
 
 export type DeliveryResult<T> = { ok: true; value: T } | { ok: false; error: ApiError };
 
 export const DELIVERY_SERVICE = Symbol("DELIVERY_SERVICE");
+
+
+/** What the courier records when handing over an order (all optional: older app versions send none). */
+export interface DeliveryProof {
+  actor: Actor;
+  cashCollectedMinor?: number;
+  receivedBy?: string;
+  signaturePng?: string;
+}
+
 
 export class DeliveryService {
   /** Active deliveries: all OUT_FOR_DELIVERY orders of the store. */
@@ -59,6 +71,7 @@ export class DeliveryService {
     orderId: string,
     toStatus: "DELIVERED" | "FAILED_DELIVERY",
     reason?: string,
+    proof?: DeliveryProof,
   ): Promise<DeliveryResult<{ id: string; status: string; paymentStatus: string }>> {
     const order = await prisma.order.findFirst({ where: { storeId, id: orderId } });
     if (!order) return { ok: false, error: { type: "not_found", message: "Order not found" } };
@@ -66,18 +79,32 @@ export class DeliveryService {
       return { ok: false, error: { type: "conflict", message: `Cannot update an order in ${order.status}` } };
     }
     const paymentStatus = toStatus === "DELIVERED" ? "COLLECTED" : order.paymentStatus;
-    await prisma.$transaction(async (tx) => {
-      await tx.order.update({
-        where: { id: orderId },
-        data: { status: toStatus, paymentStatus },
+    // Delivered: the cash the courier says they collected goes on the order's history line.
+    const note = toStatus === "DELIVERED" && proof?.cashCollectedMinor !== undefined
+      ? cashNote(proof.cashCollectedMinor, order.totalMinor)
+      : reason?.trim() ?? null;
+    try {
+      await prisma.$transaction(async (tx) => {
+        await tx.order.update({
+          where: { id: orderId },
+          data: { status: toStatus, paymentStatus },
+        });
+        await tx.orderStatusHistory.create({
+          data: { orderId, storeId, fromStatus: "OUT_FOR_DELIVERY", toStatus, reason: note, actorType: "delivery" },
+        });
+        if (toStatus === "DELIVERED" && proof?.signaturePng) {
+          await captureSignatures(tx, storeId, proof.actor, { documentType: "ORDER", documentId: orderId, step: "DELIVERED", locationId: null },
+            [{ signerKind: "CUSTOMER", signerName: proof.receivedBy, imagePng: proof.signaturePng }]);
+        }
+        // Handed to the customer: consume the checkout reservation in the same
+        // transaction. A FAILED_DELIVERY keeps the reservation so a retry can go out.
+        await settleForStatus(tx, { id: orderId, storeId }, toStatus);
       });
-      await tx.orderStatusHistory.create({
-        data: { orderId, storeId, fromStatus: "OUT_FOR_DELIVERY", toStatus, reason: reason?.trim() ?? null, actorType: "delivery" },
-      });
-      // Handed to the customer: consume the checkout reservation in the same
-      // transaction. A FAILED_DELIVERY keeps the reservation so a retry can go out.
-      await settleForStatus(tx, { id: orderId, storeId }, toStatus);
-    });
+    } catch (e) {
+      const r = signatureErrorResult(e);
+      if (r) return r;
+      throw e;
+    }
     // Award loyalty points when a delivery is completed (same rule as admin transition).
     if (toStatus === "DELIVERED") {
       await new LoyaltyService().earnForDeliveredOrder(orderId);

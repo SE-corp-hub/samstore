@@ -68,8 +68,8 @@ const PurchaseOrdersPanel = panel(() => import("../../../components/admin/Purcha
 const UlatPanel = panel(() => import("../../../components/admin/UlatPanel"));
 
 /**
- * Mobile bottom bar for counter staff: the five jobs they do all day, one tap each, plus
- * "More" for the full menu. Phone only (hidden from md up). It only changes what is easy to
+ * Bottom bar for counter staff: the five jobs they do all day, one tap each, plus
+ * "More" for the full menu. Phones and tablets held upright (hidden from lg up, where the sidebar shows). It only changes what is easy to
  * reach: the server still decides what each role may do.
  */
 const STAFF_BAR: { id: string; label: string; icon: string }[] = [
@@ -80,7 +80,7 @@ const STAFF_BAR: { id: string; label: string; icon: string }[] = [
   { id: "orders", label: "Orders", icon: "bi-receipt" },
 ];
 
-/** Roles that get the phone bottom bar: the same five jobs for staff, manager and owner. */
+/** Roles that get the bottom bar: the same five jobs for staff, manager and owner. */
 const BAR_ROLES = ["STAFF", "MANAGER", "OWNER", "STORE_OWNER"];
 /** Menu ids that open the same screen as a bar button. */
 const BAR_ALIAS: Record<string, string> = { utangrice: "utang" };
@@ -345,22 +345,22 @@ export default function AdminDashboard() {
 
   return (
     <div key={activeStore ?? "none"} className="admin-shell d-flex min-vh-100">
-      {/* Desktop sidebar */}
-      <aside className="admin-sidebar d-none d-md-flex flex-column" style={{ width: 240, position: "sticky", top: 0, height: "100vh" }}>
+      {/* Sidebar: PC, and a tablet held sideways */}
+      <aside className="admin-sidebar d-none d-lg-flex flex-column" style={{ width: 240, position: "sticky", top: 0, height: "100vh" }}>
         {sidebar}
       </aside>
 
-      {/* Mobile drawer */}
+      {/* Drawer: phones, and a tablet held upright */}
       {mobileNav && (
         <>
-          <div className="modal fade show d-block d-md-none" tabIndex={-1}>
-            <div className="modal-dialog modal-dialog-scrollable" style={{ maxWidth: 280, margin: 0 }}>
+          <div className="modal fade show d-block d-lg-none" tabIndex={-1}>
+            <div className="modal-dialog modal-dialog-scrollable" style={{ maxWidth: "min(320px, 85vw)", margin: 0 }}>
               <div className="modal-content rounded-0 border-end min-vh-100" style={{ minHeight: "100vh" }}>
                 {sidebar}
               </div>
             </div>
           </div>
-          <div className="modal-backdrop fade show d-md-none" onClick={() => setMobileNav(false)}></div>
+          <div className="modal-backdrop fade show d-lg-none" onClick={() => setMobileNav(false)}></div>
         </>
       )}
 
@@ -369,7 +369,7 @@ export default function AdminDashboard() {
         {/* Topbar */}
         <nav className="admin-topbar navbar navbar-expand py-2">
           <div className="container-fluid">
-            <button className="btn btn-outline-secondary btn-sm d-md-none me-2" onClick={() => setMobileNav(true)}>
+            <button className="btn btn-outline-secondary btn-sm d-lg-none me-2" onClick={() => setMobileNav(true)} aria-label="Menu">
               <i className="bi bi-list"></i>
             </button>
             <span className="navbar-brand fw-semibold fs-6 mb-0 d-flex align-items-center gap-2">
@@ -396,7 +396,7 @@ export default function AdminDashboard() {
                   <i className="bi bi-box-arrow-up-right"></i>
                 </a>
               )}
-              <button className="btn btn-sm btn-outline-secondary d-md-none" onClick={logout} title="Log out">
+              <button className="btn btn-sm btn-outline-secondary d-lg-none" onClick={logout} title="Log out" aria-label="Log out">
                 <i className="bi bi-box-arrow-right"></i>
               </button>
             </div>
@@ -408,7 +408,7 @@ export default function AdminDashboard() {
         </main>
 
         {BAR_ROLES.includes(role) && (
-          <nav className="staff-bar d-md-none" aria-label="Main actions">
+          <nav className="staff-bar d-lg-none" aria-label="Main actions">
             {STAFF_BAR.filter((b) => allowed.includes(b.id)).map((b) => (
               <button
                 key={b.id}

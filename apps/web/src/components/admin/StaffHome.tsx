@@ -34,7 +34,7 @@ export default function StaffHome({ role, onNavigate, labelFor }: Props) {
   const other = items(OTHER);
 
   const Tile = ({ id, icon, label }: { id: string; icon: string; label: string }) => (
-    <div className="col-6 col-md-4">
+    <div className="col-6 col-md-4 col-xl-3">
       <button type="button" className="staff-tile w-100" onClick={() => onNavigate(id)}>
         <i className={`bi ${icon}`}></i>
         <span>{label}</span>

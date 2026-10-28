@@ -101,6 +101,7 @@ export default function OrdersPanel() {
   const [orderDetail, setOrderDetail] = useState<AdminOrder | null>(null);
   const [detailSignature, setDetailSignature] = useState<string | null>(null);
   const [detailItems, setDetailItems] = useState<{ productName: string; quantity: number; lineTotalMinor: number }[] | null>(null);
+  const [detailReceived, setDetailReceived] = useState<{ signerName: string; imagePng: string; createdAt: string }[]>([]);
   const [detailHistory, setDetailHistory] = useState<{ fromStatus: string | null; toStatus: string; createdAt: string; reason?: string | null; actorType?: string }[] | null>(null);
   const [detailToken, setDetailToken] = useState<string | null>(null);
   const [counts, setCounts] = useState<Record<string, number>>({});
@@ -584,6 +585,12 @@ export default function OrdersPanel() {
                           setDetailSignature(null);
                           setDetailItems(null);
                           setDetailHistory(null);
+                          setDetailReceived([]);
+                          // Courier hand-over: who received the order, signed on the courier page.
+                          fetch(`${API_URL}/admin/signatures?documentType=ORDER&documentId=${o.id}`, { headers: adminHeaders() })
+                            .then((r) => (r.ok ? r.json() : null))
+                            .then((d) => setDetailReceived(Array.isArray(d?.signatures) ? d.signatures : []))
+                            .catch(() => setDetailReceived([]));
                           setDetailToken(null);
                           fetch(`${API_URL}/admin/orders/${o.id}`, { headers: adminHeaders() })
                             .then((r) => r.json())
@@ -1125,6 +1132,12 @@ export default function OrdersPanel() {
                                                                                                             </ul>
                                                                                                           </div>
                                                                                                         )}
+                                                                                                        {detailReceived.map((sg, i) => (
+                                                                                                          <div key={i} className="border rounded p-2 bg-light mb-2">
+                                                                                                            <div className="fw-semibold small mb-1"><i className="bi bi-pen me-1"></i>Received by {sg.signerName} · {new Date(sg.createdAt).toLocaleString()}</div>
+                                                                                                            <img src={sg.imagePng} alt={`Signature of ${sg.signerName}`} className="border rounded w-100" style={{ maxHeight: 140, objectFit: "contain", background: "#fff" }} />
+                                                                                                          </div>
+                                                                                                        ))}
                                                                                                         {orderDetail.paymentMethod === "credit" && (
                                     <div className="border rounded p-2 bg-light">
                                       <div className="fw-semibold small mb-1"><i className="bi bi-pen me-1"></i>Customer signature</div>

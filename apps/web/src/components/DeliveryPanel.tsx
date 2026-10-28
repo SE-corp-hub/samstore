@@ -2,11 +2,14 @@
 
 // Mobile delivery site (DELIVERY role, U7): all OUT_FOR_DELIVERY orders of the store with
 // tap-to-call + navigate deep links, schedule sorting, logout, and a Recent section.
+// Delivered asks for the cash collected and the receiver's name and signature (kept on the order).
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { API_URL } from "../config";
 import { getAdminToken, clearAdminSession } from "../lib/admin";
+import SignaturePad from "./admin/SignaturePad";
+import { PesoInput } from "./NumberBoxes";
 
 interface DeliveryOrder {
   id: string;
@@ -52,6 +55,10 @@ export default function DeliveryPanel() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [failTarget, setFailTarget] = useState<{ id: string; orderNumber: string } | null>(null);
   const [reason, setReason] = useState("");
+  const [doneTarget, setDoneTarget] = useState<DeliveryOrder | null>(null);
+  const [cash, setCash] = useState("");
+  const [receivedBy, setReceivedBy] = useState("");
+  const [signature, setSignature] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -91,12 +98,15 @@ export default function DeliveryPanel() {
       const res = await fetch(`${API_URL}/delivery/orders/${id}/status`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${getAdminToken()}` },
-        body: JSON.stringify({ toStatus, reason: toStatus === "FAILED_DELIVERY" ? (reason || "Delivery failed") : undefined }),
+        body: JSON.stringify(toStatus === "FAILED_DELIVERY"
+          ? { toStatus, reason: reason || "Delivery failed" }
+          : { toStatus, cashCollectedMinor: Math.round(Number(cash || 0) * 100), receivedBy: receivedBy.trim() || undefined, signature: signature ?? undefined }),
       });
       const d = await res.json();
-      if (!res.ok) { setError(d?.message ?? "Update failed"); return; }
+      if (!res.ok) { setError(d?.message ?? d?.errors?.[0] ?? "Update failed"); return; }
       setFailTarget(null);
       setReason("");
+      setDoneTarget(null);
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Update failed");
@@ -174,7 +184,8 @@ export default function DeliveryPanel() {
                     )}
                   </div>
                   <div className="d-flex gap-2">
-                    <button className="btn btn-success btn-sm flex-fill" disabled={busyId === o.id} onClick={() => mark(o.id, "DELIVERED")}>
+                    <button className="btn btn-success btn-sm flex-fill" disabled={busyId === o.id}
+                      onClick={() => { setDoneTarget(o); setCash(o.paymentMethod === "cod" ? (o.totalMinor / 100).toFixed(2) : "0"); setReceivedBy(o.customerName ?? ""); setSignature(null); }}>
                       <i className="bi bi-check-lg me-1"></i>Delivered
                     </button>
                     <button className="btn btn-outline-danger btn-sm flex-fill" disabled={busyId === o.id} onClick={() => setFailTarget({ id: o.id, orderNumber: o.orderNumber })}>
@@ -204,6 +215,39 @@ export default function DeliveryPanel() {
             ))}
           </ul>
         </div>
+      )}
+
+      {/* Delivered: cash collected + who received it */}
+      {doneTarget && (
+        <>
+          <div className="modal fade show d-block" tabIndex={-1}>
+            <div className="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+              <div className="modal-content">
+                <div className="modal-header">
+                  <h5 className="modal-title">Delivered — {doneTarget.orderNumber}</h5>
+                  <button type="button" className="btn-close" aria-label="Close" onClick={() => setDoneTarget(null)}></button>
+                </div>
+                <div className="modal-body">
+                  <label className="form-label" htmlFor="dl-cash">Cash collected (₱)</label>
+                  <PesoInput id="dl-cash" className="form-control form-control-lg" value={cash} onChange={setCash} />
+                  <div className="small text-muted mb-3">Order total {toPesos(doneTarget.totalMinor)} · {doneTarget.paymentMethod === "cod" ? "cash on delivery" : `${doneTarget.paymentMethod}, already paid: enter 0`}</div>
+                  <label className="form-label" htmlFor="dl-name">Received by</label>
+                  <input id="dl-name" className="form-control mb-2" value={receivedBy} onChange={(e) => setReceivedBy(e.target.value)} placeholder="Name of the person who took the order" />
+                  <div className="small mb-1">Signature of the person who received it</div>
+                  <SignaturePad onSignature={setSignature} />
+                  {signature && receivedBy.trim().length < 2 && <div className="small text-danger mt-1">Enter the name of the person who signed.</div>}
+                </div>
+                <div className="modal-footer">
+                  <button className="btn btn-outline-secondary" onClick={() => setDoneTarget(null)}>Cancel</button>
+                  <button className="btn btn-success" disabled={busyId === doneTarget.id || cash === "" || (!!signature && receivedBy.trim().length < 2)} onClick={() => mark(doneTarget.id, "DELIVERED")}>
+                    <i className="bi bi-check-lg me-1"></i>Mark delivered
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div className="modal-backdrop fade show"></div>
+        </>
       )}
 
       {/* Failed delivery reason modal */}

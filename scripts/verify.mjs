@@ -51,6 +51,7 @@ const TEST_FILES = [
   "apps/api/src/domain/weight.test.ts",
   "apps/api/src/domain/stock-location.test.ts",
   "apps/api/src/domain/people.test.ts",
+  "apps/api/src/domain/delivery-proof.test.ts",
   "apps/api/src/domain/transfer-flow.test.ts",
   "apps/api/src/domain/resack.test.ts",
   "apps/api/src/domain/selling.test.ts",

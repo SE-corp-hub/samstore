@@ -28,6 +28,7 @@ import { printSlip } from "../../lib/slip-print";
 import { getPrinterSettings } from "../../lib/printer-settings";
 import { creditStatusWords } from "../../lib/credit-status";
 import { peso, kg } from "../../lib/number-format";
+import { useMediaQuery, WIDE } from "../../lib/use-media-query";
 
 interface Loc { id: string; name: string; code: string | null; type: string }
 interface Item {
@@ -191,6 +192,7 @@ export default function BentaPanel() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step, last]);
 
+  const wide = useMediaQuery(WIDE);
   const byId = useMemo(() => new Map(items.map((i) => [i.id, i])), [items]);
   const here = locations.find((l) => l.id === locationId);
   const code = (id: string) => { const l = locations.find((x) => x.id === id); return l?.code ?? l?.name ?? "?"; };
@@ -344,298 +346,315 @@ export default function BentaPanel() {
     );
   }
 
-  return (
-    <div style={{ fontSize: 18 }}>
-      <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
-        <h1 className="h4 mb-0">POS</h1>
-        <button type="button" className="btn btn-outline-dark" onClick={() => setShowHeld(!showHeld)}>
-          <i className="bi bi-pause-circle me-1"></i>Held{holds.filter((h) => h.locationId === locationId).length > 0 ? ` (${holds.filter((h) => h.locationId === locationId).length})` : ""}
-        </button>
+  // Tablet held sideways (or a PC): products on the left, the sale on the right, both always in view.
+  const pickList = (
+    <>
+      {customers.length > 0 && (
+        <div className="mb-2">
+          <select className="form-select" aria-label="Customer with special prices" disabled={cart.length > 0} value={priceCustomer} onChange={(e) => void pickPriceCustomer(e.target.value)}>
+            <option value="">Customer: walk-in (store prices)</option>
+            {customers.map((c) => <option key={c.id} value={c.id}>{c.name ?? c.phone ?? "—"}</option>)}
+          </select>
+          {priceCustomer && <div className="small text-muted mt-1">{specialCount > 0 ? `${specialCount} special ${specialCount === 1 ? "price" : "prices"} for this customer.` : "No special prices for this customer — store prices apply."}</div>}
+        </div>
+      )}
+      <input className="form-control form-control-lg mb-3" placeholder="Search (name or first letters)" aria-label="Search" value={search} onChange={(e) => setSearch(e.target.value)} />
+      <div className="row g-2 mb-3">
+        {shown.map((i) => (
+          <div key={i.id} className="col-6 col-md-4 col-lg-3">
+            <button type="button" className="btn btn-outline-dark w-100 h-100 text-start p-2" style={{ minHeight: 120 }}
+              onClick={() => { setEditing({ productId: i.id, mode: i.loose ? "KILO" : "PIECE", value: "", sourceLocationId: null }); setEditIdx(null); }}>
+              <div className="fw-semibold">{i.name}{i.forReview && <span className="badge text-bg-warning ms-1">To review</span>}</div>
+              <div style={{ fontSize: 22, fontVariantNumeric: "tabular-nums" }}>{peso(i.priceMinor)}<span className="fs-6 text-muted">{i.loose ? "/kg" : ""}</span></div>
+              <div className="small" style={{ fontVariantNumeric: "tabular-nums" }}>
+                {locations.map((l) => {
+                  const n = i.stock[l.id] ?? 0;
+                  return <span key={l.id} className={`me-2 ${n === 0 ? "text-danger" : ""}`}>{l.code ?? l.name} {i.loose ? kg(n) : n}</span>;
+                })}
+              </div>
+            </button>
+          </div>
+        ))}
       </div>
-      <StoreBar label="Selling at" locations={locations} value={locationId} homeLocationId={homeLocationId} locked={cart.length > 0}
-        lockedNote="To switch store, hold or clear this sale first." onPick={(id) => { reset(); void loadCatalog(id); }} />
-      {showHeld && (
-        <div className="card mb-3"><div className="card-body">
-          <h2 className="h6">Held sales at {here?.name}</h2>
-          {holds.filter((h) => h.locationId === locationId).length === 0 && <div className="text-muted">Nothing on hold.</div>}
-          <ul className="list-unstyled mb-0">
-            {holds.filter((h) => h.locationId === locationId).map((h) => (
-              <li key={h.id} className="d-flex justify-content-between align-items-center py-1 border-bottom">
-                <span>{h.label}<span className="small text-muted"> · {new Date(h.at).toLocaleTimeString("en-PH", { hour: "numeric", minute: "2-digit" })}</span></span>
-                <span className="text-nowrap">
-                  <button type="button" className="btn btn-success btn-sm me-1" onClick={() => {
-                    setCart([...cart, ...h.cart]);
-                    const rest = holds.filter((x) => x.id !== h.id); setHolds(rest); saveHolds(rest); setShowHeld(false);
-                  }}>Resume</button>
-                  <button type="button" className="btn btn-outline-danger btn-sm" onClick={() => { const rest = holds.filter((x) => x.id !== h.id); setHolds(rest); saveHolds(rest); }}>Delete</button>
+      <button type="button" className="btn btn-outline-secondary mb-3" onClick={() => setNewItem(true)}>+ New item (not on the list yet)</button>
+    </>
+  );
+  const cartCard = cart.length > 0 && (
+    <div className={`card border-success${wide ? "" : " position-sticky bottom-0 sticky-above-bar"}`}>
+      <div className="card-body">
+        <ul className="list-unstyled mb-2" style={{ fontVariantNumeric: "tabular-nums" }}>
+          {cart.map((l, idx) => {
+            const it = byId.get(l.productId);
+            const c = computed[idx]!;
+            return (
+              <li key={idx} className="d-flex justify-content-between align-items-center py-1 border-bottom">
+                <span>
+                  {l.mode === "PIECE" ? `${l.value} × ` : `${kg(c.grams ?? 0)} `}{it?.name}
+                  {l.mode === "PESO" && <span className="text-muted"> (₱{l.value})</span>}
+                  {l.sourceLocationId && <span className="badge text-bg-info ms-1">take from {code(l.sourceLocationId)}</span>}
+                  {l.price !== undefined && <span className="badge text-bg-warning ms-1">price {peso(l.price)}{it?.loose ? "/kg" : ""}</span>}
+                </span>
+                <span className="text-nowrap">{peso(c.totalMinor)}
+                  <button type="button" className="btn btn-link p-0 ms-2" aria-label="Edit" onClick={() => { setEditing(l); setEditIdx(idx); }}>Edit</button>
+                  <button type="button" className="btn btn-link text-danger p-0 ms-2" aria-label="Remove" onClick={() => setCart(cart.filter((_, j) => j !== idx))}>×</button>
                 </span>
               </li>
-            ))}
-          </ul>
-        </div></div>
-      )}
-      {error && <div className="alert alert-danger py-2" role="alert">{error}</div>}
-
-      {step === "pick" && !editing && !newItem && (
-        <>
-          {customers.length > 0 && (
-            <div className="mb-2">
-              <select className="form-select" aria-label="Customer with special prices" disabled={cart.length > 0} value={priceCustomer} onChange={(e) => void pickPriceCustomer(e.target.value)}>
-                <option value="">Customer: walk-in (store prices)</option>
-                {customers.map((c) => <option key={c.id} value={c.id}>{c.name ?? c.phone ?? "—"}</option>)}
-              </select>
-              {priceCustomer && <div className="small text-muted mt-1">{specialCount > 0 ? `${specialCount} special ${specialCount === 1 ? "price" : "prices"} for this customer.` : "No special prices for this customer — store prices apply."}</div>}
+            );
+          })}
+        </ul>
+        <div className="d-flex justify-content-between align-items-center">
+          <span style={{ fontSize: 28, fontVariantNumeric: "tabular-nums" }} className="fw-bold">{peso(total)}</span>
+          <span className="d-flex gap-2">
+            <button type="button" className="btn btn-outline-dark btn-lg" onClick={() => {
+              const first = byId.get(cart[0]!.productId)?.name ?? "Sale";
+              const h: Held = { id: `${Date.now()}`, label: `${first}${cart.length > 1 ? ` +${cart.length - 1}` : ""} · ${peso(total)}`, at: Date.now(), locationId, cart };
+              const all = [...holds, h]; setHolds(all); saveHolds(all);
+              keyRef.current = null; setCart([]); setError(null); toast("Sale put on hold");
+            }}>Hold</button>
+            <button type="button" className="btn btn-success btn-lg" onClick={() => setStep("pay")}>Pay</button>
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+  const quickCount = checking && (
+    <QuickCount productId={checking.productId} name={checking.name} loose={!!byId.get(checking.productId)?.loose} locationId={locationId}
+      onCancel={() => setChecking(null)} onDone={async () => { setChecking(null); await loadCatalog(locationId); }} />
+  );
+  const editCard = editing && (() => {
+    const it = byId.get(editing.productId);
+    if (!it) return null;
+    const c = lineOf(it, editing);
+    const from = editing.sourceLocationId ?? locationId;
+    const avail = it.stock[from] ?? 0;
+    const over = it.tracked && c.units > avail;
+    const short = over && from !== locationId; // the counter itself may sell below zero
+    const belowZero = over && from === locationId;
+    const changed = editing.price !== undefined && editing.price !== it.priceMinor;
+    const reasonGiven = !changed || reasonOk(editing.reason);
+    return (
+      <div className="card border-success" style={{ maxWidth: 520 }}>
+        <div className="card-body">
+          <h2 className="h5">{it.name} · {peso(it.priceMinor)}{it.loose ? "/kg" : ""}</h2>
+          {it.loose && (
+            <div className="btn-group w-100 mb-3" role="group" aria-label="Kilos or pesos?">
+              <button type="button" className={`btn btn-lg ${editing.mode === "KILO" ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setEditing({ ...editing, mode: "KILO", value: "" })}>Kilos</button>
+              <button type="button" className={`btn btn-lg ${editing.mode === "PESO" ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setEditing({ ...editing, mode: "PESO", value: "" })}>Pesos</button>
             </div>
           )}
-          <input className="form-control form-control-lg mb-3" placeholder="Search (name or first letters)" aria-label="Search" value={search} onChange={(e) => setSearch(e.target.value)} />
-          <div className="row g-2 mb-3">
-            {shown.map((i) => (
-              <div key={i.id} className="col-6 col-md-4 col-lg-3">
-                <button type="button" className="btn btn-outline-dark w-100 h-100 text-start p-2" style={{ minHeight: 120 }}
-                  onClick={() => setEditing({ productId: i.id, mode: i.loose ? "KILO" : "PIECE", value: "", sourceLocationId: null })}>
-                  <div className="fw-semibold">{i.name}{i.forReview && <span className="badge text-bg-warning ms-1">To review</span>}</div>
-                  <div style={{ fontSize: 22, fontVariantNumeric: "tabular-nums" }}>{peso(i.priceMinor)}<span className="fs-6 text-muted">{i.loose ? "/kg" : ""}</span></div>
-                  <div className="small" style={{ fontVariantNumeric: "tabular-nums" }}>
-                    {locations.map((l) => {
-                      const n = i.stock[l.id] ?? 0;
-                      return <span key={l.id} className={`me-2 ${n === 0 ? "text-danger" : ""}`}>{l.code ?? l.name} {i.loose ? kg(n) : n}</span>;
-                    })}
-                  </div>
-                </button>
-              </div>
-            ))}
+          <NumPad value={editing.value} onChange={(v) => setEditing({ ...editing, value: v })} decimals={editing.mode === "KILO" ? 3 : editing.mode === "PESO" ? 2 : 0}
+            label={editing.mode === "PESO" ? "Amount in pesos" : editing.mode === "KILO" ? "How many kilos" : "How many"} unit={editing.mode === "PESO" ? "₱" : editing.mode === "KILO" ? "kg" : it.gramsPerUnit ? "sacks" : "pieces"} />
+          <div className="mt-2" style={{ fontVariantNumeric: "tabular-nums" }}>
+            {editing.mode === "PESO" && c.grams ? <div className="fs-5">= <strong>{kg(c.grams)}</strong> · pay <strong>{peso(c.totalMinor)}</strong></div> : null}
+            {editing.mode === "KILO" && c.totalMinor > 0 ? <div className="fs-5">= <strong>{peso(c.totalMinor)}</strong></div> : null}
+            {editing.mode === "PIECE" && c.totalMinor > 0 ? <div className="fs-5">= <strong>{peso(c.totalMinor)}</strong></div> : null}
           </div>
-          <button type="button" className="btn btn-outline-secondary mb-3" onClick={() => setNewItem(true)}>+ New item (not on the list yet)</button>
-
-          {cart.length > 0 && (
-            <div className="card border-success position-sticky bottom-0 sticky-above-bar">
-              <div className="card-body">
-                <ul className="list-unstyled mb-2" style={{ fontVariantNumeric: "tabular-nums" }}>
-                  {cart.map((l, idx) => {
-                    const it = byId.get(l.productId);
-                    const c = computed[idx]!;
-                    return (
-                      <li key={idx} className="d-flex justify-content-between align-items-center py-1 border-bottom">
-                        <span>
-                          {l.mode === "PIECE" ? `${l.value} × ` : `${kg(c.grams ?? 0)} `}{it?.name}
-                          {l.mode === "PESO" && <span className="text-muted"> (₱{l.value})</span>}
-                          {l.sourceLocationId && <span className="badge text-bg-info ms-1">take from {code(l.sourceLocationId)}</span>}
-                          {l.price !== undefined && <span className="badge text-bg-warning ms-1">price {peso(l.price)}{it?.loose ? "/kg" : ""}</span>}
-                        </span>
-                        <span className="text-nowrap">{peso(c.totalMinor)}
-                          <button type="button" className="btn btn-link p-0 ms-2" aria-label="Edit" onClick={() => { setEditing(l); setEditIdx(idx); }}>Edit</button>
-                          <button type="button" className="btn btn-link text-danger p-0 ms-2" aria-label="Remove" onClick={() => setCart(cart.filter((_, j) => j !== idx))}>×</button>
-                        </span>
-                      </li>
-                    );
-                  })}
-                </ul>
-                <div className="d-flex justify-content-between align-items-center">
-                  <span style={{ fontSize: 28, fontVariantNumeric: "tabular-nums" }} className="fw-bold">{peso(total)}</span>
-                  <span className="d-flex gap-2">
-                    <button type="button" className="btn btn-outline-dark btn-lg" onClick={() => {
-                      const first = byId.get(cart[0]!.productId)?.name ?? "Sale";
-                      const h: Held = { id: `${Date.now()}`, label: `${first}${cart.length > 1 ? ` +${cart.length - 1}` : ""} · ${peso(total)}`, at: Date.now(), locationId, cart };
-                      const all = [...holds, h]; setHolds(all); saveHolds(all);
-                      keyRef.current = null; setCart([]); setError(null); toast("Sale put on hold");
-                    }}>Hold</button>
-                    <button type="button" className="btn btn-success btn-lg" onClick={() => setStep("pay")}>Pay</button>
-                  </span>
-                </div>
-              </div>
+          <div className="mt-3">
+            <label className="form-label mb-1" htmlFor="bt-price">Price {it.loose ? "per kilo" : "each"} <span className="text-muted small">(list price {peso(it.priceMinor)} — change it only if needed)</span></label>
+            <PesoInput id="bt-price" className="form-control form-control-lg" value={editing.price !== undefined ? String(editing.price / 100) : ""} placeholder={(it.priceMinor / 100).toFixed(2)}
+              onChange={(v) => { const m = v === "" ? undefined : toMinor(v); setEditing({ ...editing, price: m === undefined || m === it.priceMinor ? undefined : m, reason: m === undefined || m === it.priceMinor ? undefined : editing.reason }); }} />
+            {changed && (
+              <PriceReason className="form-select mt-2" value={editing.reason ?? ""} onChange={(v) => setEditing({ ...editing, reason: v })} />
+            )}
+          </div>
+          {it.tracked && (
+            <div className="mt-3">
+              <LocationPicker id="bt-from" label="Taken from (where the item comes from)" locations={locations} value={from}
+                labelFor={(l) => `${l.name}${l.id === locationId ? " (here)" : ""} — ${it.loose ? kg(it.stock[l.id] ?? 0) : `${it.stock[l.id] ?? 0}`}`}
+                onAdded={(loc) => setLocations([...locations, { id: loc.id, name: loc.name, code: null, type: "STORE" }])}
+                onChange={(id) => setEditing({ ...editing, sourceLocationId: id === locationId ? null : id })} />
             </div>
           )}
-        </>
-      )}
+          {belowZero && (
+            <div className="alert alert-warning mt-2 mb-0">
+              <strong>Count is {it.loose ? kg(avail) : avail}</strong> — you can still sell. The count goes below zero until the next count.
+              <button type="button" className="btn btn-dark btn-sm ms-2" onClick={() => setChecking({ productId: it.id, name: it.name })}>Any left? Count</button>
+            </div>
+          )}
+          {short && (
+            <div className="alert alert-danger mt-2 mb-0">
+              <strong>Short</strong> — only {it.loose ? kg(avail) : avail} at {code(from)}. Lower the amount, or take from another location.
+              {from === locationId && <button type="button" className="btn btn-dark btn-sm ms-2" onClick={() => setChecking({ productId: it.id, name: it.name })}>Any left? Count</button>}
+            </div>
+          )}
+          <div className="d-flex justify-content-between mt-3 pos-actions">
+            <button type="button" className="btn btn-outline-secondary btn-lg" onClick={() => { setEditing(null); setEditIdx(null); }}>Back</button>
+            <button type="button" className="btn btn-success btn-lg" disabled={c.totalMinor <= 0 || short || !reasonGiven || (editing.mode === "PIECE" && !Number.isInteger(c.units))}
+              onClick={() => { setCart(editIdx === null ? [...cart, editing] : cart.map((x, j) => (j === editIdx ? editing : x))); setEditing(null); setEditIdx(null); setSearch(""); }}>{editIdx === null ? "Add" : "Save"}</button>
+          </div>
+        </div>
+      </div>
+    );
+  })();
 
-      {step === "pick" && checking && (
-        <QuickCount productId={checking.productId} name={checking.name} loose={!!byId.get(checking.productId)?.loose} locationId={locationId}
-          onCancel={() => setChecking(null)} onDone={async () => { setChecking(null); await loadCatalog(locationId); }} />
-      )}
+  const sideBySide = wide && step === "pick" && !newItem;
+  return (
+    <div style={{ fontSize: 18 }} className={sideBySide ? "row g-3 align-items-start" : undefined}>
+      <div className={sideBySide ? "col-lg-7 col-xl-8" : undefined}>
+        <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+          <h1 className="h4 mb-0">POS</h1>
+          <button type="button" className="btn btn-outline-dark" onClick={() => setShowHeld(!showHeld)}>
+            <i className="bi bi-pause-circle me-1"></i>Held{holds.filter((h) => h.locationId === locationId).length > 0 ? ` (${holds.filter((h) => h.locationId === locationId).length})` : ""}
+          </button>
+        </div>
+        <StoreBar label="Selling at" locations={locations} value={locationId} homeLocationId={homeLocationId} locked={cart.length > 0}
+          lockedNote="To switch store, hold or clear this sale first." onPick={(id) => { reset(); void loadCatalog(id); }} />
+        {showHeld && (
+          <div className="card mb-3"><div className="card-body">
+            <h2 className="h6">Held sales at {here?.name}</h2>
+            {holds.filter((h) => h.locationId === locationId).length === 0 && <div className="text-muted">Nothing on hold.</div>}
+            <ul className="list-unstyled mb-0">
+              {holds.filter((h) => h.locationId === locationId).map((h) => (
+                <li key={h.id} className="d-flex justify-content-between align-items-center py-1 border-bottom">
+                  <span>{h.label}<span className="small text-muted"> · {new Date(h.at).toLocaleTimeString("en-PH", { hour: "numeric", minute: "2-digit" })}</span></span>
+                  <span className="text-nowrap">
+                    <button type="button" className="btn btn-success btn-sm me-1" onClick={() => {
+                      setCart([...cart, ...h.cart]);
+                      const rest = holds.filter((x) => x.id !== h.id); setHolds(rest); saveHolds(rest); setShowHeld(false);
+                    }}>Resume</button>
+                    <button type="button" className="btn btn-outline-danger btn-sm" onClick={() => { const rest = holds.filter((x) => x.id !== h.id); setHolds(rest); saveHolds(rest); }}>Delete</button>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div></div>
+        )}
+        {error && <div className="alert alert-danger py-2" role="alert">{error}</div>}
 
-      {step === "pick" && editing && !checking && (() => {
-        const it = byId.get(editing.productId);
-        if (!it) return null;
-        const c = lineOf(it, editing);
-        const from = editing.sourceLocationId ?? locationId;
-        const avail = it.stock[from] ?? 0;
-        const over = it.tracked && c.units > avail;
-        const short = over && from !== locationId; // the counter itself may sell below zero
-        const belowZero = over && from === locationId;
-        const changed = editing.price !== undefined && editing.price !== it.priceMinor;
-        const reasonGiven = !changed || reasonOk(editing.reason);
-        return (
+        {sideBySide && pickList}
+        {step === "pick" && !newItem && !sideBySide && (
+          <>
+            {!editing && <>{pickList}{cartCard}</>}
+            {quickCount}
+            {!checking && editCard}
+          </>
+        )}
+
+        {step === "pick" && newItem && <NewItemForm locationId={locationId} onCancel={() => setNewItem(false)} onDone={async () => { setNewItem(false); await loadCatalog(locationId); }} />}
+
+        {step === "pay" && (
           <div className="card border-success" style={{ maxWidth: 520 }}>
             <div className="card-body">
-              <h2 className="h5">{it.name} · {peso(it.priceMinor)}{it.loose ? "/kg" : ""}</h2>
-              {it.loose && (
-                <div className="btn-group w-100 mb-3" role="group" aria-label="Kilos or pesos?">
-                  <button type="button" className={`btn btn-lg ${editing.mode === "KILO" ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setEditing({ ...editing, mode: "KILO", value: "" })}>Kilos</button>
-                  <button type="button" className={`btn btn-lg ${editing.mode === "PESO" ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setEditing({ ...editing, mode: "PESO", value: "" })}>Pesos</button>
-                </div>
-              )}
-              <NumPad value={editing.value} onChange={(v) => setEditing({ ...editing, value: v })} decimals={editing.mode === "KILO" ? 3 : editing.mode === "PESO" ? 2 : 0}
-                label={editing.mode === "PESO" ? "Amount in pesos" : editing.mode === "KILO" ? "How many kilos" : "How many"} unit={editing.mode === "PESO" ? "₱" : editing.mode === "KILO" ? "kg" : it.gramsPerUnit ? "sacks" : "pieces"} />
-              <div className="mt-2" style={{ fontVariantNumeric: "tabular-nums" }}>
-                {editing.mode === "PESO" && c.grams ? <div className="fs-5">= <strong>{kg(c.grams)}</strong> · pay <strong>{peso(c.totalMinor)}</strong></div> : null}
-                {editing.mode === "KILO" && c.totalMinor > 0 ? <div className="fs-5">= <strong>{peso(c.totalMinor)}</strong></div> : null}
-                {editing.mode === "PIECE" && c.totalMinor > 0 ? <div className="fs-5">= <strong>{peso(c.totalMinor)}</strong></div> : null}
+              <div className="small text-muted">Step 2 of 2</div>
+              <div className="d-flex justify-content-between align-items-baseline mb-3">
+                <h2 className="h5 mb-0">Payment</h2>
+                <span className="fw-bold" style={{ fontSize: 28, fontVariantNumeric: "tabular-nums" }}>{peso(total)}</span>
               </div>
-              <div className="mt-3">
-                <label className="form-label mb-1" htmlFor="bt-price">Price {it.loose ? "per kilo" : "each"} <span className="text-muted small">(list price {peso(it.priceMinor)} — change it only if needed)</span></label>
-                <PesoInput id="bt-price" className="form-control form-control-lg" value={editing.price !== undefined ? String(editing.price / 100) : ""} placeholder={(it.priceMinor / 100).toFixed(2)}
-                  onChange={(v) => { const m = v === "" ? undefined : toMinor(v); setEditing({ ...editing, price: m === undefined || m === it.priceMinor ? undefined : m, reason: m === undefined || m === it.priceMinor ? undefined : editing.reason }); }} />
-                {changed && (
-                  <PriceReason className="form-select mt-2" value={editing.reason ?? ""} onChange={(v) => setEditing({ ...editing, reason: v })} />
-                )}
+              <div className="d-grid gap-2 mb-3" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
+                {(["cash", "gcash", "maya", "bank", "split", "utang"] as Pay[]).map((p) => (
+                  <button key={p} type="button" className={`btn btn-lg ${pay === p ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setPay(p)}>
+                    {PAY_LABEL[p]}
+                  </button>
+                ))}
               </div>
-              {it.tracked && (
-                <div className="mt-3">
-                  <LocationPicker id="bt-from" label="Taken from (where the item comes from)" locations={locations} value={from}
-                    labelFor={(l) => `${l.name}${l.id === locationId ? " (here)" : ""} — ${it.loose ? kg(it.stock[l.id] ?? 0) : `${it.stock[l.id] ?? 0}`}`}
-                    onAdded={(loc) => setLocations([...locations, { id: loc.id, name: loc.name, code: null, type: "STORE" }])}
-                    onChange={(id) => setEditing({ ...editing, sourceLocationId: id === locationId ? null : id })} />
-                </div>
+
+              {pay === "cash" && drawerOpen === false && shiftRequired && (
+                <OpenDrawer onOpened={() => { setDrawerOpen(true); setError(null); }} />
               )}
-              {belowZero && (
-                <div className="alert alert-warning mt-2 mb-0">
-                  <strong>Count is {it.loose ? kg(avail) : avail}</strong> — you can still sell. The count goes below zero until the next count.
-                  <button type="button" className="btn btn-dark btn-sm ms-2" onClick={() => setChecking({ productId: it.id, name: it.name })}>Any left? Count</button>
-                </div>
+              {pay === "cash" && (
+                <>
+                  <NumPad value={tendered} onChange={setTendered} decimals={2} label="Cash received" unit="₱" />
+                  {tendered && <div className={`mt-2 fs-4 ${change < 0 ? "text-danger" : ""}`} style={{ fontVariantNumeric: "tabular-nums" }}>{change < 0 ? `Short ${peso(-change)}` : `Change ${peso(change)}`}</div>}
+                </>
               )}
-              {short && (
-                <div className="alert alert-danger mt-2 mb-0">
-                  <strong>Short</strong> — only {it.loose ? kg(avail) : avail} at {code(from)}. Lower the amount, or take from another location.
-                  {from === locationId && <button type="button" className="btn btn-dark btn-sm ms-2" onClick={() => setChecking({ productId: it.id, name: it.name })}>Any left? Count</button>}
-                </div>
+              {pay === "split" && (
+                <>
+                  <div className="small text-muted mb-2">Part of the sale in each way. The parts must add up to {peso(total)}.</div>
+                  {parts.map((x, i) => (
+                    <div key={i} className="row g-2 mb-2 align-items-end">
+                      <div className="col-5">
+                        <select className="form-select form-select-lg" aria-label="Way to pay" value={x.method} onChange={(e) => setParts(parts.map((y, j) => (j === i ? { ...y, method: e.target.value as SplitPart["method"] } : y)))}>
+                          <option value="cash">Cash</option><option value="gcash">GCash</option><option value="maya">Maya</option><option value="bank">Bank transfer</option>
+                        </select>
+                      </div>
+                      <div className="col-7">
+                        <input className="form-control form-control-lg" inputMode="decimal" placeholder="₱ amount" aria-label="Amount" value={x.amount} onChange={(e) => setParts(parts.map((y, j) => (j === i ? { ...y, amount: e.target.value.replace(/[^\d.]/g, "").slice(0, 10) } : y)))} />
+                      </div>
+                      {x.method !== "cash" && (
+                        <div className="col-12">
+                          <input className="form-control" inputMode="numeric" placeholder={`${x.method === "gcash" ? "GCash" : x.method === "maya" ? "Maya" : "Bank"} reference no.`} aria-label="Reference number" value={x.reference} onChange={(e) => setParts(parts.map((y, j) => (j === i ? { ...y, reference: e.target.value.replace(/\s/g, "").slice(0, 40) } : y)))} />
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                  <div className="d-flex gap-2 align-items-center">
+                    {parts.length < 4 && <button type="button" className="btn btn-outline-secondary btn-sm" onClick={() => setParts([...parts, { method: "cash", amount: "", reference: "" }])}>+ Add a part</button>}
+                    {parts.length > 2 && <button type="button" className="btn btn-outline-secondary btn-sm" onClick={() => setParts(parts.slice(0, -1))}>Remove last</button>}
+                    {(() => { const left = total - parts.reduce((s, x) => s + toMinor(x.amount || "0"), 0); return <span className={`ms-auto fw-semibold ${left === 0 ? "text-success" : "text-danger"}`}>{left === 0 ? "Fully paid" : left > 0 ? `${peso(left)} left` : `${peso(-left)} too much`}</span>; })()}
+                  </div>
+                </>
               )}
-              <div className="d-flex justify-content-between mt-3">
-                <button type="button" className="btn btn-outline-secondary btn-lg" onClick={() => { setEditing(null); setEditIdx(null); }}>Back</button>
-                <button type="button" className="btn btn-success btn-lg" disabled={c.totalMinor <= 0 || short || !reasonGiven || (editing.mode === "PIECE" && !Number.isInteger(c.units))}
-                  onClick={() => { setCart(editIdx === null ? [...cart, editing] : cart.map((x, j) => (j === editIdx ? editing : x))); setEditing(null); setEditIdx(null); setSearch(""); }}>{editIdx === null ? "Add" : "Save"}</button>
+              {needsRef(pay as Pay) && (
+                <>
+                  <label className="form-label" htmlFor="bt-ref">{pay === "maya" ? "Maya" : pay === "bank" ? "Bank transfer" : "GCash"} reference no.</label>
+                  <input id="bt-ref" className="form-control form-control-lg" inputMode="numeric" value={reference} onChange={(e) => setReference(e.target.value.replace(/\s/g, "").slice(0, 40))} />
+                </>
+              )}
+              {pay === "utang" && (
+                <>
+                  <label className="form-label" htmlFor="bt-cust">Customer</label>
+                  <select id="bt-cust" className="form-select form-select-lg mb-2" disabled={!!priceCustomer} value={customerId} onChange={(e) => { setCustomerId(e.target.value); setCustomerSig(null); }}>
+                    <option value="">Choose…</option>
+                    {customers.filter((c) => c.creditApproved).map((c) => <option key={c.id} value={c.id}>{c.name ?? c.phone ?? "—"} — owes {peso(c.creditBalanceMinor)} · {creditStatusWords(c.creditStatus).label}</option>)}
+                  </select>
+                  {!newCust && <button type="button" className="btn btn-outline-success mb-2" onClick={() => setNewCust(true)}>+ New customer</button>}
+                  {newCust && <QuickCustomer onCancel={() => setNewCust(false)} onAdded={async (id) => {
+                    const res = await fetch(`${API_URL}/admin/customers`, { headers: adminHeaders() });
+                    if (res.ok) setCustomers(((await res.json()).customers ?? []) as Customer[]);
+                    setCustomerId(id); setCustomerSig(null); setNewCust(false);
+                  }} />}
+                  {customer && (
+                    <>
+                      <p className="mb-2">This sale on credit: <strong>{peso(total)}</strong>. Total owed after: <strong>{peso(customer.creditBalanceMinor + total)}</strong>.</p>
+                      {customer.creditUnlimited && <p className="small text-muted mb-2">No credit limit.</p>}
+                      {overLimit && (
+                        <div className="alert alert-danger py-2">Over the credit limit ({peso(customer.creditLimitMinor)}). The customer must pay some of the balance first — use the Credit screen — then can buy on credit again.</div>
+                      )}
+                      <div className="fw-semibold">Signature of {customer.name ?? "the customer"}</div>
+                      <SignaturePad key={customerId} onSignature={setCustomerSig} />
+                    </>
+                  )}
+                </>
+              )}
+
+              <div className="form-check form-switch mt-3">
+                <input className="form-check-input" type="checkbox" id="bt-paper" checked={paper} onChange={(e) => setPaper(e.target.checked)} />
+                <label className="form-check-label" htmlFor="bt-paper">From a paper slip (type in the slip)</label>
               </div>
-            </div>
-          </div>
-        );
-      })()}
-
-      {step === "pick" && newItem && <NewItemForm locationId={locationId} onCancel={() => setNewItem(false)} onDone={async () => { setNewItem(false); await loadCatalog(locationId); }} />}
-
-      {step === "pay" && (
-        <div className="card border-success" style={{ maxWidth: 520 }}>
-          <div className="card-body">
-            <div className="small text-muted">Step 2 of 2</div>
-            <div className="d-flex justify-content-between align-items-baseline mb-3">
-              <h2 className="h5 mb-0">Payment</h2>
-              <span className="fw-bold" style={{ fontSize: 28, fontVariantNumeric: "tabular-nums" }}>{peso(total)}</span>
-            </div>
-            <div className="d-grid gap-2 mb-3" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
-              {(["cash", "gcash", "maya", "bank", "split", "utang"] as Pay[]).map((p) => (
-                <button key={p} type="button" className={`btn btn-lg ${pay === p ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setPay(p)}>
-                  {PAY_LABEL[p]}
-                </button>
-              ))}
-            </div>
-
-            {pay === "cash" && drawerOpen === false && shiftRequired && (
-              <OpenDrawer onOpened={() => { setDrawerOpen(true); setError(null); }} />
-            )}
-            {pay === "cash" && (
-              <>
-                <NumPad value={tendered} onChange={setTendered} decimals={2} label="Cash received" unit="₱" />
-                {tendered && <div className={`mt-2 fs-4 ${change < 0 ? "text-danger" : ""}`} style={{ fontVariantNumeric: "tabular-nums" }}>{change < 0 ? `Short ${peso(-change)}` : `Change ${peso(change)}`}</div>}
-              </>
-            )}
-            {pay === "split" && (
-              <>
-                <div className="small text-muted mb-2">Part of the sale in each way. The parts must add up to {peso(total)}.</div>
-                {parts.map((x, i) => (
-                  <div key={i} className="row g-2 mb-2 align-items-end">
+              {paper && (
+                <div className="border rounded p-2 mt-2">
+                  <div className="row g-2">
                     <div className="col-5">
-                      <select className="form-select form-select-lg" aria-label="Way to pay" value={x.method} onChange={(e) => setParts(parts.map((y, j) => (j === i ? { ...y, method: e.target.value as SplitPart["method"] } : y)))}>
-                        <option value="cash">Cash</option><option value="gcash">GCash</option><option value="maya">Maya</option><option value="bank">Bank transfer</option>
-                      </select>
+                      <label className="form-label" htmlFor="bt-slip">Slip number</label>
+                      <input id="bt-slip" className="form-control form-control-lg" value={slipNo} onChange={(e) => setSlipNo(e.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, "").slice(0, 20))} />
                     </div>
                     <div className="col-7">
-                      <input className="form-control form-control-lg" inputMode="decimal" placeholder="₱ amount" aria-label="Amount" value={x.amount} onChange={(e) => setParts(parts.map((y, j) => (j === i ? { ...y, amount: e.target.value.replace(/[^\d.]/g, "").slice(0, 10) } : y)))} />
+                      <label className="form-label" htmlFor="bt-time">Date and time on the slip</label>
+                      <input id="bt-time" type="datetime-local" className="form-control form-control-lg" value={slipTime} onChange={(e) => setSlipTime(e.target.value)} />
                     </div>
-                    {x.method !== "cash" && (
-                      <div className="col-12">
-                        <input className="form-control" inputMode="numeric" placeholder={`${x.method === "gcash" ? "GCash" : x.method === "maya" ? "Maya" : "Bank"} reference no.`} aria-label="Reference number" value={x.reference} onChange={(e) => setParts(parts.map((y, j) => (j === i ? { ...y, reference: e.target.value.replace(/\s/g, "").slice(0, 40) } : y)))} />
-                      </div>
-                    )}
                   </div>
-                ))}
-                <div className="d-flex gap-2 align-items-center">
-                  {parts.length < 4 && <button type="button" className="btn btn-outline-secondary btn-sm" onClick={() => setParts([...parts, { method: "cash", amount: "", reference: "" }])}>+ Add a part</button>}
-                  {parts.length > 2 && <button type="button" className="btn btn-outline-secondary btn-sm" onClick={() => setParts(parts.slice(0, -1))}>Remove last</button>}
-                  {(() => { const left = total - parts.reduce((s, x) => s + toMinor(x.amount || "0"), 0); return <span className={`ms-auto fw-semibold ${left === 0 ? "text-success" : "text-danger"}`}>{left === 0 ? "Fully paid" : left > 0 ? `${peso(left)} left` : `${peso(-left)} too much`}</span>; })()}
+                  <label className="form-label mt-2" htmlFor="bt-photo">Photo of the slip</label>
+                  <input id="bt-photo" type="file" accept="image/*" capture="environment" className="form-control"
+                    onChange={async (e) => { const f = e.target.files?.[0]; if (!f) return; try { setSlipPhoto(await photoToJpeg(f)); } catch (err) { setError(err instanceof Error ? err.message : "Could not read the photo"); } }} />
+                  {slipPhoto && <img src={slipPhoto} alt="Photo of the slip" className="img-fluid mt-2 border" style={{ maxHeight: 160 }} />}
+                  <div className="fw-semibold mt-2">Your signature (staff)</div>
+                  <SignaturePad onSignature={setStaffSig} />
                 </div>
-              </>
-            )}
-            {needsRef(pay as Pay) && (
-              <>
-                <label className="form-label" htmlFor="bt-ref">{pay === "maya" ? "Maya" : pay === "bank" ? "Bank transfer" : "GCash"} reference no.</label>
-                <input id="bt-ref" className="form-control form-control-lg" inputMode="numeric" value={reference} onChange={(e) => setReference(e.target.value.replace(/\s/g, "").slice(0, 40))} />
-              </>
-            )}
-            {pay === "utang" && (
-              <>
-                <label className="form-label" htmlFor="bt-cust">Customer</label>
-                <select id="bt-cust" className="form-select form-select-lg mb-2" disabled={!!priceCustomer} value={customerId} onChange={(e) => { setCustomerId(e.target.value); setCustomerSig(null); }}>
-                  <option value="">Choose…</option>
-                  {customers.filter((c) => c.creditApproved).map((c) => <option key={c.id} value={c.id}>{c.name ?? c.phone ?? "—"} — owes {peso(c.creditBalanceMinor)} · {creditStatusWords(c.creditStatus).label}</option>)}
-                </select>
-                {!newCust && <button type="button" className="btn btn-outline-success mb-2" onClick={() => setNewCust(true)}>+ New customer</button>}
-                {newCust && <QuickCustomer onCancel={() => setNewCust(false)} onAdded={async (id) => {
-                  const res = await fetch(`${API_URL}/admin/customers`, { headers: adminHeaders() });
-                  if (res.ok) setCustomers(((await res.json()).customers ?? []) as Customer[]);
-                  setCustomerId(id); setCustomerSig(null); setNewCust(false);
-                }} />}
-                {customer && (
-                  <>
-                    <p className="mb-2">This sale on credit: <strong>{peso(total)}</strong>. Total owed after: <strong>{peso(customer.creditBalanceMinor + total)}</strong>.</p>
-                    {customer.creditUnlimited && <p className="small text-muted mb-2">No credit limit.</p>}
-                    {overLimit && (
-                      <div className="alert alert-danger py-2">Over the credit limit ({peso(customer.creditLimitMinor)}). The customer must pay some of the balance first — use the Credit screen — then can buy on credit again.</div>
-                    )}
-                    <div className="fw-semibold">Signature of {customer.name ?? "the customer"}</div>
-                    <SignaturePad key={customerId} onSignature={setCustomerSig} />
-                  </>
-                )}
-              </>
-            )}
+              )}
 
-            <div className="form-check form-switch mt-3">
-              <input className="form-check-input" type="checkbox" id="bt-paper" checked={paper} onChange={(e) => setPaper(e.target.checked)} />
-              <label className="form-check-label" htmlFor="bt-paper">From a paper slip (type in the slip)</label>
-            </div>
-            {paper && (
-              <div className="border rounded p-2 mt-2">
-                <div className="row g-2">
-                  <div className="col-5">
-                    <label className="form-label" htmlFor="bt-slip">Slip number</label>
-                    <input id="bt-slip" className="form-control form-control-lg" value={slipNo} onChange={(e) => setSlipNo(e.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, "").slice(0, 20))} />
-                  </div>
-                  <div className="col-7">
-                    <label className="form-label" htmlFor="bt-time">Date and time on the slip</label>
-                    <input id="bt-time" type="datetime-local" className="form-control form-control-lg" value={slipTime} onChange={(e) => setSlipTime(e.target.value)} />
-                  </div>
-                </div>
-                <label className="form-label mt-2" htmlFor="bt-photo">Photo of the slip</label>
-                <input id="bt-photo" type="file" accept="image/*" capture="environment" className="form-control"
-                  onChange={async (e) => { const f = e.target.files?.[0]; if (!f) return; try { setSlipPhoto(await photoToJpeg(f)); } catch (err) { setError(err instanceof Error ? err.message : "Could not read the photo"); } }} />
-                {slipPhoto && <img src={slipPhoto} alt="Photo of the slip" className="img-fluid mt-2 border" style={{ maxHeight: 160 }} />}
-                <div className="fw-semibold mt-2">Your signature (staff)</div>
-                <SignaturePad onSignature={setStaffSig} />
+              <div className="d-flex justify-content-between mt-3">
+                <button type="button" className="btn btn-outline-secondary btn-lg" disabled={busy} onClick={() => setStep("pick")}>Back</button>
+                <button type="button" className="btn btn-success btn-lg" disabled={!canSubmit} onClick={() => void submit()}>{busy ? "Please wait…" : "Done"}</button>
               </div>
-            )}
-
-            <div className="d-flex justify-content-between mt-3">
-              <button type="button" className="btn btn-outline-secondary btn-lg" disabled={busy} onClick={() => setStep("pick")}>Back</button>
-              <button type="button" className="btn btn-success btn-lg" disabled={!canSubmit} onClick={() => void submit()}>{busy ? "Please wait…" : "Done"}</button>
             </div>
           </div>
+        )}
+      </div>
+      {sideBySide && (
+        <div className="col-lg-5 col-xl-4 pos-side">
+          {quickCount || editCard || cartCard || (
+            <div className="card"><div className="card-body text-muted">Tap a product to start a sale.</div></div>
+          )}
         </div>
       )}
     </div>
