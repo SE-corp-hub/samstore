@@ -7,7 +7,7 @@ import { useEffect, useState } from "react";
 import { cleanPrinterSettings, DEFAULT_PRINTER, getPrinterSettings, savePrinterSettings, type PrinterSettings } from "../../lib/printer-settings";
 import { printSlip } from "../../lib/slip-print";
 import { toast } from "../../lib/toast";
-import { bluetoothSupported, connectPrinter, connectedPrinterName, diagnosePrinter, printTestLine } from "../../lib/bt-print";
+import { bluetoothSupported, btErrorText, connectPrinter, connectedPrinterName, diagnosePrinter, printTestLine } from "../../lib/bt-print";
 
 export default function PrinterSettingsCard({ storeName }: { storeName?: string }) {
   const [p, setP] = useState<PrinterSettings>(DEFAULT_PRINTER);
@@ -46,7 +46,7 @@ export default function PrinterSettingsCard({ storeName }: { storeName?: string 
             <div className="d-flex flex-wrap align-items-center gap-2">
               <button type="button" className="btn btn-outline-dark" onClick={async () => {
                 try { const name = await connectPrinter(); setBtName(name); toast(`Connected: ${name}`); set({ bluetooth: true }); }
-                catch (e) { toast(e instanceof Error && e.name === "NotFoundError" ? "No printer was chosen" : `Could not connect: ${e instanceof Error ? e.message : "error"}`, "danger"); }
+                catch (e) { toast(`Could not connect: ${btErrorText(e)}`, "danger"); }
               }}><i className="bi bi-bluetooth me-1"></i>Connect printer</button>
               <span className="small text-muted">{btName ? `Connected: ${btName}` : "Not connected yet. Turn the printer on and press Connect."}</span>
             </div>
@@ -56,7 +56,7 @@ export default function PrinterSettingsCard({ storeName }: { storeName?: string 
               <button type="button" className="btn btn-outline-secondary btn-sm" disabled={checking} onClick={async () => { setChecking(true); setReport(await diagnosePrinter()); setBtName(connectedPrinterName()); setChecking(false); }}>
                 <i className="bi bi-search me-1"></i>{checking ? "Checking…" : "Check my printer"}
               </button>
-              <button type="button" className="btn btn-outline-secondary btn-sm ms-2" onClick={async () => { try { await printTestLine(p.widthMm); toast("Sent to the printer"); } catch (e) { toast(`Did not print: ${e instanceof Error ? e.message : "error"}`, "danger"); } }}>
+              <button type="button" className="btn btn-outline-secondary btn-sm ms-2" onClick={async () => { try { await printTestLine(p.widthMm); toast("Sent to the printer"); } catch (e) { toast(`Did not print: ${btErrorText(e)}`, "danger"); } }}>
                 <i className="bi bi-printer me-1"></i>Print a test line
               </button>
               {report && (
