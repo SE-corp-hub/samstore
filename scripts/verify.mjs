@@ -78,6 +78,7 @@ const TEST_FILES = [
   "apps/web/src/lib/number-format.test.ts",
   "apps/web/src/lib/quick-cash.test.ts",
   "apps/web/src/lib/product-find.test.ts",
+  "apps/web/src/lib/wake-fetch.test.ts",
   "apps/web/src/lib/text-message.test.ts",
   "apps/web/src/lib/slip-print.test.ts",
   "apps/web/src/lib/printer-settings.test.ts",

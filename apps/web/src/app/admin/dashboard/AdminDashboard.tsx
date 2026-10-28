@@ -8,6 +8,7 @@ import {
 } from "../../../lib/admin";
 import dynamic from "next/dynamic";
 import { API_URL } from "../../../config";
+import { wakeFetch } from "../../../lib/wake-fetch";
 import { useLang, LANG_WORDS } from "../../../lib/lang";
 import QueueBadge from "../../../components/admin/QueueBadge";
 import StaffHome from "../../../components/admin/StaffHome";
@@ -104,6 +105,7 @@ export default function AdminDashboard() {
   // Whether we know which stores this account can reach. Without this the shell
   // renders while the answer is still "none", and every tab answers 403.
   const [storesStatus, setStoresStatus] = useState<"loading" | "ready" | "error">("loading");
+  const [waking, setWaking] = useState(false); // the sleeping beta server is starting up
   const userNavigated = useRef(false);
 
   const loadStores = useCallback(async () => {
@@ -111,7 +113,7 @@ export default function AdminDashboard() {
     if (!token) return;
     setStoresStatus("loading");
     try {
-      const res = await fetch(`${API_URL}/admin/stores/mine`, { headers: { Authorization: `Bearer ${token}` } });
+      const res = await wakeFetch(`${API_URL}/admin/stores/mine`, { headers: { Authorization: `Bearer ${token}` } }, setWaking);
       if (handleUnauthorized(res)) return;
       if (!res.ok) {
         setStoresStatus("error");
@@ -205,6 +207,18 @@ export default function AdminDashboard() {
   };
 
   if (!authed) return null;
+
+  if (storesStatus === "loading" && waking) {
+    return (
+      <div className="container d-flex align-items-center justify-content-center" style={{ minHeight: "100vh" }}>
+        <div className="card shadow-sm p-4 text-center" style={{ width: "100%", maxWidth: 460 }} role="status">
+          <div className="spinner-border text-success mx-auto" aria-hidden="true"></div>
+          <h4 className="mt-3 mb-2">Starting the server</h4>
+          <p className="text-muted mb-0">It was asleep. This can take up to a minute — please wait, it opens by itself.</p>
+        </div>
+      </div>
+    );
+  }
 
   // A signed-in account that reaches no store gets an explanation, not a tab shell
   // where every panel answers 403. A platform admin is excluded: an empty

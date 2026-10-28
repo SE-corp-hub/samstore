@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { API_URL } from "../../../config";
+import { wakeFetch } from "../../../lib/wake-fetch";
 import { getAuthItem, setAuthItem } from "../../../lib/admin";
 
 export default function AdminLogin() {
@@ -21,6 +22,7 @@ export default function AdminLogin() {
   const [pinMode, setPinMode] = useState(false);
   const [pinPhone, setPinPhone] = useState("");
   const [pin, setPin] = useState("");
+  const [waking, setWaking] = useState(false); // the sleeping beta server is starting up
 
   useEffect(() => {
     try {
@@ -42,11 +44,11 @@ export default function AdminLogin() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${API_URL}/auth/pin-login`, {
+      const res = await wakeFetch(`${API_URL}/auth/pin-login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ phone: pinPhone, pin: digits }),
-      });
+      }, setWaking);
       const data = await res.json().catch(() => null);
       if (!res.ok) {
         setError(data?.message ?? "Could not log in");
@@ -94,11 +96,11 @@ export default function AdminLogin() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${API_URL}/auth/login`, {
+      const res = await wakeFetch(`${API_URL}/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ identifier, password }),
-      });
+      }, setWaking);
       const data = await res.json();
       if (!res.ok) {
         // First-login guard: credentials are valid but a password change is required.
@@ -218,6 +220,7 @@ export default function AdminLogin() {
               <h1 className="h4 mt-2 mb-0">Log in with your PIN</h1>
             </div>
             {error && <div className="alert alert-danger py-2" role="alert">{error}</div>}
+            {waking && <div className="alert alert-info py-2" role="status">Starting the server — this can take up to a minute. Please wait.</div>}
             <label className="form-label" htmlFor="pin-phone">Mobile number</label>
             <input
               id="pin-phone" className="form-control form-control-lg mb-3" inputMode="tel" autoComplete="tel"
@@ -259,6 +262,7 @@ export default function AdminLogin() {
               <p className="text-muted small">Sign in to manage your store</p>
             </div>
             {error && <div className="alert alert-danger py-2 small">{error}</div>}
+            {waking && <div className="alert alert-info py-2" role="status">Starting the server — this can take up to a minute. Please wait.</div>}
 
             {/* Security: demo logins (with passwords) only when a developer turns them on —
                 never on a real deployment. */}
