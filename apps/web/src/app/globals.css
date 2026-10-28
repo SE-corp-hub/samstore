@@ -17,6 +17,18 @@
 body {
   background: #faf7f2;
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  /* A tap on a number or name selected it, and the tablet browser then opened a search
+     ("Touch to Search"). This is a tap-to-use app, so text only selects where you type. */
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+input,
+textarea,
+[contenteditable="true"] {
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
 }
 
 .navbar.bg-dark {
