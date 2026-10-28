@@ -43,6 +43,9 @@ test("Bluetooth errors are explained in plain words", () => {
   assert.match(btErrorText(err("NotFoundError", "Bluetooth adapter not available.")), /Nearby devices.*\(Bluetooth adapter not available\.\)/);
   assert.match(btErrorText(err("NetworkError", "GATT Server is disconnected.")), /did not answer/);
   assert.match(btErrorText(err("SecurityError", "x")), /Nearby devices/);
+  // The printer connected, but none of its services is on the app's list: not a Bluetooth-off problem.
+  assert.match(btErrorText(err("NotFoundError", "No Services found in device.")), /Check my printer/);
+  assert.match(btErrorText(err("SecurityError", "Origin is not allowed to access any service.")), /Check my printer/);
   // An automatic print after a sale has no tap, so Chrome cannot show its printer list.
   assert.match(btErrorText(err("NeedsTapError", "Printer not connected yet")), /Tap Connect printer/);
   assert.match(btErrorText(err("SecurityError", "Must be handling a user gesture to show a permission request.")), /Tap Connect printer/);
