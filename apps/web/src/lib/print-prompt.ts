@@ -11,6 +11,7 @@ import { toast } from "./toast";
 export interface PromptActions {
   print: () => Promise<void>;   // send the kept receipt to the (re)connected printer
   printWindow: () => void;      // the normal print window instead
+  dismiss: () => void;          // Close (no receipt): the person gave up on this receipt
 }
 
 let open: { close: () => void } | null = null;
@@ -88,6 +89,6 @@ export function showPrinterPrompt(error: unknown, act: PromptActions): void {
   connect.addEventListener("click", () => { void run(connectPrinter, "Choose your printer in the list…"); });
   again.addEventListener("click", () => { void run(async () => {}, "Connecting to the printer…"); });
   windowBtn.addEventListener("click", () => { close(); act.printWindow(); });
-  cancel.addEventListener("click", close);
+  cancel.addEventListener("click", () => { close(); act.dismiss(); });
   connect.focus();
 }
