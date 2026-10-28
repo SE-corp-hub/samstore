@@ -31,6 +31,8 @@ import { peso, kg } from "../../lib/number-format";
 import { useMediaQuery, WIDE } from "../../lib/use-media-query";
 import { quickCash } from "../../lib/quick-cash";
 import Steps from "./Steps";
+import ProductFinder from "./ProductFinder";
+import { noteUse } from "../../lib/product-find";
 
 interface Loc { id: string; name: string; code: string | null; type: string }
 interface Item {
@@ -94,7 +96,7 @@ export default function BentaPanel() {
   const [homeLocationId, setHomeLocationId] = useState<string | null>(null);
   const [items, setItems] = useState<Item[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
-  const [search, setSearch] = useState("");
+  const [cleared, setCleared] = useState(0); // bumps to empty the search after an item goes in
   const [cart, setCart] = useState<CartLine[]>(() => savedCart()?.cart ?? []);
   const [editing, setEditing] = useState<CartLine | null>(null);
   const [editIdx, setEditIdx] = useState<number | null>(null); // which cart line is being edited (null = adding a new one)
@@ -208,10 +210,6 @@ export default function BentaPanel() {
   const byId = useMemo(() => new Map(items.map((i) => [i.id, i])), [items]);
   const here = locations.find((l) => l.id === locationId);
   const code = (id: string) => { const l = locations.find((x) => x.id === id); return l?.code ?? l?.name ?? "?"; };
-  const shown = items.filter((i) => {
-    const q = search.trim().toLowerCase();
-    return !q || i.name.toLowerCase().includes(q) || i.name.toLowerCase().split(/\s+/).map((w) => w[0]).join("").startsWith(q);
-  });
   const computed = cart.map((l) => lineOf(byId.get(l.productId), l));
   const total = computed.reduce((s, c) => s + c.totalMinor, 0);
   const change = pay === "cash" && tendered ? toMinor(tendered) - total : 0;
@@ -372,25 +370,24 @@ export default function BentaPanel() {
           {priceCustomer && <div className="small text-muted mt-1">{specialCount > 0 ? `${specialCount} special ${specialCount === 1 ? "price" : "prices"} for this customer.` : "No special prices for this customer — store prices apply."}</div>}
         </div>
       )}
-      <input className="form-control form-control-lg mb-3" placeholder="Search (name or first letters)" aria-label="Search" value={search} onChange={(e) => setSearch(e.target.value)} />
-      <div className="row g-2 mb-3">
-        {shown.map((i) => (
-          <div key={i.id} className="col-6 col-md-4 col-lg-3">
-            <button type="button" className={`btn ${inSale(i.id) > 0 ? "btn-dark" : "btn-outline-dark"} w-100 h-100 text-center p-2 position-relative`} style={{ minHeight: 120 }}
-              aria-label={`${i.name}${inSale(i.id) > 0 ? `, ${inSale(i.id)} in this sale` : ""}`}
-              onClick={() => startEdit({ productId: i.id, mode: i.loose ? "KILO" : "PIECE", value: "", sourceLocationId: null }, null)}>
-              {inSale(i.id) > 0 && <span className="position-absolute top-0 end-0 badge rounded-pill text-bg-success m-1">{inSale(i.id)}</span>}
-              <div className="fw-semibold">{i.name}{i.forReview && <span className="badge text-bg-warning ms-1">To review</span>}</div>
-              <div style={{ fontSize: 22, fontVariantNumeric: "tabular-nums" }}>{peso(i.priceMinor)}<span className="fs-6 text-muted">{i.loose ? "/kg" : ""}</span></div>
-              {/* Only this store's count: other stores show when a line is taken from them. */}
-              {(() => {
-                const n = i.stock[locationId] ?? 0;
-                return <div className={`small ${n <= 0 && inSale(i.id) === 0 ? "text-danger" : ""}`} style={{ fontVariantNumeric: "tabular-nums" }}>{n <= 0 ? "None left here" : `${i.loose ? kg(n) : n} left`}</div>;
-              })()}
-            </button>
-          </div>
-        ))}
-      </div>
+      <ProductFinder list="pos" items={items} clearSignal={cleared} colClass={wide ? "col-6 col-xl-3 col-lg-4" : "col-6 col-md-4"}
+        renderTile={(i) => (
+          <button type="button" className={`btn ${inSale(i.id) > 0 ? "btn-dark" : "btn-outline-dark"} w-100 h-100 text-center p-2 position-relative`} style={{ minHeight: 104 }}
+            aria-label={`${i.name}${inSale(i.id) > 0 ? `, ${inSale(i.id)} in this sale` : ""}`}
+            onClick={() => { noteUse("pos", i.id); startEdit({ productId: i.id, mode: i.loose ? "KILO" : "PIECE", value: "", sourceLocationId: null }, null); }}>
+            {inSale(i.id) > 0 && <span className="position-absolute top-0 end-0 badge rounded-pill text-bg-success m-1 fs-6">{inSale(i.id)}</span>}
+            <div className="fw-semibold">{i.name}{i.forReview && <span className="badge text-bg-warning ms-1">To review</span>}</div>
+            <div style={{ fontSize: 22, fontVariantNumeric: "tabular-nums" }}>{peso(i.priceMinor)}<span className="fs-6 opacity-75">{i.loose ? "/kg" : ""}</span></div>
+            {/* Only this store's count: other stores show when a line is taken from them. */}
+            {(() => {
+              const n = i.stock[locationId] ?? 0;
+              // A white badge stays readable whether the tile is light, dark (in the sale) or pressed.
+              return n <= 0
+                ? <div><span className="badge bg-white text-danger border border-danger fw-semibold">None left here</span></div>
+                : <div className="small" style={{ fontVariantNumeric: "tabular-nums" }}>{i.loose ? kg(n) : n} left</div>;
+            })()}
+          </button>
+        )} />
       <div className="text-center mb-3">
         <button type="button" className="btn btn-outline-secondary" onClick={() => setNewItem(true)}>+ New item (not on the list yet)</button>
       </div>
@@ -510,7 +507,7 @@ export default function BentaPanel() {
           <div className="d-flex justify-content-between mt-3 pos-actions">
             <button type="button" className="btn btn-outline-secondary btn-lg" onClick={() => { setEditing(null); setEditIdx(null); }}>Back</button>
             <button type="button" className="btn btn-success btn-lg px-5" disabled={c.totalMinor <= 0 || short || !reasonGiven || (editing.mode === "PIECE" && !Number.isInteger(c.units))}
-              onClick={() => { setCart(editIdx === null ? [...cart, editing] : cart.map((x, j) => (j === editIdx ? editing : x))); setEditing(null); setEditIdx(null); setSearch(""); }}>{editIdx === null ? "Add to sale" : "Save"}</button>
+              onClick={() => { setCart(editIdx === null ? [...cart, editing] : cart.map((x, j) => (j === editIdx ? editing : x))); setEditing(null); setEditIdx(null); setCleared((n) => n + 1); }}>{editIdx === null ? "Add to sale" : "Save"}</button>
           </div>
         </div>
       </div>
