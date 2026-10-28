@@ -44,6 +44,6 @@ test("Bluetooth errors are explained in plain words", () => {
   assert.match(btErrorText(err("NetworkError", "GATT Server is disconnected.")), /did not answer/);
   assert.match(btErrorText(err("SecurityError", "x")), /Nearby devices/);
   // An automatic print after a sale has no tap, so Chrome cannot show its printer list.
-  assert.match(btErrorText(err("NeedsTapError", "Printer not connected yet")), /Tap Print receipt/);
-  assert.match(btErrorText(err("SecurityError", "Must be handling a user gesture to show a permission request.")), /Tap Print receipt/);
+  assert.match(btErrorText(err("NeedsTapError", "Printer not connected yet")), /Tap Connect printer/);
+  assert.match(btErrorText(err("SecurityError", "Must be handling a user gesture to show a permission request.")), /Tap Connect printer/);
 });

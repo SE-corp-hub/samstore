@@ -3,8 +3,8 @@
 // The HTML builder is pure so its escaping and layout are unit-tested.
 
 import { getPrinterSettings } from "./printer-settings";
-import { btErrorText, printViaBluetooth } from "./bt-print";
-import { toast } from "./toast";
+import { printViaBluetooth } from "./bt-print";
+import { showPrinterPrompt } from "./print-prompt";
 
 export interface SlipLine { label: string; value: string }
 export interface SlipRow { name: string; qty: string; note?: string }
@@ -68,11 +68,9 @@ export function printSlip(s: Slip): void {
   if (cfg.bluetooth && !s.a4) {
     // Straight to the Bluetooth printer. If that fails, fall back to the normal print window so a receipt is never lost.
     const slip = s;
+    // Whatever stops it (not connected, Bluetooth off, printer off), the receipt is kept and a box offers Connect printer.
     printViaBluetooth(slip, slip.widthMm ?? 58).catch((e) => {
-      // An automatic print with no printer picked yet: the Print receipt button on screen connects it.
-      if (e instanceof Error && e.name === "NeedsTapError") { toast(btErrorText(e), "danger"); return; }
-      toast(`Bluetooth print did not work: ${btErrorText(e)}. Using the print window.`, "danger");
-      browserPrint(slip);
+      showPrinterPrompt(e, { print: () => printViaBluetooth(slip, slip.widthMm ?? 58), printWindow: () => browserPrint(slip) });
     });
     return;
   }
