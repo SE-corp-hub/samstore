@@ -29,6 +29,7 @@ import { getPrinterSettings } from "../../lib/printer-settings";
 import { creditStatusWords } from "../../lib/credit-status";
 import { peso, kg } from "../../lib/number-format";
 import { useMediaQuery, WIDE } from "../../lib/use-media-query";
+import { quickCash } from "../../lib/quick-cash";
 
 interface Loc { id: string; name: string; code: string | null; type: string }
 interface Item {
@@ -193,6 +194,8 @@ export default function BentaPanel() {
   }, [step, last]);
 
   const wide = useMediaQuery(WIDE);
+  /** How much of a product is already in this sale: pieces, or one per kilo/peso line. */
+  const inSale = (productId: string) => cart.filter((l) => l.productId === productId).reduce((n, l) => n + (l.mode === "PIECE" ? Number(l.value) || 0 : 1), 0);
   const byId = useMemo(() => new Map(items.map((i) => [i.id, i])), [items]);
   const here = locations.find((l) => l.id === locationId);
   const code = (id: string) => { const l = locations.find((x) => x.id === id); return l?.code ?? l?.name ?? "?"; };
@@ -280,7 +283,7 @@ export default function BentaPanel() {
 
   if (step === "done" && last) {
     return (
-      <div style={{ fontSize: 18, maxWidth: 520 }}>
+      <div className="mx-auto" style={{ fontSize: 18, maxWidth: 520 }}>
         {last.status === "WAITING_OWNER" ? (
           <div className="alert alert-warning">
             <div className="h4 mb-1">Waiting for the owner</div>
@@ -362,8 +365,10 @@ export default function BentaPanel() {
       <div className="row g-2 mb-3">
         {shown.map((i) => (
           <div key={i.id} className="col-6 col-md-4 col-lg-3">
-            <button type="button" className="btn btn-outline-dark w-100 h-100 text-start p-2" style={{ minHeight: 120 }}
+            <button type="button" className={`btn ${inSale(i.id) > 0 ? "btn-dark" : "btn-outline-dark"} w-100 h-100 text-center p-2 position-relative`} style={{ minHeight: 120 }}
+              aria-label={`${i.name}${inSale(i.id) > 0 ? `, ${inSale(i.id)} in this sale` : ""}`}
               onClick={() => { setEditing({ productId: i.id, mode: i.loose ? "KILO" : "PIECE", value: "", sourceLocationId: null }); setEditIdx(null); }}>
+              {inSale(i.id) > 0 && <span className="position-absolute top-0 end-0 badge rounded-pill text-bg-success m-1">{inSale(i.id)}</span>}
               <div className="fw-semibold">{i.name}{i.forReview && <span className="badge text-bg-warning ms-1">To review</span>}</div>
               <div style={{ fontSize: 22, fontVariantNumeric: "tabular-nums" }}>{peso(i.priceMinor)}<span className="fs-6 text-muted">{i.loose ? "/kg" : ""}</span></div>
               <div className="small" style={{ fontVariantNumeric: "tabular-nums" }}>
@@ -376,7 +381,9 @@ export default function BentaPanel() {
           </div>
         ))}
       </div>
-      <button type="button" className="btn btn-outline-secondary mb-3" onClick={() => setNewItem(true)}>+ New item (not on the list yet)</button>
+      <div className="text-center mb-3">
+        <button type="button" className="btn btn-outline-secondary" onClick={() => setNewItem(true)}>+ New item (not on the list yet)</button>
+      </div>
     </>
   );
   const cartCard = cart.length > 0 && (
@@ -411,7 +418,7 @@ export default function BentaPanel() {
               const all = [...holds, h]; setHolds(all); saveHolds(all);
               keyRef.current = null; setCart([]); setError(null); toast("Sale put on hold");
             }}>Hold</button>
-            <button type="button" className="btn btn-success btn-lg" onClick={() => setStep("pay")}>Pay</button>
+            <button type="button" className="btn btn-success btn-lg" onClick={() => { if (!pay) setPay("cash"); setStep("pay"); }}>Pay</button>
           </span>
         </div>
       </div>
@@ -433,9 +440,9 @@ export default function BentaPanel() {
     const changed = editing.price !== undefined && editing.price !== it.priceMinor;
     const reasonGiven = !changed || reasonOk(editing.reason);
     return (
-      <div className="card border-success" style={{ maxWidth: 520 }}>
+      <div className="card border-success mx-auto" style={{ maxWidth: 520 }}>
         <div className="card-body">
-          <h2 className="h5">{it.name} · {peso(it.priceMinor)}{it.loose ? "/kg" : ""}</h2>
+          <h2 className="h5 text-center">{it.name} · {peso(it.priceMinor)}{it.loose ? "/kg" : ""}</h2>
           {it.loose && (
             <div className="btn-group w-100 mb-3" role="group" aria-label="Kilos or pesos?">
               <button type="button" className={`btn btn-lg ${editing.mode === "KILO" ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setEditing({ ...editing, mode: "KILO", value: "" })}>Kilos</button>
@@ -533,7 +540,7 @@ export default function BentaPanel() {
         {step === "pick" && newItem && <NewItemForm locationId={locationId} onCancel={() => setNewItem(false)} onDone={async () => { setNewItem(false); await loadCatalog(locationId); }} />}
 
         {step === "pay" && (
-          <div className="card border-success" style={{ maxWidth: 520 }}>
+          <div className="card border-success mx-auto" style={{ maxWidth: 520 }}>
             <div className="card-body">
               <div className="small text-muted">Step 2 of 2</div>
               <div className="d-flex justify-content-between align-items-baseline mb-3">
@@ -553,6 +560,13 @@ export default function BentaPanel() {
               )}
               {pay === "cash" && (
                 <>
+                  <div className="d-flex flex-wrap justify-content-center gap-2 mb-2" role="group" aria-label="Quick cash amounts">
+                    {quickCash(total).map((m) => (
+                      <button key={m} type="button" className={`btn btn-lg ${tendered && toMinor(tendered) === m ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setTendered(String(m / 100))}>
+                        {m === total ? "Exact" : peso(m)}
+                      </button>
+                    ))}
+                  </div>
                   <NumPad value={tendered} onChange={setTendered} decimals={2} label="Cash received" unit="₱" />
                   {tendered && <div className={`mt-2 fs-4 ${change < 0 ? "text-danger" : ""}`} style={{ fontVariantNumeric: "tabular-nums" }}>{change < 0 ? `Short ${peso(-change)}` : `Change ${peso(change)}`}</div>}
                 </>
@@ -644,7 +658,7 @@ export default function BentaPanel() {
 
               <div className="d-flex justify-content-between mt-3">
                 <button type="button" className="btn btn-outline-secondary btn-lg" disabled={busy} onClick={() => setStep("pick")}>Back</button>
-                <button type="button" className="btn btn-success btn-lg" disabled={!canSubmit} onClick={() => void submit()}>{busy ? "Please wait…" : "Done"}</button>
+                <button type="button" className="btn btn-success btn-lg" disabled={!canSubmit} onClick={() => void submit()}>{busy ? "Please wait…" : "Finish sale"}</button>
               </div>
             </div>
           </div>

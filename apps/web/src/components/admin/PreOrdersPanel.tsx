@@ -1,9 +1,9 @@
 "use client";
 
-// Pre Order panel — dedicated sidebar tab (Sell group). Three sub-tabs:
-// 'Pre-Orders' (ON_HOLD drafts: edit qty, delete/void, finalize), 'Finalize'
-// (charge drafts to utang with a finger-drawn signature) and 'Build'
-// (embedded POS product-selection flow → review → save as pre-order).
+// Pre Order panel — dedicated sidebar tab (Sell group). Two lists and one flow:
+// 'Waiting' (ON_HOLD drafts: edit qty, delete/void, complete with cash or credit),
+// 'Done' (completed pre-orders by date, with receipts) and the New pre-order flow
+// (tap products → customer and items on one page → save).
 // Backend contract (not live yet): GET /admin/pos/preorders?from=&to=,
 // POST /admin/pos/preorder, POST /admin/pos/preorders/:id/finalize,
 // POST /admin/pos/holds/:id/void, GET /admin/orders/:id + PATCH /admin/orders/:id/items.
@@ -34,11 +34,6 @@ const unitOf = (l: CartLine) => l.price ?? l.product.priceMinor;
 const priceMissingReason = (l: CartLine) => l.price !== undefined && l.price !== l.product.priceMinor && !reasonOk(l.reason);
 
 const toPesos = (m: number) => `₱${(m / 100).toFixed(2)}`;
-const PRE_STATUS_BADGE: Record<string, string> = {
-  ON_HOLD: "text-bg-warning",
-  COMPLETED: "text-bg-success",
-  CANCELLED: "text-bg-danger",
-};
 const localToday = () => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -199,21 +194,15 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
   const loadPreorders = useCallback(async () => {
     setPreLoading(true);
     try {
-      let url = `${API_URL}/admin/pos/preorders`;
-      if (preFrom || preTo) {
-        const q = new URLSearchParams();
-        if (preFrom) q.set("from", new Date(`${preFrom}T00:00:00`).toISOString());
-        if (preTo) q.set("to", new Date(`${preTo}T23:59:59`).toISOString());
-        url += `?${q.toString()}`;
-      }
-      const res = await fetch(url, { headers: adminHeaders() });
+      // All pre-orders: every waiting one shows whatever its date; Done filters by date below.
+      const res = await fetch(`${API_URL}/admin/pos/preorders`, { headers: adminHeaders() });
       if (!res.ok) throw new Error("Failed to load pre-orders");
       const d = await res.json();
       setPreorders(d.preorders ?? []);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Load pre-orders failed");
     } finally { setPreLoading(false); }
-  }, [preFrom, preTo]);
+  }, []);
 
   useEffect(() => { void loadPreorders(); }, [loadPreorders]);
 
@@ -235,14 +224,12 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
 
   useEffect(() => { void loadBuilder(); }, [loadBuilder]);
 
+  const inRange = (p: Preorder) => (!preFrom || p.createdAt.slice(0, 10) >= preFrom) && (!preTo || p.createdAt.slice(0, 10) <= preTo);
   const drafts = preorders.filter((p) => p.status === "ON_HOLD");
-  const completed = preorders.filter((p) => p.status === "COMPLETED");
+  const completed = preorders.filter((p) => p.status === "COMPLETED" && inRange(p));
   const todayStr = localToday();
 
-  const newPreorder = () => {
-    setSubTab("build");
-    toast("Select products, then Save as pre-order");
-  };
+  const newPreorder = () => { setSubTab("build"); setBuildStep("products"); };
 
   const openPreEdit = (p: Preorder) => {
     setEditPre(null);
@@ -492,7 +479,7 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
   /** Aggregate pre-order items: how many units of each product are on hold (draft) vs sold (finalized) in the current range. */
   const holdSoldRows = () => {
     const map: Record<string, { productName: string; holdQty: number; soldQty: number }> = {};
-    for (const p of preorders) {
+    for (const p of preorders.filter(inRange)) {
       const kind = p.status === "ON_HOLD" ? "hold" : p.status === "COMPLETED" ? "sold" : null;
       if (!kind) continue;
       for (const it of p.items) {
@@ -503,98 +490,64 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
     return Object.values(map).sort((a, b) => (b.holdQty + b.soldQty) - (a.holdQty + a.soldQty));
   };
 
-  const rowActions = (p: Preorder, finalizeOnly: boolean) => (
-    <>
-      {p.status === "ON_HOLD" && (
-        <>
-          {!finalizeOnly && (
+  /** One pre-order as a card: who, what, how much, then the actions (Complete sale first). */
+  const preCard = (p: Preorder, finalizeOnly: boolean, pastDue: boolean) => (
+    <div className="col" key={p.id}>
+      <div className={`card h-100 ${pastDue ? "border-danger" : ""}`}>
+        <div className="card-body d-flex flex-column">
+          <div className="d-flex justify-content-between align-items-start gap-2 mb-1">
+            <div>
+              <div className="fw-bold">{p.customerName || "—"}</div>
+              <div className="small text-muted">{p.orderNumber} · {fmtDate(p.createdAt)}</div>
+            </div>
+            <div className="fw-bold fs-5 text-end" style={{ fontVariantNumeric: "tabular-nums" }}>{maybePrice(p.totalMinor)}</div>
+          </div>
+          {p.dueAt && <div className={`small mb-1 ${pastDue ? "text-danger fw-semibold" : "text-muted"}`}>Due {fmtDate(p.dueAt)}{pastDue ? " (late)" : ""}</div>}
+          <div className="mb-2 flex-grow-1">{itemLines(p, 4)}</div>
+          {p.status === "ON_HOLD" && (
             <>
-              <button className="btn btn-sm btn-outline-warning" onClick={() => openPreEdit(p)}><i className="bi bi-pencil me-1"></i>Edit</button>
-              <button className="btn btn-sm btn-outline-danger" onClick={() => { setConfirmVoid({ id: p.id, orderNumber: p.orderNumber }); setVoidReason(""); }}><i className="bi bi-x-circle me-1"></i>Delete</button>
+              <button className="btn btn-success w-100 mb-2" onClick={() => openFinalize(p)}><i className="bi bi-check2-circle me-1"></i>Complete sale</button>
+              {!finalizeOnly && (
+                <div className="d-flex gap-2">
+                  <button className="btn btn-outline-dark flex-fill" onClick={() => openPreEdit(p)}><i className="bi bi-pencil me-1"></i>Edit</button>
+                  <button className="btn btn-outline-danger flex-fill" onClick={() => { setConfirmVoid({ id: p.id, orderNumber: p.orderNumber }); setVoidReason(""); }}><i className="bi bi-x-circle me-1"></i>Delete</button>
+                </div>
+              )}
             </>
           )}
-          <button className="btn btn-sm btn-success" onClick={() => openFinalize(p)}><i className="bi bi-check2-circle me-1"></i>Finalize</button>
-        </>
-      )}
-      {p.status === "COMPLETED" && (
-        <button className="btn btn-sm btn-outline-secondary" title="Print receipt" onClick={() => setReceiptOrder(p.id)}>
-          <i className="bi bi-receipt me-1"></i>Receipt
-        </button>
-      )}
-    </>
-  );
-
-  const preCard = (p: Preorder, finalizeOnly: boolean, pastDue: boolean) => (
-    <div className="card" key={p.id}>
-      <div className="card-body py-2">
-        <div className="d-flex justify-content-between align-items-center">
-          <div>
-            <span className={`fw-semibold ${pastDue ? "text-danger" : ""}`}>{p.orderNumber}</span>
-            <div className="small text-muted">{p.customerName} · {maybePrice(p.totalMinor)}</div>
-          </div>
-          <span className={`badge ${PRE_STATUS_BADGE[p.status] ?? "text-bg-secondary"}`}>{p.status}</span>
-        </div>
-        <div className="small text-muted mb-1">
-          {itemCount(p)} item(s) · due {p.dueAt ? fmtDate(p.dueAt) : "—"}
-        </div>
-        <div className="mb-1">{itemLines(p, 2)}</div>
-        <div className="d-flex flex-wrap gap-1 align-items-center">
-          {rowActions(p, finalizeOnly)}
+          {p.status === "COMPLETED" && (
+            <button className="btn btn-outline-dark w-100" onClick={() => setReceiptOrder(p.id)}><i className="bi bi-receipt me-1"></i>Receipt</button>
+          )}
         </div>
       </div>
     </div>
   );
 
-  const preTable = (list: Preorder[], finalizeOnly: boolean) => (
-    <table className="table table-sm align-middle mb-1 d-none d-md-table">
-      <thead>
-        <tr>
-          <th>Order</th><th>Customer</th><th>Items</th><th className="text-end">Total</th><th>Due</th><th>Status</th><th className="text-end">Actions</th>
-        </tr>
-      </thead>
-      <tbody>
-        {list.map((p) => {
-          const pastDue = !!p.dueAt && p.dueAt.slice(0, 10) < todayStr;
-          return (
-            <tr key={p.id} className={pastDue ? "table-danger" : ""}>
-              <td className={pastDue ? "text-danger fw-semibold" : "fw-semibold"}>{p.orderNumber}</td>
-              <td className="small">{p.customerName || "—"}</td>
-              <td>{itemLines(p)}</td>
-              <td className="text-end">{maybePrice(p.totalMinor)}</td>
-              <td className="small">{p.dueAt ? fmtDate(p.dueAt) : "—"}</td>
-              <td><span className={`badge ${PRE_STATUS_BADGE[p.status] ?? "text-bg-secondary"}`}>{p.status}</span></td>
-              <td className="text-end">
-                <div className="d-flex flex-wrap gap-1 justify-content-end">
-                  {rowActions(p, finalizeOnly)}
-                </div>
-              </td>
-            </tr>
-          );
-        })}
-      </tbody>
-    </table>
-  );
-
   const renderDrafts = (finalizeOnly: boolean) => {
     if (preLoading) return <p className="text-muted">Loading pre-orders…</p>;
     const rows = finalizeOnly ? completed : drafts;
-    const summary = !finalizeOnly ? holdSoldRows() : [];
+    const summary = finalizeOnly ? holdSoldRows() : [];
     if (rows.length === 0 && summary.length === 0) {
       return (
-        <p className="text-muted text-center py-4">
-          <i className={`${finalizeOnly ? "bi bi-check2-circle" : "bi bi-journal-text"} fs-3 d-block mb-2`}></i>
-          {finalizeOnly ? "No finalized pre-orders in this range. Finalize drafts from the Pre-Orders tab." : "No pre-orders in this range."}
-        </p>
+        <div className="text-muted text-center py-5">
+          <i className={`${finalizeOnly ? "bi bi-check2-circle" : "bi bi-bag-check"} fs-1 d-block mb-2`}></i>
+          {finalizeOnly ? "No completed pre-orders on these dates." : "No pre-orders waiting."}
+          {!finalizeOnly && (
+            <div className="mt-3">
+              <button className="btn btn-success btn-lg" onClick={newPreorder}><i className="bi bi-plus-lg me-1"></i>New pre-order</button>
+            </div>
+          )}
+        </div>
       );
     }
     return (
       <>
-        {!finalizeOnly && summary.length > 0 && (
+        {finalizeOnly && summary.length > 0 && (
           <div className="card mb-2">
             <div className="card-body py-2">
               <h6 className="small fw-bold mb-1"><i className="bi bi-box-seam me-1"></i>Products — on hold vs sold</h6>
               <div className="small text-muted mb-1">
-                {preFrom && preTo ? `Filtered by date: ${fmtDate(new Date(`${preFrom}T00:00:00`).toISOString())} → ${fmtDate(new Date(`${preTo}T23:59:59`).toISOString())}` : "All dates"} · counts follow the From/To filter above.
+                {preFrom && preTo ? `${preFrom} to ${preTo}` : "All dates"} · counts follow the dates above.
               </div>
               <table className="table table-sm align-middle mb-1">
                 <thead>
@@ -621,18 +574,25 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
         {rows.length === 0 ? (
           <p className="text-muted text-center py-4">
             <i className="bi bi-journal-text fs-3 d-block mb-2"></i>
-            {finalizeOnly ? "No finalized pre-orders in this range." : "No pre-orders in this range."}
+            {finalizeOnly ? "No completed pre-orders on these dates." : "No pre-orders waiting."}
           </p>
         ) : (
           <>
-            <div className="d-grid gap-2 d-md-none">
-              {rows.map((p) => preCard(p, finalizeOnly, !!p.dueAt && p.dueAt.slice(0, 10) < todayStr))}
+            <div className="row row-cols-1 row-cols-md-2 row-cols-xl-3 g-3">
+              {rows.map((p) => preCard(p, finalizeOnly, p.status === "ON_HOLD" && !!p.dueAt && p.dueAt.slice(0, 10) < todayStr))}
             </div>
-            {preTable(rows, finalizeOnly)}
           </>
         )}
       </>
     );
+  };
+
+  const inOrder = (productId: string) => buildCart.find((l) => l.product.id === productId)?.quantity ?? 0;
+  const itemsInOrder = buildCart.reduce((s, l) => s + l.quantity, 0);
+  const setLinePrice = (l: CartLine, v: string) => {
+    const m = v === "" ? undefined : Math.round(Number(v) * 100);
+    const same = m === undefined || m === l.product.priceMinor;
+    setBuildCart((c) => c.map((x) => (x.product.id === l.product.id ? { ...x, price: same ? undefined : m, reason: same ? undefined : x.reason } : x)));
   };
 
   const renderBuild = () => (
@@ -642,158 +602,161 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
       )}
       {buildStep === "products" && !newItemOpen && (
         <>
-          <button type="button" className="btn btn-outline-success btn-sm mb-2" onClick={() => setNewItemOpen(true)}>
-            <i className="bi bi-plus-lg me-1"></i>New item (with cost and selling price)
-          </button>
-          <p className="small text-muted mb-2"><i className="bi bi-bag-check me-1"></i>Tap products to add them, then Review order and Save as pre-order (customer required).</p>
-          <div className="d-flex gap-2 mb-2 flex-wrap">
-            <input className="form-control form-control-sm" style={{ maxWidth: 200 }} placeholder="Search…" value={buildSearch} onChange={(e) => setBuildSearch(e.target.value)} />
-            <button className={`btn btn-sm ${buildCategory === "" ? "btn-primary" : "btn-outline-primary"}`} onClick={() => setBuildCategory("")}>All</button>
-            {buildCategories.map((c) => (
-              <button key={c} className={`btn btn-sm ${buildCategory === c ? "btn-primary" : "btn-outline-primary"}`} onClick={() => setBuildCategory(buildCategory === c ? "" : c)}>{c}</button>
-            ))}
-          </div>
-
-          {buildProducts.length === 0 && <p className="text-muted small text-center py-4">Loading products…</p>}
-          {buildFiltered.length === 0 && buildProducts.length > 0 && <p className="text-muted small text-center py-4">No products match.</p>}
-
-          <div className="row g-2">
-            {buildFiltered.map((p) => (
-              <div className="col-6 col-md-4 col-lg-3" key={p.id}>
-                <button
-                  type="button"
-                  className="btn btn-outline-primary w-100 py-3 d-flex flex-column"
-                  onClick={() => addProduct(p)}
-                >
-                  <span className="fw-semibold small text-truncate w-100 text-center">{p.name}</span>
-                  <span className="small">{maybePrice(p.priceMinor)}</span>
-                  <span className={`small ${p.availableQuantity <= 0 ? "text-danger" : "text-muted"}`}>
-                    {p.availableQuantity <= 0 ? "No stock — pre-order OK" : `${p.availableQuantity} left`}
-                  </span>
-                </button>
-              </div>
-            ))}
-          </div>
-
-          {/* sticky bottom bar (sticky inside the panel, unlike POS's fixed bar) */}
-          <div className="position-sticky bottom-0 sticky-above-bar bg-white border-top shadow-sm d-flex align-items-center justify-content-between px-3 py-2" style={{ zIndex: 5 }}>
-            <div>
-              <div className="fw-bold">{buildCart.reduce((s, l) => s + l.quantity, 0)} item(s)</div>
-              <div className="text-muted small">{maybePrice(buildSubtotal)}</div>
+          <div className="text-center text-muted mb-2">Step 1 of 2 · Tap what the customer wants</div>
+          <input className="form-control form-control-lg mb-2" placeholder="Search (name or first letters)" aria-label="Search" value={buildSearch} onChange={(e) => setBuildSearch(e.target.value)} />
+          {buildCategories.length > 1 && (
+            <div className="d-flex flex-wrap justify-content-center gap-2 mb-2">
+              <button className={`btn ${buildCategory === "" ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setBuildCategory("")}>All</button>
+              {buildCategories.map((c) => (
+                <button key={c} className={`btn ${buildCategory === c ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setBuildCategory(buildCategory === c ? "" : c)}>{c}</button>
+              ))}
             </div>
-            <button className="btn btn-primary btn-lg" disabled={buildCart.length === 0} onClick={() => setBuildStep("review")}>
-              Review order <i className="bi bi-arrow-right ms-1"></i>
+          )}
+
+          {buildProducts.length === 0 && <p className="text-muted text-center py-4">Loading products…</p>}
+          {buildFiltered.length === 0 && buildProducts.length > 0 && <p className="text-muted text-center py-4">No products match.</p>}
+
+          <div className="row g-2 mb-3">
+            {buildFiltered.map((p) => {
+              const n = inOrder(p.id);
+              return (
+                <div className="col-6 col-md-4 col-lg-3" key={p.id}>
+                  <button type="button" className={`btn ${n > 0 ? "btn-dark" : "btn-outline-dark"} w-100 h-100 p-2 text-center position-relative`} style={{ minHeight: 120 }}
+                    aria-label={`${p.name}${n > 0 ? `, ${n} in this order` : ""}`} onClick={() => addProduct(p)}>
+                    {n > 0 && <span className="position-absolute top-0 end-0 badge rounded-pill text-bg-success m-1">{n}</span>}
+                    <div className="fw-semibold">{p.name}</div>
+                    <div style={{ fontSize: 22, fontVariantNumeric: "tabular-nums" }}>{maybePrice(p.priceMinor)}</div>
+                    <div className="small">{p.availableQuantity <= 0 ? "None in stock yet" : `${p.availableQuantity} in stock`}</div>
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+          <div className="text-center mb-3">
+            <button type="button" className="btn btn-outline-secondary" onClick={() => setNewItemOpen(true)}>+ New item (not on the list yet)</button>
+          </div>
+
+          <div className="position-sticky bottom-0 sticky-above-bar bg-white border border-success rounded shadow-sm d-flex align-items-center justify-content-between gap-2 px-3 py-2" style={{ zIndex: 5 }}>
+            <div style={{ fontVariantNumeric: "tabular-nums" }}>
+              <div className="fw-bold fs-5">{maybePrice(buildSubtotal)}</div>
+              <div className="text-muted small">{itemsInOrder} item{itemsInOrder === 1 ? "" : "s"}</div>
+            </div>
+            <button className="btn btn-success btn-lg" disabled={buildCart.length === 0} onClick={() => { setError(null); setBuildStep("review"); }}>
+              Next <i className="bi bi-arrow-right ms-1"></i>
             </button>
           </div>
         </>
       )}
 
       {buildStep === "review" && (
-        <>
-          <div className="card mb-2">
+        <div className="mx-auto" style={{ maxWidth: 640 }}>
+          <div className="text-center text-muted mb-2">Step 2 of 2 · Who is it for?</div>
+          <div className="card mb-3">
             <div className="card-body">
-              {buildCart.length === 0 ? (
-                <p className="text-muted small text-center py-4">No items — go back and add products.</p>
-              ) : (
+              <label className="form-label fw-semibold" htmlFor="po-cust">Customer</label>
+              <select id="po-cust" className="form-select form-select-lg" value={buildCustomerId} onChange={(e) => { setBuildCustomerId(e.target.value); if (e.target.value) { setBuildNewName(""); setBuildNewPhone(""); } }}>
+                <option value="">Choose a customer…</option>
+                {buildCustomers.map((c) => <option key={c.id} value={c.id}>{c.name ?? c.email ?? c.phone ?? "Customer"}</option>)}
+              </select>
+              {!buildCustomerId && (
                 <>
-                  {buildCart.map((l) => (
-                    <div key={l.product.id} className="d-flex align-items-center gap-2 mb-1">
-                      <div className="flex-grow-1 small">
-                        <div className="fw-semibold">{l.product.name}</div>
-                        <div className="text-muted">list {maybePrice(l.product.priceMinor)}</div>
-                        <PesoInput className="form-control form-control-sm mt-1" aria-label={`Price of ${l.product.name}`} style={{ maxWidth: 120 }}
-                          value={l.price !== undefined ? String(l.price / 100) : ""} placeholder={(l.product.priceMinor / 100).toFixed(2)}
-                          onChange={(v) => { const m = v === "" ? undefined : Math.round(Number(v) * 100); const same = m === undefined || m === l.product.priceMinor; setBuildCart((c) => c.map((x) => (x.product.id === l.product.id ? { ...x, price: same ? undefined : m, reason: same ? undefined : x.reason } : x))); }} />
-                        {l.price !== undefined && l.price !== l.product.priceMinor && (
-                          <PriceReason className="form-select form-select-sm mt-1" invalid={priceMissingReason(l)} value={l.reason ?? ""} onChange={(v) => setBuildCart((c) => c.map((x) => (x.product.id === l.product.id ? { ...x, reason: v } : x)))} />
-                        )}
-                      </div>
-                      <div className="input-group input-group-sm" style={{ width: 104 }}>
-                        <button className="btn btn-outline-secondary" onClick={() => setQty(l.product.id, l.quantity - 1)}>-</button>
-                        <input className="form-control text-center" type="number" min={1} value={l.quantity} onChange={(e) => { const v = parseInt(e.target.value, 10); if (v >= 1) setQty(l.product.id, v); }} />
-                        <button className="btn btn-outline-secondary" onClick={() => setQty(l.product.id, l.quantity + 1)}>+</button>
-                      </div>
-                      <div className="fw-semibold small" style={{ width: 66, textAlign: "right" }}>{maybePrice(unitOf(l) * l.quantity)}</div>
-                    </div>
-                  ))}
+                  <div className="text-center text-muted my-2">or a new customer</div>
+                  <div className="row g-2">
+                    <div className="col-sm-7"><input className="form-control form-control-lg" aria-label="New customer's name" placeholder="Name" value={buildNewName} onChange={(e) => setBuildNewName(e.target.value)} /></div>
+                    <div className="col-sm-5"><input className="form-control form-control-lg" inputMode="tel" aria-label="New customer's mobile number" placeholder="Mobile (optional)" value={buildNewPhone} onChange={(e) => setBuildNewPhone(e.target.value)} /></div>
+                  </div>
                 </>
               )}
             </div>
           </div>
 
-          <div className="card mb-2">
+          <div className="card mb-3">
             <div className="card-body">
-              <h6 className="small fw-bold mb-2">Customer <span className="text-danger">*</span></h6>
-              <select className="form-select form-select-sm mb-1" value={buildCustomerId} onChange={(e) => { setBuildCustomerId(e.target.value); if (e.target.value) { setBuildNewName(""); setBuildNewPhone(""); } }}>
-                <option value="">Select customer…</option>
-                {buildCustomers.map((c) => <option key={c.id} value={c.id}>{c.name ?? c.email ?? c.phone ?? "Customer"}</option>)}
-              </select>
-              {!buildCustomerId && (
-                <div className="row g-1 mb-1">
-                  <div className="col-7"><input className="form-control form-control-sm" placeholder="New customer name (autosaves)" value={buildNewName} onChange={(e) => setBuildNewName(e.target.value)} /></div>
-                  <div className="col-5"><input className="form-control form-control-sm" placeholder="Phone" value={buildNewPhone} onChange={(e) => setBuildNewPhone(e.target.value)} /></div>
+              {buildCart.length === 0 && <p className="text-muted text-center py-3 mb-0">No items. Go back and tap products.</p>}
+              {buildCart.map((l) => (
+                <div key={l.product.id} className="border-bottom py-2">
+                  <div className="d-flex justify-content-between align-items-baseline gap-2">
+                    <div className="fw-semibold">{l.product.name}</div>
+                    <div className="fw-semibold text-end text-nowrap" style={{ fontVariantNumeric: "tabular-nums" }}>{maybePrice(unitOf(l) * l.quantity)}</div>
+                  </div>
+                  <div className="d-flex justify-content-between align-items-center gap-2 mt-1">
+                    <div className="small text-muted">{maybePrice(unitOf(l))} each{l.price !== undefined && l.price !== l.product.priceMinor ? ` (list ${maybePrice(l.product.priceMinor)})` : ""}</div>
+                    <div className="d-flex align-items-center gap-1">
+                      <button type="button" className="btn btn-outline-dark" style={{ width: 48 }} aria-label={`One less ${l.product.name}`} onClick={() => setQty(l.product.id, l.quantity - 1)}>−</button>
+                      <span className="fw-bold text-center" style={{ minWidth: 40, fontVariantNumeric: "tabular-nums" }} aria-live="polite">{l.quantity}</span>
+                      <button type="button" className="btn btn-outline-dark" style={{ width: 48 }} aria-label={`One more ${l.product.name}`} onClick={() => setQty(l.product.id, l.quantity + 1)}>+</button>
+                    </div>
+                  </div>
+                  <details className="mt-1">
+                    <summary className="small text-primary" style={{ cursor: "pointer" }}>Change price</summary>
+                    <div className="d-flex flex-wrap gap-2 mt-1">
+                      <PesoInput className="form-control" style={{ maxWidth: 160 }} aria-label={`Price of ${l.product.name}`}
+                        value={l.price !== undefined ? String(l.price / 100) : ""} placeholder={(l.product.priceMinor / 100).toFixed(2)} onChange={(v) => setLinePrice(l, v)} />
+                      {l.price !== undefined && l.price !== l.product.priceMinor && (
+                        <PriceReason className="form-select flex-grow-1" invalid={priceMissingReason(l)} value={l.reason ?? ""} onChange={(v) => setBuildCart((c) => c.map((x) => (x.product.id === l.product.id ? { ...x, reason: v } : x)))} />
+                      )}
+                    </div>
+                  </details>
                 </div>
-              )}
-              {buildNewName.trim() && !buildCustomerId && <small className="text-muted">Customer is saved automatically when you save the pre-order.</small>}
-
-              <div className="d-flex justify-content-between fw-bold fs-5 mt-2 mb-2">
-                <span>Total</span><span>{maybePrice(buildSubtotal)}</span>
-              </div>
-              <div className="d-flex flex-wrap gap-2">
-                <button className="btn btn-outline-secondary flex-fill" onClick={() => setBuildStep("products")}>Back</button>
-                <button className="btn btn-primary flex-fill" disabled={buildCart.length === 0 || buildBusy} onClick={savePreorder}>
-                  <i className="bi bi-bag-check me-1"></i>{buildBusy ? "Saving…" : "Save as pre-order"}
-                </button>
+              ))}
+              <div className="d-flex justify-content-between align-items-baseline mt-3" style={{ fontVariantNumeric: "tabular-nums" }}>
+                <span className="fs-5">Total</span><span className="fw-bold" style={{ fontSize: 28 }}>{maybePrice(buildSubtotal)}</span>
               </div>
             </div>
           </div>
-        </>
+
+          <div className="position-sticky bottom-0 sticky-above-bar bg-white border border-success rounded shadow-sm d-flex gap-2 p-2 mb-2" style={{ zIndex: 5 }}>
+            <button className="btn btn-outline-secondary btn-lg" onClick={() => setBuildStep("products")}>Back</button>
+            <button className="btn btn-success btn-lg flex-fill" disabled={buildCart.length === 0 || buildBusy || (!buildCustomerId && !buildNewName.trim())} onClick={savePreorder}>
+              <i className="bi bi-bag-check me-1"></i>{buildBusy ? "Saving…" : "Save pre-order"}
+            </button>
+          </div>
+          {!buildCustomerId && !buildNewName.trim() && <div className="text-center text-muted small">Choose a customer or type a new name to save.</div>}
+        </div>
       )}
     </>
   );
 
   return (
     <div>
-      <div className="d-flex flex-wrap align-items-center gap-2 mb-2">
-        <h1 className="h4 mb-0">
-          <i className="bi bi-bag-check me-2"></i>Pre Order
-          <span className="badge text-bg-warning ms-1">{drafts.length} open</span>
-        </h1>
-        {subTab !== "build" && (
-          <button className="btn btn-primary btn-sm ms-auto" onClick={newPreorder}>
-            <i className="bi bi-plus-lg me-1"></i>New pre-order
+      <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+        <h1 className="h4 mb-0">{subTab === "build" ? "New pre-order" : "Pre-order"}</h1>
+        {subTab === "build" ? (
+          <button className="btn btn-outline-dark" onClick={() => { setSubTab("list"); setBuildStep("products"); setNewItemOpen(false); }}>
+            <i className="bi bi-arrow-left me-1"></i>Back to list
           </button>
+        ) : (
+          <button className="btn btn-success btn-lg" onClick={newPreorder}><i className="bi bi-plus-lg me-1"></i>New pre-order</button>
         )}
       </div>
 
       {lastFinalizedOrderId && (
-        <div className="d-flex align-items-center gap-2 mb-2 small">
-          <span className="text-muted">Last finalized order:</span>
-          <button className="btn btn-sm btn-outline-secondary" onClick={() => { setReceiptOrder(lastFinalizedOrderId); setLastFinalizedOrderId(null); }}>
+        <div className="d-flex align-items-center justify-content-center gap-2 mb-2">
+          <span className="text-muted">Sale completed.</span>
+          <button className="btn btn-outline-dark" onClick={() => { setReceiptOrder(lastFinalizedOrderId); setLastFinalizedOrderId(null); }}>
             <i className="bi bi-printer me-1"></i>Print receipt
           </button>
         </div>
       )}
 
-      {error && <div className="alert alert-danger py-2 small">{error}</div>}
+      {error && <div className="alert alert-danger py-2">{error}</div>}
       {receiptOrder && <ReceiptModal orderId={receiptOrder} onClose={() => setReceiptOrder(null)} />}
 
-      {/* sub-tabs */}
-      <div className="btn-group w-100 mb-3" role="group" aria-label="Pre-order view">
-        <button type="button" className={`btn ${subTab === "list" ? "btn-primary" : "btn-outline-primary"}`} onClick={() => setSubTab("list")}>Pre-Orders</button>
-        <button type="button" className={`btn ${subTab === "finalize" ? "btn-primary" : "btn-outline-primary"}`} onClick={() => setSubTab("finalize")}>Finalize</button>
-        <button type="button" className={`btn ${subTab === "build" ? "btn-primary" : "btn-outline-primary"}`} onClick={() => setSubTab("build")}>Build</button>
-      </div>
-
-      {/* date filters (hidden on the Build tab) */}
       {subTab !== "build" && (
-      <div className="d-flex flex-wrap gap-2 align-items-center mb-2">
-        <label className="form-label small mb-0 me-1">From</label>
-        <input className="form-control form-control-sm" style={{ width: 140 }} type="date" value={preFrom} onChange={(e) => setPreFrom(e.target.value)} />
-        <label className="form-label small mb-0 me-1">To</label>
-        <input className="form-control form-control-sm" style={{ width: 140 }} type="date" value={preTo} onChange={(e) => setPreTo(e.target.value)} />
-        {!preFrom && !preTo && <span className="small text-muted">All dates</span>}
-      </div>
+        <div className="btn-group w-100 mb-3" role="group" aria-label="Pre-order list">
+          <button type="button" className={`btn btn-lg ${subTab === "list" ? "btn-dark" : "btn-outline-dark"}`} aria-pressed={subTab === "list"} onClick={() => setSubTab("list")}>Waiting ({drafts.length})</button>
+          <button type="button" className={`btn btn-lg ${subTab === "finalize" ? "btn-dark" : "btn-outline-dark"}`} aria-pressed={subTab === "finalize"} onClick={() => setSubTab("finalize")}>Done</button>
+        </div>
+      )}
+
+      {/* dates: only the Done list (every waiting pre-order always shows) */}
+      {subTab === "finalize" && (
+        <div className="d-flex flex-wrap gap-2 align-items-center justify-content-center mb-3">
+          <label className="form-label mb-0" htmlFor="po-from">From</label>
+          <input id="po-from" className="form-control" style={{ width: 170 }} type="date" value={preFrom} onChange={(e) => setPreFrom(e.target.value)} />
+          <label className="form-label mb-0" htmlFor="po-to">To</label>
+          <input id="po-to" className="form-control" style={{ width: 170 }} type="date" value={preTo} onChange={(e) => setPreTo(e.target.value)} />
+        </div>
       )}
 
       {subTab === "list" ? renderDrafts(false) : subTab === "finalize" ? renderDrafts(true) : renderBuild()}
