@@ -220,7 +220,7 @@ export default function BentaPanel() {
   };
 
   const canSubmit = total > 0 && !!pay && !busy
-    && (pay !== "cash" || !tendered || toMinor(tendered) >= total)
+    && (pay !== "cash" || (!!tendered && toMinor(tendered) >= total))
     && (!needsRef(pay) || reference.trim().length >= 4)
     && (pay !== "split" || (parts.reduce((s, x) => s + toMinor(x.amount || "0"), 0) === total && parts.every((x) => toMinor(x.amount || "0") > 0 && (x.method === "cash" || x.reference.trim().length >= 4))))
     && (pay !== "utang" || (!!customer && !!customerSig && !overLimit))
@@ -660,6 +660,7 @@ export default function BentaPanel() {
                 <button type="button" className="btn btn-outline-secondary btn-lg" disabled={busy} onClick={() => setStep("pick")}>Back</button>
                 <button type="button" className="btn btn-success btn-lg" disabled={!canSubmit} onClick={() => void submit()}>{busy ? "Please wait…" : "Finish sale"}</button>
               </div>
+              {pay === "cash" && !tendered && <div className="text-center text-muted mt-2">Tap Exact or enter the cash received first.</div>}
             </div>
           </div>
         )}
