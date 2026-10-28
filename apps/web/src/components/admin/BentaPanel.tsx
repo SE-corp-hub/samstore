@@ -374,7 +374,7 @@ export default function BentaPanel() {
         renderTile={(i) => (
           <button type="button" className={`btn ${inSale(i.id) > 0 ? "btn-dark" : "btn-outline-dark"} w-100 h-100 text-center p-2 position-relative`} style={{ minHeight: 104 }}
             aria-label={`${i.name}${inSale(i.id) > 0 ? `, ${inSale(i.id)} in this sale` : ""}`}
-            onClick={() => { noteUse("pos", i.id); startEdit({ productId: i.id, mode: i.loose ? "KILO" : "PIECE", value: "", sourceLocationId: null }, null); }}>
+            onClick={() => { noteUse("pos", i.id); startEdit({ productId: i.id, mode: i.loose ? "KILO" : "PIECE", value: i.loose ? "" : "1", sourceLocationId: null }, null); }}>
             {inSale(i.id) > 0 && <span className="position-absolute top-0 end-0 badge rounded-pill text-bg-success m-1 fs-6">{inSale(i.id)}</span>}
             <div className="fw-semibold">{i.name}{i.forReview && <span className="badge text-bg-warning ms-1">To review</span>}</div>
             <div style={{ fontSize: 22, fontVariantNumeric: "tabular-nums" }}>{peso(i.priceMinor)}<span className="fs-6 opacity-75">{i.loose ? "/kg" : ""}</span></div>
@@ -461,7 +461,7 @@ export default function BentaPanel() {
               <button type="button" className={`btn btn-lg ${editing.mode === "PESO" ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setEditing({ ...editing, mode: "PESO", value: "" })}>Pesos</button>
             </div>
           )}
-          <NumPad value={editing.value} onChange={(v) => setEditing({ ...editing, value: v })} decimals={editing.mode === "KILO" ? 3 : editing.mode === "PESO" ? 2 : 0}
+          <NumPad startFresh={editing.mode === "PIECE"} value={editing.value} onChange={(v) => setEditing({ ...editing, value: v })} decimals={editing.mode === "KILO" ? 3 : editing.mode === "PESO" ? 2 : 0}
             label={editing.mode === "PESO" ? "Amount in pesos" : editing.mode === "KILO" ? "How many kilos" : "How many"} unit={editing.mode === "PESO" ? "₱" : editing.mode === "KILO" ? "kg" : it.gramsPerUnit ? "sacks" : "pieces"} />
           <div className="mt-2" style={{ fontVariantNumeric: "tabular-nums" }}>
             {editing.mode === "PESO" && c.grams ? <div className="fs-5">= <strong>{kg(c.grams)}</strong> · pay <strong>{peso(c.totalMinor)}</strong></div> : null}
@@ -585,7 +585,8 @@ export default function BentaPanel() {
               {pay === "cash" && drawerOpen === false && shiftRequired && (
                 <OpenDrawer onOpened={() => { setDrawerOpen(true); setError(null); }} />
               )}
-              {pay === "cash" && (
+              {/* One pad at a time: the cash pad shows once the drawer is open. */}
+              {pay === "cash" && !(drawerOpen === false && shiftRequired) && (
                 <>
                   <div className="d-flex flex-wrap justify-content-center gap-2 mb-2" role="group" aria-label="Quick cash amounts">
                     {quickCash(total).map((m) => (
@@ -687,7 +688,7 @@ export default function BentaPanel() {
                 <button type="button" className="btn btn-outline-secondary btn-lg" disabled={busy} onClick={() => setStep("pick")}>Back</button>
                 <button type="button" className="btn btn-success btn-lg flex-fill py-3 fw-bold" style={{ fontSize: 22 }} disabled={!canSubmit} onClick={() => void submit()}>{busy ? "Please wait…" : "Finish sale"}</button>
               </div>
-              {pay === "cash" && !tendered && <div className="text-center text-muted mt-2">Tap Exact or enter the cash received first.</div>}
+              {pay === "cash" && !tendered && <div className="text-center text-muted mt-2">{drawerOpen === false && shiftRequired ? "Open the cash drawer first." : "Tap Exact or enter the cash received first."}</div>}
             </div>
           </div>
         )}
