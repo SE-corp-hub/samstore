@@ -5,6 +5,9 @@ import { spawnSync } from "node:child_process";
 import { createInterface } from "node:readline/promises";
 
 const FILE = "go-live/beta-database-url.txt";
+const ROLES_SQL = `DO $$ BEGIN CREATE ROLE anon NOLOGIN; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE ROLE authenticated NOLOGIN; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+`;
 const clean = (s) => (s ?? "").trim().replace(/^["']|["']$/g, "").trim();
 
 function refOf(url) {
@@ -38,13 +41,15 @@ async function main() {
   if (!/sslmode=/i.test(url)) url += (url.includes("?") ? "&" : "?") + "sslmode=require";
 
   const env = { ...process.env, DATABASE_URL: url, TEST_LOGINS_FILE: "beta-test-logins.txt" };
-  const step = (label, cmd) => {
+  const step = (label, cmd, input) => {
     console.log(`\n${label}`);
-    const r = spawnSync(cmd, { shell: true, stdio: "inherit", env });
+    const r = spawnSync(cmd, { shell: true, stdio: [input ? "pipe" : "inherit", "inherit", "inherit"], input, env });
     if (r.status !== 0) throw new Error(`Failed at: ${label}. Tell Claude what it says above.`);
   };
-  step("Step 1 of 2: creating the tables...", "npx prisma migrate deploy");
-  step("Step 2 of 2: adding the TEST Bigasan sample store...", "npx tsx scripts/test-setup.ts");
+  // A Supabase database has these roles; Neon does not, and the lock-down migration revokes from them.
+  step("Step 1 of 3: preparing the database...", "npx prisma db execute --schema prisma/schema.prisma --stdin", ROLES_SQL);
+  step("Step 2 of 3: creating the tables...", "npx prisma migrate deploy");
+  step("Step 3 of 3: adding the TEST Bigasan sample store...", "npx tsx scripts/test-setup.ts");
   if (existsSync(FILE)) unlinkSync(FILE);
   console.log("\nBeta database is ready. Sample-store logins: go-live\\beta-test-logins.txt (keep it private).");
   console.log("The saved address file was deleted. Tell Claude: beta database ready");
