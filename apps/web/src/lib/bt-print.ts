@@ -87,7 +87,7 @@ export function slipToEscPos(s: Slip, w: number): Uint8Array {
 interface BtChar { uuid?: string; properties: { write: boolean; writeWithoutResponse: boolean }; writeValue(v: BufferSource): Promise<void>; writeValueWithoutResponse?(v: BufferSource): Promise<void> }
 interface BtService { uuid?: string; getCharacteristics(): Promise<BtChar[]> }
 interface BtServer { connected: boolean; getPrimaryServices(): Promise<BtService[]> }
-interface BtDevice { name?: string; gatt?: { connected: boolean; connect(): Promise<BtServer>; disconnect(): void }; addEventListener(t: string, f: () => void): void }
+interface BtDevice { id?: string; name?: string; gatt?: { connected: boolean; connect(): Promise<BtServer>; disconnect(): void }; addEventListener(t: string, f: () => void): void }
 interface BtApi { requestDevice(o: unknown): Promise<BtDevice>; getDevices?: () => Promise<BtDevice[]> }
 
 // Services that common BLE receipt printers use for printing (Chrome only lets a page use the ones it lists here).
@@ -138,6 +138,7 @@ export function pickWriter(chars: CharInfo[]): number {
 export function btErrorText(e: unknown): string {
   const name = e instanceof Error ? e.name : "";
   const msg = e instanceof Error ? e.message : String(e);
+  if (name === "NeedsTapError" || /gesture/i.test(msg)) return "The printer is not connected yet. Tap Print receipt once to connect it. After that, receipts print by themselves.";
   if (name === "NotFoundError" && (/cancel/i.test(msg) || !msg)) return "No printer was chosen";
   // Chrome's own words go at the end so a screenshot tells Claude exactly what happened.
   const raw = msg ? ` (${msg})` : "";
@@ -184,16 +185,36 @@ export async function connectPrinter(): Promise<string> {
   device = await bt.requestDevice({ acceptAllDevices: true, optionalServices: SERVICES });
   device.addEventListener("gattserverdisconnected", () => { writer = null; });
   writer = await findWriter(device);
+  try { window.localStorage.setItem(SAVED, JSON.stringify({ id: device.id ?? "", name: device.name ?? "" })); } catch { /* just not remembered */ }
   return device.name || "Bluetooth printer";
 }
+
+// The printer picked last time, so Chrome's remembered devices can be matched after the app restarts.
+const SAVED = "samstore-bt-printer";
+const saved = (): { id: string; name: string } | null => {
+  try { return JSON.parse(window.localStorage.getItem(SAVED) ?? "null") as { id: string; name: string } | null; } catch { return null; }
+};
 
 export const connectedPrinterName = (): string | null => (writer && device ? device.name || "Bluetooth printer" : null);
 
 async function ready(): Promise<BtChar> {
   if (writer && device?.gatt?.connected) return writer;
   if (device) { writer = await findWriter(device); return writer; }
-  const known = await api()?.getDevices?.().catch(() => []);
-  if (known && known.length > 0) { device = known[0]!; writer = await findWriter(device); return writer; }
+  // After the app restarts the picked printer is gone from memory. Chrome can hand it back without asking
+  // (when its remembered-devices feature is on); prefer the one picked last time.
+  const known = (await api()?.getDevices?.().catch(() => [])) ?? [];
+  const last = saved();
+  const match = known.find((d) => last && d.id === last.id) ?? known.find((d) => last?.name && d.name === last.name) ?? known[0];
+  if (match) {
+    device = match;
+    device.addEventListener("gattserverdisconnected", () => { writer = null; });
+    writer = await findWriter(device);
+    return writer;
+  }
+  // Chrome shows its printer list only right after a tap. An automatic print (after a sale) has no tap,
+  // so say so plainly instead of failing with a confusing error.
+  const activation = (navigator as unknown as { userActivation?: { isActive: boolean } }).userActivation;
+  if (activation && !activation.isActive) throw Object.assign(new Error("Printer not connected yet"), { name: "NeedsTapError" });
   // First print of the session: Chrome asks which printer (this works because Print was just tapped).
   await connectPrinter();
   return writer!;
