@@ -138,9 +138,12 @@ export function pickWriter(chars: CharInfo[]): number {
 export function btErrorText(e: unknown): string {
   const name = e instanceof Error ? e.name : "";
   const msg = e instanceof Error ? e.message : String(e);
-  if (name === "NotFoundError") return /cancel/i.test(msg) || !msg ? "No printer was chosen" : "Bluetooth is off or no printer was found. Turn on Bluetooth and Location, and turn the printer on.";
-  if (name === "SecurityError" || name === "NotAllowedError") return "Chrome is not allowed to use Bluetooth. Allow \"Nearby devices\" for Chrome in the phone's Settings, then try again.";
-  if (name === "NetworkError" || /gatt|connect/i.test(msg)) return "The printer did not answer. Turn it off and on, close RawBT or any other printing app, then try again.";
+  if (name === "NotFoundError" && (/cancel/i.test(msg) || !msg)) return "No printer was chosen";
+  // Chrome's own words go at the end so a screenshot tells Claude exactly what happened.
+  const raw = msg ? ` (${msg})` : "";
+  // "Bluetooth adapter not available" also shows when Bluetooth is on but Chrome lacks the Nearby devices permission.
+  if (name === "NotFoundError" || name === "SecurityError" || name === "NotAllowedError") return `Chrome cannot use Bluetooth. In the phone's Settings, open Apps, Chrome, Permissions and allow "Nearby devices" and "Location", turn Location on, then reopen Chrome.${raw}`;
+  if (name === "NetworkError" || /gatt|connect/i.test(msg)) return `The printer did not answer. Turn it off and on, close RawBT or any other printing app, then try again.${raw}`;
   return msg || "error";
 }
 

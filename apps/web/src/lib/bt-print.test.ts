@@ -40,7 +40,7 @@ test("the receipt never goes to the device-name slot, and a known print channel 
 test("Bluetooth errors are explained in plain words", () => {
   const err = (name: string, message: string) => Object.assign(new Error(message), { name });
   assert.equal(btErrorText(err("NotFoundError", "User cancelled the requestDevice() chooser.")), "No printer was chosen");
-  assert.match(btErrorText(err("NotFoundError", "Bluetooth adapter not available.")), /Turn on Bluetooth/);
+  assert.match(btErrorText(err("NotFoundError", "Bluetooth adapter not available.")), /Nearby devices.*\(Bluetooth adapter not available\.\)/);
   assert.match(btErrorText(err("NetworkError", "GATT Server is disconnected.")), /did not answer/);
   assert.match(btErrorText(err("SecurityError", "x")), /Nearby devices/);
 });
