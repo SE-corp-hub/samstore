@@ -1,5 +1,7 @@
 "use client";
 
+import { useState } from "react";
+
 // Rice Ops M5 — the big on-screen number pad. Numbers never go through the phone
 // keyboard: 64 px keys, equal-width digits, one thumb. `decimals` allows one "." (kilos).
 
@@ -10,6 +12,7 @@ export default function NumPad({
   maxLength = 9,
   label,
   unit,
+  startFresh = false,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -18,8 +21,15 @@ export default function NumPad({
   maxLength?: number;
   label: string;
   unit?: string;
+  /** The value shown is a ready-made guess (e.g. 1 sack): the first digit replaces it. */
+  startFresh?: boolean;
 }) {
+  const [fresh, setFresh] = useState(startFresh);
   const press = (k: string) => {
+    if (fresh) {
+      setFresh(false);
+      if (/\d/.test(k)) return onChange(k);
+    }
     if (k === "⌫") return onChange(value.slice(0, -1));
     if (k === "C") return onChange("");
     if (k === ".") {

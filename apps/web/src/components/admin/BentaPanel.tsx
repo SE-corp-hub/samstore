@@ -30,6 +30,9 @@ import { creditStatusWords } from "../../lib/credit-status";
 import { peso, kg } from "../../lib/number-format";
 import { useMediaQuery, WIDE } from "../../lib/use-media-query";
 import { quickCash } from "../../lib/quick-cash";
+import Steps from "./Steps";
+import ProductFinder from "./ProductFinder";
+import { noteUse } from "../../lib/product-find";
 
 interface Loc { id: string; name: string; code: string | null; type: string }
 interface Item {
@@ -93,7 +96,7 @@ export default function BentaPanel() {
   const [homeLocationId, setHomeLocationId] = useState<string | null>(null);
   const [items, setItems] = useState<Item[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
-  const [search, setSearch] = useState("");
+  const [cleared, setCleared] = useState(0); // bumps to empty the search after an item goes in
   const [cart, setCart] = useState<CartLine[]>(() => savedCart()?.cart ?? []);
   const [editing, setEditing] = useState<CartLine | null>(null);
   const [editIdx, setEditIdx] = useState<number | null>(null); // which cart line is being edited (null = adding a new one)
@@ -126,6 +129,10 @@ export default function BentaPanel() {
   const [textPhone, setTextPhone] = useState("");
   const [priceCustomer, setPriceCustomer] = useState(""); // a customer picked at the counter: their special prices apply
   const [specialCount, setSpecialCount] = useState(0);
+  // Less used choices stay folded away until asked for, so the screen shows one clear next step.
+  const [morePay, setMorePay] = useState(false);
+  const [priceOpen, setPriceOpen] = useState(false);
+  const [fromOpen, setFromOpen] = useState(false);
 
   const loadCatalog = useCallback(async (loc?: string) => {
     const q = loc ? `?locationId=${encodeURIComponent(loc)}` : "";
@@ -194,15 +201,15 @@ export default function BentaPanel() {
   }, [step, last]);
 
   const wide = useMediaQuery(WIDE);
+  const startEdit = (l: CartLine, idx: number | null) => {
+    setEditing(l); setEditIdx(idx);
+    setPriceOpen(l.price !== undefined); setFromOpen(!!l.sourceLocationId);
+  };
   /** How much of a product is already in this sale: pieces, or one per kilo/peso line. */
   const inSale = (productId: string) => cart.filter((l) => l.productId === productId).reduce((n, l) => n + (l.mode === "PIECE" ? Number(l.value) || 0 : 1), 0);
   const byId = useMemo(() => new Map(items.map((i) => [i.id, i])), [items]);
   const here = locations.find((l) => l.id === locationId);
   const code = (id: string) => { const l = locations.find((x) => x.id === id); return l?.code ?? l?.name ?? "?"; };
-  const shown = items.filter((i) => {
-    const q = search.trim().toLowerCase();
-    return !q || i.name.toLowerCase().includes(q) || i.name.toLowerCase().split(/\s+/).map((w) => w[0]).join("").startsWith(q);
-  });
   const computed = cart.map((l) => lineOf(byId.get(l.productId), l));
   const total = computed.reduce((s, c) => s + c.totalMinor, 0);
   const change = pay === "cash" && tendered ? toMinor(tendered) - total : 0;
@@ -216,11 +223,12 @@ export default function BentaPanel() {
     if (priceCustomer) void loadCatalog(locationId);
     setPriceCustomer(""); setSpecialCount(0);
     setCart([]); setStep("pick"); setPay(null); setTendered(""); setReference(""); setParts([{ method: "cash", amount: "", reference: "" }, { method: "gcash", amount: "", reference: "" }]); setCustomerId(""); setCustomerSig(null);
-    setPaper(false); setSlipNo(""); setSlipTime(""); setSlipPhoto(null); setStaffSig(null); setError(null);
+    setPaper(false); setMorePay(false); setSlipNo(""); setSlipTime(""); setSlipPhoto(null); setStaffSig(null); setError(null);
   };
 
+  const allPay = morePay || pay === "maya" || pay === "bank" || pay === "split";
   const canSubmit = total > 0 && !!pay && !busy
-    && (pay !== "cash" || !tendered || toMinor(tendered) >= total)
+    && (pay !== "cash" || (!!tendered && toMinor(tendered) >= total))
     && (!needsRef(pay) || reference.trim().length >= 4)
     && (pay !== "split" || (parts.reduce((s, x) => s + toMinor(x.amount || "0"), 0) === total && parts.every((x) => toMinor(x.amount || "0") > 0 && (x.method === "cash" || x.reference.trim().length >= 4))))
     && (pay !== "utang" || (!!customer && !!customerSig && !overLimit))
@@ -284,6 +292,7 @@ export default function BentaPanel() {
   if (step === "done" && last) {
     return (
       <div className="mx-auto" style={{ fontSize: 18, maxWidth: 520 }}>
+        <Steps items={["Pick items", "Pay", "Done"]} current={2} />
         {last.status === "WAITING_OWNER" ? (
           <div className="alert alert-warning">
             <div className="h4 mb-1">Waiting for the owner</div>
@@ -344,7 +353,7 @@ export default function BentaPanel() {
             </div>
           </div>
         )}
-        <button className="btn btn-success btn-lg w-100" onClick={reset}>New sale</button>
+        <button className="btn btn-success btn-lg w-100 py-3" onClick={reset}><i className="bi bi-plus-lg me-1"></i>New sale</button>
       </div>
     );
   }
@@ -361,65 +370,67 @@ export default function BentaPanel() {
           {priceCustomer && <div className="small text-muted mt-1">{specialCount > 0 ? `${specialCount} special ${specialCount === 1 ? "price" : "prices"} for this customer.` : "No special prices for this customer — store prices apply."}</div>}
         </div>
       )}
-      <input className="form-control form-control-lg mb-3" placeholder="Search (name or first letters)" aria-label="Search" value={search} onChange={(e) => setSearch(e.target.value)} />
-      <div className="row g-2 mb-3">
-        {shown.map((i) => (
-          <div key={i.id} className="col-6 col-md-4 col-lg-3">
-            <button type="button" className={`btn ${inSale(i.id) > 0 ? "btn-dark" : "btn-outline-dark"} w-100 h-100 text-center p-2 position-relative`} style={{ minHeight: 120 }}
-              aria-label={`${i.name}${inSale(i.id) > 0 ? `, ${inSale(i.id)} in this sale` : ""}`}
-              onClick={() => { setEditing({ productId: i.id, mode: i.loose ? "KILO" : "PIECE", value: "", sourceLocationId: null }); setEditIdx(null); }}>
-              {inSale(i.id) > 0 && <span className="position-absolute top-0 end-0 badge rounded-pill text-bg-success m-1">{inSale(i.id)}</span>}
-              <div className="fw-semibold">{i.name}{i.forReview && <span className="badge text-bg-warning ms-1">To review</span>}</div>
-              <div style={{ fontSize: 22, fontVariantNumeric: "tabular-nums" }}>{peso(i.priceMinor)}<span className="fs-6 text-muted">{i.loose ? "/kg" : ""}</span></div>
-              <div className="small" style={{ fontVariantNumeric: "tabular-nums" }}>
-                {locations.map((l) => {
-                  const n = i.stock[l.id] ?? 0;
-                  return <span key={l.id} className={`me-2 ${n === 0 ? "text-danger" : ""}`}>{l.code ?? l.name} {i.loose ? kg(n) : n}</span>;
-                })}
-              </div>
-            </button>
-          </div>
-        ))}
-      </div>
+      <ProductFinder list="pos" items={items} clearSignal={cleared} colClass={wide ? "col-6 col-xl-3 col-lg-4" : "col-6 col-md-4"}
+        renderTile={(i) => (
+          <button type="button" className={`btn ${inSale(i.id) > 0 ? "btn-dark" : "btn-outline-dark"} w-100 h-100 text-center p-2 position-relative`} style={{ minHeight: 104 }}
+            aria-label={`${i.name}${inSale(i.id) > 0 ? `, ${inSale(i.id)} in this sale` : ""}`}
+            onClick={() => { noteUse("pos", i.id); startEdit({ productId: i.id, mode: i.loose ? "KILO" : "PIECE", value: i.loose ? "" : "1", sourceLocationId: null }, null); }}>
+            {inSale(i.id) > 0 && <span className="position-absolute top-0 end-0 badge rounded-pill text-bg-success m-1 fs-6">{inSale(i.id)}</span>}
+            <div className="fw-semibold">{i.name}{i.forReview && <span className="badge text-bg-warning ms-1">To review</span>}</div>
+            <div style={{ fontSize: 22, fontVariantNumeric: "tabular-nums" }}>{peso(i.priceMinor)}<span className="fs-6 opacity-75">{i.loose ? "/kg" : ""}</span></div>
+            {/* Only this store's count: other stores show when a line is taken from them. */}
+            {(() => {
+              const n = i.stock[locationId] ?? 0;
+              // A white badge stays readable whether the tile is light, dark (in the sale) or pressed.
+              return n <= 0
+                ? <div><span className="badge bg-white text-danger border border-danger fw-semibold">None left here</span></div>
+                : <div className="small" style={{ fontVariantNumeric: "tabular-nums" }}>{i.loose ? kg(n) : n} left</div>;
+            })()}
+          </button>
+        )} />
       <div className="text-center mb-3">
         <button type="button" className="btn btn-outline-secondary" onClick={() => setNewItem(true)}>+ New item (not on the list yet)</button>
       </div>
     </>
   );
+  const holdSale = () => {
+    const first = byId.get(cart[0]!.productId)?.name ?? "Sale";
+    const h: Held = { id: `${Date.now()}`, label: `${first}${cart.length > 1 ? ` +${cart.length - 1}` : ""} · ${peso(total)}`, at: Date.now(), locationId, cart };
+    const all = [...holds, h]; setHolds(all); saveHolds(all);
+    keyRef.current = null; setCart([]); setError(null); toast("Sale put on hold");
+  };
   const cartCard = cart.length > 0 && (
-    <div className={`card border-success${wide ? "" : " position-sticky bottom-0 sticky-above-bar"}`}>
+    <div className={`card border-success${wide ? "" : " position-sticky bottom-0 sticky-above-bar shadow"}`}>
       <div className="card-body">
-        <ul className="list-unstyled mb-2" style={{ fontVariantNumeric: "tabular-nums" }}>
+        <ul className="list-unstyled mb-2" style={{ fontVariantNumeric: "tabular-nums", maxHeight: wide ? undefined : "32vh", overflowY: "auto" }}>
           {cart.map((l, idx) => {
             const it = byId.get(l.productId);
             const c = computed[idx]!;
             return (
-              <li key={idx} className="d-flex justify-content-between align-items-center py-1 border-bottom">
-                <span>
-                  {l.mode === "PIECE" ? `${l.value} × ` : `${kg(c.grams ?? 0)} `}{it?.name}
-                  {l.mode === "PESO" && <span className="text-muted"> (₱{l.value})</span>}
-                  {l.sourceLocationId && <span className="badge text-bg-info ms-1">take from {code(l.sourceLocationId)}</span>}
-                  {l.price !== undefined && <span className="badge text-bg-warning ms-1">price {peso(l.price)}{it?.loose ? "/kg" : ""}</span>}
-                </span>
-                <span className="text-nowrap">{peso(c.totalMinor)}
-                  <button type="button" className="btn btn-link p-0 ms-2" aria-label="Edit" onClick={() => { setEditing(l); setEditIdx(idx); }}>Edit</button>
-                  <button type="button" className="btn btn-link text-danger p-0 ms-2" aria-label="Remove" onClick={() => setCart(cart.filter((_, j) => j !== idx))}>×</button>
-                </span>
+              <li key={idx} className="d-flex align-items-stretch gap-2 py-1 border-bottom">
+                {/* The whole line is the button: tap it to change the amount or price. */}
+                <button type="button" className="btn btn-light flex-grow-1 text-start d-flex justify-content-between align-items-center gap-2" aria-label={`Change ${it?.name ?? "line"}`} onClick={() => startEdit(l, idx)}>
+                  <span>
+                    {l.mode === "PIECE" ? `${l.value} × ` : `${kg(c.grams ?? 0)} `}{it?.name}
+                    {l.mode === "PESO" && <span className="text-muted"> (₱{l.value})</span>}
+                    {l.sourceLocationId && <span className="badge text-bg-info ms-1">from {code(l.sourceLocationId)}</span>}
+                    {l.price !== undefined && <span className="badge text-bg-warning ms-1">new price</span>}
+                  </span>
+                  <span className="fw-semibold text-nowrap">{peso(c.totalMinor)}</span>
+                </button>
+                <button type="button" className="btn btn-outline-danger" style={{ minWidth: 48 }} aria-label={`Remove ${it?.name ?? "line"}`} onClick={() => setCart(cart.filter((_, j) => j !== idx))}>
+                  <i className="bi bi-trash" aria-hidden="true"></i>
+                </button>
               </li>
             );
           })}
         </ul>
-        <div className="d-flex justify-content-between align-items-center">
-          <span style={{ fontSize: 28, fontVariantNumeric: "tabular-nums" }} className="fw-bold">{peso(total)}</span>
-          <span className="d-flex gap-2">
-            <button type="button" className="btn btn-outline-dark btn-lg" onClick={() => {
-              const first = byId.get(cart[0]!.productId)?.name ?? "Sale";
-              const h: Held = { id: `${Date.now()}`, label: `${first}${cart.length > 1 ? ` +${cart.length - 1}` : ""} · ${peso(total)}`, at: Date.now(), locationId, cart };
-              const all = [...holds, h]; setHolds(all); saveHolds(all);
-              keyRef.current = null; setCart([]); setError(null); toast("Sale put on hold");
-            }}>Hold</button>
-            <button type="button" className="btn btn-success btn-lg" onClick={() => { if (!pay) setPay("cash"); setStep("pay"); }}>Pay</button>
-          </span>
+        <div className="text-center text-muted small mb-2">Tap a line to change it.</div>
+        <div className="d-flex gap-2">
+          <button type="button" className="btn btn-outline-dark btn-lg" onClick={holdSale}>Hold</button>
+          <button type="button" className="btn btn-success btn-lg flex-fill py-3 fw-bold" style={{ fontSize: 22, fontVariantNumeric: "tabular-nums" }} onClick={() => { if (!pay) setPay("cash"); setStep("pay"); }}>
+            Pay {peso(total)}
+          </button>
         </div>
       </div>
     </div>
@@ -442,29 +453,38 @@ export default function BentaPanel() {
     return (
       <div className="card border-success mx-auto" style={{ maxWidth: 520 }}>
         <div className="card-body">
-          <h2 className="h5 text-center">{it.name} · {peso(it.priceMinor)}{it.loose ? "/kg" : ""}</h2>
+          <h2 className="h5 text-center mb-1">{it.name} · {peso(it.priceMinor)}{it.loose ? "/kg" : ""}</h2>
+          <div className="text-center text-muted mb-2">{it.loose ? "Sell by kilos or by pesos?" : "How many?"}</div>
           {it.loose && (
             <div className="btn-group w-100 mb-3" role="group" aria-label="Kilos or pesos?">
               <button type="button" className={`btn btn-lg ${editing.mode === "KILO" ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setEditing({ ...editing, mode: "KILO", value: "" })}>Kilos</button>
               <button type="button" className={`btn btn-lg ${editing.mode === "PESO" ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setEditing({ ...editing, mode: "PESO", value: "" })}>Pesos</button>
             </div>
           )}
-          <NumPad value={editing.value} onChange={(v) => setEditing({ ...editing, value: v })} decimals={editing.mode === "KILO" ? 3 : editing.mode === "PESO" ? 2 : 0}
+          <NumPad startFresh={editing.mode === "PIECE"} value={editing.value} onChange={(v) => setEditing({ ...editing, value: v })} decimals={editing.mode === "KILO" ? 3 : editing.mode === "PESO" ? 2 : 0}
             label={editing.mode === "PESO" ? "Amount in pesos" : editing.mode === "KILO" ? "How many kilos" : "How many"} unit={editing.mode === "PESO" ? "₱" : editing.mode === "KILO" ? "kg" : it.gramsPerUnit ? "sacks" : "pieces"} />
           <div className="mt-2" style={{ fontVariantNumeric: "tabular-nums" }}>
             {editing.mode === "PESO" && c.grams ? <div className="fs-5">= <strong>{kg(c.grams)}</strong> · pay <strong>{peso(c.totalMinor)}</strong></div> : null}
             {editing.mode === "KILO" && c.totalMinor > 0 ? <div className="fs-5">= <strong>{peso(c.totalMinor)}</strong></div> : null}
             {editing.mode === "PIECE" && c.totalMinor > 0 ? <div className="fs-5">= <strong>{peso(c.totalMinor)}</strong></div> : null}
           </div>
+          {!priceOpen && !fromOpen && (
+            <div className="d-flex flex-wrap justify-content-center gap-2 mt-3">
+              <button type="button" className="btn btn-outline-secondary" onClick={() => setPriceOpen(true)}>Change price</button>
+              {it.tracked && locations.length > 1 && <button type="button" className="btn btn-outline-secondary" onClick={() => setFromOpen(true)}>Take from another store</button>}
+            </div>
+          )}
+          {priceOpen && (
           <div className="mt-3">
-            <label className="form-label mb-1" htmlFor="bt-price">Price {it.loose ? "per kilo" : "each"} <span className="text-muted small">(list price {peso(it.priceMinor)} — change it only if needed)</span></label>
+            <label className="form-label mb-1" htmlFor="bt-price">New price {it.loose ? "per kilo" : "each"} <span className="text-muted small">(usual price {peso(it.priceMinor)})</span></label>
             <PesoInput id="bt-price" className="form-control form-control-lg" value={editing.price !== undefined ? String(editing.price / 100) : ""} placeholder={(it.priceMinor / 100).toFixed(2)}
               onChange={(v) => { const m = v === "" ? undefined : toMinor(v); setEditing({ ...editing, price: m === undefined || m === it.priceMinor ? undefined : m, reason: m === undefined || m === it.priceMinor ? undefined : editing.reason }); }} />
             {changed && (
               <PriceReason className="form-select mt-2" value={editing.reason ?? ""} onChange={(v) => setEditing({ ...editing, reason: v })} />
             )}
           </div>
-          {it.tracked && (
+          )}
+          {it.tracked && (fromOpen || short) && (
             <div className="mt-3">
               <LocationPicker id="bt-from" label="Taken from (where the item comes from)" locations={locations} value={from}
                 labelFor={(l) => `${l.name}${l.id === locationId ? " (here)" : ""} — ${it.loose ? kg(it.stock[l.id] ?? 0) : `${it.stock[l.id] ?? 0}`}`}
@@ -486,8 +506,8 @@ export default function BentaPanel() {
           )}
           <div className="d-flex justify-content-between mt-3 pos-actions">
             <button type="button" className="btn btn-outline-secondary btn-lg" onClick={() => { setEditing(null); setEditIdx(null); }}>Back</button>
-            <button type="button" className="btn btn-success btn-lg" disabled={c.totalMinor <= 0 || short || !reasonGiven || (editing.mode === "PIECE" && !Number.isInteger(c.units))}
-              onClick={() => { setCart(editIdx === null ? [...cart, editing] : cart.map((x, j) => (j === editIdx ? editing : x))); setEditing(null); setEditIdx(null); setSearch(""); }}>{editIdx === null ? "Add" : "Save"}</button>
+            <button type="button" className="btn btn-success btn-lg px-5" disabled={c.totalMinor <= 0 || short || !reasonGiven || (editing.mode === "PIECE" && !Number.isInteger(c.units))}
+              onClick={() => { setCart(editIdx === null ? [...cart, editing] : cart.map((x, j) => (j === editIdx ? editing : x))); setEditing(null); setEditIdx(null); setCleared((n) => n + 1); }}>{editIdx === null ? "Add to sale" : "Save"}</button>
           </div>
         </div>
       </div>
@@ -500,10 +520,14 @@ export default function BentaPanel() {
       <div className={sideBySide ? "col-lg-7 col-xl-8" : undefined}>
         <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
           <h1 className="h4 mb-0">POS</h1>
-          <button type="button" className="btn btn-outline-dark" onClick={() => setShowHeld(!showHeld)}>
-            <i className="bi bi-pause-circle me-1"></i>Held{holds.filter((h) => h.locationId === locationId).length > 0 ? ` (${holds.filter((h) => h.locationId === locationId).length})` : ""}
-          </button>
+          {/* Held sales: the button only shows when there is one to come back to. */}
+          {holds.some((h) => h.locationId === locationId) && (
+            <button type="button" className="btn btn-warning" onClick={() => setShowHeld(!showHeld)}>
+              <i className="bi bi-pause-circle me-1"></i>Held sales ({holds.filter((h) => h.locationId === locationId).length})
+            </button>
+          )}
         </div>
+        <Steps items={["Pick items", "Pay", "Done"]} current={step === "pay" ? 1 : 0} />
         <StoreBar label="Selling at" locations={locations} value={locationId} homeLocationId={homeLocationId} locked={cart.length > 0}
           lockedNote="To switch store, hold or clear this sale first." onPick={(id) => { reset(); void loadCatalog(id); }} />
         {showHeld && (
@@ -542,23 +566,27 @@ export default function BentaPanel() {
         {step === "pay" && (
           <div className="card border-success mx-auto" style={{ maxWidth: 520 }}>
             <div className="card-body">
-              <div className="small text-muted">Step 2 of 2</div>
-              <div className="d-flex justify-content-between align-items-baseline mb-3">
-                <h2 className="h5 mb-0">Payment</h2>
-                <span className="fw-bold" style={{ fontSize: 28, fontVariantNumeric: "tabular-nums" }}>{peso(total)}</span>
+              <div className="text-center mb-3">
+                <div className="text-muted">Customer pays</div>
+                <div className="fw-bold" style={{ fontSize: 40, fontVariantNumeric: "tabular-nums" }}>{peso(total)}</div>
               </div>
-              <div className="d-grid gap-2 mb-3" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
-                {(["cash", "gcash", "maya", "bank", "split", "utang"] as Pay[]).map((p) => (
-                  <button key={p} type="button" className={`btn btn-lg ${pay === p ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setPay(p)}>
-                    {PAY_LABEL[p]}
+              <div className="text-center fw-semibold mb-2">How are they paying?</div>
+              <div className={`d-grid gap-2 ${allPay ? "mb-3" : "mb-2"}`} style={{ gridTemplateColumns: "repeat(3, 1fr)" }} role="group" aria-label="How are they paying?">
+                {(["cash", "gcash", "utang", ...(allPay ? ["maya", "bank", "split"] : [])] as Pay[]).map((p) => (
+                  <button key={p} type="button" className={`btn btn-lg ${pay === p ? "btn-dark" : "btn-outline-dark"}`} aria-pressed={pay === p} onClick={() => setPay(p)}>
+                    {p === "cash" && <i className="bi bi-cash me-1" aria-hidden="true"></i>}{PAY_LABEL[p]}
                   </button>
                 ))}
               </div>
+              {!allPay && (
+                <div className="text-center mb-3"><button type="button" className="btn btn-link" onClick={() => setMorePay(true)}>Other ways to pay</button></div>
+              )}
 
               {pay === "cash" && drawerOpen === false && shiftRequired && (
                 <OpenDrawer onOpened={() => { setDrawerOpen(true); setError(null); }} />
               )}
-              {pay === "cash" && (
+              {/* One pad at a time: the cash pad shows once the drawer is open. */}
+              {pay === "cash" && !(drawerOpen === false && shiftRequired) && (
                 <>
                   <div className="d-flex flex-wrap justify-content-center gap-2 mb-2" role="group" aria-label="Quick cash amounts">
                     {quickCash(total).map((m) => (
@@ -568,7 +596,7 @@ export default function BentaPanel() {
                     ))}
                   </div>
                   <NumPad value={tendered} onChange={setTendered} decimals={2} label="Cash received" unit="₱" />
-                  {tendered && <div className={`mt-2 fs-4 ${change < 0 ? "text-danger" : ""}`} style={{ fontVariantNumeric: "tabular-nums" }}>{change < 0 ? `Short ${peso(-change)}` : `Change ${peso(change)}`}</div>}
+                  {tendered && <div className={`mt-2 text-center fw-bold ${change < 0 ? "text-danger" : "text-success"}`} style={{ fontSize: 30, fontVariantNumeric: "tabular-nums" }} aria-live="polite">{change < 0 ? `Short ${peso(-change)}` : `Change ${peso(change)}`}</div>}
                 </>
               )}
               {pay === "split" && (
@@ -631,10 +659,10 @@ export default function BentaPanel() {
                 </>
               )}
 
-              <div className="form-check form-switch mt-3">
+              {(allPay || paper) && <div className="form-check form-switch mt-3">
                 <input className="form-check-input" type="checkbox" id="bt-paper" checked={paper} onChange={(e) => setPaper(e.target.checked)} />
                 <label className="form-check-label" htmlFor="bt-paper">From a paper slip (type in the slip)</label>
-              </div>
+              </div>}
               {paper && (
                 <div className="border rounded p-2 mt-2">
                   <div className="row g-2">
@@ -656,10 +684,11 @@ export default function BentaPanel() {
                 </div>
               )}
 
-              <div className="d-flex justify-content-between mt-3">
+              <div className="d-flex gap-2 mt-3">
                 <button type="button" className="btn btn-outline-secondary btn-lg" disabled={busy} onClick={() => setStep("pick")}>Back</button>
-                <button type="button" className="btn btn-success btn-lg" disabled={!canSubmit} onClick={() => void submit()}>{busy ? "Please wait…" : "Finish sale"}</button>
+                <button type="button" className="btn btn-success btn-lg flex-fill py-3 fw-bold" style={{ fontSize: 22 }} disabled={!canSubmit} onClick={() => void submit()}>{busy ? "Please wait…" : "Finish sale"}</button>
               </div>
+              {pay === "cash" && !tendered && <div className="text-center text-muted mt-2">{drawerOpen === false && shiftRequired ? "Open the cash drawer first." : "Tap Exact or enter the cash received first."}</div>}
             </div>
           </div>
         )}
@@ -667,7 +696,7 @@ export default function BentaPanel() {
       {sideBySide && (
         <div className="col-lg-5 col-xl-4 pos-side">
           {quickCount || editCard || cartCard || (
-            <div className="card"><div className="card-body text-muted">Tap a product to start a sale.</div></div>
+            <div className="card"><div className="card-body text-center text-muted py-5"><i className="bi bi-hand-index fs-1 d-block mb-2" aria-hidden="true"></i>Tap a product to start a sale.</div></div>
           )}
         </div>
       )}
