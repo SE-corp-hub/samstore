@@ -53,3 +53,8 @@ test("Bluetooth errors are explained in plain words", () => {
   assert.match(btErrorText(err("NeedsTapError", "Printer not connected yet")), /Tap Connect printer/);
   assert.match(btErrorText(err("SecurityError", "Must be handling a user gesture to show a permission request.")), /Tap Connect printer/);
 });
+
+test("the Bluetooth receipt prints the address and contact lines under the name", () => {
+  const lines = slipLines({ storeName: "Tindahan ni Sam", header: "Brgy. 1", contact: "0917 123 4567", title: "RECEIPT" }, 32).map((l) => l.trim());
+  assert.deepEqual(lines.slice(0, 4), ["Tindahan ni Sam", "Brgy. 1", "0917 123 4567", "RECEIPT"]);
+});

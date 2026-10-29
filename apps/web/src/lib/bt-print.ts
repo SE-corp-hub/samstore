@@ -51,6 +51,7 @@ export function slipLines(s: Slip, w: number): string[] {
     if (c > 0) out.push("", "", "- - - - - - cut here - - - - - -", "", "");
     out.push(...center(s.storeName, w));
     if (s.header) out.push(...center(s.header, w));
+    if (s.contact) out.push(...center(s.contact, w));
     out.push(...center(s.title, w));
     if (s.reference) out.push(...center(s.reference, w));
     if (s.when) out.push(...center(s.when, w));
