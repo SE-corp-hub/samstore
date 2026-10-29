@@ -486,7 +486,7 @@ export default function OrdersPanel() {
         a.push({ key: "failed", label: "Delivery failed", icon: "bi-exclamation-triangle", tone: "danger", run: () => void transition(o.id, "FAILED_DELIVERY") });
       }
       if (s === "FAILED_DELIVERY") a.push({ key: "retry", label: "Retry delivery", icon: "bi-arrow-repeat", tone: "main", run: () => void transition(o.id, "OUT_FOR_DELIVERY") });
-      if (s !== "ON_HOLD") a.push({ key: "receipt", label: "Receipt", icon: "bi-receipt", tone: "plain", run: () => setReceiptOrder(o.id) });
+      if (s !== "ON_HOLD") a.push({ key: "receipt", label: "Reprint receipt", icon: "bi-printer", tone: "plain", run: () => setReceiptOrder(o.id) });
       if (canVoidRefund && s === "COMPLETED") {
         const refund = o.paymentStatus === "COLLECTED";
         a.push({ key: "voidrefund", label: refund ? "Refund sale" : "Void sale", icon: "bi-x-circle", tone: "danger", run: () => setConfirmAction({ orderId: o.id, kind: refund ? "refund" : "void" }) });
@@ -572,7 +572,9 @@ export default function OrdersPanel() {
   const dayWords = range === "today" ? "today" : range === "yesterday" ? "yesterday" : range === "tomorrow" ? "tomorrow" : "in these dates";
 
   const orderRow = (o: AdminOrder) => {
-    const main = actionsFor(o).find((x) => x.tone === "main");
+    const acts = actionsFor(o);
+    const main = acts.find((x) => x.tone === "main");
+    const reprint = acts.find((x) => x.key === "receipt");
     const age = ageOf(o);
     const open = orderDetail?.id === o.id;
     return (
@@ -597,6 +599,11 @@ export default function OrdersPanel() {
             </span>
           </span>
         </button>
+        {reprint && (
+          <button type="button" className="btn btn-outline-dark order-reprint" onClick={reprint.run} aria-label={`Reprint receipt for ${o.orderNumber}`}>
+            <i className="bi bi-printer me-1" aria-hidden="true"></i>Reprint
+          </button>
+        )}
         {main && (
           <button type="button" className="btn btn-success order-go" disabled={busy(o)} onClick={main.run}>
             {busy(o) ? <span className="spinner-border spinner-border-sm me-1" aria-hidden="true"></span> : <i className={`bi ${main.icon} me-1`} aria-hidden="true"></i>}
