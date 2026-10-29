@@ -585,6 +585,34 @@ export class PosService {
 
   /** v4: create a pre-order draft — customer REQUIRED, stock reserved (ON_HOLD + source=PRE_ORDER). */
   async createPreOrder(storeId: string, actorId: string, input: PreOrderCreateRequest): Promise<PosResult<{ orderId: string; orderNumber: string; status: string; totalMinor: number; currencyCode: string }>> {
+    // A pre-order saved with no signal is sent later, maybe more than once: the same key makes one pre-order.
+    let key: string | null = null;
+    if (input.idempotencyKey !== undefined) {
+      try {
+        key = saleKey(storeId, input.idempotencyKey);
+      } catch (e) {
+        return { ok: false, error: { type: "validation", errors: [e instanceof SellingError ? e.message : "invalid idempotencyKey"] } };
+      }
+      const earlier = await this.replayPreOrder(storeId, key);
+      if (earlier) return { ok: true, value: earlier };
+    }
+    try {
+      return await this.createPreOrderOnce(storeId, actorId, input, key);
+    } catch (e) {
+      if (key && e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002" && JSON.stringify(e.meta?.target ?? "").includes("idempotencyKey")) {
+        const won = await this.replayPreOrder(storeId, key);
+        if (won) return { ok: true, value: won };
+      }
+      throw e;
+    }
+  }
+
+  private async replayPreOrder(storeId: string, key: string) {
+    const o = await prisma.order.findFirst({ where: { storeId, idempotencyKey: key, source: "PRE_ORDER" }, select: { id: true, orderNumber: true, status: true, totalMinor: true, currencyCode: true } });
+    return o ? { orderId: o.id, orderNumber: o.orderNumber, status: o.status, totalMinor: o.totalMinor, currencyCode: o.currencyCode } : null;
+  }
+
+  private async createPreOrderOnce(storeId: string, actorId: string, input: PreOrderCreateRequest, key: string | null): Promise<PosResult<{ orderId: string; orderNumber: string; status: string; totalMinor: number; currencyCode: string }>> {
     if (!this.validateItems(input.items)) {
       return { ok: false, error: { type: "validation", errors: ["At least one item with positive quantity is required"] } };
     }
@@ -606,6 +634,7 @@ export class PosService {
         id, orderNumber, status: "ON_HOLD", source: "PRE_ORDER", paymentMethod: "credit", paymentStatus: "PENDING",
         currencyCode: store.currencyCode, totals, storeCustomerId: custId, customerName: displayName, lines,
         preorder: { startAt: input.startAt ?? new Date().toISOString(), dueAt: input.dueAt ?? null },
+        idempotencyKey: key,
       });
       await this.decrementStock(tx, storeId, lines, { orderId: id, createdBy: actorId, allowBelowZero: true });
     }, txOptions());

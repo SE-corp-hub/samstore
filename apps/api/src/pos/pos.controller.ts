@@ -72,10 +72,10 @@ export class PosController {
 
   /** POST /admin/pos/preorder — create a v4 pre-order draft (customer required, stock reserved). */
   @Post("preorder")
-  async createPreOrder(@Req() req: Request & { user?: AuthPrincipal }, @Body() body: PreOrderCreateRequest, @Headers("x-store-id") headerStoreId?: string) {
+  async createPreOrder(@Req() req: Request & { user?: AuthPrincipal }, @Body() body: PreOrderCreateRequest, @Headers("x-store-id") headerStoreId?: string, @Headers("idempotency-key") idempotencyKey?: string) {
     const user = req.user!;
     const storeId = await this.guardAndStore(req, headerStoreId);
-    const result = await this.pos.createPreOrder(storeId, user.sub, body);
+    const result = await this.pos.createPreOrder(storeId, user.sub, { ...body, ...(body?.idempotencyKey === undefined && idempotencyKey ? { idempotencyKey } : {}) });
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
     return { ...result.value, storeId };
   }

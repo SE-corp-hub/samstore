@@ -1,7 +1,7 @@
 // Rice Ops M5 — Benta arithmetic and rules (pure, no DB).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { checkPaperSlip, isLoose, mergeQuantity, planManualItem, priceAt, priceLine, saleKey, SellingError, shortMessage } from "./selling.js";
+import { checkPaperSlip, isLoose, offlineSoldAt, mergeQuantity, planManualItem, priceAt, priceLine, saleKey, SellingError, shortMessage } from "./selling.js";
 
 const sack = { name: "Sinandomeng 25 kg", priceMinor: 130_000, stockBaseUnit: "g", stockBaseQuantity: 25_000 };
 const loose = { name: "Sinandomeng (per kilo)", priceMinor: 5_200, stockBaseUnit: "g", stockBaseQuantity: 1 };
@@ -61,6 +61,17 @@ test("M5: a paper slip keeps its real time — not in the future, not older than
   assert.throws(() => checkPaperSlip({ slipNo: "0123", occurredAt: "2026-09-01T10:00:00+08:00" }, now), /31 days/);
   assert.throws(() => checkPaperSlip({ slipNo: "", occurredAt: "2026-10-15T10:00:00+08:00" }, now), /paper slip number/);
   assert.throws(() => checkPaperSlip({ slipNo: "12", occurredAt: "kahapon" }, now), /date and time/);
+});
+
+test("Offline sale: keeps the tablet time when it is 1 min to 3 days old, else now", () => {
+  const now = new Date("2026-10-29T10:00:00+08:00");
+  assert.equal(offlineSoldAt("2026-10-29T08:15:00+08:00", now)?.toISOString(), "2026-10-29T00:15:00.000Z");
+  assert.equal(offlineSoldAt("2026-10-27T08:15:00+08:00", now)?.toISOString(), "2026-10-27T00:15:00.000Z");
+  assert.equal(offlineSoldAt(now.toISOString(), now), null, "sent right away: now");
+  assert.equal(offlineSoldAt("2026-10-29T11:00:00+08:00", now), null, "future");
+  assert.equal(offlineSoldAt("2026-10-20T10:00:00+08:00", now), null, "too old");
+  assert.equal(offlineSoldAt("kahapon", now), null);
+  assert.equal(offlineSoldAt(undefined, now), null);
 });
 
 test("M5: Bagong item — rice joins Bigas; it needs what is on hand to be sellable", () => {

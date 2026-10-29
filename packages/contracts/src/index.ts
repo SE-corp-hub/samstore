@@ -364,6 +364,8 @@ export interface PreOrderCreateRequest {
   /** default now / now + store creditTermDays */
   startAt?: string;
   dueAt?: string;
+  /** The same key always returns the same pre-order (a retry, or one saved with no signal and sent later). */
+  idempotencyKey?: string;
 }
 
 export interface PreOrderCreateResponse {

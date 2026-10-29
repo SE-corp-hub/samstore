@@ -31,7 +31,7 @@ import { coverShortage, deductWithBuffer } from "../domain/buffer.js";
 import { formatOrderNumber } from "../domain/order-number.js";
 import { resolveLinePrice, PriceOverrideError } from "../domain/price-override.js";
 import { taxColumnsFor } from "../domain/tax-store.js";
-import { checkPaperSlip, isLoose, mergeQuantity, planManualItem, priceAt, priceLine, saleKey, SellingError, shortMessage, type ManualItemAsk, type PricedLine } from "../domain/selling.js";
+import { checkPaperSlip, isLoose, mergeQuantity, offlineSoldAt, planManualItem, priceAt, priceLine, saleKey, SellingError, shortMessage, type ManualItemAsk, type PricedLine } from "../domain/selling.js";
 import { formatKilos } from "../domain/weight.js";
 import { limitCheck, pesoText, saleText } from "../domain/utang.js";
 import { CreditService } from "../credit/credit.service.js";
@@ -84,6 +84,8 @@ export interface BentaInput {
   signatures?: SignatureInput[];
   /** Galing sa papel: encode a paper slip (number + the real time it happened). */
   paperSlip?: { slipNo?: unknown; occurredAt?: unknown };
+  /** When the tablet made the sale; a sale that waited offline keeps its real time (at most 3 days). */
+  soldAt?: unknown;
 }
 
 export interface BentaSaleView {
@@ -365,6 +367,7 @@ export class BentaService {
       const seq = await this.sequences.nextOrderSequence(storeId);
       const orderNumber = formatOrderNumber(store.slug, seq, { prefix: store.settings?.orderNumberPrefix ?? undefined });
       const now = new Date();
+      const at = paper?.occurredAt ?? offlineSoldAt(input.soldAt, now) ?? now;
       const releases: { id: string; docNumber: string }[] = [];
 
       try {
@@ -377,7 +380,7 @@ export class BentaService {
               paymentMethod: PAY_CODE[method], paymentStatus: method === "utang" ? "PENDING" : "COLLECTED",
               idempotencyKey: key, cartToken: "", customerName, customerPhone: "", deliveryAddressLine1: "",
               storeCustomerId, fulfillmentType: "PICKUP", registerSessionId,
-              sellingLocationId: loc.id, occurredAt: paper?.occurredAt ?? now, paperSlipNo: paper?.slipNo ?? null, encodedLater: !!paper,
+              sellingLocationId: loc.id, occurredAt: at, paperSlipNo: paper?.slipNo ?? null, encodedLater: !!paper,
             },
           });
           await tx.orderItem.createMany({
@@ -437,12 +440,12 @@ export class BentaService {
               const bal = await tx.storeCustomer.findUniqueOrThrow({ where: { id: storeCustomerId }, select: { creditBalanceMinor: true } });
               outcome.smsStatus = (await queueSms(tx, {
                 storeId, storeCustomerId, template: "utang_sale", documentType: "SALE", documentId: orderId, createdById: actor.userId,
-                text: saleText({ customerName, amountMinor: subtotal, items: priced.map((l) => l.product.name), locationName: loc.name, at: paper?.occurredAt ?? now, balanceMinor: bal.creditBalanceMinor }),
+                text: saleText({ customerName, amountMinor: subtotal, items: priced.map((l) => l.product.name), locationName: loc.name, at, balanceMinor: bal.creditBalanceMinor }),
               })).status;
             }
           }
           await tx.auditLog.create({
-            data: { storeId, actorType: "USER", actorId: actor.userId, action: paper ? "benta.paper_slip" : "benta.sell", entityType: "Order", entityId: orderId, after: { orderNumber, totalMinor: subtotal, method, locationId: loc.id, ...(paper ? { slipNo: paper.slipNo, occurredAt: paper.occurredAt.toISOString() } : {}) } },
+            data: { storeId, actorType: "USER", actorId: actor.userId, action: paper ? "benta.paper_slip" : "benta.sell", entityType: "Order", entityId: orderId, after: { orderNumber, totalMinor: subtotal, method, locationId: loc.id, ...(paper ? { slipNo: paper.slipNo, occurredAt: paper.occurredAt.toISOString() } : at !== now ? { soldOfflineAt: at.toISOString() } : {}) } },
           });
         }, txOptions());
       } catch (e) {
@@ -465,7 +468,7 @@ export class BentaService {
       const view: BentaSaleView = {
         status: waitOwner ? "WAITING_OWNER" : "COMPLETED", approvalId: outcome.approvalId, smsStatus: outcome.smsStatus,
         orderId, orderNumber, totalMinor: subtotal, changeMinor: plan?.changeMinor ?? 0, paymentMethod: method, locationId: loc.id,
-        occurredAt: (paper?.occurredAt ?? now).toISOString(), encodedLater: !!paper, replayed: false,
+        occurredAt: (at).toISOString(), encodedLater: !!paper, replayed: false,
         lines: items.map((i) => ({ productId: i.productId, name: i.productName, soldBy: i.soldBy, quantity: i.quantity, grams: i.grams, unitPriceMinor: i.unitPriceMinor, lineTotalMinor: i.lineTotalMinor, enteredAmountMinor: i.enteredAmountMinor, sourceLocationId: i.sourceLocationId })),
         releases,
         belowCost: outcome.belowCost,

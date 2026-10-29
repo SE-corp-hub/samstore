@@ -135,6 +135,21 @@ export function checkPaperSlip(slip: { slipNo?: unknown; occurredAt?: unknown },
   return { slipNo, occurredAt: when };
 }
 
+/** A sale made with no signal waits on the tablet; it may reach the server hours later. */
+export const OFFLINE_SALE_MAX_AGE_DAYS = 3;
+
+/**
+ * When a sale really happened, as the tablet clock saw it. Used only when it is in the past and
+ * at most 3 days old; anything else (missing, garbage, future, too old) means "now", as before.
+ */
+export function offlineSoldAt(soldAt: unknown, now: Date): Date | null {
+  const when = typeof soldAt === "string" ? new Date(soldAt) : null;
+  if (!when || Number.isNaN(when.getTime())) return null;
+  const age = now.getTime() - when.getTime();
+  if (age < 60_000 || age > OFFLINE_SALE_MAX_AGE_DAYS * 86_400_000) return null;
+  return when;
+}
+
 export type ManualSoldAs = "SACK" | "KILO" | "PIECE";
 
 export interface ManualItemAsk {

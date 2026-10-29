@@ -9,12 +9,14 @@ import { API_URL } from "../config";
 import { adminHeaders } from "./admin";
 import { newSaleKey } from "./saleKey";
 import { keepInQueue } from "./retryable";
+import { notFromApi } from "./wake-fetch";
+import { isOffline, markOnline } from "./offlineCache";
 
 const QUEUE = "rice-offline-queue-v1";
 const FAILED = "rice-offline-failed-v1";
 const EVENT = "rice-queue";
 
-export interface QueuedStep { id: string; path: string; body: unknown; label: string; createdAt: number; attempts: number }
+export interface QueuedStep { id: string; path: string; body: unknown; label: string; createdAt: number; attempts: number; /** What the screen shows while it waits (never sent). */ view?: unknown }
 export interface FailedStep { id: string; label: string; message: string; at: number }
 export type StepResult = { status: "sent"; ok: boolean; data: (Record<string, unknown> & { message?: string; errors?: string[] }) | null } | { status: "queued" };
 
@@ -43,30 +45,43 @@ export const failedSteps = () => read<FailedStep>(FAILED);
 export const clearFailed = () => write<FailedStep>(FAILED, []);
 export const QUEUE_EVENT = EVENT;
 
-async function post(path: string, body: unknown, key: string) {
+/** How long a step waits for the server before it is kept on the tablet instead (a sleeping server, weak signal). */
+export const SEND_WAIT_MS = 15_000;
+
+async function post(path: string, body: unknown, key: string, waitMs?: number) {
+  const ctl = new AbortController();
+  const timer = waitMs ? setTimeout(() => ctl.abort(), waitMs) : null;
   const res = await fetch(`${API_URL}${path}`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "Idempotency-Key": key, ...adminHeaders() },
     body: JSON.stringify(body),
-  });
-  return { ok: res.ok, status: res.status, data: (await res.json().catch(() => null)) as (Record<string, unknown> & { message?: string; errors?: string[] }) | null };
+    signal: ctl.signal,
+  }).finally(() => { if (timer) clearTimeout(timer); });
+  return { ok: res.ok, status: res.status, reachedApi: !notFromApi(res), data: (await res.json().catch(() => null)) as (Record<string, unknown> & { message?: string; errors?: string[] }) | null };
 }
 
-/** Send a signed step now; with no signal it waits on the phone and goes later. */
-export async function sendStep(path: string, body: unknown, label: string): Promise<StepResult> {
+/**
+ * Send a signed step now; with no signal it waits on the phone and goes later. While other steps
+ * are already waiting it joins the end of the line, so they reach the server in the order made.
+ * A server that has not answered within SEND_WAIT_MS (asleep, weak signal) counts as no signal,
+ * and while the screens already work from the saved copy the step is kept at once (no wait at the counter).
+ */
+export async function sendStep(path: string, body: unknown, label: string, view?: unknown): Promise<StepResult> {
   const id = newSaleKey();
-  const offline = typeof navigator !== "undefined" && navigator.onLine === false;
-  if (!offline) {
+  const noSignal = typeof navigator !== "undefined" && navigator.onLine === false;
+  if (!isOffline() && queuedSteps().length === 0) {
     try {
-      const r = await post(path, body, id);
-      return { status: "sent", ok: r.ok, data: r.data };
+      const r = await post(path, body, id, SEND_WAIT_MS);
+      // A sleeping or unreachable server (Render waking up) is the same as no signal.
+      if (r.reachedApi) return { status: "sent", ok: r.ok, data: r.data };
     } catch {
       /* no signal mid-send: queue it with the SAME key — if it did arrive, the server answers once */
     }
   }
   const items = queuedSteps();
-  items.push({ id, path, body, label, createdAt: Date.now(), attempts: 0 });
+  items.push({ id, path, body, label, createdAt: Date.now(), attempts: 0, ...(view === undefined ? {} : { view }) });
   if (!write(QUEUE, items)) return { status: "sent", ok: false, data: { message: "No signal and the phone is full — try again later" } };
+  if (!noSignal) void flushQueue();
   return { status: "queued" };
 }
 
@@ -89,6 +104,8 @@ export async function flushQueue(): Promise<{ sent: number; failed: number }> {
         write(QUEUE, queuedSteps().map((s) => (s.id === next.id ? { ...s, attempts: s.attempts + 1 } : s)));
         break;
       }
+      if (!r.reachedApi) break; // the server is asleep or unreachable: the same as no signal, however long it takes
+      if (r.ok) markOnline();
       if (r.status === 409 && /Pinoproseso|process/i.test(String(r.data?.message ?? ""))) break; // still running server-side — try again later
       if (!r.ok && keepInQueue(r.status, next.attempts)) {
         // The login ran out or the server was busy: the sale stays on the phone and goes later.

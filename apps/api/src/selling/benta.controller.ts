@@ -91,7 +91,8 @@ export class BentaController {
 
   /**
    * POST /admin/benta — { idempotencyKey, locationId?, lines:[{productId, quantity | kilos | grams | amountMinor, sourceLocationId?}],
-   * payment:{method:"cash"|"gcash"|"maya"|"bank"|"split"|"utang", tenderedMinor?, reference?, tenders?:[{method,amountMinor,reference?}] (split)}, customerId?, customerName?, signatures?, paperSlip?:{slipNo, occurredAt} }
+   * payment:{method:"cash"|"gcash"|"maya"|"bank"|"split"|"utang", tenderedMinor?, reference?, tenders?:[{method,amountMinor,reference?}] (split)}, customerId?, customerName?, signatures?, paperSlip?:{slipNo, occurredAt}, soldAt? }
+   * soldAt: when the tablet made the sale (a sale that waited with no signal keeps its real time, up to 3 days).
    * The same idempotencyKey always returns the same sale (replayed: true).
    */
   @Post("benta")
@@ -107,6 +108,7 @@ export class BentaController {
       },
       customerId: str(body?.customerId), customerName: str(body?.customerName), signatures: signaturesFrom(body?.signatures),
       paperSlip: paper ? { slipNo: paper.slipNo, occurredAt: paper.occurredAt } : undefined,
+      soldAt: body?.soldAt,
     }));
   }
 
