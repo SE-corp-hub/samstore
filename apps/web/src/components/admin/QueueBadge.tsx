@@ -2,7 +2,8 @@
 
 // Rice Ops M10 + offline store mode — what is waiting on this tablet, shown on the screen
 // (no pop-ups):
-//   * QueueBadge (top bar): always shows Online or Offline.
+//   * QueueBadge (top bar): always shows Online or Offline, from a real check every few seconds
+//     (lib/offlineCache.ts watchConnection), not only what the browser says.
 //   * SyncBar (under the top bar): "3 records saved on this tablet" with an "Upload now" button,
 //     the result of the last upload, and anything the server refused (with the reason),
 //     so nothing silently disappears. Waiting records still upload by themselves too.
@@ -68,7 +69,7 @@ export function SyncBar() {
             <div className="small">{offline ? t("sync.whenWifi") : t("sync.auto")}</div>
           </div>
           <button type="button" className="btn btn-link btn-sm" onClick={() => setDetails(!details)}>{details ? t("sync.hide") : t("sync.show")}</button>
-          <button type="button" className="btn btn-dark btn-lg" disabled={busy || (typeof navigator !== "undefined" && navigator.onLine === false)} onClick={() => void upload()}>
+          <button type="button" className="btn btn-dark btn-lg" disabled={busy} onClick={() => void upload()}>
             {busy ? <><span className="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>{t("sync.uploading")}</> : <><i className="bi bi-cloud-arrow-up me-1"></i>{t("sync.upload")}</>}
           </button>
           {details && (

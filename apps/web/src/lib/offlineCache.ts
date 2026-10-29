@@ -15,11 +15,57 @@ export const CACHE_WAIT_MS = 8_000;
 export const OFFLINE_WAIT_MS = 2_000;
 
 let usingSaved = false;
+/** The last real check (see watchConnection) could not reach this app's own web server. */
+let netDown = false;
+
+const changed = () => { try { window.dispatchEvent(new Event(OFFLINE_EVENT)); } catch { /* not in a browser */ } };
 
 function setUsingSaved(v: boolean) {
   if (usingSaved === v) return;
   usingSaved = v;
-  try { window.dispatchEvent(new Event(OFFLINE_EVENT)); } catch { /* not in a browser */ }
+  changed();
+}
+
+/** How often the tablet checks for real that it can reach the internet. */
+export const CHECK_EVERY_MS = 5_000;
+const CHECK_WAIT_MS = 4_000;
+
+/**
+ * Ask this app's own web server for a tiny file. Chrome inside GBox can keep saying "online"
+ * (navigator.onLine) with the Wi-Fi off, so only a real answer counts as online.
+ */
+export async function checkConnection(): Promise<boolean> {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), CHECK_WAIT_MS);
+  let ok = false;
+  try {
+    const res = await fetch(`/manifest.webmanifest?ping=${Date.now()}`, { method: "HEAD", cache: "no-store", signal: ctl.signal });
+    ok = res.ok || res.status === 405;
+  } catch {
+    ok = false;
+  } finally {
+    clearTimeout(timer);
+  }
+  if (netDown === ok) {
+    netDown = !ok;
+    if (ok) usingSaved = false; // back online: screens ask the server again (it says if it is still asleep)
+    changed();
+  }
+  return ok;
+}
+
+let watching = false;
+
+/** Keep checking every few seconds and at once when the phone says the network changed. */
+export function watchConnection(): void {
+  if (watching || typeof window === "undefined") return;
+  watching = true;
+  const check = () => void checkConnection();
+  window.addEventListener("online", check);
+  window.addEventListener("offline", () => { if (!netDown) { netDown = true; changed(); } });
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") check(); });
+  setInterval(() => { if (document.visibilityState !== "hidden") check(); }, CHECK_EVERY_MS);
+  check();
 }
 
 /** The server answered (a queued sale went through): screens are live again. */
@@ -27,7 +73,7 @@ export const markOnline = () => setUsingSaved(false);
 
 /** True with no internet, or while screens show the saved copy because the server did not answer. */
 export function isOffline(): boolean {
-  return (typeof navigator !== "undefined" && navigator.onLine === false) || usingSaved;
+  return (typeof navigator !== "undefined" && navigator.onLine === false) || netDown || usingSaved;
 }
 
 /** Most answers belong to one store; the account's own store list does not. */
@@ -54,7 +100,7 @@ export function saveCopy(path: string, data: unknown, scope?: Scope) {
  * A clear "no" from the server (403, 404 …) returns null, never an old copy.
  */
 export async function cachedGet<T = unknown>(path: string, { headers, waitMs = CACHE_WAIT_MS }: { headers?: Record<string, string>; waitMs?: number } = {}): Promise<T | null> {
-  if (typeof navigator === "undefined" || navigator.onLine !== false) {
+  if ((typeof navigator === "undefined" || navigator.onLine !== false) && !netDown) {
     const ctl = new AbortController();
     // Already working from the saved copy: ask briefly, so each screen still opens fast.
     const timer = setTimeout(() => ctl.abort(), usingSaved ? Math.min(waitMs, OFFLINE_WAIT_MS) : waitMs);
