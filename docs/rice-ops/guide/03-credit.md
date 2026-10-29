@@ -24,6 +24,7 @@ Held sideways, the list stays on the left and the customer you tap opens on the 
 ## Text or print the balance
 - **Text the balance:** your phone's text app opens with the message ready. Press Send there. Nothing goes out until you do. No valid mobile number? The number is missing or wrong.
 - **Print statement** (slip) or **Statement (A4)**.
+- **Choose what to print** (next to History): tick only the entries you want, or use **All** / **None**, then tap **Print statement** or **Statement (A4)**. Each entry keeps its real balance, and the statement says how many entries it shows. **Cancel** goes back to printing everything.
 - **History** shows each utang and payment, newest first, with the balance after it. **Texts** under it opens this customer's texts.
 - **Texts** tab: **Text opened** means the text app opened. The app cannot tell if you pressed Send. **Failed** has **Send again**. The app does not send texts by itself: the shop uses your phone's own text app, so only **Text the balance** and **Text receipt** really reach people.
 

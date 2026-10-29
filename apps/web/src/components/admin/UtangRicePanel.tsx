@@ -98,6 +98,8 @@ export default function UtangRicePanel({ role }: { role?: string; onNavigate?: (
   const [history, setHistory] = useState<Entry[] | null>(null);
   const [justPaid, setJustPaid] = useState<Paid | null>(null);
   const [showAllHistory, setShowAllHistory] = useState(false);
+  // Entries ticked for the statement; null = not choosing, the statement prints everything.
+  const [pick, setPick] = useState<Set<string> | null>(null);
 
   const load = useCallback(async () => {
     const q = search.trim() ? `?search=${encodeURIComponent(search.trim())}` : "";
@@ -126,7 +128,7 @@ export default function UtangRicePanel({ role }: { role?: string; onNavigate?: (
   }, []);
   useEffect(() => { if (tab === "texts") void loadTexts(); }, [tab, loadTexts]);
   useEffect(() => {
-    setHistory(null); setJustPaid(null); setPaying(false); setShowAllHistory(false);
+    setHistory(null); setJustPaid(null); setPaying(false); setShowAllHistory(false); setPick(null);
     if (!selected) return;
     void loadTexts(selected.id);
     void loadHistory(selected.id);
@@ -134,20 +136,25 @@ export default function UtangRicePanel({ role }: { role?: string; onNavigate?: (
 
   const open = (c: Cust | null) => { setAdding(false); setSelected(c); };
 
+  /** Slip or A4 statement. With entries ticked, only those print; each keeps its real balance after. */
   const printStatement = (c: Cust, a4: boolean) => {
     const entries = [...(history ?? [])].sort((x, y) => new Date(x.startAt).getTime() - new Date(y.startAt).getTime());
     let run = 0;
     const over = overdueDays(entries);
+    const rows = entries.map((e) => {
+      run += e.amountMinor;
+      return {
+        id: e.id,
+        name: `${new Date(e.startAt).toLocaleDateString("en-PH")} ${e.type === "payment" ? "Payment" : "Utang"}${e.dueAt && e.type === "purchase" ? ` (due ${new Date(e.dueAt).toLocaleDateString("en-PH")})` : ""}${e.note ? ` ${e.note}` : ""}`,
+        qty: `${e.type === "payment" ? "-" : ""}${peso(Math.abs(e.amountMinor))}  bal ${peso(run)}`,
+      };
+    });
+    const chosen = pick ? rows.filter((r) => pick.has(r.id)) : rows;
     printSlip({
       storeName: storeName || "SAM STORE", title: "CREDIT STATEMENT", reference: c.name, when: new Date().toLocaleDateString("en-PH"), a4,
-      lines: [...(c.phone ? [{ label: "Phone", value: c.phone }] : []), { label: "Limit", value: limitPhrase(c, peso) }],
-      rows: entries.map((e) => {
-        run += e.amountMinor;
-        return {
-          name: `${new Date(e.startAt).toLocaleDateString("en-PH")} ${e.type === "payment" ? "Payment" : "Utang"}${e.dueAt && e.type === "purchase" ? ` (due ${new Date(e.dueAt).toLocaleDateString("en-PH")})` : ""}${e.note ? ` ${e.note}` : ""}`,
-          qty: `${e.type === "payment" ? "-" : ""}${peso(Math.abs(e.amountMinor))}  bal ${peso(run)}`,
-        };
-      }),
+      lines: [...(c.phone ? [{ label: "Phone", value: c.phone }] : []), { label: "Limit", value: limitPhrase(c, peso) },
+        ...(pick ? [{ label: "Entries", value: `${chosen.length} of ${rows.length}` }] : [])],
+      rows: chosen.map(({ name, qty }) => ({ name, qty })),
       totals: [{ label: "Balance", value: peso(c.balanceMinor) }, { label: "Days overdue", value: over > 0 ? String(over) : "none" }],
       signatures: [{ role: "Received by", name: "" }],
     });
@@ -247,6 +254,11 @@ export default function UtangRicePanel({ role }: { role?: string; onNavigate?: (
     let run = 0;
     const rows = sorted.map((e) => ({ ...e, after: (run += e.amountMinor) })).reverse();
     const failedTexts = texts.filter((t) => t.status === "FAILED").length;
+    const printBtn = (cust: Cust, a4: boolean, full = false) => (
+      <button type="button" className={`btn btn-outline-dark ${full ? "w-100" : ""}`} disabled={!history || pick?.size === 0} onClick={() => printStatement(cust, a4)}>
+        <i className={`bi ${a4 ? "bi-file-earmark-text" : "bi-printer"} me-1`} aria-hidden="true"></i>{a4 ? "Statement (A4)" : "Print statement"}{pick ? ` (${pick.size})` : ""}
+      </button>
+    );
     return (
       <div>
         {justPaid && (
@@ -294,19 +306,40 @@ export default function UtangRicePanel({ role }: { role?: string; onNavigate?: (
                   <i className="bi bi-chat-dots me-2" aria-hidden="true"></i>Text the balance
                 </button>
               </div>
-              <div className="col-6"><button type="button" className="btn btn-outline-dark w-100" disabled={!history} onClick={() => printStatement(c, false)}><i className="bi bi-printer me-1" aria-hidden="true"></i>Print statement</button></div>
-              <div className="col-6"><button type="button" className="btn btn-outline-dark w-100" disabled={!history} onClick={() => printStatement(c, true)}><i className="bi bi-file-earmark-text me-1" aria-hidden="true"></i>Statement (A4)</button></div>
+              <div className="col-6">{printBtn(c, false, true)}</div>
+              <div className="col-6">{printBtn(c, true, true)}</div>
             </div>
           </div>
         </div>
 
-        <h3 className="h6 text-uppercase text-muted mb-2">History</h3>
+        <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+          <h3 className="h6 text-uppercase text-muted mb-0">History</h3>
+          {rows.length > 0 && (pick ? (
+            <div className="d-flex flex-wrap gap-2">
+              <button type="button" className="btn btn-outline-dark btn-sm" onClick={() => setPick(new Set(rows.map((e) => e.id)))}>All</button>
+              <button type="button" className="btn btn-outline-dark btn-sm" onClick={() => setPick(new Set())}>None</button>
+              <button type="button" className="btn btn-outline-secondary btn-sm" onClick={() => setPick(null)}>Cancel</button>
+            </div>
+          ) : (
+            <button type="button" className="btn btn-outline-dark btn-sm" onClick={() => { setPick(new Set(rows.map((e) => e.id))); setShowAllHistory(true); }}>
+              <i className="bi bi-check2-square me-1" aria-hidden="true"></i>Choose what to print
+            </button>
+          ))}
+        </div>
+        {pick && rows.length > 0 && (
+          <div className="alert alert-info py-2">
+            <div className="mb-2">Tick the entries for the statement · <strong>{pick.size} of {rows.length}</strong></div>
+            <div className="d-flex flex-wrap gap-2">{printBtn(c, false)}{printBtn(c, true)}</div>
+          </div>
+        )}
         {history === null ? <p className="text-muted">Loading…</p> : rows.length === 0 ? <p className="text-muted">No credit entries yet.</p> : (
           <>
             <ul className="list-group mb-2" style={NUM}>
               {(showAllHistory ? rows : rows.slice(0, 10)).map((e) => (
-                <li key={e.id} className="list-group-item d-flex align-items-center gap-3 py-2" style={{ minHeight: 56 }}>
-                  <i className={`bi ${e.type === "payment" ? "bi-arrow-down-circle text-success" : "bi-bag"} fs-5`} aria-hidden="true"></i>
+                <li key={e.id} className="list-group-item d-flex align-items-center gap-3 py-2" style={{ minHeight: 56, cursor: pick ? "pointer" : undefined }}
+                  onClick={pick ? () => setPick((p) => { const n = new Set(p); if (n.has(e.id)) n.delete(e.id); else n.add(e.id); return n; }) : undefined}>
+                  {pick ? <input type="checkbox" className="form-check-input m-0 flex-shrink-0" style={{ width: 28, height: 28 }} checked={pick.has(e.id)} readOnly aria-label={`Print ${e.type === "payment" ? "payment" : "utang"} of ${date(e.startAt)}`} />
+                    : <i className={`bi ${e.type === "payment" ? "bi-arrow-down-circle text-success" : "bi-bag"} fs-5`} aria-hidden="true"></i>}
                   <span className="flex-grow-1" style={{ minWidth: 0 }}>
                     <span className="d-block">{e.type === "purchase" ? "Utang" : e.type === "payment" ? "Payment" : e.type}{e.note ? <span className="text-muted"> · {e.note}</span> : null}</span>
                     <span className="small text-muted">{date(e.startAt)}{e.dueAt && e.type === "purchase" ? ` · due ${date(e.dueAt)}` : ""}</span>
