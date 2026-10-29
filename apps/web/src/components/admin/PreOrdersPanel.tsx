@@ -22,6 +22,7 @@ import { quickCash } from "../../lib/quick-cash";
 import { peso } from "../../lib/number-format";
 import ProductFinder from "./ProductFinder";
 import { noteUse } from "../../lib/product-find";
+import { printSlip, type Slip } from "../../lib/slip-print";
 
 interface Preorder {
   id: string; orderNumber: string; customerName: string; storeCustomerId: string | null;
@@ -43,6 +44,10 @@ const localToday = () => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 };
 const fmtDate = (iso: string) => iso.slice(0, 10);
+// The sleeping beta server (or a slow one) makes the web's /backend proxy answer a plain
+// "Internal Server Error" page after 30 s. Reading that as JSON showed "Unexpected token".
+const readJson = (res: Response) => res.json().catch(() => null);
+const SLOW_SERVER = "The server took too long to answer (it may have been asleep). Check the Waiting list before you save again: the pre-order may already be there.";
 
 /** Finger-drawn signature pad: 300×120 white canvas, black 3px round-cap strokes.
     Pointer events with touch fallback; exports via canvas.toDataURL("image/png"). */
@@ -366,8 +371,9 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
       method: "POST", headers: { "Content-Type": "application/json", ...adminHeaders() },
       body: JSON.stringify({ name: buildNewName.trim(), phone: buildNewPhone.trim() || undefined }),
     });
+    const d = await readJson(res);
+    if (!d) throw new Error("The server took too long to answer (it may have been asleep). Tap Save again.");
     if (!res.ok) return null;
-    const d = await res.json();
     setBuildCustomerId(d.id);
     await loadBuilder();
     return d.id;
@@ -395,7 +401,8 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
           body: JSON.stringify({ items: buildCart.map((l) => ({ productId: l.product.id, quantity: l.quantity, ...overridePart(l) })), customerId: customer }),
         });
       }
-      const data = await res.json();
+      const data = await readJson(res);
+      if (!data) { setError(SLOW_SERVER); await loadPreorders(); return; }
       if (!res.ok) { setError(data?.errors?.join(", ") ?? data?.message ?? "Could not save the pre-order"); return; }
       toast(editingPre ? `Saved — ${editingPre.orderNumber}` : `Pre-order saved — ${data.orderNumber}`);
       clearBuild();
@@ -484,6 +491,20 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
     );
   };
 
+  /** A slip for the customer: what they ordered and what they will pay on pick-up. */
+  const preorderSlip = (p: Preorder): Slip => ({
+    storeName: storeName || "SAM STORE", title: "PRE-ORDER", reference: p.orderNumber, when: new Date(p.createdAt).toLocaleString("en-PH"),
+    lines: [{ label: "Customer", value: p.customerName || "—" }, ...(p.dueAt ? [{ label: "Due", value: fmtDate(p.dueAt) }] : [])],
+    rows: p.items.map((it) => {
+      const name = it.variantName ? `${it.productName} · ${it.variantName}` : it.productName;
+      // Prices hidden for pre-orders: item and quantity only (the total still shows).
+      return hidePrice ? { name, qty: String(it.quantity) }
+        : { name: `${it.quantity} × ${name}`, note: `@ ${toPesos(it.unitPriceMinor)}`, qty: toPesos(it.lineTotalMinor) };
+    }),
+    totals: [{ label: "Total", value: toPesos(p.totalMinor) }],
+    footer: "Not paid yet. Pay when you pick up.",
+  });
+
   /** One pre-order as a card: who, what, how much, then the actions (Complete sale first). */
   const preCard = (p: Preorder, pastDue: boolean) => (
     <div className="col" key={p.id}>
@@ -502,6 +523,7 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
             <>
               <button className="btn btn-success btn-lg w-100 mb-2" onClick={() => openFinalize(p)}><i className="bi bi-check2-circle me-1"></i>Complete sale</button>
               <div className="d-flex gap-2">
+                <button className="btn btn-outline-dark flex-fill" onClick={() => printSlip(preorderSlip(p))}><i className="bi bi-printer me-1"></i>Print</button>
                 <button className="btn btn-outline-dark flex-fill" onClick={() => void openPreEdit(p)}><i className="bi bi-pencil me-1"></i>Change</button>
                 <button className="btn btn-outline-danger flex-fill" onClick={() => { setConfirmVoid({ id: p.id, orderNumber: p.orderNumber }); setVoidReason(""); }}><i className="bi bi-trash me-1"></i>Delete</button>
               </div>
