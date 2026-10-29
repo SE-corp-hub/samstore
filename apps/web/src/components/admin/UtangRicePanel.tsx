@@ -89,7 +89,7 @@ export default function UtangRicePanel({ role }: { role?: string; onNavigate?: (
   useEffect(() => { void load(); }, [load]);
   useEffect(() => {
     void fetch(`${API_URL}/admin/me/rice`, { headers: adminHeaders() }).then((r) => (r.ok ? r.json() : null)).then((me) => setLocationId(me?.homeLocationId ?? null));
-    void fetch(`${API_URL}/admin/settings`, { headers: adminHeaders() }).then((r) => (r.ok ? r.json() : null)).then((d) => setStoreName(d?.store?.name ?? "")).catch(() => {});
+    void fetch(`${API_URL}/admin/settings`, { headers: adminHeaders() }).then((r) => (r.ok ? r.json() : null)).then((d) => setStoreName(d?.name ?? "")).catch(() => {});
     void fetch(`${API_URL}/admin/utang/settings`, { headers: adminHeaders() }).then((r) => (r.ok ? r.json() : null)).then((d) => d && setSettings(d.settings as Settings));
   }, []);
   useEffect(() => { if (tab === "texts") void loadTexts(); }, [tab, loadTexts]);

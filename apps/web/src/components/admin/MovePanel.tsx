@@ -31,7 +31,7 @@ export default function MovePanel() {
   const [rows, setRows] = useState<MoveRow[]>([]);
   const [storeName, setStoreName] = useState("");
   const [receipt, setReceipt] = useState<Slip | null>(null);
-  useEffect(() => { void fetch(`${API_URL}/admin/settings`, { headers: adminHeaders() }).then((r) => (r.ok ? r.json() : null)).then((d) => setStoreName(d?.store?.name ?? "")).catch(() => {}); }, []);
+  useEffect(() => { void fetch(`${API_URL}/admin/settings`, { headers: adminHeaders() }).then((r) => (r.ok ? r.json() : null)).then((d) => setStoreName(d?.name ?? "")).catch(() => {}); }, []);
   useEffect(() => { if (receipt && getPrinterSettings().autoPrint) printSlip(receipt); }, [receipt]);
   const slipOf = (m: MoveRow): Slip => ({
     storeName: storeName || "SAM STORE", title: "MOVE STOCK RECEIPT", reference: m.docNumber, when: new Date(m.at).toLocaleString("en-PH"),

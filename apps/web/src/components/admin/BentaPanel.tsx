@@ -167,7 +167,7 @@ export default function BentaPanel() {
         cachedGet<{ customers?: Customer[] }>("/admin/customers"),
       ]);
       setHomeLocationId(me?.homeLocationId ?? null);
-      void cachedGet<{ store?: { name?: string } }>("/admin/settings").then((d) => setStoreName(d?.store?.name ?? ""));
+      void cachedGet<{ name?: string }>("/admin/settings").then((d) => setStoreName(d?.name ?? ""));
       setCustomers(((cs?.customers ?? []) as Customer[]));
       // A kept cart belongs to the location it was started at.
       const kept = savedCart();

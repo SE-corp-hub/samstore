@@ -60,7 +60,7 @@ export default function PasokPanel(_props: { role?: string; onNavigate?: (tab: s
     setLocationId((cur) => cur || me?.homeLocationId || ((locs?.warehouses ?? []) as (Loc & { isDefault?: boolean })[]).filter((l) => l.isActive).find((l) => l.isDefault)?.id || active[0]?.id || "");
     setChosen(true);
     setProducts(((ps?.products ?? []) as Product[]).filter((p) => p.isActive !== false));
-    setStoreName(st?.store?.name ?? "");
+    setStoreName(st?.name ?? "");
   }, []);
   useEffect(() => { load().catch(() => setError("Could not load")); }, [load]);
 

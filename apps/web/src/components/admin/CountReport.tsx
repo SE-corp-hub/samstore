@@ -44,7 +44,7 @@ export default function CountReport({ countId, onBack, backLabel = "← Counts",
       if (!res.ok) { setError(d?.errors?.join(", ") ?? d?.message ?? "Could not open the report"); return; }
       setReport(d as unknown as Report);
     })().catch(() => { if (live) setError("Could not open the report"); });
-    void fetch(`${API_URL}/admin/settings`, { headers: adminHeaders() }).then((r) => (r.ok ? r.json() : null)).then((d) => { if (live) setStoreName(d?.store?.name ?? ""); }).catch(() => {});
+    void fetch(`${API_URL}/admin/settings`, { headers: adminHeaders() }).then((r) => (r.ok ? r.json() : null)).then((d) => { if (live) setStoreName(d?.name ?? ""); }).catch(() => {});
     return () => { live = false; };
   }, [countId]);
 

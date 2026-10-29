@@ -174,7 +174,7 @@ export function CountSheet({ count, owner, onClose, onReload }: { count: CountDe
   // A list count may leave items uncounted; the quick and closing counts must be counted in full.
   const wholeListOnly = count.kind === "QUICK" || count.kind === "CLOSING";
   const canCancel = owner || !!count.mine;
-  useEffect(() => { void fetch(`${API_URL}/admin/settings`, { headers: adminHeaders() }).then((r) => (r.ok ? r.json() : null)).then((d) => setStoreName(d?.store?.name ?? "")).catch(() => {}); }, []);
+  useEffect(() => { void fetch(`${API_URL}/admin/settings`, { headers: adminHeaders() }).then((r) => (r.ok ? r.json() : null)).then((d) => setStoreName(d?.name ?? "")).catch(() => {}); }, []);
   const shown = count.lines.filter((l) => (!find.trim() || l.name.toLowerCase().includes(find.trim().toLowerCase())) && (!onlyLeft || (values[l.productId] ?? "") === ""));
   const printSheet = () => printSlip({
     storeName: storeName || "SAM STORE", title: result ? "COUNT SUBMITTED" : editable ? "COUNT SHEET" : "COUNT RESULT", reference: count.docNumber, when: new Date().toLocaleString("en-PH"),

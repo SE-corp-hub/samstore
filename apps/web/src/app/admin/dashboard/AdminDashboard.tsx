@@ -12,7 +12,8 @@ import { wakeFetch } from "../../../lib/wake-fetch";
 import { saveCopy, savedCopy, useOffline } from "../../../lib/offlineCache";
 
 /** Screens that work with no internet; every other screen still opens, but read-only (its buttons are off). */
-const OFFLINE_READY = new Set(["home", "pos", "preorders"]);
+// Settings opens offline too: Printer is kept on this tablet, the other groups lock their own buttons.
+const OFFLINE_READY = new Set(["home", "pos", "preorders", "settings"]);
 
 const STORES_PATH = "/admin/stores/mine";
 import { resumePendingReceipt } from "../../../lib/slip-print";
@@ -21,7 +22,7 @@ import QueueBadge, { SyncBar } from "../../../components/admin/QueueBadge";
 import StaffHome from "../../../components/admin/StaffHome";
 
 /** Rice Ops M10: the store screens get the large, high-contrast look (globals.css .rice-ui). */
-const RICE_TABS = new Set(["pos", "preorders", "orders", "utang", "utangrice", "agentorders", "agent", "approvals", "moves", "returns", "resack", "pasok", "purchaseorders", "bilangin", "storereport", "payable", "ulat", "drafts", "kargadors"]);
+const RICE_TABS = new Set(["pos", "preorders", "orders", "utang", "utangrice", "agentorders", "agent", "approvals", "moves", "returns", "resack", "pasok", "purchaseorders", "bilangin", "storereport", "payable", "ulat", "drafts", "kargadors", "settings"]);
 // The landing panel stays eager (it is the first paint); every other panel loads when
 // its tab opens. Shipping every panel at once cost ~95 kB of route JS for one visible screen,
 // and dragged jsbarcode/qrcode (used by two panels) into the initial payload.
