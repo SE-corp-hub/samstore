@@ -1,7 +1,8 @@
 // Offline in the store — screens open from the last good answer when the server can't be reached.
 import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import { cachedGet, checkConnection, isOffline, offlineRef, savedCopy } from "./offlineCache";
+import { cachedGet, checkConnection, isOffline, offlineRef, saveCopy, savedCopy } from "./offlineCache";
+import { registeredStoreName } from "./slip-print";
 
 const mem = new Map<string, string>();
 const storage = { getItem: (k: string) => mem.get(k) ?? null, setItem: (k: string, v: string) => void mem.set(k, v), removeItem: (k: string) => void mem.delete(k) };
@@ -74,4 +75,9 @@ test("real check: Wi-Fi off while the browser still says online (GBox) shows Off
   globalThis.fetch = answer(200, {}) as typeof fetch;
   assert.equal(await checkConnection(), true);
   assert.equal(isOffline(), false);
+});
+
+test("receipts know the registered store name from the saved /admin/settings answer (name is at the top level)", () => {
+  saveCopy("/admin/settings", { id: "s1", name: " Tindahan ni Sam ", settings: {} });
+  assert.equal(registeredStoreName(), "Tindahan ni Sam");
 });

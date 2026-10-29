@@ -249,10 +249,10 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
       const [p, c, s] = await Promise.all([
         cachedGet<{ products?: PosProduct[] }>("/admin/products"),
         cachedGet<{ customers?: PosCustomer[] }>("/admin/customers"),
-        cachedGet<{ settings?: { hidePricePreOrder?: boolean }; store?: { name?: string } }>("/admin/settings"),
+        cachedGet<{ settings?: { hidePricePreOrder?: boolean }; name?: string }>("/admin/settings"),
       ]);
       setHidePrice(Boolean(s?.settings?.hidePricePreOrder));
-      setStoreName(s?.store?.name ?? "");
+      setStoreName(s?.name ?? "");
       setBuildProducts(p?.products ?? []);
       setBuildCustomers(c?.customers ?? []);
     } catch (e) {

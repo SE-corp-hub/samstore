@@ -70,7 +70,7 @@ const limitWords = (c: { creditUnlimited?: boolean; creditLimitMinor: number }) 
 
 export default function CustomersPanel() {
   const [storeNameForText, setStoreNameForText] = useState("");
-  useEffect(() => { fetch(`${API_URL}/admin/settings`, { headers: adminHeaders() }).then((r) => (r.ok ? r.json() : null)).then((d) => setStoreNameForText(d?.store?.name ?? "")).catch(() => {}); }, []);
+  useEffect(() => { fetch(`${API_URL}/admin/settings`, { headers: adminHeaders() }).then((r) => (r.ok ? r.json() : null)).then((d) => setStoreNameForText(d?.name ?? "")).catch(() => {}); }, []);
   const [customers, setCustomers] = useState<CustomerRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
