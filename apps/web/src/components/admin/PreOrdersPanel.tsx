@@ -23,7 +23,7 @@ import { peso } from "../../lib/number-format";
 import ProductFinder from "./ProductFinder";
 import { noteUse } from "../../lib/product-find";
 import { printSlip, type Slip } from "../../lib/slip-print";
-import { cachedGet, offlineRef } from "../../lib/offlineCache";
+import { cachedGet, offlineRef, useOffline } from "../../lib/offlineCache";
 import { QUEUE_EVENT, queuedSteps, sendStep } from "../../lib/offlineQueue";
 import { newSaleKey } from "../../lib/saleKey";
 
@@ -167,6 +167,7 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
   const [preTo, setPreTo] = useState(localToday());
   const [preorders, setPreorders] = useState<Preorder[]>([]);
   const [here, setHere] = useState<Preorder[]>([]); // saved on this tablet, waiting for the internet
+  const offline = useOffline(); // complete / change / delete need the internet
   const [preLoading, setPreLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [receiptOrder, setReceiptOrder] = useState<string | null>(null);
@@ -551,16 +552,16 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
           )}
           {!local && p.status === "ON_HOLD" && (
             <>
-              <button className="btn btn-success btn-lg w-100 mb-2" onClick={() => openFinalize(p)}><i className="bi bi-check2-circle me-1"></i>Complete sale</button>
+              <button className="btn btn-success btn-lg w-100 mb-2" disabled={offline} onClick={() => openFinalize(p)}><i className={`bi ${offline ? "bi-lock" : "bi-check2-circle"} me-1`}></i>Complete sale{offline && " · Needs internet"}</button>
               <div className="d-flex gap-2">
                 <button className="btn btn-outline-dark flex-fill" onClick={() => printSlip(preorderSlip(p))}><i className="bi bi-printer me-1"></i>Print</button>
-                <button className="btn btn-outline-dark flex-fill" onClick={() => void openPreEdit(p)}><i className="bi bi-pencil me-1"></i>Change</button>
-                <button className="btn btn-outline-danger flex-fill" onClick={() => { setConfirmVoid({ id: p.id, orderNumber: p.orderNumber }); setVoidReason(""); }}><i className="bi bi-trash me-1"></i>Delete</button>
+                <button className="btn btn-outline-dark flex-fill" disabled={offline} onClick={() => void openPreEdit(p)}><i className="bi bi-pencil me-1"></i>Change</button>
+                <button className="btn btn-outline-danger flex-fill" disabled={offline} onClick={() => { setConfirmVoid({ id: p.id, orderNumber: p.orderNumber }); setVoidReason(""); }}><i className="bi bi-trash me-1"></i>Delete</button>
               </div>
             </>
           )}
           {p.status === "COMPLETED" && (
-            <button className="btn btn-outline-dark w-100" onClick={() => setReceiptOrder(p.id)}><i className="bi bi-receipt me-1"></i>Receipt</button>
+            <button className="btn btn-outline-dark w-100" disabled={offline} onClick={() => setReceiptOrder(p.id)}><i className="bi bi-receipt me-1"></i>Receipt</button>
           )}
         </div>
       </div>
@@ -653,7 +654,7 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
               );
             }} />
           <div className="text-center">
-            <button type="button" className="btn btn-outline-secondary" onClick={() => setNewItemOpen(true)}>+ New item (not on the list yet)</button>
+            <button type="button" className="btn btn-outline-secondary" disabled={offline} onClick={() => setNewItemOpen(true)}>+ New item (not on the list yet){offline && " · Needs internet"}</button>
           </div>
         </>
       )}

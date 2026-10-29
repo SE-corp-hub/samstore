@@ -4,6 +4,7 @@
 // in lib/offlineQueue.ts until the internet is back.
 // Kept in this browser only (localStorage), one copy per store and per address; logging out forgets them.
 
+import { useEffect, useState } from "react";
 import { API_URL } from "../config";
 import { adminHeaders, getAdminStoreId, handleUnauthorized, SAVED_COPY_PREFIX as PREFIX } from "./admin";
 import { notFromApi } from "./wake-fetch";
@@ -70,6 +71,19 @@ export function watchConnection(): void {
 
 /** The server answered (a queued sale went through): screens are live again. */
 export const markOnline = () => setUsingSaved(false);
+
+/** Re-renders when the tablet goes offline or comes back. */
+export function useOffline(): boolean {
+  const [offline, setOffline] = useState(false);
+  useEffect(() => {
+    const refresh = () => setOffline(isOffline());
+    const events = [OFFLINE_EVENT, "online", "offline"];
+    refresh();
+    for (const e of events) window.addEventListener(e, refresh);
+    return () => { for (const e of events) window.removeEventListener(e, refresh); };
+  }, []);
+  return offline;
+}
 
 /** True with no internet, or while screens show the saved copy because the server did not answer. */
 export function isOffline(): boolean {

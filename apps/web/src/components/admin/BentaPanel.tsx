@@ -14,7 +14,10 @@ import { API_URL } from "../../config";
 import { adminHeaders, getAdminStoreId } from "../../lib/admin";
 import { toast } from "../../lib/toast";
 import { sendStep } from "../../lib/offlineQueue";
-import { cachedGet, offlineRef } from "../../lib/offlineCache";
+import { cachedGet, offlineRef, useOffline } from "../../lib/offlineCache";
+
+/** Shown on a button that needs the internet while the tablet is offline. */
+export const NEEDS_NET = "Needs internet";
 import { newSaleKey } from "../../lib/saleKey";
 import { photoToJpeg } from "../../lib/photo";
 import NumPad from "./NumPad";
@@ -123,6 +126,7 @@ export default function BentaPanel() {
   const [newItem, setNewItem] = useState(false);
   const keyRef = useRef<string | null>(savedCart()?.key ?? null);
   const [drawerOpen, setDrawerOpen] = useState<boolean | null>(null);
+  const offline = useOffline();
   const [shiftRequired, setShiftRequired] = useState(true); // the owner can switch this off in Settings
   const [storeName, setStoreName] = useState("");
   // What the done screen needs to text the customer, kept after the cart is cleared.
@@ -403,7 +407,7 @@ export default function BentaPanel() {
           </button>
         )} />
       <div className="text-center mb-3">
-        <button type="button" className="btn btn-outline-secondary" onClick={() => setNewItem(true)}>+ New item (not on the list yet)</button>
+        <button type="button" className="btn btn-outline-secondary" disabled={offline} onClick={() => setNewItem(true)}>+ New item (not on the list yet){offline && <> · <i className="bi bi-lock"></i> {NEEDS_NET}</>}</button>
       </div>
     </>
   );
@@ -653,7 +657,7 @@ export default function BentaPanel() {
                     <option value="">Choose…</option>
                     {customers.filter((c) => c.creditApproved).map((c) => <option key={c.id} value={c.id}>{c.name ?? c.phone ?? "—"} — owes {peso(c.creditBalanceMinor)} · {creditStatusWords(c.creditStatus).label}</option>)}
                   </select>
-                  {!newCust && <button type="button" className="btn btn-outline-success mb-2" onClick={() => setNewCust(true)}>+ New customer</button>}
+                  {!newCust && <button type="button" className="btn btn-outline-success mb-2" disabled={offline} onClick={() => setNewCust(true)}>+ New customer{offline && <> · <i className="bi bi-lock"></i> {NEEDS_NET}</>}</button>}
                   {newCust && <QuickCustomer onCancel={() => setNewCust(false)} onAdded={async (id) => {
                     const res = await fetch(`${API_URL}/admin/customers`, { headers: adminHeaders() });
                     if (res.ok) setCustomers(((await res.json()).customers ?? []) as Customer[]);
@@ -723,6 +727,7 @@ function OpenDrawer({ onOpened }: { onOpened: () => void }) {
   const [float, setFloat] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const offline = useOffline();
   const open = async () => {
     setBusy(true); setError(null);
     const res = await fetch(`${API_URL}/admin/registers/open`, {
@@ -740,7 +745,7 @@ function OpenDrawer({ onOpened }: { onOpened: () => void }) {
       <div className="fw-semibold mb-2">The cash drawer is closed. Open it before taking cash.</div>
       {error && <div className="text-danger mb-2">{error}</div>}
       <NumPad value={float} onChange={setFloat} decimals={2} label="Cash in the drawer now (change fund)" unit="₱" />
-      <button type="button" className="btn btn-dark btn-lg w-100 mt-2" disabled={busy} onClick={() => void open()}>{busy ? "Please wait…" : "Open the cash drawer"}</button>
+      <button type="button" className="btn btn-dark btn-lg w-100 mt-2" disabled={busy || offline} onClick={() => void open()}>{offline ? <><i className="bi bi-lock me-1"></i>{NEEDS_NET} to open the drawer — use GCash or Credit, or connect</> : busy ? "Please wait…" : "Open the cash drawer"}</button>
     </div>
   );
 }
