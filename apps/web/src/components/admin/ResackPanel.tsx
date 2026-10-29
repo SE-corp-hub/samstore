@@ -2,7 +2,7 @@
 
 // Resack: any rice into any rice. Store first, then the rice (with what is left on
 // the shelf), weigh in, weigh out, and only the porter (kargador) signs. A receipt
-// can be printed right away and reprinted later from "Recent resacks".
+// prints right after every resack (no signal too) and can be reprinted from "Recent resacks".
 // (Old "started" jobs from before are still listed so they can be finished or cancelled.)
 // The screen does the arithmetic: kilos in, kilos out, the loss and whether it is
 // within 1% — before anyone signs. Over 1% goes to the owner; the stock still moves.
@@ -11,12 +11,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { API_URL } from "../../config";
 import { adminHeaders } from "../../lib/admin";
 import { toast } from "../../lib/toast";
-import { sendStep } from "../../lib/offlineQueue";
+import { QUEUE_EVENT, queuedSteps, sendStep } from "../../lib/offlineQueue";
+import { offlineRef } from "../../lib/offlineCache";
 import StoreBar from "./StoreBar";
 import SignCapture, { type KargadorOption, type SignatureOut } from "./SignCapture";
 import { askText } from "../../lib/ask";
 import { printSlip, type Slip } from "../../lib/slip-print";
-import { getPrinterSettings } from "../../lib/printer-settings";
 
 interface Product { id: string; name: string; stockBaseUnit: string | null; stockBaseQuantity: number | null; stockConversionFamily: string | null; isActive?: boolean }
 interface Location { id: string; name: string; code: string | null; isActive: boolean }
@@ -34,6 +34,8 @@ const isLoose = (p?: Product) => !!p && (p.stockBaseUnit ?? "") === "g" && p.sto
 const weighed = (p?: Product) => !!p && (p.stockBaseUnit ?? "") === "g" && !!p.stockBaseQuantity;
 const kg = (g: number) => (g / 1000).toLocaleString("en-PH", { maximumFractionDigits: 3 });
 const errText = (d: ApiBody | null, f: string) => d?.errors?.join(", ") ?? d?.message ?? f;
+// Resacks made with no signal wait on this tablet; each keeps its receipt (the queue "view") to reprint.
+const waitingResacks = (): Slip[] => queuedSteps().filter((s) => s.path.startsWith("/admin/resacks") && s.view).map((s) => s.view as Slip);
 
 /** Stock units for an output row: sacks as typed, loose rice in grams from kilos. */
 function unitsOf(p: Product | undefined, amount: string): number {
@@ -62,8 +64,10 @@ export default function ResackPanel() {
   const [stock, setStock] = useState<Record<string, number>>({});
   const [storeName, setStoreName] = useState("");
   const [receipt, setReceipt] = useState<Slip | null>(null);
-  // "Print the receipt right after each transaction" (Printer settings on this phone).
-  useEffect(() => { if (receipt && getPrinterSettings().autoPrint) printSlip(receipt); }, [receipt]);
+  // Every resack prints its receipt right away. If the printer is not connected, the
+  // "Printer not connected" box keeps it and offers Connect printer — no error.
+  useEffect(() => { if (receipt) printSlip(receipt); }, [receipt]);
+  const [waiting, setWaiting] = useState<Slip[]>([]);
 
   useEffect(() => {
     (async () => {
@@ -91,6 +95,18 @@ export default function ResackPanel() {
     if (res.ok) setJobs((await res.json()).resacks);
   }, [locationId]);
   useEffect(() => { void loadJobs(); }, [loadJobs]);
+  useEffect(() => {
+    let count = waitingResacks().length;
+    const refresh = () => {
+      const now = waitingResacks();
+      setWaiting(now);
+      if (now.length < count) void loadJobs(); // one was uploaded: it now shows under Recent
+      count = now.length;
+    };
+    refresh();
+    window.addEventListener(QUEUE_EVENT, refresh);
+    return () => window.removeEventListener(QUEUE_EVENT, refresh);
+  }, [loadJobs]);
   const loadStock = useCallback(async () => {
     if (!locationId) return;
     const res = await fetch(`${API_URL}/admin/benta/catalog?locationId=${encodeURIComponent(locationId)}`, { headers: adminHeaders() });
@@ -134,22 +150,24 @@ export default function ResackPanel() {
     let body: Record<string, unknown>;
     if (finishing) { path = `/admin/resacks/${finishing.id}/finish`; body = { outputs, signatures }; }
     else body = { locationId, inputProductId: inputId, inputQty: inQty, outputs, kargadorId: k, signatures };
-    const r = await sendStep(path, body, `Resack ${inProduct?.name ?? ""}`.trim());
-    setBusy(false);
-    if (r.status === "queued") { reset(); return; }
-    const data = r.data as ApiBody | null;
-    if (!r.ok) { setSigning(false); setError(errText(data, "Did not go through")); return; }
-    toast(data?.needsApproval ? "Done — short by more than 1%, the owner was told" : "Resack done");
     const slip: Slip = {
-      storeName: storeName || "SAM STORE", title: "RESACK RECEIPT", reference: String(data?.docNumber ?? "") || null, when: new Date().toLocaleString("en-PH"),
+      storeName: storeName || "SAM STORE", title: "RESACK RECEIPT", reference: null, when: new Date().toLocaleString("en-PH"),
       lines: [{ label: "Store", value: here?.name ?? "" }, { label: "From", value: `${inQty} × ${inProduct?.name ?? ""} (${kg(gramsIn)} kg)` }],
       rows: outs.map((o, i) => { const p = byId.get(o.productId); return { name: p?.name ?? "", qty: p ? (isLoose(p) ? `${kg(outUnits[i] ?? 0)} kg` : `${outUnits[i]} sacks`) : "" }; }),
-      totals: [{ label: "Out", value: `${kg(gramsOut)} kg` }, { label: loss > 0 ? "Short" : "Short", value: loss > 0 ? `${kg(loss)} kg (${lossPct.toFixed(1)}%)` : "none" }],
+      totals: [{ label: "Out", value: `${kg(gramsOut)} kg` }, { label: "Short", value: loss > 0 ? `${kg(loss)} kg (${lossPct.toFixed(1)}%)` : "none" }],
       signatures: [{ role: "Porter", name: kargadors.find((x) => x.id === (finishing?.kargador?.id ?? kargadorId))?.name ?? "" }],
       footer: "Signed on the device by the porter.", widthMm: 58,
     };
+    const offline: Slip = { ...slip, reference: offlineRef(String(Date.now())), footer: "Saved on this tablet · uploads when online. Signed by the porter." };
+    const r = await sendStep(path, body, `Resack ${inProduct?.name ?? ""}`.trim(), offline);
+    setBusy(false);
+    // No signal: the resack waits on the tablet, and its receipt still prints now.
+    if (r.status === "queued") { reset(); setReceipt(offline); return; }
+    const data = r.data as ApiBody | null;
+    if (!r.ok) { setSigning(false); setError(errText(data, "Did not go through")); return; }
+    toast(data?.needsApproval ? "Done — short by more than 1%, the owner was told" : "Resack done");
     reset();
-    setReceipt(slip);
+    setReceipt({ ...slip, reference: String(data?.docNumber ?? "") || null });
     await Promise.all([loadJobs(), loadStock()]);
   };
 
@@ -185,7 +203,7 @@ export default function ResackPanel() {
 
       {chosen && receipt && !mode && !finishing && (
         <div className="alert alert-success d-flex flex-wrap align-items-center justify-content-between gap-2">
-          <strong>Resack saved{receipt.reference ? ` — ${receipt.reference}` : ""}.</strong>
+          <strong>{receipt.reference?.startsWith("OFFLINE-") ? "Resack saved on this tablet — uploads when online" : "Resack saved"}{receipt.reference ? ` — ${receipt.reference}` : ""}.</strong>
           <span className="d-flex gap-2">
             <button type="button" className="btn btn-dark btn-lg" onClick={() => printSlip(receipt)}><i className="bi bi-printer me-1"></i>Print receipt</button>
             <button type="button" className="btn btn-outline-secondary" onClick={() => setReceipt(null)}>Close</button>
@@ -217,7 +235,20 @@ export default function ResackPanel() {
             </div>
           )}
           <h2 className="h5">Recent resacks</h2>
-          {recent.length === 0 ? <p className="text-muted">None yet.</p> : (
+          {waiting.length > 0 && (
+            <div className="list-group mb-2">
+              {waiting.map((w) => (
+                <div key={w.reference} className="list-group-item d-flex justify-content-between align-items-center gap-2">
+                  <div>
+                    <div className="fw-semibold">{w.reference} · {w.lines?.find((l) => l.label === "From")?.value}</div>
+                    <div className="small text-muted">{w.when} · <span className="badge text-bg-warning">Waiting to upload</span></div>
+                  </div>
+                  <button type="button" className="btn btn-sm btn-outline-dark" onClick={() => printSlip(w)}><i className="bi bi-receipt me-1"></i>Receipt</button>
+                </div>
+              ))}
+            </div>
+          )}
+          {recent.length === 0 && waiting.length === 0 ? <p className="text-muted">None yet.</p> : (
             <div className="list-group">
               {recent.map((j) => (
                 <div key={j.id} className="list-group-item">
