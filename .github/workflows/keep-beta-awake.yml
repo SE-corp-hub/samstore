@@ -1,0 +1,30 @@
+name: Keep beta awake
+
+# The free Render services sleep after about 15 minutes with no visitor, and the
+# first visit after that waits 30 s or more while both wake. During store hours this
+# visits the web app's /backend/health every 5 minutes; that one call goes through
+# the web service to the API, so it keeps both awake.
+#
+# Store hours here: 6:00 AM to 5:00 PM Philippine time (UTC+8) = 22:00 to 08:59 UTC.
+# Render's free plan gives 750 hours a month per workspace, shared by both services;
+# 11 hours a day x 2 services x 31 days = 682 hours, leaving room for evening use.
+# Widening the window past about 12 hours a day would use up the month's hours and
+# Render would stop both services until the next month.
+#
+# GitHub runs scheduled workflows only from the default branch (main), and may start
+# them a few minutes late; every 5 minutes keeps a margin under the 15-minute sleep.
+
+on:
+  schedule:
+    - cron: "*/5 22-23 * * *"
+    - cron: "*/5 0-8 * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Visit the beta
+        # A slow wake is not a failure worth an email: report the answer and move on.
+        run: curl -sS -o /dev/null -w "%{http_code} in %{time_total}s\n" --max-time 150 https://samstore-beta-web.onrender.com/backend/health || true
