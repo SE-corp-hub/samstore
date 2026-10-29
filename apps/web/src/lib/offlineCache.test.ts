@@ -1,7 +1,7 @@
 // Offline in the store — screens open from the last good answer when the server can't be reached.
 import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import { cachedGet, isOffline, offlineRef, savedCopy } from "./offlineCache";
+import { cachedGet, checkConnection, isOffline, offlineRef, savedCopy } from "./offlineCache";
 
 const mem = new Map<string, string>();
 const storage = { getItem: (k: string) => mem.get(k) ?? null, setItem: (k: string, v: string) => void mem.set(k, v), removeItem: (k: string) => void mem.delete(k) };
@@ -61,4 +61,17 @@ test("a clear no (403) is not hidden behind an old copy; each store has its own 
 
 test("offline receipt reference", () => {
   assert.equal(offlineRef("sale-1b2c3d4e-aaaa-bbbb-cccc-0123456789ab"), "OFFLINE-6789AB");
+});
+
+test("real check: Wi-Fi off while the browser still says online (GBox) shows Offline, and back", async () => {
+  globalThis.fetch = answer(200, { a: 1 }) as typeof fetch;
+  await cachedGet("/admin/settings");
+  globalThis.fetch = (async () => { throw new TypeError("Failed to fetch"); }) as typeof fetch;
+  assert.equal(await checkConnection(), false);
+  assert.equal(nav.onLine, true);
+  assert.equal(isOffline(), true);
+  assert.deepEqual(await cachedGet("/admin/settings"), { a: 1 }, "no wait: the saved copy at once");
+  globalThis.fetch = answer(200, {}) as typeof fetch;
+  assert.equal(await checkConnection(), true);
+  assert.equal(isOffline(), false);
 });
