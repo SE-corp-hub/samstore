@@ -14,6 +14,7 @@ import PaymentReview from "./PaymentReview";
 import ChatPanel from "./ChatPanel";
 import { toast } from "../../lib/toast";
 import { useMediaQuery, WIDE } from "../../lib/use-media-query";
+import { cachedGet, useOffline } from "../../lib/offlineCache";
 
 const STATUS_BADGE: Record<string, string> = {
   RECEIVED: "text-bg-secondary",
@@ -75,6 +76,7 @@ export default function OrdersPanel() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [transitioning, setTransitioning] = useState<string | null>(null);
+  const offline = useOffline();
   const [pendingReason, setPendingReason] = useState<{ orderId: string; to: string } | null>(null);
   const [reason, setReason] = useState("");
   const [receiptOrder, setReceiptOrder] = useState<string | null>(null);
@@ -160,9 +162,9 @@ export default function OrdersPanel() {
       if (sourceFilter) q.set("source", sourceFilter);
       if (paymentFilter) q.set("payment", paymentFilter);
       if (fulfillmentFilter) q.set("fulfillment", fulfillmentFilter);
-            const res = await fetch(`${API_URL}/admin/orders?${q.toString()}`, { headers: adminHeaders() });
-                        if (!res.ok) throw new Error("Failed to load orders");
-                        const data = await res.json();
+            // Offline in the store: the last list saved on this tablet for the same day and filters.
+            const data = await cachedGet<{ orders?: AdminOrder[] }>(`/admin/orders?${q.toString()}`);
+                        if (!data) throw new Error("Failed to load orders");
                         let list = data.orders ?? [];
                         // Oldest-first in Pending (FIFO: the longest-waiting order is the most urgent).
                         if (tab === "pending") list = list.sort((a: AdminOrder, b: AdminOrder) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0));
@@ -173,15 +175,14 @@ export default function OrdersPanel() {
                                                 for (const [k, v] of [["from", q.get("from")], ["to", q.get("to")], ["customer", q.get("customer")], ["source", q.get("source")], ["payment", q.get("payment")], ["fulfillment", q.get("fulfillment")]] as const) {
                                                   if (v) cq.set(k, v);
                                                 }
-                        fetch(`${API_URL}/admin/orders/counts?${cq.toString()}`, { headers: adminHeaders() })
-                          .then((r) => r.json())
+                        cachedGet<{ counts?: typeof counts }>(`/admin/orders/counts?${cq.toString()}`)
                           .then((d) => d?.counts && setCounts(d.counts))
                           .catch(() => {});
       if (canWrite) {
-        const p = await fetch(`${API_URL}/admin/products`, { headers: adminHeaders() }).then((r) => r.json());
-        const c = await fetch(`${API_URL}/admin/customers`, { headers: adminHeaders() }).then((r) => r.json());
-        setProducts((p.products ?? []).map((x: any) => ({ id: x.id, name: x.name, sku: x.sku })));
-        setCustomers((c.customers ?? []).map((x: any) => ({ id: x.id, name: x.name ?? x.email ?? x.phone ?? "Customer" })));
+        const p = await cachedGet<{ products?: any[] }>("/admin/products");
+        const c = await cachedGet<{ customers?: any[] }>("/admin/customers");
+        setProducts((p?.products ?? []).map((x: any) => ({ id: x.id, name: x.name, sku: x.sku })));
+        setCustomers((c?.customers ?? []).map((x: any) => ({ id: x.id, name: x.name ?? x.email ?? x.phone ?? "Customer" })));
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Load failed");
@@ -449,7 +450,8 @@ export default function OrdersPanel() {
     };
 
   const isDeliv = (o: AdminOrder) => (o.deliveryType ?? "delivery") === "delivery"; // legacy/online = delivery
-  const busy = (o: AdminOrder) => transitioning === o.id;
+  // Offline: orders open from the saved copy, but changing one needs the internet.
+  const busy = (o: AdminOrder) => offline || transitioning === o.id;
   const openPay = (o: AdminOrder, method: "cash" | "credit") => {
     setPayHold({ id: o.id, orderNumber: o.orderNumber, totalMinor: o.totalMinor, isDelivery: Boolean(o.deliveryAddressLine1?.trim()) });
     setPayMethod(method); setPaySig(null); setPaySigError(false); setTendered("");
@@ -536,16 +538,15 @@ export default function OrdersPanel() {
     setDetailReceived([]);
     setDetailToken(null);
     // Courier hand-over: who received the order, signed on the courier page.
-    fetch(`${API_URL}/admin/signatures?documentType=ORDER&documentId=${o.id}`, { headers: adminHeaders() })
-      .then((r) => (r.ok ? r.json() : null))
+    cachedGet<{ signatures?: unknown }>(`/admin/signatures?documentType=ORDER&documentId=${o.id}`)
       .then((d) => setDetailReceived(Array.isArray(d?.signatures) ? d.signatures : []))
       .catch(() => setDetailReceived([]));
     loadDetail(o);
   };
   const loadDetail = (o: AdminOrder) => {
-    fetch(`${API_URL}/admin/orders/${o.id}`, { headers: adminHeaders() })
-      .then((r) => r.json())
+    cachedGet<any>(`/admin/orders/${o.id}`) // eslint-disable-line @typescript-eslint/no-explicit-any
       .then((d) => {
+        if (!d) { setDetailSignature(""); setDetailItems([]); setDetailHistory([]); return; }
         // Merge full detail into the row so the pane has address/notes/breakdown.
         setOrderDetail((cur) => (cur && cur.id === o.id ? { ...o, ...(d as AdminOrder) } : cur));
         setDetailSignature(typeof d?.signatureData === "string" ? (d.signatureData as string) : "");
@@ -645,7 +646,7 @@ export default function OrdersPanel() {
         {plain.length > 0 && (
           <div className="d-grid gap-2 mb-3" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))" }}>
             {plain.map((x) => (
-              <button key={x.key} type="button" className="btn btn-outline-dark" disabled={busy(o)} onClick={x.run}>
+              <button key={x.key} type="button" className="btn btn-outline-dark" disabled={x.key === "receipt" ? transitioning === o.id : busy(o)} onClick={x.run}>
                 <i className={`bi ${x.icon} me-1`} aria-hidden="true"></i>{x.label}
               </button>
             ))}
@@ -769,13 +770,16 @@ export default function OrdersPanel() {
       <div className="orders-screen">
         <div className="d-flex flex-wrap align-items-center gap-2 mb-2">
           <h1 className="h4 mb-0 me-auto"><i className="bi bi-receipt me-2" aria-hidden="true"></i>Orders</h1>
-          <button type="button" className="btn btn-outline-dark" onClick={() => setReviewOpen(true)}><i className="bi bi-inboxes me-1" aria-hidden="true"></i>Payment review</button>
-          <button type="button" className="btn btn-outline-dark" onClick={() => setChatOpen(true)}><i className="bi bi-chat-dots me-1" aria-hidden="true"></i>Chat inbox</button>
+          <button type="button" className="btn btn-outline-dark" disabled={offline} onClick={() => setReviewOpen(true)}><i className="bi bi-inboxes me-1" aria-hidden="true"></i>Payment review</button>
+          <button type="button" className="btn btn-outline-dark" disabled={offline} onClick={() => setChatOpen(true)}><i className="bi bi-chat-dots me-1" aria-hidden="true"></i>Chat inbox</button>
           <button type="button" className="btn btn-outline-dark" onClick={() => void load()} disabled={loading} aria-label="Refresh orders">
             <i className={`bi bi-arrow-clockwise ${loading ? "spin" : ""}`} aria-hidden="true"></i>
             <span className="ms-1 d-none d-md-inline">{lastLoaded ? `Updated ${lastLoaded}` : "Refresh"}</span>
           </button>
         </div>
+        {offline && (
+          <div className="alert alert-secondary py-2" role="status"><i className="bi bi-wifi-off me-1"></i>Offline: showing the orders last saved on this tablet. Changing an order needs the internet.</div>
+        )}
         {error && (
           <div className="alert alert-danger d-flex align-items-start gap-2 py-2" role="alert">
             <span className="flex-grow-1">{error}</span>
@@ -864,31 +868,31 @@ export default function OrdersPanel() {
             <span className="fw-bold me-1">{selected.size} ticked</span>
             {selected.size < orders.length && <button type="button" className="btn btn-outline-dark" onClick={() => setSelected(new Set(orders.map((x) => x.id)))}>Tick all {orders.length}</button>}
             {canWrite && canBatchReceive && (
-              <button className="btn btn-success" disabled={transitioning === "batch"} onClick={() => runBatch("Received", async (o) => doTransition(o.id, "CONFIRMED"))}>
+              <button className="btn btn-success" disabled={offline || transitioning === "batch"} onClick={() => runBatch("Received", async (o) => doTransition(o.id, "CONFIRMED"))}>
                 <i className="bi bi-check-lg me-1" aria-hidden="true"></i>Receive
               </button>
             )}
             {canWrite && canBatchSend && (
-              <button className="btn btn-success" disabled={transitioning === "batch"} onClick={() => runBatch("Sent for delivery", async (o) => sendForDelivery(o.id))}>
+              <button className="btn btn-success" disabled={offline || transitioning === "batch"} onClick={() => runBatch("Sent for delivery", async (o) => sendForDelivery(o.id))}>
                 <i className="bi bi-truck me-1" aria-hidden="true"></i>Send for delivery
               </button>
             )}
             {canWrite && canBatchPickup && (
-              <button className="btn btn-success" disabled={transitioning === "batch"} onClick={() => runBatch("Completed (pickup)", async (o) => completeNow(o.id))}>
+              <button className="btn btn-success" disabled={offline || transitioning === "batch"} onClick={() => runBatch("Completed (pickup)", async (o) => completeNow(o.id))}>
                 <i className="bi bi-bag-check me-1" aria-hidden="true"></i>Complete pickup
               </button>
             )}
             {canWrite && canBatchDelivered && (
-              <button className="btn btn-success" disabled={transitioning === "batch"} onClick={() => runBatch("Marked delivered", async (o) => doTransition(o.id, "DELIVERED"))}>
+              <button className="btn btn-success" disabled={offline || transitioning === "batch"} onClick={() => runBatch("Marked delivered", async (o) => doTransition(o.id, "DELIVERED"))}>
                 <i className="bi bi-check2-circle me-1" aria-hidden="true"></i>Mark delivered
               </button>
             )}
             {canWrite && canBatchCancel && (
-              <button className="btn btn-outline-danger" disabled={transitioning === "batch"} onClick={() => setPendingReason({ orderId: "__BATCH__", to: "CANCELLED" })}>
+              <button className="btn btn-outline-danger" disabled={offline || transitioning === "batch"} onClick={() => setPendingReason({ orderId: "__BATCH__", to: "CANCELLED" })}>
                 <i className="bi bi-x-lg me-1" aria-hidden="true"></i>Cancel
               </button>
             )}
-            <button className="btn btn-outline-dark ms-auto" disabled={transitioning === "batch"} onClick={clearSelection}>Untick</button>
+            <button className="btn btn-outline-dark ms-auto" disabled={offline || transitioning === "batch"} onClick={clearSelection}>Untick</button>
           </div>
         )}
 

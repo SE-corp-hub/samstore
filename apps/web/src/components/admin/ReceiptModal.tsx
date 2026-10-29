@@ -1,9 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { API_URL } from "../../config";
-import { adminHeaders } from "../../lib/admin";
 import { printSlip, type Slip } from "../../lib/slip-print";
+import { cachedGet } from "../../lib/offlineCache";
 
 // Printable receipt view (browser print). VAT display-only label per decision #2.
 
@@ -49,13 +48,12 @@ function useReceipt(orderId: string) {
   const [settings, setSettings] = useState<{ receiptHeader?: string | null; receiptFooter?: string | null; showVatLabel?: boolean } | null>(null);
   useEffect(() => {
     let alive = true;
-    fetch(`${API_URL}/admin/settings`, { headers: adminHeaders() })
-      .then((r) => r.json())
+    // Offline: the copy saved when this receipt (or the settings) was last opened on this tablet.
+    cachedGet<{ settings?: typeof settings }>("/admin/settings")
       .then((d) => { if (alive) setSettings(d?.settings ?? null); })
       .catch(() => {});
-    fetch(`${API_URL}/admin/orders/${orderId}/receipt`, { headers: adminHeaders() })
-      .then((r) => r.json())
-      .then((d) => { if (alive) { if (d?.orderNumber) setData(d); else setError(d?.message ?? "Load failed"); } })
+    cachedGet<ReceiptData & { message?: string }>(`/admin/orders/${orderId}/receipt`)
+      .then((d) => { if (alive) { if (d?.orderNumber) setData(d); else setError(d ? d.message ?? "Load failed" : "This receipt needs the internet the first time"); } })
       .catch(() => alive && setError("Network error"));
     return () => { alive = false; };
   }, [orderId]);
