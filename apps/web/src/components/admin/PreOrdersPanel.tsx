@@ -23,18 +23,23 @@ import { peso } from "../../lib/number-format";
 import ProductFinder from "./ProductFinder";
 import { noteUse } from "../../lib/product-find";
 import { printSlip, type Slip } from "../../lib/slip-print";
-import { cachedGet, offlineRef } from "../../lib/offlineCache";
+import { cachedGet, offlineRef, useOffline } from "../../lib/offlineCache";
 import { QUEUE_EVENT, queuedSteps, sendStep } from "../../lib/offlineQueue";
 import { newSaleKey } from "../../lib/saleKey";
 
 const PREORDER_PATH = "/admin/pos/preorder";
 /** Pre-orders saved on this tablet with no internet, not on the server yet (shown with Print only). */
 const waitingHere = (): Preorder[] => queuedSteps().filter((s) => s.path === PREORDER_PATH && s.view).map((s) => s.view as Preorder);
+const FINALIZE_PATH = /^\/admin\/pos\/preorders\/[^/]+\/finalize$/;
+/** Pre-orders completed on this tablet with no internet: shown under Done until they upload. */
+const doneHere = (): Preorder[] => queuedSteps().filter((s) => FINALIZE_PATH.test(s.path) && s.view).map((s) => s.view as Preorder);
 
 interface Preorder {
   id: string; orderNumber: string; customerName: string; storeCustomerId: string | null;
   status: string; totalMinor: number; createdAt: string; dueAt: string | null;
   items: { productId: string; productName: string; unitPriceMinor: number; quantity: number; lineTotalMinor: number; variantId?: string | null; variantName?: string | null; priceOverridden?: boolean }[];
+  /** Completed on this tablet, not uploaded yet: how it was paid. */
+  paidBy?: "cash" | "credit"; changeMinor?: number; completedAt?: string;
 }
 interface PosProduct {
   id: string; name: string; sku: string; priceMinor: number;
@@ -167,6 +172,9 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
   const [preTo, setPreTo] = useState(localToday());
   const [preorders, setPreorders] = useState<Preorder[]>([]);
   const [here, setHere] = useState<Preorder[]>([]); // saved on this tablet, waiting for the internet
+  const [doneLocal, setDoneLocal] = useState<Preorder[]>([]); // completed on this tablet, waiting for the internet
+  const [localReceipt, setLocalReceipt] = useState<Slip | null>(null);
+  const offline = useOffline(); // change / delete need the internet (complete works offline)
   const [preLoading, setPreLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [receiptOrder, setReceiptOrder] = useState<string | null>(null);
@@ -222,12 +230,14 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
   useEffect(() => { void loadPreorders(); }, [loadPreorders]);
   // When a pre-order saved offline reaches the server, show the list from the server again.
   useEffect(() => {
-    let count = waitingHere().length;
+    let count = waitingHere().length + doneHere().length;
     const refresh = () => {
       const now = waitingHere();
+      const fin = doneHere();
       setHere(now);
-      if (now.length < count) void loadPreorders();
-      count = now.length;
+      setDoneLocal(fin);
+      if (now.length + fin.length < count) void loadPreorders();
+      count = now.length + fin.length;
     };
     refresh();
     window.addEventListener(QUEUE_EVENT, refresh);
@@ -253,7 +263,7 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
   useEffect(() => { void loadBuilder(); }, [loadBuilder]);
 
   const inRange = (p: Preorder) => (!preFrom || p.createdAt.slice(0, 10) >= preFrom) && (!preTo || p.createdAt.slice(0, 10) <= preTo);
-  const drafts = preorders.filter((p) => p.status === "ON_HOLD");
+  const drafts = preorders.filter((p) => p.status === "ON_HOLD" && !doneLocal.some((d) => d.id === p.id));
   const completed = preorders.filter((p) => p.status === "COMPLETED" && inRange(p));
   const todayStr = localToday();
 
@@ -332,21 +342,31 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
     if (finalizePay === "credit" && !finalizeSig) { setFinalizeSigError(true); return; }
     setFinalizeBusy(true); setFinalizeError(null);
     try {
-      const res = await fetch(`${API_URL}/admin/pos/preorders/${finalizeTarget.id}/finalize`, {
-        method: "POST", headers: { "Content-Type": "application/json", ...adminHeaders() },
-        body: JSON.stringify({
-          paymentMethod: finalizePay,
-          tenderedMinor: finalizePay === "cash" && finalizeTendered ? finalizeCash : undefined,
-          signatureData: finalizeSig ?? undefined,
-          startAt: finalizeStart ? new Date(finalizeStart).toISOString() : undefined,
-          dueAt: finalizeDue ? new Date(finalizeDue).toISOString() : undefined,
-        }),
-      });
-      const d = await res.json();
-      if (!res.ok) { setFinalizeError(d?.errors?.join(", ") ?? d?.message ?? "Finalize failed"); return; }
       const target = finalizeTarget;
+      const change = finalizePay === "cash" ? Math.max(0, finalizeCash - target.totalMinor) : 0;
+      const base = preorders.find((p) => p.id === target.id);
+      // Shown under Done while it waits on this tablet (never sent).
+      const view: Preorder | undefined = base && { ...base, status: "COMPLETED", paidBy: finalizePay, changeMinor: change, completedAt: new Date().toISOString() };
+      const sent = await sendStep(`/admin/pos/preorders/${target.id}/finalize`, {
+        paymentMethod: finalizePay,
+        tenderedMinor: finalizePay === "cash" && finalizeTendered ? finalizeCash : undefined,
+        signatureData: finalizeSig ?? undefined,
+        startAt: finalizeStart ? new Date(finalizeStart).toISOString() : undefined,
+        dueAt: finalizeDue ? new Date(finalizeDue).toISOString() : undefined,
+        idempotencyKey: newSaleKey(),
+      }, `Complete pre-order ${target.customerName}`, view);
+      if (sent.status === "queued") {
+        // No internet: completed on this tablet, it moves to Done and uploads later (see the upload bar).
+        setFinalizeTarget(null);
+        setLastFinalizedOrderId(null);
+        setLocalReceipt(view ? soldSlip(view) : null);
+        setSubTab("finalize");
+        return;
+      }
+      const d = (sent.data ?? {}) as { orderId?: string; orderNumber?: string; changeMinor?: number; message?: string; errors?: string[] };
+      if (!sent.ok) { setFinalizeError(d.errors?.join(", ") ?? d.message ?? "Finalize failed"); return; }
       toast(finalizePay === "cash"
-        ? `Sold — paid in cash${d.changeMinor > 0 ? ` · change ${toPesos(d.changeMinor)}` : ""} · ${d.orderNumber ?? target.orderNumber}`
+        ? `Sold — paid in cash${(d.changeMinor ?? 0) > 0 ? ` · change ${toPesos(d.changeMinor ?? 0)}` : ""} · ${d.orderNumber ?? target.orderNumber}`
         : `Sold — on credit · ${d.orderNumber ?? target.orderNumber}`);
       if (finalizePay === "credit") {
         // The customer's new balance and number, so staff can text them the transaction.
@@ -356,7 +376,8 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
         setFinalizedPhone(c?.phone ?? "");
       }
       setFinalizeTarget(null);
-      setLastFinalizedOrderId(d.orderId ?? finalizeTarget.id);
+      setLocalReceipt(null);
+      setLastFinalizedOrderId(d.orderId ?? target.id);
       await loadPreorders();
     } catch (e) {
       setFinalizeError(e instanceof Error ? e.message : "Finalize failed");
@@ -463,8 +484,9 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
   /** Every product across pre-orders: on hold = all waiting ones, sold = completed between the dates. */
   const holdSoldRows = () => {
     const map: Record<string, { productName: string; holdQty: number; soldQty: number }> = {};
-    for (const p of preorders) {
-      const kind = p.status === "ON_HOLD" ? "hold" : p.status === "COMPLETED" && inRange(p) ? "sold" : null;
+    const doneIds = new Set(doneLocal.map((d) => d.id));
+    for (const p of [...preorders.filter((x) => !doneIds.has(x.id)), ...doneLocal]) {
+      const kind = p.status === "ON_HOLD" ? "hold" : p.status === "COMPLETED" && (doneIds.has(p.id) || inRange(p)) ? "sold" : null;
       if (!kind) continue;
       for (const it of p.items) {
         const e = map[it.productId] ?? (map[it.productId] = { productName: it.productName, holdQty: 0, soldQty: 0 });
@@ -529,6 +551,13 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
     footer: "Not paid yet. Pay when you pick up.",
   });
 
+  /** The receipt for a pre-order completed on this tablet while offline. */
+  const soldSlip = (p: Preorder): Slip => ({
+    ...preorderSlip(p), title: "SALES RECEIPT", when: new Date(p.completedAt ?? Date.now()).toLocaleString("en-PH"),
+    totals: [{ label: "Total", value: toPesos(p.totalMinor) }, ...(p.paidBy === "cash" && (p.changeMinor ?? 0) > 0 ? [{ label: "Change", value: toPesos(p.changeMinor ?? 0) }] : [])],
+    footer: p.paidBy === "cash" ? "Paid in cash. Thank you!" : "On credit (utang). Thank you!",
+  });
+
   /** One pre-order as a card: who, what, how much, then the actions (Complete sale first). */
   const preCard = (p: Preorder, pastDue: boolean, local = false) => (
     <div className="col" key={p.id}>
@@ -543,7 +572,13 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
           </div>
           {p.dueAt && <div className={`small mb-1 ${pastDue ? "text-danger fw-semibold" : "text-muted"}`}>Due {fmtDate(p.dueAt)}{pastDue ? " (late)" : ""}</div>}
           <div className="mb-3 flex-grow-1">{itemLines(p, 4)}</div>
-          {local && (
+          {local && p.status === "COMPLETED" && (
+            <>
+              <div className="small text-warning-emphasis mb-2"><i className="bi bi-wifi-off me-1"></i>Completed on this tablet ({p.paidBy === "cash" ? "paid in cash" : "on credit"}). It uploads when the internet is back.</div>
+              <button className="btn btn-outline-dark w-100" onClick={() => printSlip(soldSlip(p))}><i className="bi bi-printer me-1"></i>Print receipt</button>
+            </>
+          )}
+          {local && p.status !== "COMPLETED" && (
             <>
               <div className="small text-warning-emphasis mb-2"><i className="bi bi-wifi-off me-1"></i>Saved on this tablet — it is sent when the internet is back. Complete, change or delete it after that.</div>
               <button className="btn btn-outline-dark w-100" onClick={() => printSlip(preorderSlip(p))}><i className="bi bi-printer me-1"></i>Print</button>
@@ -554,13 +589,13 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
               <button className="btn btn-success btn-lg w-100 mb-2" onClick={() => openFinalize(p)}><i className="bi bi-check2-circle me-1"></i>Complete sale</button>
               <div className="d-flex gap-2">
                 <button className="btn btn-outline-dark flex-fill" onClick={() => printSlip(preorderSlip(p))}><i className="bi bi-printer me-1"></i>Print</button>
-                <button className="btn btn-outline-dark flex-fill" onClick={() => void openPreEdit(p)}><i className="bi bi-pencil me-1"></i>Change</button>
-                <button className="btn btn-outline-danger flex-fill" onClick={() => { setConfirmVoid({ id: p.id, orderNumber: p.orderNumber }); setVoidReason(""); }}><i className="bi bi-trash me-1"></i>Delete</button>
+                <button className="btn btn-outline-dark flex-fill" disabled={offline} onClick={() => void openPreEdit(p)}><i className="bi bi-pencil me-1"></i>Change</button>
+                <button className="btn btn-outline-danger flex-fill" disabled={offline} onClick={() => { setConfirmVoid({ id: p.id, orderNumber: p.orderNumber }); setVoidReason(""); }}><i className="bi bi-trash me-1"></i>Delete</button>
               </div>
             </>
           )}
-          {p.status === "COMPLETED" && (
-            <button className="btn btn-outline-dark w-100" onClick={() => setReceiptOrder(p.id)}><i className="bi bi-receipt me-1"></i>Receipt</button>
+          {!local && p.status === "COMPLETED" && (
+            <button className="btn btn-outline-dark w-100" disabled={offline} onClick={() => setReceiptOrder(p.id)}><i className="bi bi-receipt me-1"></i>Receipt</button>
           )}
         </div>
       </div>
@@ -570,7 +605,7 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
   const renderList = (done: boolean) => {
     if (preLoading) return <p className="text-muted text-center py-4">Loading pre-orders…</p>;
     const rows = done ? completed : drafts;
-    const local = done ? [] : here;
+    const local = done ? doneLocal : here;
     return (
       <>
         {summaryCard()}
@@ -653,7 +688,7 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
               );
             }} />
           <div className="text-center">
-            <button type="button" className="btn btn-outline-secondary" onClick={() => setNewItemOpen(true)}>+ New item (not on the list yet)</button>
+            <button type="button" className="btn btn-outline-secondary" disabled={offline} onClick={() => setNewItemOpen(true)}>+ New item (not on the list yet){offline && " · Needs internet"}</button>
           </div>
         </>
       )}
@@ -751,6 +786,13 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
         )}
       </div>
 
+      {localReceipt && doneLocal.length > 0 && subTab !== "build" && (
+        <div className="alert alert-warning d-flex flex-wrap align-items-center justify-content-center gap-2">
+          <span><i className="bi bi-wifi-off me-1"></i>Sale completed on this tablet. It uploads when the internet is back.</span>
+          <button className="btn btn-outline-dark" onClick={() => printSlip(localReceipt)}><i className="bi bi-printer me-1"></i>Print receipt</button>
+          <button className="btn btn-outline-secondary" onClick={() => setLocalReceipt(null)}>Close</button>
+        </div>
+      )}
       {lastFinalizedOrderId && subTab !== "build" && (
         <div className="alert alert-success d-flex flex-wrap align-items-center justify-content-center gap-2">
           <span>Sale completed.</span>

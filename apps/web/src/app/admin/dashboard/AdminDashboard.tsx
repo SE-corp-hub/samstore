@@ -9,7 +9,10 @@ import {
 import dynamic from "next/dynamic";
 import { API_URL } from "../../../config";
 import { wakeFetch } from "../../../lib/wake-fetch";
-import { saveCopy, savedCopy } from "../../../lib/offlineCache";
+import { saveCopy, savedCopy, useOffline } from "../../../lib/offlineCache";
+
+/** Screens that work with no internet; every other screen still opens, but read-only (its buttons are off). */
+const OFFLINE_READY = new Set(["home", "pos", "preorders"]);
 
 const STORES_PATH = "/admin/stores/mine";
 import { resumePendingReceipt } from "../../../lib/slip-print";
@@ -110,6 +113,8 @@ export default function AdminDashboard() {
   // renders while the answer is still "none", and every tab answers 403.
   const [storesStatus, setStoresStatus] = useState<"loading" | "ready" | "error">("loading");
   const [waking, setWaking] = useState(false); // the sleeping beta server is starting up
+  const offline = useOffline();
+  const locked = offline && !OFFLINE_READY.has(tab);
   const userNavigated = useRef(false);
 
   const loadStores = useCallback(async () => {
@@ -435,7 +440,16 @@ export default function AdminDashboard() {
         <SyncBar />
 
         <main className={`container-fluid py-4 flex-grow-1${BAR_ROLES.includes(role) ? " has-staff-bar" : ""}`} style={{ background: "#faf7f2" }}>
-          {RICE_TABS.has(tab) ? <div className="rice-ui p-2 rounded">{renderTab()}</div> : renderTab()}
+          {locked && (
+            <div className="alert alert-secondary d-flex align-items-center gap-2" role="status">
+              <i className="bi bi-lock fs-4"></i>
+              <div><div className="fw-semibold">Needs internet</div><div className="small">You can open this screen, but its buttons are off until the tablet is online. POS and Pre-order work offline.</div></div>
+            </div>
+          )}
+          {/* Always the same wrapper, so going offline locks the screen without reloading it. */}
+          <fieldset disabled={locked} className="border-0 p-0 m-0" style={{ minWidth: 0 }}>
+            {RICE_TABS.has(tab) ? <div className="rice-ui p-2 rounded">{renderTab()}</div> : renderTab()}
+          </fieldset>
         </main>
 
         {BAR_ROLES.includes(role) && (

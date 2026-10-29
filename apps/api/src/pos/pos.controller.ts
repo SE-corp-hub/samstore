@@ -90,10 +90,11 @@ export class PosController {
 
   /** POST /admin/pos/preorders/:id/finalize — utang finalize: signature REQUIRED → COMPLETED + CreditEntry. */
   @Post("preorders/:id/finalize")
-  async finalizePreorder(@Req() req: Request & { user?: AuthPrincipal }, @Param("id") id: string, @Body() body: PreOrderFinalizeRequest, @Headers("x-store-id") headerStoreId?: string) {
+  async finalizePreorder(@Req() req: Request & { user?: AuthPrincipal }, @Param("id") id: string, @Body() body: PreOrderFinalizeRequest, @Headers("x-store-id") headerStoreId?: string, @Headers("idempotency-key") idempotencyKey?: string) {
     const user = req.user!;
     const storeId = await this.guardAndStore(req, headerStoreId);
-    const result = await this.pos.finalizePreorder(storeId, user.sub, id, body);
+    // Offline store mode: a completion saved on the tablet carries a key, so sending it again is answered the same.
+    const result = await this.pos.finalizePreorder(storeId, user.sub, id, { ...body, ...(body?.idempotencyKey === undefined && idempotencyKey ? { idempotencyKey } : {}) });
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
     return { ...result.value, storeId };
   }

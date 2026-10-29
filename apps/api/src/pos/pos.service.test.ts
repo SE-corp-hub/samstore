@@ -785,3 +785,40 @@ test("finalize in cash: COMPLETED + COLLECTED, a cash payment with change, no cr
     await cleanupFixture(fx.storeId, fx.customerId);
   }
 });
+
+test("finalize with an idempotency key: sent again (offline retry) answers the same and writes nothing more", async () => {
+  const fx = await makeFixture();
+  try {
+    const created = await svc.createPreOrder(fx.storeId, "actorX", { customerId: fx.storeCustomerId, items: [{ productId: fx.productId, quantity: 1 }] });
+    assert.equal(created.ok, true);
+    if (!created.ok) return;
+    const id = created.value.orderId;
+    const body = { signatureData: SIGNATURE, idempotencyKey: `fin-${randomId()}` };
+    const first = await svc.finalizePreorder(fx.storeId, "actorX", id, body);
+    const again = await svc.finalizePreorder(fx.storeId, "actorX", id, body);
+    assert.equal(first.ok, true);
+    assert.equal(again.ok, true);
+    if (!first.ok || !again.ok) return;
+    assert.equal(again.value.orderId, id);
+    assert.equal(again.value.status, "COMPLETED");
+    assert.equal(again.value.creditEntryId, first.value.creditEntryId);
+    assert.equal(await prisma.creditEntry.count({ where: { orderId: id } }), 1);
+    assert.equal((await prisma.storeCustomer.findUnique({ where: { id: fx.storeCustomerId } }))?.creditBalanceMinor, 10000);
+
+    // Cash: the change is answered again, and the money is counted once.
+    const cashOrder = await svc.createPreOrder(fx.storeId, "actorX", { customerId: fx.storeCustomerId, items: [{ productId: fx.productId, quantity: 1 }] });
+    if (!cashOrder.ok) return;
+    const cashBody = { paymentMethod: "cash" as const, tenderedMinor: 12000, idempotencyKey: `fin-${randomId()}` };
+    const c1 = await svc.finalizePreorder(fx.storeId, "actorX", cashOrder.value.orderId, cashBody);
+    const c2 = await svc.finalizePreorder(fx.storeId, "actorX", cashOrder.value.orderId, cashBody);
+    assert.equal(c1.ok && c2.ok, true);
+    if (c2.ok) { assert.equal(c2.value.paymentMethod, "cash"); assert.equal(c2.value.changeMinor, 2000); }
+    assert.equal(await prisma.orderStatusHistory.count({ where: { orderId: cashOrder.value.orderId, actorType: "pos_finalize" } }), 1);
+
+    // An unknown order is still not found, key or not.
+    const none = await svc.finalizePreorder(fx.storeId, "actorX", randomId(), body);
+    assert.equal(none.ok, false);
+  } finally {
+    await cleanupFixture(fx.storeId, fx.customerId);
+  }
+});
