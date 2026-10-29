@@ -352,11 +352,12 @@ body {
 }
 .order-main .min-w-0, .order-detail .min-w-0 { min-width: 0; }
 .order-go { align-self: center; white-space: nowrap; min-width: 150px; }
+.order-reprint { align-self: center; white-space: nowrap; }
 /* Phones: the button drops under the row instead of squeezing the name. */
 @media (max-width: 575.98px) {
   .order-row { flex-wrap: wrap; }
   .order-main { flex: 1 1 0; }
-  .order-go { flex: 1 0 100%; }
+  .order-go, .order-reprint { flex: 1 0 auto; }
 }
 .orders-screen .spin { display: inline-block; animation: orders-spin 0.8s linear infinite; }
 @keyframes orders-spin { to { transform: rotate(360deg); } }
