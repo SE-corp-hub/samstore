@@ -336,3 +336,30 @@ body {
 .pos-side { position: sticky; top: 1rem; max-height: calc(100vh - 6rem - var(--staff-bar-h, 0px)); overflow-y: auto; }
 /* Back / Add stay on screen at the bottom of the sale panel, even when the panel scrolls. */
 .pos-side .pos-actions { position: sticky; bottom: 0; background: #fff; padding: 8px 0; margin-bottom: -8px; }
+
+/* Orders: one row per order (who + what left, amount + status right, next step as one button). */
+.order-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.order-row {
+  display: flex; align-items: stretch; gap: 8px; min-height: 64px; padding: 6px 8px;
+  background: #fff; border: 1px solid #c9c4bc; border-radius: 10px;
+}
+.order-row.is-open { border: 2px solid #1f1d1a; padding: 5px 7px; }
+.order-row.is-picked { background: #f4f1ec; }
+.order-pick { display: flex; align-items: center; justify-content: center; min-width: 44px; cursor: pointer; }
+.order-main {
+  flex: 1 1 auto; min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  background: transparent; border: 0; padding: 4px; text-align: left; color: inherit; border-radius: 6px;
+}
+.order-main .min-w-0, .order-detail .min-w-0 { min-width: 0; }
+.order-go { align-self: center; white-space: nowrap; min-width: 150px; }
+/* Phones: the button drops under the row instead of squeezing the name. */
+@media (max-width: 575.98px) {
+  .order-row { flex-wrap: wrap; }
+  .order-main { flex: 1 1 0; }
+  .order-go { flex: 1 0 100%; }
+}
+.orders-screen .spin { display: inline-block; animation: orders-spin 0.8s linear infinite; }
+@keyframes orders-spin { to { transform: rotate(360deg); } }
+/* Upright and phones: day chips + Filters on one line, search full width under them. Sideways: all on one line. */
+.ord-search { flex: 1 1 100%; order: 3; }
+@media (min-width: 992px) { .ord-search { flex: 1 1 160px; order: 0; } }
