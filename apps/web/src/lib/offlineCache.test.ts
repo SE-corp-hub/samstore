@@ -1,7 +1,7 @@
 // Offline in the store — screens open from the last good answer when the server can't be reached.
 import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import { cachedGet, checkConnection, isOffline, offlineRef, saveCopy, savedCopy } from "./offlineCache";
+import { cachedGet, checkConnection, connectionState, INTERNET_PROBE, isOffline, offlineRef, saveCopy, savedCopy } from "./offlineCache";
 import { registeredStoreName } from "./slip-print";
 
 const mem = new Map<string, string>();
@@ -80,4 +80,25 @@ test("real check: Wi-Fi off while the browser still says online (GBox) shows Off
 test("receipts know the registered store name from the saved /admin/settings answer (name is at the top level)", () => {
   saveCopy("/admin/settings", { id: "s1", name: " Tindahan ni Sam ", settings: {} });
   assert.equal(registeredStoreName(), "Tindahan ni Sam");
+});
+
+test("Wi-Fi on but the free server asleep: 'Connecting to server', not a false 'Offline'; Online once it answers", async () => {
+  // Own web server times out (asleep), the always-awake probe answers.
+  globalThis.fetch = (async (url: string) => {
+    if (String(url).startsWith(INTERNET_PROBE)) return new Response(null, { status: 204 });
+    throw new DOMException("aborted", "AbortError");
+  }) as typeof fetch;
+  assert.equal(await checkConnection(), true);
+  assert.equal(connectionState(), "waking");
+  assert.equal(isOffline(), true, "steps still wait on the tablet while the server sleeps");
+  // Web and API awake again.
+  globalThis.fetch = answer(200, { ok: true }) as typeof fetch;
+  assert.equal(await checkConnection(), true);
+  assert.equal(connectionState(), "online");
+  // No internet at all: both fail.
+  globalThis.fetch = (async () => { throw new TypeError("Failed to fetch"); }) as typeof fetch;
+  assert.equal(await checkConnection(), false);
+  assert.equal(connectionState(), "offline");
+  globalThis.fetch = answer(200, {}) as typeof fetch;
+  await checkConnection();
 });

@@ -47,6 +47,7 @@ const WORDS: Record<string, [tl: string, en: string]> = {
   "queue.clear": ["Alisin sa listahan", "Clear the list"],
   "sync.online": ["Online", "Online"],
   "sync.offline": ["Offline", "Offline"],
+  "sync.waking": ["Kumokonekta sa server…", "Connecting to server…"],
   "sync.waiting": ["{n} na record ang naka-save sa tablet", "{n} saved on this tablet, not uploaded yet"],
   "sync.whenWifi": ["Offline — i-upload kapag may Wi-Fi na", "Offline — upload them when you have Wi-Fi"],
   "sync.auto": ["May internet — pindutin ang Upload, o hintayin na kusang ma-upload", "Internet is back — tap Upload now, or they upload by themselves"],
