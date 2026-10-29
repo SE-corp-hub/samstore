@@ -162,8 +162,8 @@ export default function RegisterBar({ onShiftChange }: { onShiftChange?: (open: 
                   <span className="input-group-text">₱</span>
                   <input className="form-control" inputMode="decimal" placeholder="0.00" value={floatInput} onChange={(e) => setFloatInput(e.target.value)} />
                 </div>
-                <label className="form-label small">Notes</label>
-                <input className="form-control" value={openNotes} onChange={(e) => setOpenNotes(e.target.value)} />
+                <label htmlFor="register-notes" className="form-label small">Notes</label>
+                <input id="register-notes" className="form-control" value={openNotes} onChange={(e) => setOpenNotes(e.target.value)} />
               </div>
               <div className="modal-footer">
                 <button className="btn btn-outline-secondary" onClick={() => setOpenModal(false)}>Cancel</button>
@@ -198,8 +198,8 @@ export default function RegisterBar({ onShiftChange }: { onShiftChange?: (open: 
                   <span className="input-group-text">₱</span>
                   <input className="form-control" inputMode="decimal" placeholder="0.00" value={moveAmount} onChange={(e) => setMoveAmount(e.target.value)} />
                 </div>
-                <label className="form-label small">Reason</label>
-                <input className="form-control" placeholder={moveModal === "CASH_IN" ? "change fund top-up" : "bank drop"} value={moveReason} onChange={(e) => setMoveReason(e.target.value)} />
+                <label htmlFor="register-reason" className="form-label small">Reason</label>
+                <input id="register-reason" className="form-control" placeholder={moveModal === "CASH_IN" ? "change fund top-up" : "bank drop"} value={moveReason} onChange={(e) => setMoveReason(e.target.value)} />
               </div>
               <div className="modal-footer">
                 <button className="btn btn-outline-secondary" onClick={() => setMoveModal(null)}>Cancel</button>
@@ -241,8 +241,8 @@ export default function RegisterBar({ onShiftChange }: { onShiftChange?: (open: 
                     Variance: {variance === 0 ? "balanced" : `${variance < 0 ? "short " : "over "}${toPesos(Math.abs(variance))}`}
                   </div>
                 )}
-                <label className="form-label small mt-3">Notes</label>
-                <input className="form-control" value={closeNotes} onChange={(e) => setCloseNotes(e.target.value)} />
+                <label htmlFor="register-notes-2" className="form-label small mt-3">Notes</label>
+                <input id="register-notes-2" className="form-control" value={closeNotes} onChange={(e) => setCloseNotes(e.target.value)} />
               </div>
               <div className="modal-footer">
                 <button className="btn btn-outline-secondary" onClick={() => setCloseModal(false)}>Cancel</button>

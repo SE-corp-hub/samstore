@@ -457,8 +457,8 @@ export default function StoresPanel() {
                 <div className="modal-body">
                   {statusError && <div className="alert alert-danger py-2 small mb-2">{statusError}</div>}
                   <p className="small text-muted mb-2">{STATUS_META[statusTarget.action].body}</p>
-                  <label className="form-label small">Reason <span className="text-muted">(optional)</span></label>
-                  <textarea
+                  <label htmlFor="stores-reason-optional" className="form-label small">Reason <span className="text-muted">(optional)</span></label>
+                  <textarea id="stores-reason-optional"
                     className="form-control"
                     rows={2}
                     value={statusReason}

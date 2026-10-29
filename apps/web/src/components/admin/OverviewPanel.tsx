@@ -143,7 +143,7 @@ export default function OverviewPanel({ onNavigate, storeSlug, storeName }: Over
               <i className="bi bi-box-arrow-up-right me-1"></i>Open storefront
             </a>
           )}
-          <button className="btn btn-sm btn-outline-secondary" onClick={load} title="Refresh" disabled={loading}>
+          <button className="btn btn-sm btn-outline-secondary" onClick={load} title="Refresh" aria-label="Refresh" disabled={loading}>
             <i className="bi bi-arrow-clockwise"></i>
           </button>
           <div className="form-check form-switch form-check-sm ms-1" title="Auto-refresh every 30s">
@@ -162,36 +162,36 @@ export default function OverviewPanel({ onNavigate, storeSlug, storeName }: Over
 
       <div className="row g-3 mb-3">
         <div className="col-6 col-md-3">
-          <button className="btn card text-start h-100 p-3 shadow-sm" onClick={() => onNavigate("orders")}>
+          <button className="btn card text-start h-100 w-100 p-3 shadow-sm" onClick={() => onNavigate("orders")}>
             <div className="small text-muted">Today&apos;s sales</div>
             <div className="h4 mb-0">{toPesos(today?.revenueMinor ?? 0)}</div>
             <small className="text-muted">{today?.count ?? 0} orders</small>
-            {dailyTargetMinor && dailyTargetMinor > 0 && (
+            {dailyTargetMinor != null && dailyTargetMinor > 0 && (
               <div className="progress mt-1" style={{ height: 6 }}>
                 <div className="progress-bar" style={{ width: `${Math.min(100, Math.round(((today?.revenueMinor ?? 0) / dailyTargetMinor) * 100))}%` }}></div>
               </div>
             )}
-            {dailyTargetMinor && dailyTargetMinor > 0 && (
+            {dailyTargetMinor != null && dailyTargetMinor > 0 && (
               <small className="text-muted">{Math.round(((today?.revenueMinor ?? 0) / dailyTargetMinor) * 100)}% of {toPesos(dailyTargetMinor)}</small>
             )}
           </button>
         </div>
         <div className="col-6 col-md-3">
-          <button className="btn card text-start h-100 p-3 shadow-sm" onClick={() => onNavigate("orders")}>
+          <button className="btn card text-start h-100 w-100 p-3 shadow-sm" onClick={() => onNavigate("orders")}>
             <div className="small text-muted">Awaiting action</div>
             <div className={`h4 mb-0 ${awaiting > 0 ? "text-warning" : ""}`}>{awaiting}</div>
             <small className="text-muted">received + confirmed</small>
           </button>
         </div>
         <div className="col-6 col-md-3">
-          <button className="btn card text-start h-100 p-3 shadow-sm" onClick={() => onNavigate("orders")}>
+          <button className="btn card text-start h-100 w-100 p-3 shadow-sm" onClick={() => onNavigate("orders")}>
             <div className="small text-muted">Out for delivery</div>
             <div className={`h4 mb-0 ${outForDelivery > 0 ? "text-primary" : ""}`}>{outForDelivery}</div>
             <small className="text-muted">couriers on the road</small>
           </button>
         </div>
         <div className="col-6 col-md-3">
-          <button className="btn card text-start h-100 p-3 shadow-sm" onClick={() => onNavigate("inventory")}>
+          <button className="btn card text-start h-100 w-100 p-3 shadow-sm" onClick={() => onNavigate("inventory")}>
             <div className="small text-muted">Low stock</div>
             <div className={`h4 mb-0 ${(lowStockCount ?? 0) > 0 ? "text-danger" : ""}`}>{lowStockCount ?? "—"}</div>
             <small className="text-muted">at or below reorder</small>

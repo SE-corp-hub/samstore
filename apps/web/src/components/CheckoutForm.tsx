@@ -301,12 +301,12 @@ export default function CheckoutForm({ cartToken, store, subtotalMinor, delivery
           </div>
 
           <div className="mb-2">
-            <label className="form-label small">Full name *</label>
-            <input className="form-control" value={form.customerName} onChange={set("customerName")} required minLength={2} />
+            <label htmlFor="checkout-full-name" className="form-label small">Full name *</label>
+            <input id="checkout-full-name" className="form-control" value={form.customerName} onChange={set("customerName")} required minLength={2} />
           </div>
           <div className="mb-2">
-            <label className="form-label small">Phone *</label>
-            <input className="form-control" value={form.customerPhone} onChange={set("customerPhone")} required placeholder="+63..." />
+            <label htmlFor="checkout-phone" className="form-label small">Phone *</label>
+            <input id="checkout-phone" className="form-control" value={form.customerPhone} onChange={set("customerPhone")} required placeholder="+63..." />
           </div>
 
           {delivery ? (
@@ -372,28 +372,28 @@ export default function CheckoutForm({ cartToken, store, subtotalMinor, delivery
                 </select>
               </div>
               <div className="mb-2">
-                <label className="form-label small">Street / House no. *</label>
-                <input className="form-control" value={form.deliveryAddressLine1} onChange={set("deliveryAddressLine1")} required minLength={5} placeholder="e.g. 123 Mabini St." />
+                <label htmlFor="checkout-street-house-no" className="form-label small">Street / House no. *</label>
+                <input id="checkout-street-house-no" className="form-control" value={form.deliveryAddressLine1} onChange={set("deliveryAddressLine1")} required minLength={5} placeholder="e.g. 123 Mabini St." />
               </div>
               <div className="mb-2">
-                <label className="form-label small">Building / Unit (optional)</label>
-                <input className="form-control" value={form.deliveryAddressLine2} onChange={set("deliveryAddressLine2")} placeholder="e.g. Unit 5, Blk 2" />
+                <label htmlFor="checkout-building-unit-option" className="form-label small">Building / Unit (optional)</label>
+                <input id="checkout-building-unit-option" className="form-control" value={form.deliveryAddressLine2} onChange={set("deliveryAddressLine2")} placeholder="e.g. Unit 5, Blk 2" />
               </div>
               <div className="mb-2">
-                <label className="form-label small">Landmark</label>
-                <input className="form-control" value={form.landmark} onChange={set("landmark")} />
+                <label htmlFor="checkout-landmark" className="form-label small">Landmark</label>
+                <input id="checkout-landmark" className="form-control" value={form.landmark} onChange={set("landmark")} />
               </div>
               <div className="mb-2">
-                <label className="form-label small">Delivery schedule</label>
-                <input className="form-control" value={form.deliverySchedule} onChange={set("deliverySchedule")} placeholder="e.g. Today 5-8pm" />
+                <label htmlFor="checkout-delivery-schedule" className="form-label small">Delivery schedule</label>
+                <input id="checkout-delivery-schedule" className="form-control" value={form.deliverySchedule} onChange={set("deliverySchedule")} placeholder="e.g. Today 5-8pm" />
               </div>
             </>
           ) : (
             <div className="alert alert-light border small"><i className="bi bi-shop me-1"></i>Pickup order — we&apos;ll prep and have it ready for pickup.</div>
           )}
           <div className="mb-3">
-            <label className="form-label small">Notes</label>
-            <input className="form-control" value={form.notes} onChange={set("notes")} />
+            <label htmlFor="checkout-notes" className="form-label small">Notes</label>
+            <input id="checkout-notes" className="form-control" value={form.notes} onChange={set("notes")} />
           </div>
 
           {/* P3b: statutory 20% discount (Senior Citizen / PWD) */}
@@ -450,12 +450,12 @@ export default function CheckoutForm({ cartToken, store, subtotalMinor, delivery
 
           <div className="row g-2 mb-3">
             <div className="col-6">
-              <label className="form-label small">Voucher code</label>
-              <input className="form-control" value={form.voucherCode} onChange={set("voucherCode")} placeholder="SAM10 (optional)" />
+              <label htmlFor="checkout-voucher-code" className="form-label small">Voucher code</label>
+              <input id="checkout-voucher-code" className="form-control" value={form.voucherCode} onChange={set("voucherCode")} placeholder="SAM10 (optional)" />
             </div>
             <div className="col-6">
-              <label className="form-label small">Loyalty points</label>
-              <input className="form-control" type="number" min="0" step="100" value={form.loyaltyPoints} onChange={set("loyaltyPoints")} placeholder="100 pts = ₱1" />
+              <label htmlFor="checkout-loyalty-points" className="form-label small">Loyalty points</label>
+              <input id="checkout-loyalty-points" className="form-control" type="number" min="0" step="100" value={form.loyaltyPoints} onChange={set("loyaltyPoints")} placeholder="100 pts = ₱1" />
             </div>
           </div>
 

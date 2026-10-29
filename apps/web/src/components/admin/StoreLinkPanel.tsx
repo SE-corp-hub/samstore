@@ -165,8 +165,8 @@ export default function StoreLinkPanel() {
                   {link ? (
                     <>
                       <div className="input-group mb-2">
-                        <input className="form-control form-control-sm" readOnly value={link} />
-                        <button className="btn btn-outline-secondary btn-sm" onClick={copy}>
+                        <input className="form-control form-control-sm" readOnly value={link} aria-label="Public store link" />
+                        <button className="btn btn-outline-secondary btn-sm" onClick={copy} aria-label={copied ? "Link copied" : "Copy link"} title="Copy link">
                           <i className={`bi ${copied ? "bi-check-lg" : "bi-clipboard"}`}></i>
                         </button>
                       </div>
@@ -218,24 +218,24 @@ export default function StoreLinkPanel() {
                 <div className="col-md-3">
                   <label className="form-label small">Accent color</label>
                   <div className="d-flex align-items-center gap-2">
-                    <input type="color" className="form-control form-control-color" value={accentColor} onChange={(e) => setAccentColor(e.target.value)} style={{ width: 46 }} />
-                    <input className="form-control form-control-sm" value={accentColor} onChange={(e) => setAccentColor(e.target.value)} />
+                    <input type="color" className="form-control form-control-color" aria-label="Pick accent color" value={accentColor} onChange={(e) => setAccentColor(e.target.value)} style={{ width: 46 }} />
+                    <input className="form-control form-control-sm" aria-label="Accent color code" value={accentColor} onChange={(e) => setAccentColor(e.target.value)} />
                   </div>
                 </div>
                 <div className="col-md-4">
-                  <label className="form-label small">Banner text (shown on storefront)</label>
-                  <input className="form-control form-control-sm" value={bannerText} onChange={(e) => setBannerText(e.target.value)} placeholder="e.g. Free delivery over ₱500" />
+                  <label htmlFor="storelin-banner-text-shown-on" className="form-label small">Banner text (shown on storefront)</label>
+                  <input id="storelin-banner-text-shown-on" className="form-control form-control-sm" value={bannerText} onChange={(e) => setBannerText(e.target.value)} placeholder="e.g. Free delivery over ₱500" />
                 </div>
                 <div className="col-md-5">
-                  <label className="form-label small">Share message</label>
-                  <input className="form-control form-control-sm" value={shareMessage} onChange={(e) => setShareMessage(e.target.value)} placeholder="e.g. Order from us — no app, no sign-up" />
+                  <label htmlFor="storelin-share-message" className="form-label small">Share message</label>
+                  <input id="storelin-share-message" className="form-control form-control-sm" value={shareMessage} onChange={(e) => setShareMessage(e.target.value)} placeholder="e.g. Order from us — no app, no sign-up" />
                 </div>
               </div>
               <div className="row g-2 mt-1">
                 <div className="col-md-6">
                   <label className="form-label small">Logo</label>
                   <div className="d-flex align-items-center gap-2">
-                    <input className="form-control form-control-sm" type="file" accept="image/*" onChange={(e) => e.target.files?.[0] && uploadLogo(e.target.files[0])} />
+                    <input className="form-control form-control-sm" type="file" aria-label="Logo image" accept="image/*" onChange={(e) => e.target.files?.[0] && uploadLogo(e.target.files[0])} />
                     {data.logoUrl && <img src={data.logoUrl} alt="logo" height="32" className="rounded" />}
                   </div>
                 </div>

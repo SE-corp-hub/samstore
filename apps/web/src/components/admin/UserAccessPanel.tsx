@@ -247,8 +247,8 @@ export default function UserAccessPanel() {
 
       {isPlatform && (
         <div className="d-flex flex-wrap gap-2 align-items-center mb-2">
-          <label className="form-label small mb-0 me-1">Store</label>
-          <select className="form-select form-select-sm" style={{ width: 220 }} value={storeId} onChange={(e) => setStoreId(e.target.value)}>
+          <label htmlFor="useracce-store" className="form-label small mb-0 me-1">Store</label>
+          <select id="useracce-store" className="form-select form-select-sm" style={{ width: 220 }} value={storeId} onChange={(e) => setStoreId(e.target.value)}>
             {stores.map((s) => <option key={s.id} value={s.id}>{s.name} · {s.slug}</option>)}
           </select>
           <span className="small text-muted">Platform admin — any store's users</span>
@@ -364,12 +364,12 @@ export default function UserAccessPanel() {
                   <button type="button" className="btn-close" onClick={() => setShowAdd(false)}></button>
                 </div>
                 <div className="modal-body">
-                  <label className="form-label small">Email <span className="text-danger">*</span></label>
-                  <input className="form-control" type="email" value={addEmail} onChange={(e) => setAddEmail(e.target.value)} />
-                  <label className="form-label small mt-2">Name</label>
-                  <input className="form-control" value={addName} onChange={(e) => setAddName(e.target.value)} placeholder="optional" />
-                  <label className="form-label small mt-2">Role</label>
-                  <select className="form-select" value={addRole} onChange={(e) => setAddRole(e.target.value)}>
+                  <label htmlFor="useracce-email" className="form-label small">Email <span className="text-danger">*</span></label>
+                  <input id="useracce-email" className="form-control" type="email" value={addEmail} onChange={(e) => setAddEmail(e.target.value)} />
+                  <label htmlFor="useracce-name" className="form-label small mt-2">Name</label>
+                  <input id="useracce-name" className="form-control" value={addName} onChange={(e) => setAddName(e.target.value)} placeholder="optional" />
+                  <label htmlFor="useracce-role" className="form-label small mt-2">Role</label>
+                  <select id="useracce-role" className="form-select" value={addRole} onChange={(e) => setAddRole(e.target.value)}>
                     {PANEL_ADD_ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
                   </select>
                 </div>

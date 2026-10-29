@@ -17,7 +17,7 @@ export default function BarChart({ data, color = "var(--sam-primary)", max }: Ba
         return (
           <div key={i} className="d-flex flex-column justify-content-end flex-grow-1 text-center" title={`${d.label}: ${d.valueLabel ?? d.value}`}>
             <div style={{ height: h, background: color, borderRadius: "4px 4px 0 0", minWidth: 12 }} />
-            <div className="small text-muted mt-1" style={{ fontSize: 10 }}>{d.label}</div>
+            <div className="small text-muted mt-1" style={{ fontSize: 12 }}>{d.label}</div>
           </div>
         );
       })}
