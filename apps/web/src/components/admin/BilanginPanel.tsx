@@ -328,7 +328,7 @@ function WriteOffForm({ locationId, products }: { locationId: string; products: 
     const signatures = [{ signerKind: "STAFF", imagePng: sig }, ...(photo ? [{ signerKind: "SLIP_PHOTO", imagePng: photo }] : [])];
     const sent = await sendStep("/admin/write-offs", { locationId, productId, ...(isLoose(p) ? { kilos: amount } : { quantity: Number(amount) }), reason, note: note.trim() || undefined, signatures }, `Write-off: ${p?.name ?? ""}`);
     setBusy(false);
-    if (sent.status === "queued") { toast("No signal — saved on this phone, will be sent when the signal is back"); setProductId(""); setAmount(""); setReason(""); setNote(""); setPhoto(null); setSig(null); setSigKey((k) => k + 1); return; }
+    if (sent.status === "queued") { setProductId(""); setAmount(""); setReason(""); setNote(""); setPhoto(null); setSig(null); setSigKey((k) => k + 1); return; }
     const r = { ok: sent.ok, data: sent.data as ApiBody | null };
     if (!r.ok) { setError(errText(r.data, "Could not write off")); return; }
     toast(r.data?.needsApproval ? `Written off (${String(r.data?.docNumber)}) — over 1%, the owner was told` : `Written off: ${String(r.data?.docNumber)}`);

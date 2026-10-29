@@ -136,7 +136,7 @@ export default function ResackPanel() {
     else body = { locationId, inputProductId: inputId, inputQty: inQty, outputs, kargadorId: k, signatures };
     const r = await sendStep(path, body, `Resack ${inProduct?.name ?? ""}`.trim());
     setBusy(false);
-    if (r.status === "queued") { toast("No signal — saved on this phone, it will be sent when the signal returns"); reset(); return; }
+    if (r.status === "queued") { reset(); return; }
     const data = r.data as ApiBody | null;
     if (!r.ok) { setSigning(false); setError(errText(data, "Did not go through")); return; }
     toast(data?.needsApproval ? "Done — short by more than 1%, the owner was told" : "Resack done");

@@ -114,7 +114,7 @@ export default function PasokPanel(_props: { role?: string; onNavigate?: (tab: s
     const sent = await sendStep("/admin/stock-in", body, `Stock in${po ? ` (${po.docNumber})` : supplier.trim() ? ` (${supplier.trim()})` : ""}`);
     setBusy(false);
     const clear = () => { setRows([{ productId: "", amount: "", cost: "" }]); setSupplier(""); setPoId(""); setSig(null); setSigKey((k) => k + 1); void loadOrders(locationId); };
-    if (sent.status === "queued") { toast("No signal — saved on this phone, it will be sent when the signal returns"); clear(); return; }
+    if (sent.status === "queued") { clear(); return; }
     const d = sent.data as ApiBody | null;
     if (!sent.ok) { setError(errText(d, "Did not go through")); return; }
     toast(`Received: ${String(d?.docNumber ?? "")}`);

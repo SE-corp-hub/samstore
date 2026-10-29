@@ -72,7 +72,7 @@ export default function MovePanel() {
     setError(null);
     const r = await sendStep("/admin/moves", { fromLocationId: from, toLocationId: to, productId, quantity: n, note }, "Move stock");
     setBusy(false);
-    if (r.status === "queued") { toast("No signal — saved on this phone, will be sent when the signal is back"); return; }
+    if (r.status === "queued") { setQty("1"); setNote(""); setProductId(""); return; } // saved offline: shown in the upload bar
     const d = r.data as Body | null;
     if (!r.ok) { setError(d?.errors?.join(", ") ?? d?.message ?? "The move did not go through"); return; }
     toast(`Moved ${n} — ${d?.docNumber ?? "done"}`);

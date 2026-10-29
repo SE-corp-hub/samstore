@@ -357,7 +357,7 @@ function PayForm({ customer, locationId, onCancel, onDone }: { customer: Cust; l
     const signatures = [{ signerKind: "STAFF", imagePng: staffSig }, ...(custSig ? [{ signerKind: "CUSTOMER", signerName: customer.name, imagePng: custSig }] : [])];
     const sent = await sendStep("/admin/utang/payments", { customerId: customer.id, amountMinor: amt, method, reference: method === "gcash" ? reference.trim() : undefined, locationId: locationId ?? undefined, signatures }, `Payment from ${customer.name}`);
     setBusy(false);
-    if (sent.status === "queued") { toast("No signal — saved on this phone, will be sent when the signal is back"); await onDone(customer.balanceMinor - amt, amt); return; }
+    if (sent.status === "queued") { await onDone(customer.balanceMinor - amt, amt); return; }
     const r = { ok: sent.ok, data: sent.data as ApiBody | null };
     if (!r.ok) { setError(errText(r.data, "Did not go through")); return; }
     const bal = Number(r.data?.balanceMinor ?? 0);

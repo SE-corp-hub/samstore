@@ -274,7 +274,6 @@ export default function BentaPanel() {
           releases: [], zeroCheck: [],
         });
         setTextInfo(null);
-        toast("No internet — the sale is saved on this tablet and will be sent when the internet is back");
         keyRef.current = null;
         try { window.sessionStorage.removeItem(cartKey()); } catch { /* convenience only */ }
         setStep("done");
@@ -316,7 +315,7 @@ export default function BentaPanel() {
           <div className="alert alert-success">
             <div className="h4 mb-1">Sold</div>
             <div>{last.orderNumber}</div>
-            {last.offline && <div className="small">No internet — saved on this tablet. It is sent by itself when the internet is back (see &quot;Waiting to send&quot; at the top).</div>}
+            {last.offline && <div className="small">Offline — saved on this tablet. Upload it with &quot;Upload now&quot; at the top when you have Wi-Fi.</div>}
             {last.smsStatus === "QUEUED" && <div className="small">Sending a text to the customer.</div>}
             {last.smsStatus === "SKIPPED" && <div className="small">No text — the customer has no mobile number.</div>}
           </div>
