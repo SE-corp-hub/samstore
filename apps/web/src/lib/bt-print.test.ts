@@ -42,8 +42,14 @@ test("Bluetooth errors are explained in plain words", () => {
   assert.equal(btErrorText(err("NotFoundError", "User cancelled the requestDevice() chooser.")), "No printer was chosen");
   assert.match(btErrorText(err("NotFoundError", "Bluetooth adapter not available.")), /Nearby devices.*\(Bluetooth adapter not available\.\)/);
   assert.match(btErrorText(err("NetworkError", "GATT Server is disconnected.")), /did not answer/);
+  // A connect that never answers (tablet after Bluetooth off/on): only closing the app clears it.
+  assert.match(btErrorText(err("TimeoutError", "No answer from the printer")), /close this app completely.*receipt is kept/);
+  assert.match(btErrorText(err("PendingReceipt", "")), /not printed yet/);
   assert.match(btErrorText(err("SecurityError", "x")), /Nearby devices/);
+  // The printer connected, but none of its services is on the app's list: not a Bluetooth-off problem.
+  assert.match(btErrorText(err("NotFoundError", "No Services found in device.")), /Check my printer/);
+  assert.match(btErrorText(err("SecurityError", "Origin is not allowed to access any service.")), /Check my printer/);
   // An automatic print after a sale has no tap, so Chrome cannot show its printer list.
-  assert.match(btErrorText(err("NeedsTapError", "Printer not connected yet")), /Tap Print receipt/);
-  assert.match(btErrorText(err("SecurityError", "Must be handling a user gesture to show a permission request.")), /Tap Print receipt/);
+  assert.match(btErrorText(err("NeedsTapError", "Printer not connected yet")), /Tap Connect printer/);
+  assert.match(btErrorText(err("SecurityError", "Must be handling a user gesture to show a permission request.")), /Tap Connect printer/);
 });

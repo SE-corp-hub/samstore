@@ -3,8 +3,8 @@
 // The HTML builder is pure so its escaping and layout are unit-tested.
 
 import { getPrinterSettings } from "./printer-settings";
-import { btErrorText, printViaBluetooth } from "./bt-print";
-import { toast } from "./toast";
+import { printViaBluetooth } from "./bt-print";
+import { showPrinterPrompt } from "./print-prompt";
 
 export interface SlipLine { label: string; value: string }
 export interface SlipRow { name: string; qty: string; note?: string }
@@ -68,15 +68,38 @@ export function printSlip(s: Slip): void {
   if (cfg.bluetooth && !s.a4) {
     // Straight to the Bluetooth printer. If that fails, fall back to the normal print window so a receipt is never lost.
     const slip = s;
-    printViaBluetooth(slip, slip.widthMm ?? 58).catch((e) => {
-      // An automatic print with no printer picked yet: the Print receipt button on screen connects it.
-      if (e instanceof Error && e.name === "NeedsTapError") { toast(btErrorText(e), "danger"); return; }
-      toast(`Bluetooth print did not work: ${btErrorText(e)}. Using the print window.`, "danger");
-      browserPrint(slip);
-    });
+    // Whatever stops it (not connected, Bluetooth off, printer off), the receipt is kept and a box offers Connect printer.
+    printViaBluetooth(slip, slip.widthMm ?? 58).catch((e) => { keepPending(slip); prompt(slip, e); });
     return;
   }
   browserPrint(s);
+}
+
+// A receipt that could not reach the printer is kept on this device until it prints or the person closes
+// the box, so it survives closing the app (the fix for a dead Bluetooth link on the tablet).
+const PENDING = "samstore-pending-receipt";
+const KEEP_MS = 12 * 60 * 60 * 1000;
+function keepPending(slip: Slip): void {
+  try { window.localStorage.setItem(PENDING, JSON.stringify({ at: Date.now(), slip })); } catch { /* only kept for this session */ }
+}
+function dropPending(): void {
+  try { window.localStorage.removeItem(PENDING); } catch { /* nothing kept */ }
+}
+function prompt(slip: Slip, e: unknown): void {
+  showPrinterPrompt(e, {
+    print: async () => { await printViaBluetooth(slip, slip.widthMm ?? 58); dropPending(); },
+    printWindow: () => { dropPending(); browserPrint(slip); },
+    dismiss: dropPending,
+  });
+}
+
+/** When the app opens: offer the receipt that did not print before the app was closed. */
+export function resumePendingReceipt(): void {
+  if (typeof window === "undefined") return;
+  let kept: { at?: number; slip?: Slip } | null = null;
+  try { kept = JSON.parse(window.localStorage.getItem(PENDING) ?? "null") as { at?: number; slip?: Slip } | null; } catch { kept = null; }
+  if (!kept?.slip || !kept.at || Date.now() - kept.at > KEEP_MS || !getPrinterSettings().bluetooth) { dropPending(); return; }
+  prompt(kept.slip, Object.assign(new Error("Receipt not printed yet"), { name: "PendingReceipt" }));
 }
 
 function browserPrint(s: Slip): void {

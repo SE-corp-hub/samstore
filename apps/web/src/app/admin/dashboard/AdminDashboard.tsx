@@ -9,6 +9,7 @@ import {
 import dynamic from "next/dynamic";
 import { API_URL } from "../../../config";
 import { wakeFetch } from "../../../lib/wake-fetch";
+import { resumePendingReceipt } from "../../../lib/slip-print";
 import { useLang, LANG_WORDS } from "../../../lib/lang";
 import QueueBadge from "../../../components/admin/QueueBadge";
 import StaffHome from "../../../components/admin/StaffHome";
@@ -164,6 +165,8 @@ export default function AdminDashboard() {
     }
   }, [router]);
 
+  // A receipt that could not print before the app was closed is offered again.
+  useEffect(() => { resumePendingReceipt(); }, []);
   useEffect(() => {
     const token = getAdminToken();
     if (!token) {
@@ -214,7 +217,7 @@ export default function AdminDashboard() {
         <div className="card shadow-sm p-4 text-center" style={{ width: "100%", maxWidth: 460 }} role="status">
           <div className="spinner-border text-success mx-auto" aria-hidden="true"></div>
           <h4 className="mt-3 mb-2">Starting the server</h4>
-          <p className="text-muted mb-0">It was asleep. This can take up to a minute — please wait, it opens by itself.</p>
+          <p className="text-muted mb-0">It was asleep. This can take a minute or two — please wait, it opens by itself.</p>
         </div>
       </div>
     );

@@ -87,7 +87,7 @@ export function slipToEscPos(s: Slip, w: number): Uint8Array {
 interface BtChar { uuid?: string; properties: { write: boolean; writeWithoutResponse: boolean }; writeValue(v: BufferSource): Promise<void>; writeValueWithoutResponse?(v: BufferSource): Promise<void> }
 interface BtService { uuid?: string; getCharacteristics(): Promise<BtChar[]> }
 interface BtServer { connected: boolean; getPrimaryServices(): Promise<BtService[]> }
-interface BtDevice { id?: string; name?: string; gatt?: { connected: boolean; connect(): Promise<BtServer>; disconnect(): void }; addEventListener(t: string, f: () => void): void }
+interface BtDevice { id?: string; name?: string; gatt?: { connected: boolean; connect(): Promise<BtServer>; disconnect(): void }; forget?: () => Promise<void>; addEventListener(t: string, f: () => void): void }
 interface BtApi { requestDevice(o: unknown): Promise<BtDevice>; getDevices?: () => Promise<BtDevice[]> }
 
 // Services that common BLE receipt printers use for printing (Chrome only lets a page use the ones it lists here).
@@ -107,6 +107,13 @@ export const bluetoothSupported = () => api() !== null;
 
 let device: BtDevice | null = null;
 let writer: BtChar | null = null;
+
+// When Bluetooth is switched off, the printer link is gone: drop it so the next print reconnects cleanly.
+if (typeof navigator !== "undefined") {
+  (navigator as unknown as { bluetooth?: EventTarget }).bluetooth?.addEventListener?.("availabilitychanged", (ev) => {
+    if (!(ev as Event & { value?: boolean }).value) { writer = null; try { device?.gatt?.disconnect(); } catch { /* already closed */ } }
+  });
+}
 
 // Every Bluetooth device has these (name, battery, maker info). Some let you write the device name, which
 // the old code picked by mistake: the receipt went there and nothing printed. They are never the print channel.
@@ -138,24 +145,43 @@ export function pickWriter(chars: CharInfo[]): number {
 export function btErrorText(e: unknown): string {
   const name = e instanceof Error ? e.name : "";
   const msg = e instanceof Error ? e.message : String(e);
-  if (name === "NeedsTapError" || /gesture/i.test(msg)) return "The printer is not connected yet. Tap Print receipt once to connect it. After that, receipts print by themselves.";
+  if (name === "NeedsTapError" || /gesture/i.test(msg)) return "The printer is not connected yet. Tap Connect printer.";
   if (name === "NotFoundError" && (/cancel/i.test(msg) || !msg)) return "No printer was chosen";
+  // Chrome found the printer but none of its print channels is one this app may use.
+  if (/service/i.test(msg)) return `The printer was found, but the app cannot use its print channel. In Printer settings tap "Check my printer" and send the report to Claude.${msg ? ` (${msg})` : ""}`;
   // Chrome's own words go at the end so a screenshot tells Claude exactly what happened.
   const raw = msg ? ` (${msg})` : "";
   // "Bluetooth adapter not available" also shows when Bluetooth is on but Chrome lacks the Nearby devices permission.
-  if (name === "NotFoundError" || name === "SecurityError" || name === "NotAllowedError") return `Chrome cannot use Bluetooth. In the phone's Settings, open Apps, Chrome, Permissions and allow "Nearby devices" and "Location", turn Location on, then reopen Chrome.${raw}`;
-  if (name === "NetworkError" || /gatt|connect/i.test(msg)) return `The printer did not answer. Turn it off and on, close RawBT or any other printing app, then try again.${raw}`;
+  if (name === "NotFoundError" || name === "SecurityError" || name === "NotAllowedError") return `Bluetooth is off, or Chrome is not allowed to use it. Turn Bluetooth on. If it is already on, open the phone's Settings, Apps, Chrome, Permissions and allow "Nearby devices" and "Location".${raw}`;
+  if (name === "PendingReceipt") return "This receipt was not printed yet. Tap Connect printer to print it now.";
+  // On the tablet, after Bluetooth is turned off and on, Chrome keeps a dead link that only closing the app clears.
+  if (name === "TimeoutError") return `The printer did not answer. Check that it is on and close by, then tap Connect printer and pick it again. If it still does not answer, close this app completely (swipe it away from recent apps) and open it again: this receipt is kept and offered again.${raw}`;
+  if (name === "NetworkError" || /gatt|connect/i.test(msg)) return `The printer did not answer. Check that Bluetooth is on, the printer is on and close by, and RawBT or another app is not using it.${raw}`;
   return msg || "error";
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/** A Bluetooth step that never answers (printer gone, Bluetooth switched off) fails after `ms` instead of hanging. */
+const timeout = <T>(p: Promise<T>, ms: number): Promise<T> => Promise.race([
+  p, new Promise<never>((_, no) => setTimeout(() => no(Object.assign(new Error("No answer from the printer"), { name: "TimeoutError" })), ms)),
+]);
+
 /** Android often fails the first Bluetooth connection, so try up to 3 times before giving up. */
 async function connectGatt(d: BtDevice): Promise<BtServer> {
   let last: unknown;
   for (let i = 0; i < 3; i++) {
-    try { return await d.gatt!.connect(); }
-    catch (e) { last = e; try { d.gatt!.disconnect(); } catch { /* already closed */ } await sleep(600); }
+    // Clear any half-open link first: after Bluetooth is switched off and on, Chrome keeps a dead one
+    // and a new connect on top of it never answers.
+    if (!d.gatt!.connected) { try { d.gatt!.disconnect(); } catch { /* nothing to close */ } }
+    // Some printers take 10+ seconds to accept the first connection, so give it 15 seconds before giving up.
+    try { return await timeout(d.gatt!.connect(), 15000); }
+    catch (e) {
+      last = e;
+      try { d.gatt!.disconnect(); } catch { /* already closed */ }
+      if (e instanceof Error && e.name === "TimeoutError") break; // no answer at all: the link is dead, stop making staff wait
+      await sleep(600);
+    }
   }
   throw last;
 }
@@ -181,10 +207,11 @@ async function findWriter(d: BtDevice): Promise<BtChar> {
 /** Pick the printer once (Chrome asks), remember it for this session. Needs a tap (a user gesture). */
 export async function connectPrinter(): Promise<string> {
   const bt = api();
-  if (!bt) throw new Error("This browser cannot use Bluetooth printing");
+  if (!bt) throw new Error("This browser cannot use Bluetooth printing. Open the app in Chrome, or use the print window.");
   device = await bt.requestDevice({ acceptAllDevices: true, optionalServices: SERVICES });
   device.addEventListener("gattserverdisconnected", () => { writer = null; });
   writer = await findWriter(device);
+  idleLater();
   try { window.localStorage.setItem(SAVED, JSON.stringify({ id: device.id ?? "", name: device.name ?? "" })); } catch { /* just not remembered */ }
   return device.name || "Bluetooth printer";
 }
@@ -195,11 +222,32 @@ const saved = (): { id: string; name: string } | null => {
   try { return JSON.parse(window.localStorage.getItem(SAVED) ?? "null") as { id: string; name: string } | null; } catch { return null; }
 };
 
-export const connectedPrinterName = (): string | null => (writer && device ? device.name || "Bluetooth printer" : null);
+/** A printer was picked on this device before (this session, or saved), so "Try again" can reconnect it without Chrome's list. */
+export const printerPickedBefore = (): boolean => device !== null || saved() !== null;
+
+/** false when Chrome says Bluetooth is off; null when it cannot tell. */
+export async function bluetoothOn(): Promise<boolean | null> {
+  const bt = api() as (BtApi & { getAvailability?: () => Promise<boolean> }) | null;
+  try { return bt?.getAvailability ? await bt.getAvailability() : null; } catch { return null; }
+}
+
+// The picked printer, even while the link is let go between prints.
+export const connectedPrinterName = (): string | null => (device ? device.name || "Bluetooth printer" : null);
 
 async function ready(): Promise<BtChar> {
   if (writer && device?.gatt?.connected) return writer;
-  if (device) { writer = await findWriter(device); return writer; }
+  if (device) {
+    try { writer = await findWriter(device); return writer; }
+    catch (e) {
+      // This printer link is dead (for example Bluetooth was switched off and on while connected). Chrome keeps
+      // such a link until the app is closed, so ask Chrome to forget the printer: the next tap on Try again or
+      // Connect printer then picks it fresh from Chrome's list with a clean, new link.
+      const dead = device;
+      device = null; writer = null;
+      if (e instanceof Error && e.name === "TimeoutError") await dead.forget?.().catch(() => {});
+      throw e;
+    }
+  }
   // After the app restarts the picked printer is gone from memory. Chrome can hand it back without asking
   // (when its remembered-devices feature is on); prefer the one picked last time.
   const known = (await api()?.getDevices?.().catch(() => [])) ?? [];
@@ -221,15 +269,30 @@ async function ready(): Promise<BtChar> {
 }
 
 /** Send the slip to the connected printer in small pieces (a BLE write is only about 20 bytes safely). */
+// Let go of the printer a few seconds after the last print. Bluetooth switched off while the link is open leaves
+// a dead link in Chrome; with no link open there is nothing to go dead. Reconnecting takes a second or two.
+let idleTimer: ReturnType<typeof setTimeout> | null = null;
+function idleLater(): void {
+  if (idleTimer) clearTimeout(idleTimer);
+  idleTimer = setTimeout(() => { idleTimer = null; writer = null; try { device?.gatt?.disconnect(); } catch { /* already closed */ } }, 4000);
+}
+
 export async function printViaBluetooth(s: Slip, widthMm: 58 | 80): Promise<void> {
+  if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
   const ch = await ready();
   const data = slipToEscPos(s, widthMm === 80 ? 48 : 32);
-  for (let i = 0; i < data.length; i += 20) {
-    const part = data.slice(i, i + 20);
-    if (ch.properties.writeWithoutResponse && ch.writeValueWithoutResponse) await ch.writeValueWithoutResponse(part);
-    else await ch.writeValue(part);
-    await sleep(15);
+  try {
+    for (let i = 0; i < data.length; i += 20) {
+      const part = data.slice(i, i + 20);
+      if (ch.properties.writeWithoutResponse && ch.writeValueWithoutResponse) await timeout(ch.writeValueWithoutResponse(part), 5000);
+      else await timeout(ch.writeValue(part), 5000);
+      await sleep(15);
+    }
+  } catch (e) {
+    writer = null; // the link broke mid-receipt: reconnect on the next try
+    throw e;
   }
+  idleLater();
 }
 
 /** Look at a printer and say what it is: name, services and what each can do. Used by "Check my printer". */

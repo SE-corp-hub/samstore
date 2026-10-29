@@ -220,7 +220,7 @@ export default function AdminLogin() {
               <h1 className="h4 mt-2 mb-0">Log in with your PIN</h1>
             </div>
             {error && <div className="alert alert-danger py-2" role="alert">{error}</div>}
-            {waking && <div className="alert alert-info py-2" role="status">Starting the server — this can take up to a minute. Please wait.</div>}
+            {waking && <div className="alert alert-info py-2" role="status">Starting the server — this can take a minute or two. Please wait.</div>}
             <label className="form-label" htmlFor="pin-phone">Mobile number</label>
             <input
               id="pin-phone" className="form-control form-control-lg mb-3" inputMode="tel" autoComplete="tel"
@@ -262,7 +262,7 @@ export default function AdminLogin() {
               <p className="text-muted small">Sign in to manage your store</p>
             </div>
             {error && <div className="alert alert-danger py-2 small">{error}</div>}
-            {waking && <div className="alert alert-info py-2" role="status">Starting the server — this can take up to a minute. Please wait.</div>}
+            {waking && <div className="alert alert-info py-2" role="status">Starting the server — this can take a minute or two. Please wait.</div>}
 
             {/* Security: demo logins (with passwords) only when a developer turns them on —
                 never on a real deployment. */}
