@@ -13,19 +13,7 @@ import SignaturePad from "./SignaturePad";
 import PaymentReview from "./PaymentReview";
 import ChatPanel from "./ChatPanel";
 import { toast } from "../../lib/toast";
-
-const ALLOWED: Record<string, string[]> = {
-  RECEIVED: ["CONFIRMED", "CANCELLED"],
-  CONFIRMED: ["PREPARING", "CANCELLED"],
-  PREPARING: ["READY", "CANCELLED"],
-  READY: ["OUT_FOR_DELIVERY", "CANCELLED"],
-  OUT_FOR_DELIVERY: ["DELIVERED", "FAILED_DELIVERY"],
-  DELIVERED: [],
-  ON_HOLD: [], // handled by dedicated edit/pay/void buttons
-  COMPLETED: [],
-  CANCELLED: [],
-  FAILED_DELIVERY: ["OUT_FOR_DELIVERY"],
-};
+import { useMediaQuery, WIDE } from "../../lib/use-media-query";
 
 const STATUS_BADGE: Record<string, string> = {
   RECEIVED: "text-bg-secondary",
@@ -42,37 +30,29 @@ const STATUS_BADGE: Record<string, string> = {
 
 /** Friendly, deduped status labels (used by the pill + dropdown + detail modal). */
 const STATUS_LABEL: Record<string, string> = {
-  RECEIVED: "Pending", CONFIRMED: "Confirmed", PREPARING: "Preparing", READY: "Ready",
+  RECEIVED: "To receive", CONFIRMED: "Confirmed", PREPARING: "Preparing", READY: "Ready",
   OUT_FOR_DELIVERY: "Out for delivery", DELIVERED: "Delivered", ON_HOLD: "On hold",
   COMPLETED: "Completed", CANCELLED: "Cancelled", FAILED_DELIVERY: "Failed delivery",
 };
 
-const TABS: { id: string; label: string; status?: string[] }[] = [
-  { id: "today", label: "Today", status: undefined },
-  { id: "pending", label: "Pending", status: ["RECEIVED"] },
-  { id: "onprocess", label: "On Process", status: ["CONFIRMED", "PREPARING", "READY", "ON_HOLD"] },
-  { id: "fordelivery", label: "For Delivery", status: ["OUT_FOR_DELIVERY"] },
-  { id: "delivered", label: "Delivered", status: ["DELIVERED"] },
-  { id: "completed", label: "Completed", status: ["COMPLETED"] },
-  { id: "void", label: "Void", status: ["CANCELLED", "FAILED_DELIVERY"] },
+const TABS: { id: string; label: string; status?: string[]; hint: string }[] = [
+  { id: "today", label: "All", status: undefined, hint: "Every order for the day you picked. Tap an order to see its items and what to do next." },
+  { id: "pending", label: "To receive", status: ["RECEIVED"], hint: "New orders, oldest first. Receive them, or cancel with a reason." },
+  { id: "onprocess", label: "In progress", status: ["CONFIRMED", "PREPARING", "READY", "ON_HOLD"], hint: "Received or held orders. Send for delivery, mark ready for pickup, or take payment." },
+  { id: "fordelivery", label: "Out for delivery", status: ["OUT_FOR_DELIVERY"], hint: "With the courier. Mark delivered when the customer has it." },
+  { id: "delivered", label: "Delivered", status: ["DELIVERED"], hint: "Delivered and paid on delivery." },
+  { id: "completed", label: "Completed", status: ["COMPLETED"], hint: "Paid and done. Reprint receipts here." },
+  { id: "void", label: "Void", status: ["CANCELLED", "FAILED_DELIVERY"], hint: "Cancelled orders and failed deliveries. A failed delivery can be sent again." },
 ];
+
+/** One thing a user can do with an order. "main" is the next step (one per order, shown on its row). */
+interface OrderAction { key: string; label: string; icon: string; tone: "main" | "plain" | "danger"; run: () => void }
 
 interface EditLine { productId: string; productName: string; quantity: number; unitPriceMinor: number }
 interface ProductOption { id: string; name: string; sku: string }
 
 const toPesos = (m: number) => `₱${(m / 100).toFixed(2)}`;
 const dayRange = (d: Date) => ({ from: new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0).toISOString(), to: new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59).toISOString() });
-
-/** Pipeline KPI cards — label, count (filled from live counts below), tone, tab to jump to. */
-type PipelineKpi = [label: string, n: number, tone: string, go: () => void];
-function buildPipelineKpis(counts: Record<string, number>, setTab: (t: string) => void): PipelineKpi[] {
-  return [
-    ["To receive", counts["RECEIVED"] ?? 0, "text-bg-info", () => setTab("pending")],
-    ["In progress", (counts["CONFIRMED"] ?? 0) + (counts["PREPARING"] ?? 0) + (counts["READY"] ?? 0) + (counts["ON_HOLD"] ?? 0), "text-bg-warning", () => setTab("onprocess")],
-    ["Out for delivery", counts["OUT_FOR_DELIVERY"] ?? 0, "text-bg-dark", () => setTab("fordelivery")],
-    ["Delivered · COD due", counts["DELIVERED"] ?? 0, "text-bg-success", () => setTab("delivered")],
-  ];
-}
 
 export default function OrdersPanel() {
   const role = getAdminRole();
@@ -88,6 +68,9 @@ export default function OrdersPanel() {
   const [fulfillmentFilter, setFulfillmentFilter] = useState(""); // "" | delivery | pickup
   const [selected, setSelected] = useState<Set<string>>(new Set()); // batch mode
   const [autoRefresh, setAutoRefresh] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [lastLoaded, setLastLoaded] = useState("");
+  const wide = useMediaQuery(WIDE);
   const [orders, setOrders] = useState<AdminOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -184,6 +167,7 @@ export default function OrdersPanel() {
                         // Oldest-first in Pending (FIFO: the longest-waiting order is the most urgent).
                         if (tab === "pending") list = list.sort((a: AdminOrder, b: AdminOrder) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0));
                         setOrders(list);
+                        setLastLoaded(new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }));
             // Per-tab counts (for badges) — same filters as the list, fire-and-forget, never blocks.
                         const cq = new URLSearchParams();
                                                 for (const [k, v] of [["from", q.get("from")], ["to", q.get("to")], ["customer", q.get("customer")], ["source", q.get("source")], ["payment", q.get("payment")], ["fulfillment", q.get("fulfillment")]] as const) {
@@ -270,7 +254,7 @@ export default function OrdersPanel() {
       if (!res.ok) { setError(data?.message ?? "Transition failed"); return; }
       setPendingReason(null);
       setReason("");
-      toast(`Order → ${toStatus}`);
+      toast(`${orders.find((x) => x.id === orderId)?.orderNumber ?? "Order"}: ${STATUS_LABEL[toStatus] ?? toStatus}`);
       void load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Transition failed");
@@ -287,7 +271,7 @@ export default function OrdersPanel() {
         if (!res.ok) { setError(data?.message ?? `${kind} failed`); return; }
         setConfirmAction(null);
         setReason("");
-        toast(kind === "voidHold" ? "Held order voided — stock restored" : `${kind === "void" ? "Voided" : "Refunded"} → CANCELLED`);
+        toast(kind === "voidHold" ? "Held order voided — stock restored" : kind === "void" ? "Sale voided — stock restored" : "Sale refunded and cancelled");
         void load();
       } catch (e) {
         setError(e instanceof Error ? e.message : `${kind} failed`);
@@ -302,7 +286,7 @@ export default function OrdersPanel() {
           const res = await fetch(`${API_URL}/admin/orders/${orderId}/send-for-delivery`, { method: "POST", headers: { "Content-Type": "application/json", ...adminHeaders() } });
           const data = await res.json();
           if (!res.ok) { setError(data?.message ?? "Failed"); return; }
-          toast(`${data.orderNumber ?? "Order"} → OUT_FOR_DELIVERY`);
+          toast(`${data.orderNumber ?? "Order"}: out for delivery`);
           void load();
         } catch (e) {
           setError(e instanceof Error ? e.message : "Failed");
@@ -464,318 +448,454 @@ export default function OrdersPanel() {
       }
     };
 
-  const summaryOf = (o: AdminOrder) => `${o.orderNumber} · ${toPesos(o.totalMinor)} · ${o.customerName}`;
+  const isDeliv = (o: AdminOrder) => (o.deliveryType ?? "delivery") === "delivery"; // legacy/online = delivery
+  const busy = (o: AdminOrder) => transitioning === o.id;
+  const openPay = (o: AdminOrder, method: "cash" | "credit") => {
+    setPayHold({ id: o.id, orderNumber: o.orderNumber, totalMinor: o.totalMinor, isDelivery: Boolean(o.deliveryAddressLine1?.trim()) });
+    setPayMethod(method); setPaySig(null); setPaySigError(false); setTendered("");
+  };
 
-  const rowActions = (o: AdminOrder) => {
-      const next = ALLOWED[o.status] ?? [];
-      const isDeliv = (o.deliveryType ?? "delivery") === "delivery"; // legacy/online = delivery
-      return (
-              <div className="d-flex flex-wrap gap-1 align-items-center">
-                {/* Pending routing analysis — the pill already shows delivery/pickup hint; no separate chip. */}
-                    {o.status === "ON_HOLD" && canWrite && (
-            <>
-              <button className="btn btn-sm btn-outline-warning" onClick={() => openEdit(o)}><i className="bi bi-pencil me-1"></i>Edit</button>
-              <button className="btn btn-sm btn-success" onClick={() => { setPayHold({ id: o.id, orderNumber: o.orderNumber, totalMinor: o.totalMinor, isDelivery: Boolean(o.deliveryAddressLine1?.trim()) }); setPayMethod("cash"); setPaySig(null); setPaySigError(false); setTendered(""); }}><i className="bi bi-cash me-1"></i>Pay</button>
-                                                        <button className="btn btn-sm btn-outline-success" onClick={() => { setPayHold({ id: o.id, orderNumber: o.orderNumber, totalMinor: o.totalMinor, isDelivery: Boolean(o.deliveryAddressLine1?.trim()) }); setPayMethod("credit"); setPaySig(null); setPaySigError(false); }}><i className="bi bi-journal me-1"></i>Credit</button>
-              {canVoidRefund && <button className="btn btn-sm btn-outline-danger" onClick={() => setConfirmAction({ orderId: o.id, kind: "voidHold" })}><i className="bi bi-pause-btn me-1"></i>Void</button>}
-            </>
-          )}
-          {o.status !== "ON_HOLD" && canWrite && (
-                      <>
-                        {/* RECEIVED (Pending): Receive or Cancel only (operator spec) */}
-                                                {o.status === "RECEIVED" && (
-                                                  <>
-                                                    <button
-                                                      className="btn btn-sm btn-primary"
-                                                      disabled={transitioning === o.id}
-                                                      onClick={() => transition(o.id, "CONFIRMED")}
-                                                      title={isDeliv ? "Confirm → On Process" : "Accept → On Process (mark ready for pickup later)"}
-                                                    >
-                                                      <i className="bi bi-check-lg me-1"></i>Receive
-                                                    </button>
-                            <button className="btn btn-sm btn-outline-danger" disabled={transitioning === o.id} onClick={() => transition(o.id, "CANCELLED")}>
-                              <i className="bi bi-x-lg me-1"></i>Cancel
-                            </button>
-                          </>
-                        )}
-              {/* On Process: one-tap delivery routing */}
-                            {isDeliv && ["CONFIRMED", "PREPARING", "READY"].includes(o.status) && (
-                              <button className="btn btn-sm btn-primary" disabled={transitioning === o.id} onClick={() => sendForDelivery(o.id)}><i className="bi bi-truck me-1"></i>Send for delivery</button>
-                            )}
-                            {/* On Process: every live status can be edited, paid (→ COMPLETED), or voided (role-gated). */}
-                                                        {["CONFIRMED", "PREPARING", "READY"].includes(o.status) && (
-                                                          <>
-                                                            <button className="btn btn-sm btn-outline-warning" onClick={() => openEdit(o)} disabled={transitioning === o.id}><i className="bi bi-pencil me-1"></i>Edit</button>
-                                                            <button className="btn btn-sm btn-success" disabled={transitioning === o.id} onClick={() => { setPayHold({ id: o.id, orderNumber: o.orderNumber, totalMinor: o.totalMinor, isDelivery: Boolean(o.deliveryAddressLine1?.trim()) }); setPayMethod("cash"); setPaySig(null); setPaySigError(false); setTendered(""); }}><i className="bi bi-cash me-1"></i>Pay</button>
-                                                            {canVoidRefund && <button className="btn btn-sm btn-outline-danger" disabled={transitioning === o.id} onClick={() => setConfirmAction({ orderId: o.id, kind: "void" })}><i className="bi bi-x-circle me-1"></i>Void</button>}
-                                                          </>
-                                                        )}
-                                                        {/* Ready-for-pickup step (pickup orders only): mark ready → customer notified; then complete at the counter. */}
-                                                        {!isDeliv && ["CONFIRMED", "PREPARING"].includes(o.status) && (
-                                                          <button className="btn btn-sm btn-outline-info" disabled={transitioning === o.id} onClick={() => transition(o.id, "READY")} title="Customer is notified the order is ready">
-                                                            <i className="bi bi-bell me-1"></i>Ready for pickup
-                                                          </button>
-                                                        )}
-                                                        {!isDeliv && o.status === "READY" && (
-                                                          <button className="btn btn-sm btn-success" disabled={transitioning === o.id} onClick={() => completeNow(o.id)} title="Hand over at counter → Completed">
-                                                            <i className="bi bi-bag-check me-1"></i>Complete pickup
-                                                          </button>
-                                                        )}
-              {/* Status dropdown — shown only where dedicated buttons don't cover all transitions (i.e. NOT on RECEIVED/CONFIRMED which have Receive/Cancel & routing buttons). */}
-                            {next.length > 0 && !["RECEIVED", "CONFIRMED"].includes(o.status) && (
-                                                          <select className="form-select form-select-sm" style={{ width: 150 }} value="" disabled={transitioning === o.id} onChange={(e) => e.target.value && transition(o.id, e.target.value)}>
-                                                            <option value="" disabled>{o.status === "FAILED_DELIVERY" ? "— Retry delivery —" : `— ${STATUS_LABEL[o.status] ?? o.status} —`}</option>
-                                                            {next.filter((s) => !(isDeliv && s === "COMPLETED")).map((s) => <option key={s} value={s}>{s === "OUT_FOR_DELIVERY" && o.status === "FAILED_DELIVERY" ? "Retry delivery" : (STATUS_LABEL[s] ?? s)}</option>)}
-                                                          </select>
-                                                        )}
-              <button className="btn btn-sm btn-outline-secondary" title="Receipt" onClick={() => setReceiptOrder(o.id)}><i className="bi bi-receipt"></i></button>
-              {canVoidRefund && o.status === "COMPLETED" && (
-                <button className="btn btn-sm btn-outline-danger" title="Void/Refund" onClick={() => setConfirmAction({ orderId: o.id, kind: o.paymentStatus === "COLLECTED" ? "refund" : "void" })}><i className="bi bi-x-circle"></i></button>
-              )}
-            </>
-          )}
-          <button className="btn btn-sm btn-outline-secondary" title="Details" onClick={() => openDetail(o)}><i className="bi bi-view-list"></i></button>
-        </div>
-      );
-    };
+  /** Everything this user can do with an order, next step first. Role-gated like before. */
+  const actionsFor = (o: AdminOrder): OrderAction[] => {
+    const a: OrderAction[] = [];
+    const s = o.status;
+    const live = ["CONFIRMED", "PREPARING", "READY"].includes(s);
+    if (canWrite) {
+      if (s === "ON_HOLD") {
+        a.push({ key: "pay", label: "Pay", icon: "bi-cash", tone: "main", run: () => openPay(o, "cash") });
+        a.push({ key: "credit", label: "Charge to credit", icon: "bi-journal", tone: "plain", run: () => openPay(o, "credit") });
+        a.push({ key: "edit", label: "Change items", icon: "bi-pencil", tone: "plain", run: () => openEdit(o) });
+        if (canVoidRefund) a.push({ key: "void", label: "Void held order", icon: "bi-x-circle", tone: "danger", run: () => setConfirmAction({ orderId: o.id, kind: "voidHold" }) });
+      }
+      if (s === "RECEIVED") {
+        a.push({ key: "receive", label: "Receive", icon: "bi-check-lg", tone: "main", run: () => void transition(o.id, "CONFIRMED") });
+        a.push({ key: "cancel", label: "Cancel order", icon: "bi-x-lg", tone: "danger", run: () => void transition(o.id, "CANCELLED") });
+      }
+      if (live && isDeliv(o)) a.push({ key: "send", label: "Send for delivery", icon: "bi-truck", tone: "main", run: () => void sendForDelivery(o.id) });
+      if (live && !isDeliv(o) && s !== "READY") a.push({ key: "ready", label: "Ready for pickup", icon: "bi-bell", tone: "main", run: () => void transition(o.id, "READY") });
+      if (!isDeliv(o) && s === "READY") a.push({ key: "pickup", label: "Complete pickup", icon: "bi-bag-check", tone: "main", run: () => void completeNow(o.id) });
+      if (live) {
+        a.push({ key: "pay", label: "Pay", icon: "bi-cash", tone: "plain", run: () => openPay(o, "cash") });
+        a.push({ key: "edit", label: "Change items", icon: "bi-pencil", tone: "plain", run: () => openEdit(o) });
+        if (isDeliv(o) && s === "PREPARING") a.push({ key: "markready", label: "Mark ready", icon: "bi-box-seam", tone: "plain", run: () => void transition(o.id, "READY") });
+        if (s !== "CONFIRMED") a.push({ key: "cancel", label: "Cancel order", icon: "bi-x-lg", tone: "danger", run: () => void transition(o.id, "CANCELLED") });
+        if (canVoidRefund) a.push({ key: "void", label: "Void sale", icon: "bi-x-circle", tone: "danger", run: () => setConfirmAction({ orderId: o.id, kind: "void" }) });
+      }
+      if (s === "OUT_FOR_DELIVERY") {
+        a.push({ key: "delivered", label: "Mark delivered", icon: "bi-check2-circle", tone: "main", run: () => void transition(o.id, "DELIVERED") });
+        a.push({ key: "failed", label: "Delivery failed", icon: "bi-exclamation-triangle", tone: "danger", run: () => void transition(o.id, "FAILED_DELIVERY") });
+      }
+      if (s === "FAILED_DELIVERY") a.push({ key: "retry", label: "Retry delivery", icon: "bi-arrow-repeat", tone: "main", run: () => void transition(o.id, "OUT_FOR_DELIVERY") });
+      if (s !== "ON_HOLD") a.push({ key: "receipt", label: "Receipt", icon: "bi-receipt", tone: "plain", run: () => setReceiptOrder(o.id) });
+      if (canVoidRefund && s === "COMPLETED") {
+        const refund = o.paymentStatus === "COLLECTED";
+        a.push({ key: "voidrefund", label: refund ? "Refund sale" : "Void sale", icon: "bi-x-circle", tone: "danger", run: () => setConfirmAction({ orderId: o.id, kind: refund ? "refund" : "void" }) });
+      }
+    }
+    return a;
+  };
 
   const openEdit = (o: AdminOrder) => {
     fetch(`${API_URL}/admin/orders/${o.id}`, { headers: adminHeaders() })
       .then((r) => r.json())
       .then((d) => setEditHold({
-              id: o.id,
-              orderNumber: o.orderNumber,
-              status: o.status,
-              lines: (d?.items ?? []).map((i: any) => ({ productId: i.productId ?? "", productName: i.productName, quantity: i.quantity, unitPriceMinor: i.unitPriceMinor })),
-            }))
+        id: o.id,
+        orderNumber: o.orderNumber,
+        status: o.status,
+        lines: (d?.items ?? []).map((i: any) => ({ productId: i.productId ?? "", productName: i.productName, quantity: i.quantity, unitPriceMinor: i.unitPriceMinor })),
+      }))
       .catch(() => setError("Could not load held order"));
   };
 
-  const isDelivHint = (o: AdminOrder) => (o.deliveryType ?? "delivery") === "delivery";
-
-  /** Age badge — visible on active-status rows (Pending/On Process/For Delivery). >1h amber, >3h red. */
+  /** How long an active order has waited, in words. Over 1 h amber, over 3 h red. */
   const ageOf = (o: AdminOrder): { mins: number; label: string; tone: string } | null => {
     if (["COMPLETED", "DELIVERED", "CANCELLED", "FAILED_DELIVERY"].includes(o.status)) return null;
     const mins = Math.max(0, Math.floor((Date.now() - new Date(o.createdAt).getTime()) / 60_000));
-    if (mins < 60) return { mins, label: `${mins}m`, tone: "text-bg-secondary" };
-    if (mins < 180) return { mins, label: `${Math.floor(mins / 60)}h${mins % 60 ? "+" : ""}`, tone: "text-bg-warning" };
-    return { mins, label: `${Math.floor(mins / 60)}h+`, tone: "text-bg-danger" };
+    if (mins < 60) return { mins, label: `${mins} min`, tone: "text-bg-secondary" };
+    const h = Math.floor(mins / 60);
+    return { mins, label: `${h} h${mins % 60 ? "+" : ""} waiting`, tone: mins < 180 ? "text-bg-warning" : "text-bg-danger" };
   };
 
-    const looking = (o: AdminOrder) => {
-            const utang = o.paymentMethod === "credit";
-                  const age = ageOf(o);
-                  return (
-                    <>
-                      <span className={`badge ${STATUS_BADGE[o.status] ?? "text-bg-secondary"} text-capitalize text-nowrap`}>
-                                          {STATUS_LABEL[o.status] ?? o.status}
-                                          {o.status === "RECEIVED" && isDelivHint(o) && <i className="bi bi-geo-alt ms-1"></i>}
-                                        </span>
-                                        {isDelivHint(o) && <span className="badge text-bg-primary ms-1" title="Delivery order — send for delivery, courier delivers"><i className="bi bi-truck me-1"></i>delivery</span>}
-                                        {!isDelivHint(o) && <span className="badge text-bg-success ms-1" title="Pickup order — ready-for-pickup + complete at counter"><i className="bi bi-shop me-1"></i>pickup</span>}
-                      {age && <span className={`badge ${age.tone} ms-1`} title={`Placed ${age.mins} min ago`}>{age.label}</span>}
-                      {utang && <span className="badge text-bg-warning ms-1" title="Charged to credit"><i className="bi bi-journal-text me-1"></i>credit</span>}
-                    </>
-                  );
-                };
+  /** Placed time: just the time for today, the date too for other days. */
+  const placedAt = (iso: string) => {
+    const d = new Date(iso);
+    const time = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    return d.toDateString() === new Date().toDateString() ? time : `${d.toLocaleDateString([], { month: "short", day: "numeric" })}, ${time}`;
+  };
 
-    /** Opens the Details modal and lazily loads the signature + line items (list endpoint omits them but the detail endpoint returns them). */
-        const openDetail = (o: AdminOrder) => {
-                          setOrderDetail(o);
-                          setDetailSignature(null);
-                          setDetailItems(null);
-                          setDetailHistory(null);
-                          setDetailReceived([]);
-                          // Courier hand-over: who received the order, signed on the courier page.
-                          fetch(`${API_URL}/admin/signatures?documentType=ORDER&documentId=${o.id}`, { headers: adminHeaders() })
-                            .then((r) => (r.ok ? r.json() : null))
-                            .then((d) => setDetailReceived(Array.isArray(d?.signatures) ? d.signatures : []))
-                            .catch(() => setDetailReceived([]));
-                          setDetailToken(null);
-                          fetch(`${API_URL}/admin/orders/${o.id}`, { headers: adminHeaders() })
-                            .then((r) => r.json())
-                            .then((d) => {
-                              // Merge full detail into the row so the modal has address/notes/breakdown.
-                              setOrderDetail({ ...o, ...(d as AdminOrder) });
-                      setDetailSignature(typeof d?.signatureData === "string" ? (d.signatureData as string) : null);
-                      setDetailItems(Array.isArray(d?.items) ? (d.items as { productName: string; quantity: number; lineTotalMinor: number }[]) : []);
-                      setDetailHistory(Array.isArray(d?.statusHistory) ? (d.statusHistory as { fromStatus: string | null; toStatus: string; createdAt: string; reason?: string | null; actorType?: string }[]) : []);
-                      const t = Array.isArray(d?.claimTokens) ? (d.claimTokens as { token: string; usedAt: string | null }[]).find((c) => !c.usedAt)?.token : null;
-                      setDetailToken(t ?? null);
-                    })
-                    .catch(() => setDetailSignature(null));
-                };
-
-  const cardGrid = (
-      <div className="d-grid gap-2 d-lg-none">
-        {orders.map((o) => (
-          <div className={`card ${selected.has(o.id) ? "border-primary" : ""}`} key={o.id}>
-            <div className="card-body py-2">
-              <div className="d-flex justify-content-between align-items-center gap-2">
-                <div className="d-flex align-items-center gap-2">
-                  <input className="form-check-input" type="checkbox" checked={selected.has(o.id)} onChange={() => toggleSelect(o.id)} title="Select for batch" />
-                  <div>
-                    <span className="fw-semibold">{o.orderNumber}</span>
-                    <div className="small text-muted">{o.customerName} · {toPesos(o.totalMinor)}</div>
-                  </div>
-                </div>
-                {looking(o)}
-              </div>
-            <div className="small text-muted mb-1">{new Date(o.createdAt).toLocaleString()}</div>
-            {rowActions(o)}
-          </div>
-        </div>
-      ))}
-    </div>
+  const statusBadge = (status: string) => (
+    <span className={`badge ${STATUS_BADGE[status] ?? "text-bg-secondary"} text-nowrap`}>{STATUS_LABEL[status] ?? status}</span>
   );
 
-  const tableGrid = (
-    <div className="table-responsive d-none d-lg-block">
-      <table className="table table-hover align-middle">
-        <thead>
-                  <tr>
-                    <th style={{ width: 34 }}>
-                      <input className="form-check-input" type="checkbox" title="Select all in view" checked={orders.length > 0 && selected.size === orders.length} onChange={(e) => setSelected(e.target.checked ? new Set(orders.map((x) => x.id)) : new Set())} />
-                    </th>
-                    <th>Order</th><th>Customer</th><th className="text-end">Total</th><th>Status</th><th>Placed</th><th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {orders.map((o) => (
-                    <tr key={o.id} className={selected.has(o.id) ? "table-primary" : ""}>
-                      <td><input className="form-check-input" type="checkbox" checked={selected.has(o.id)} onChange={() => toggleSelect(o.id)} /></td>
-                      <td className="fw-semibold">{o.orderNumber}</td>
-              <td>{o.customerName}</td>
-              <td className="text-end">{toPesos(o.totalMinor)}</td>
-              <td>{looking(o)}</td>
-              <td className="small text-muted">{new Date(o.createdAt).toLocaleString()}</td>
-              <td>{rowActions(o)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
+  /** Opens the details (side pane when wide, full screen when upright) and loads items, history and signatures. */
+  const openDetail = (o: AdminOrder) => {
+    setOrderDetail(o);
+    setDetailSignature(null);
+    setDetailItems(null);
+    setDetailHistory(null);
+    setDetailReceived([]);
+    setDetailToken(null);
+    // Courier hand-over: who received the order, signed on the courier page.
+    fetch(`${API_URL}/admin/signatures?documentType=ORDER&documentId=${o.id}`, { headers: adminHeaders() })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setDetailReceived(Array.isArray(d?.signatures) ? d.signatures : []))
+      .catch(() => setDetailReceived([]));
+    loadDetail(o);
+  };
+  const loadDetail = (o: AdminOrder) => {
+    fetch(`${API_URL}/admin/orders/${o.id}`, { headers: adminHeaders() })
+      .then((r) => r.json())
+      .then((d) => {
+        // Merge full detail into the row so the pane has address/notes/breakdown.
+        setOrderDetail((cur) => (cur && cur.id === o.id ? { ...o, ...(d as AdminOrder) } : cur));
+        setDetailSignature(typeof d?.signatureData === "string" ? (d.signatureData as string) : "");
+        setDetailItems(Array.isArray(d?.items) ? (d.items as { productName: string; quantity: number; lineTotalMinor: number }[]) : []);
+        setDetailHistory(Array.isArray(d?.statusHistory) ? (d.statusHistory as { fromStatus: string | null; toStatus: string; createdAt: string; reason?: string | null; actorType?: string }[]) : []);
+        const t = Array.isArray(d?.claimTokens) ? (d.claimTokens as { token: string; usedAt: string | null }[]).find((c) => !c.usedAt)?.token : null;
+        setDetailToken(t ?? null);
+      })
+      .catch(() => setDetailSignature(""));
+  };
+  // After the list reloads (an action ran), refresh the open order so its status and buttons are current.
+  const detailId = orderDetail?.id;
+  useEffect(() => {
+    // The order may have left this list (e.g. received → In progress); it stays open with its new status.
+    if (!detailId || !orderDetail) return;
+    loadDetail(orders.find((x) => x.id === detailId) ?? orderDetail);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orders]);
 
-  return (
-      <div>
-        <h1 className="h4 mb-2"><i className="bi bi-receipt me-2"></i>Orders</h1>
-        {error && <div className="alert alert-danger py-2 small">{error}</div>}
+  const curTab = TABS.find((t) => t.id === tab)!;
+  const countFor = (t: (typeof TABS)[number]) => (t.status ? t.status.reduce((s, st) => s + (counts[st] ?? 0), 0) : Object.values(counts).reduce((s, c) => s + c, 0));
+  const extraFilters = [sourceFilter, paymentFilter, fulfillmentFilter].filter(Boolean).length;
+  const clearFilters = () => { setSourceFilter(""); setPaymentFilter(""); setFulfillmentFilter(""); setCustomer(""); };
+  const dayWords = range === "today" ? "today" : range === "yesterday" ? "yesterday" : range === "tomorrow" ? "tomorrow" : "in these dates";
 
-                {/* Pipeline KPI strip — click a stage to jump to its tab */}
-                <div className="d-flex flex-wrap gap-2 mb-2">
-                  {buildPipelineKpis(counts, setTab).map(([label, n, tone, go]) => (
-            <button key={label} type="button" className="btn btn-outline-secondary btn-sm d-flex flex-column align-items-center px-3 py-2" onClick={go}>
-              <span className={`badge ${n > 0 ? tone : "text-bg-secondary"} fs-6`}>{n > 99 ? "99+" : n}</span>
-              <span className="small text-muted">{label}</span>
-            </button>
-          ))}
+  const orderRow = (o: AdminOrder) => {
+    const main = actionsFor(o).find((x) => x.tone === "main");
+    const age = ageOf(o);
+    const open = orderDetail?.id === o.id;
+    return (
+      <li key={o.id} className={`order-row ${open ? "is-open" : ""} ${selected.has(o.id) ? "is-picked" : ""}`}>
+        <label className="order-pick" title="Select for a batch action">
+          <input className="form-check-input m-0" type="checkbox" checked={selected.has(o.id)} onChange={() => toggleSelect(o.id)} aria-label={`Select ${o.orderNumber}`} />
+        </label>
+        <button type="button" className="order-main" onClick={() => openDetail(o)} aria-current={open ? "true" : undefined}>
+          <span className="min-w-0">
+            <span className="d-block fw-bold text-truncate">{o.customerName}</span>
+            <span className="d-block small text-muted">
+              {o.orderNumber} · {isDeliv(o) ? <><i className="bi bi-truck" aria-hidden="true"></i> Delivery</> : <><i className="bi bi-shop" aria-hidden="true"></i> Pickup</>}
+              {o.paymentMethod === "credit" && <> · <i className="bi bi-journal-text" aria-hidden="true"></i> Credit</>}
+              {" · "}{placedAt(o.createdAt)}
+            </span>
+          </span>
+          <span className="text-end flex-shrink-0">
+            <span className="d-block fw-bold num">{toPesos(o.totalMinor)}</span>
+            <span className="d-inline-flex flex-wrap justify-content-end gap-1">
+              {statusBadge(o.status)}
+              {age && <span className={`badge ${age.tone}`} title={`Placed ${age.mins} min ago`}>{age.label}</span>}
+            </span>
+          </span>
+        </button>
+        {main && (
+          <button type="button" className="btn btn-success order-go" disabled={busy(o)} onClick={main.run}>
+            {busy(o) ? <span className="spinner-border spinner-border-sm me-1" aria-hidden="true"></span> : <i className={`bi ${main.icon} me-1`} aria-hidden="true"></i>}
+            {main.label}
+          </button>
+        )}
+      </li>
+    );
+  };
+
+  const detailPane = orderDetail && (() => {
+    const o = orderDetail;
+    const acts = actionsFor(o);
+    const main = acts.filter((x) => x.tone === "main");
+    const plain = acts.filter((x) => x.tone === "plain");
+    const danger = acts.filter((x) => x.tone === "danger");
+    return (
+      <div className="order-detail">
+        <div className="d-flex align-items-center gap-2 mb-2">
+          {!wide && <button type="button" className="btn btn-outline-dark" onClick={() => setOrderDetail(null)}><i className="bi bi-arrow-left me-1" aria-hidden="true"></i>Back</button>}
+          <h2 className="h5 mb-0 flex-grow-1" id="orderDetailTitle">{o.orderNumber}</h2>
+          {statusBadge(o.status)}
+          {wide && <button type="button" className="btn-close" aria-label="Close details" onClick={() => setOrderDetail(null)}></button>}
         </div>
-
-        {/* Filters */}
-        <div className="d-flex flex-wrap gap-2 align-items-center mb-2">
-          <select className="form-select form-select-sm" style={{ width: 120 }} value={range} onChange={(e) => setRange(e.target.value as typeof range)}>
-            <option value="today">Today</option>
-            <option value="yesterday">Yesterday</option>
-            <option value="tomorrow">Tomorrow</option>
-            <option value="custom">Custom range</option>
-          </select>
-          {range === "custom" && (
-            <>
-              <input className="form-control form-control-sm" style={{ width: 140 }} type="date" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} />
-              <span className="text-muted small">→</span>
-              <input className="form-control form-control-sm" style={{ width: 140 }} type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)} />
-            </>
-          )}
-          <input className="form-control form-control-sm" style={{ width: 200 }} placeholder="Search order / customer / phone…" value={customer} onChange={(e) => setCustomer(e.target.value)} />
-          <select className="form-select form-select-sm" style={{ width: 110 }} value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)} title="Source">
-            <option value="">All sources</option>
-            <option value="online">Online</option>
-            <option value="pos">POS</option>
-            <option value="PRE_ORDER">Pre-order</option>
-          </select>
-          <select className="form-select form-select-sm" style={{ width: 105 }} value={paymentFilter} onChange={(e) => setPaymentFilter(e.target.value)} title="Payment">
-            <option value="">All payment</option>
-            <option value="cod">COD</option>
-            <option value="credit">Credit</option>
-          </select>
-          <select className="form-select form-select-sm" style={{ width: 115 }} value={fulfillmentFilter} onChange={(e) => setFulfillmentFilter(e.target.value)} title="Fulfillment">
-            <option value="">Delivery + pickup</option>
-            <option value="delivery">Delivery only</option>
-            <option value="pickup">Pickup only</option>
-          </select>
-          <div className="form-check form-switch form-check-sm" title="Auto-refresh every 30s">
-            <input className="form-check-input" type="checkbox" id="ordAuto" checked={autoRefresh} onChange={(e) => { setAutoRefresh(e.target.checked); try { localStorage.setItem("orders.autoRefresh", e.target.checked ? "1" : "0"); } catch { /* ignore */ } }} />
-            <label className="form-check-label small" htmlFor="ordAuto">Auto 30s</label>
+        <div className="d-flex justify-content-between align-items-end gap-2 mb-2">
+          <div className="min-w-0">
+            <div className="fw-bold fs-5 text-truncate">{o.customerName}</div>
+            <div className="small text-muted">{isDeliv(o) ? "Delivery" : "Pickup"} · {o.source === "PRE_ORDER" ? "Pre-order" : o.source === "pos" ? "POS" : "Online"} · {placedAt(o.createdAt)}</div>
           </div>
+          <div className="fs-4 fw-bold num">{toPesos(o.totalMinor)}</div>
         </div>
 
-        {/* Tabs */}
-              <ul className="nav nav-pills mb-2 flex-wrap">
-                <li className="nav-item">
-                  <button className="nav-link" onClick={() => setReviewOpen(true)}>
-                    <i className="bi bi-inboxes me-1"></i>Payment review
-                  </button>
-                </li>
-                <li className="nav-item">
-                  <button className="nav-link" onClick={() => setChatOpen(true)}>
-                    <i className="bi bi-chat-dots me-1"></i>Chat inbox
-                  </button>
-                </li>
-                {TABS.map((t) => {
-                                const n = t.status ? t.status.reduce((s, st) => s + (counts[st] ?? 0), 0) : Object.values(counts).reduce((s, c) => s + c, 0);
-                                return (
-                    <li className="nav-item" key={t.id}>
-                      <button className={`nav-link ${tab === t.id ? "active bg-primary" : ""}`} onClick={() => setTab(t.id)}>
-                        {t.label}
-                        {n > 0 && <span className={`badge ${tab === t.id ? "text-bg-primary" : "text-bg-secondary"} rounded-pill ms-1`}>{n > 99 ? "99+" : n}</span>}
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-
-        {/* Batch bar — appears when rows are selected */}
-        {selected.size > 0 && (
-          <div className="d-flex flex-wrap gap-1 align-items-center bg-primary bg-opacity-10 border rounded px-2 py-1 mb-2 w-100 small">
-            <span className="fw-semibold">{selected.size} selected</span>
-            {canWrite && canBatchReceive && (
-              <button className="btn btn-sm btn-primary" disabled={transitioning === "batch"} onClick={() => runBatch("Received", async (o) => doTransition(o.id, "CONFIRMED"))}>
-                <i className="bi bi-check-lg me-1"></i>Receive
+        {/* Next step first, then the other things you can do, then the risky ones apart at the bottom. */}
+        {main.map((x) => (
+          <button key={x.key} type="button" className="btn btn-success btn-lg w-100 mb-2" disabled={busy(o)} onClick={x.run}>
+            <i className={`bi ${x.icon} me-2`} aria-hidden="true"></i>{x.label}
+          </button>
+        ))}
+        {plain.length > 0 && (
+          <div className="d-grid gap-2 mb-3" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))" }}>
+            {plain.map((x) => (
+              <button key={x.key} type="button" className="btn btn-outline-dark" disabled={busy(o)} onClick={x.run}>
+                <i className={`bi ${x.icon} me-1`} aria-hidden="true"></i>{x.label}
               </button>
-            )}
-            {canWrite && canBatchCancel && (
-              <button className="btn btn-sm btn-outline-danger" disabled={transitioning === "batch"} onClick={() => setPendingReason({ orderId: "__BATCH__", to: "CANCELLED" })}>
-                <i className="bi bi-x-lg me-1"></i>Cancel
-              </button>
-            )}
-            {canWrite && canBatchSend && (
-              <button className="btn btn-sm btn-primary" disabled={transitioning === "batch"} onClick={() => runBatch("Sent for delivery", async (o) => sendForDelivery(o.id))}>
-                <i className="bi bi-truck me-1"></i>Send for delivery
-              </button>
-            )}
-            {canWrite && canBatchPickup && (
-              <button className="btn btn-sm btn-success" disabled={transitioning === "batch"} onClick={() => runBatch("Completed (pickup)", async (o) => completeNow(o.id))}>
-                <i className="bi bi-bag-check me-1"></i>Complete pickup
-              </button>
-            )}
-            {canWrite && canBatchDelivered && (
-              <button className="btn btn-sm btn-success" disabled={transitioning === "batch"} onClick={() => runBatch("Marked delivered", async (o) => doTransition(o.id, "DELIVERED"))}>
-                <i className="bi bi-check2-circle me-1"></i>Mark delivered
-              </button>
-            )}
-            <button className="btn btn-sm btn-outline-secondary" disabled={transitioning === "batch"} onClick={clearSelection}>Clear</button>
+            ))}
           </div>
         )}
 
-        {loading ? (
-          <p className="text-muted">Loading orders…</p>
-        ) : orders.length === 0 ? (
-          <p className="text-muted text-center py-4"><i className="bi bi-inbox fs-3 d-block mb-2"></i>No orders in this view.</p>
+        {o.customerPhone && (
+          <div className="d-flex flex-wrap gap-2 mb-3">
+            <a className="btn btn-outline-dark" href={`tel:${o.customerPhone}`}><i className="bi bi-telephone me-1" aria-hidden="true"></i>Call {o.customerPhone}</a>
+            <a className="btn btn-outline-dark" href={`sms:${o.customerPhone}`}><i className="bi bi-chat-dots me-1" aria-hidden="true"></i>Text</a>
+            {detailToken && (
+              <button type="button" className="btn btn-outline-dark" onClick={() => { navigator.clipboard?.writeText(detailToken); toast("Tracking code copied"); }}>
+                <i className="bi bi-clipboard me-1" aria-hidden="true"></i>Copy tracking
+              </button>
+            )}
+          </div>
+        )}
+
+        {o.deliveryAddressLine1 && (
+          <p className="mb-2"><i className="bi bi-geo-alt me-1" aria-hidden="true"></i>
+            {o.deliveryAddressLine1}{o.deliveryAddressLine2 ? `, ${o.deliveryAddressLine2}` : ""}{o.landmark ? ` (${o.landmark})` : ""}
+          </p>
+        )}
+        {o.notes && <p className="mb-2"><i className="bi bi-sticky me-1" aria-hidden="true"></i>{o.notes}</p>}
+
+        <h3 className="h6 mt-3 mb-1">Items</h3>
+        {detailItems === null ? (
+          <p className="text-muted placeholder-glow mb-2"><span className="placeholder col-8"></span></p>
+        ) : detailItems.length === 0 ? (
+          <p className="text-muted mb-2">No items.</p>
         ) : (
+          <table className="table table-sm mb-2">
+            <tbody>
+              {detailItems.map((i, idx) => (
+                <tr key={idx}>
+                  <td>{i.productName}</td>
+                  <td className="text-end text-nowrap">× {i.quantity}</td>
+                  <td className="text-end text-nowrap num">{toPesos(i.lineTotalMinor)}</td>
+                </tr>
+              ))}
+            </tbody>
+            {typeof o.subtotalMinor === "number" && (
+              <tfoot>
+                {o.deliveryFeeMinor ? <tr><td colSpan={2}>Delivery fee</td><td className="text-end num">{toPesos(o.deliveryFeeMinor)}</td></tr> : null}
+                {o.discountMinor ? <tr><td colSpan={2}>Discount</td><td className="text-end num">−{toPesos(o.discountMinor)}</td></tr> : null}
+                <tr className="fw-bold"><td colSpan={2}>Total</td><td className="text-end num">{toPesos(o.totalMinor)}</td></tr>
+              </tfoot>
+            )}
+          </table>
+        )}
+        {(o.paymentStatus || o.paymentMethod) && (
+          <p className="mb-2">Payment: {o.paymentMethod === "credit" ? "Credit" : o.paymentMethod === "cod" ? "Cash on delivery" : o.paymentMethod}{o.paymentStatus ? ` · ${o.paymentStatus === "COLLECTED" ? "paid" : o.paymentStatus === "PENDING" ? "not paid yet" : o.paymentStatus.toLowerCase().replace(/_/g, " ")}` : ""}</p>
+        )}
+
+        {detailHistory && detailHistory.length > 0 && (
           <>
-            {cardGrid}
-            {tableGrid}
+            <h3 className="h6 mt-3 mb-1">What happened</h3>
+            <ul className="list-unstyled mb-2">
+              {detailHistory.map((h, i) => (
+                <li key={i} className="d-flex justify-content-between align-items-start gap-2 py-1 border-bottom">
+                  <span>{STATUS_LABEL[h.toStatus] ?? h.toStatus}{h.reason && <span className="text-muted"> — {h.reason}</span>}</span>
+                  <span className="text-muted text-nowrap">{placedAt(h.createdAt)}</span>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+        {detailReceived.map((sg, i) => (
+          <div key={i} className="mb-2">
+            <h3 className="h6 mt-3 mb-1">Received by {sg.signerName} · {placedAt(sg.createdAt)}</h3>
+            <img src={sg.imagePng} alt={`Signature of ${sg.signerName}`} className="border rounded w-100" style={{ maxHeight: 140, objectFit: "contain", background: "#fff" }} />
+          </div>
+        ))}
+        {o.paymentMethod === "credit" && (
+          <div className="mb-2">
+            <h3 className="h6 mt-3 mb-1">Customer signature</h3>
+            {detailSignature === null ? (
+              <p className="text-muted mb-0">Loading signature…</p>
+            ) : detailSignature ? (
+              <img src={detailSignature} alt="Customer signature" className="border rounded w-100" style={{ maxHeight: 140, objectFit: "contain", background: "#fff" }} />
+            ) : (
+              <p className="text-muted mb-0">No signature on file.</p>
+            )}
+          </div>
+        )}
+
+        {danger.length > 0 && (
+          <div className="d-flex flex-wrap gap-2 border-top pt-3 mt-3">
+            {danger.map((x) => (
+              <button key={x.key} type="button" className="btn btn-outline-danger" disabled={busy(o)} onClick={x.run}>
+                <i className={`bi ${x.icon} me-1`} aria-hidden="true"></i>{x.label}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  })();
+
+  const list = loading && orders.length === 0 ? (
+    <ul className="order-list placeholder-glow" aria-busy="true" aria-label="Loading orders">
+      {[0, 1, 2, 3].map((i) => <li key={i} className="order-row"><span className="placeholder col-12 rounded" style={{ height: 48 }}></span></li>)}
+    </ul>
+  ) : orders.length === 0 ? (
+    <div className="text-center py-5 border rounded bg-white">
+      <i className="bi bi-inbox fs-1 d-block mb-2 text-muted" aria-hidden="true"></i>
+      <p className="fw-bold mb-1">{tab === "today" ? `No orders ${dayWords}` : `No "${curTab.label}" orders ${dayWords}`}</p>
+      <p className="text-muted mb-3">{customer || extraFilters ? "Some filters are on. Clear them to see more." : "New orders show here as they come in."}</p>
+      <div className="d-flex justify-content-center flex-wrap gap-2">
+        {(customer || extraFilters > 0) && <button type="button" className="btn btn-outline-dark" onClick={clearFilters}>Clear filters</button>}
+        {tab !== "today" && <button type="button" className="btn btn-outline-dark" onClick={() => setTab("today")}>Show all orders</button>}
+      </div>
+    </div>
+  ) : (
+    <ul className="order-list" aria-busy={loading}>{orders.map(orderRow)}</ul>
+  );
+
+  const chip = (on: boolean) => `btn ${on ? "btn-dark" : "btn-outline-dark"} rounded-pill`;
+
+  return (
+      <div className="orders-screen">
+        <div className="d-flex flex-wrap align-items-center gap-2 mb-2">
+          <h1 className="h4 mb-0 me-auto"><i className="bi bi-receipt me-2" aria-hidden="true"></i>Orders</h1>
+          <button type="button" className="btn btn-outline-dark" onClick={() => setReviewOpen(true)}><i className="bi bi-inboxes me-1" aria-hidden="true"></i>Payment review</button>
+          <button type="button" className="btn btn-outline-dark" onClick={() => setChatOpen(true)}><i className="bi bi-chat-dots me-1" aria-hidden="true"></i>Chat inbox</button>
+          <button type="button" className="btn btn-outline-dark" onClick={() => void load()} disabled={loading} aria-label="Refresh orders">
+            <i className={`bi bi-arrow-clockwise ${loading ? "spin" : ""}`} aria-hidden="true"></i>
+            <span className="ms-1 d-none d-md-inline">{lastLoaded ? `Updated ${lastLoaded}` : "Refresh"}</span>
+          </button>
+        </div>
+        {error && (
+          <div className="alert alert-danger d-flex align-items-start gap-2 py-2" role="alert">
+            <span className="flex-grow-1">{error}</span>
+            <button type="button" className="btn-close" aria-label="Dismiss" onClick={() => setError(null)}></button>
+          </div>
+        )}
+
+        {/* Day + search on one line; the rarer filters fold away behind "Filters". */}
+        <div className="d-flex flex-wrap gap-2 align-items-center mb-2">
+          <div className="d-flex flex-wrap gap-2" role="group" aria-label="Day">
+            {([["yesterday", "Yesterday"], ["today", "Today"], ["tomorrow", "Tomorrow"], ["custom", "Pick dates"]] as const).map(([id, label]) => (
+              <button key={id} type="button" className={chip(range === id)} aria-pressed={range === id} onClick={() => setRange(id)}>{label}</button>
+            ))}
+          </div>
+          <div className="position-relative ord-search">
+            <label htmlFor="ordSearch" className="visually-hidden">Search orders</label>
+            <i className="bi bi-search position-absolute top-50 translate-middle-y ms-3 text-muted" aria-hidden="true"></i>
+            <input id="ordSearch" type="search" className="form-control ps-5" placeholder="Name, phone or order no." value={customer} onChange={(e) => setCustomer(e.target.value)} />
+          </div>
+          <button type="button" className={`btn ms-auto ms-lg-0 ${filtersOpen || extraFilters ? "btn-dark" : "btn-outline-dark"}`} aria-expanded={filtersOpen} aria-controls="ordFilters" onClick={() => setFiltersOpen(!filtersOpen)}>
+            <i className="bi bi-sliders me-1" aria-hidden="true"></i>Filters{extraFilters > 0 && <span className="badge text-bg-light ms-1">{extraFilters}</span>}
+          </button>
+        </div>
+        {range === "custom" && (
+          <div className="d-flex flex-wrap gap-2 align-items-end mb-2">
+            <div><label className="form-label small mb-0" htmlFor="ordFrom">From</label><input id="ordFrom" className="form-control" type="date" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} /></div>
+            <div><label className="form-label small mb-0" htmlFor="ordTo">To</label><input id="ordTo" className="form-control" type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)} /></div>
+          </div>
+        )}
+        {filtersOpen && (
+          <div id="ordFilters" className="border rounded bg-white p-2 mb-2">
+            <div className="row g-2 align-items-end">
+              <div className="col-12 col-md-4">
+                <label className="form-label small mb-0" htmlFor="ordSource">Where from</label>
+                <select id="ordSource" className="form-select" value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)}>
+                  <option value="">All</option><option value="online">Online</option><option value="pos">POS</option><option value="PRE_ORDER">Pre-order</option>
+                </select>
+              </div>
+              <div className="col-6 col-md-4">
+                <label className="form-label small mb-0" htmlFor="ordPay">Payment</label>
+                <select id="ordPay" className="form-select" value={paymentFilter} onChange={(e) => setPaymentFilter(e.target.value)}>
+                  <option value="">All</option><option value="cod">Cash on delivery</option><option value="credit">Credit</option>
+                </select>
+              </div>
+              <div className="col-6 col-md-4">
+                <label className="form-label small mb-0" htmlFor="ordFul">Delivery or pickup</label>
+                <select id="ordFul" className="form-select" value={fulfillmentFilter} onChange={(e) => setFulfillmentFilter(e.target.value)}>
+                  <option value="">Both</option><option value="delivery">Delivery</option><option value="pickup">Pickup</option>
+                </select>
+              </div>
+            </div>
+            <div className="d-flex flex-wrap align-items-center gap-3 mt-2">
+              <div className="form-check form-switch mb-0">
+                <input className="form-check-input" type="checkbox" role="switch" id="ordAuto" checked={autoRefresh} onChange={(e) => { setAutoRefresh(e.target.checked); try { localStorage.setItem("orders.autoRefresh", e.target.checked ? "1" : "0"); } catch { /* ignore */ } }} />
+                <label className="form-check-label" htmlFor="ordAuto">Check for new orders every 30 seconds</label>
+              </div>
+              {(extraFilters > 0 || customer) && <button type="button" className="btn btn-link ms-auto" onClick={clearFilters}>Clear filters</button>}
+            </div>
+          </div>
+        )}
+
+        {/* Status chips: one row, in the order an order moves. The count is how many are there now. */}
+        <div className="d-flex flex-wrap gap-2 mb-1" role="group" aria-label="Order status">
+          {TABS.map((t) => {
+            const n = countFor(t);
+            return (
+              <button key={t.id} type="button" className={chip(tab === t.id)} aria-pressed={tab === t.id} onClick={() => setTab(t.id)}>
+                {t.label}
+                <span className={`badge rounded-pill ms-2 ${tab === t.id ? "text-bg-light" : n > 0 && (t.id === "pending" || t.id === "fordelivery") ? "text-bg-warning" : "text-bg-secondary"}`}>{n > 99 ? "99+" : n}</span>
+              </button>
+            );
+          })}
+        </div>
+        <p className="text-muted small mb-2">{curTab.hint}</p>
+
+        {wide ? (
+          <div className="row g-3">
+            <div className={orderDetail ? "col-lg-7" : "col-12"}>{list}</div>
+            {orderDetail && <div className="col-lg-5"><div className="pos-side border rounded bg-white p-3" role="region" aria-labelledby="orderDetailTitle">{detailPane}</div></div>}
+          </div>
+        ) : list}
+
+        {/* Batch bar — sticks to the bottom (above the tablet bar) while orders are ticked. */}
+        {selected.size > 0 && (
+          <div className="position-sticky bottom-0 sticky-above-bar bg-white border border-dark rounded shadow p-2 mt-2 d-flex flex-wrap gap-2 align-items-center" style={{ zIndex: 5 }}>
+            <span className="fw-bold me-1">{selected.size} ticked</span>
+            {selected.size < orders.length && <button type="button" className="btn btn-outline-dark" onClick={() => setSelected(new Set(orders.map((x) => x.id)))}>Tick all {orders.length}</button>}
+            {canWrite && canBatchReceive && (
+              <button className="btn btn-success" disabled={transitioning === "batch"} onClick={() => runBatch("Received", async (o) => doTransition(o.id, "CONFIRMED"))}>
+                <i className="bi bi-check-lg me-1" aria-hidden="true"></i>Receive
+              </button>
+            )}
+            {canWrite && canBatchSend && (
+              <button className="btn btn-success" disabled={transitioning === "batch"} onClick={() => runBatch("Sent for delivery", async (o) => sendForDelivery(o.id))}>
+                <i className="bi bi-truck me-1" aria-hidden="true"></i>Send for delivery
+              </button>
+            )}
+            {canWrite && canBatchPickup && (
+              <button className="btn btn-success" disabled={transitioning === "batch"} onClick={() => runBatch("Completed (pickup)", async (o) => completeNow(o.id))}>
+                <i className="bi bi-bag-check me-1" aria-hidden="true"></i>Complete pickup
+              </button>
+            )}
+            {canWrite && canBatchDelivered && (
+              <button className="btn btn-success" disabled={transitioning === "batch"} onClick={() => runBatch("Marked delivered", async (o) => doTransition(o.id, "DELIVERED"))}>
+                <i className="bi bi-check2-circle me-1" aria-hidden="true"></i>Mark delivered
+              </button>
+            )}
+            {canWrite && canBatchCancel && (
+              <button className="btn btn-outline-danger" disabled={transitioning === "batch"} onClick={() => setPendingReason({ orderId: "__BATCH__", to: "CANCELLED" })}>
+                <i className="bi bi-x-lg me-1" aria-hidden="true"></i>Cancel
+              </button>
+            )}
+            <button className="btn btn-outline-dark ms-auto" disabled={transitioning === "batch"} onClick={clearSelection}>Untick</button>
+          </div>
+        )}
+
+        {/* Upright: the order opens full screen, with Back. */}
+        {!wide && orderDetail && (
+          <>
+            <div className="modal fade show d-block" tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="orderDetailTitle">
+              <div className="modal-dialog modal-fullscreen-lg-down modal-dialog-scrollable">
+                <div className="modal-content">
+                  <div className="modal-body">{detailPane}</div>
+                </div>
+              </div>
+            </div>
+            <div className="modal-backdrop fade show"></div>
           </>
         )}
 
@@ -786,14 +906,15 @@ export default function OrdersPanel() {
             <div className="modal-dialog modal-dialog-centered">
               <div className="modal-content">
                 <div className="modal-header">
-                  <h5 className="modal-title">Reason for {pendingReason.to}</h5>
+                  <h5 className="modal-title">{pendingReason.to === "FAILED_DELIVERY" ? "Why did the delivery fail?" : pendingReason.orderId === "__BATCH__" ? `Why cancel ${selected.size} orders?` : "Why cancel this order?"}</h5>
                   <button type="button" className="btn-close" onClick={() => setPendingReason(null)}></button>
                 </div>
                 <div className="modal-body">
-                  <textarea className="form-control" rows={2} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Customer request…" />
+                  <textarea className="form-control" rows={2} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Customer changed their mind" aria-label="Reason (at least 3 letters)" />
+                  <div className="form-text">At least 3 letters. Saved in the order history.</div>
                 </div>
                 <div className="modal-footer">
-                  <button type="button" className="btn btn-outline-secondary" onClick={() => setPendingReason(null)}>Cancel</button>
+                  <button type="button" className="btn btn-outline-secondary" onClick={() => setPendingReason(null)}>Go back</button>
                   <button className="btn btn-danger" disabled={reason.trim().length < 3} onClick={() => {
                          if (pendingReason.orderId === "__BATCH__") {
                            void runBatch("Cancelled", async (o) => doTransition(o.id, "CANCELLED", reason));
@@ -801,7 +922,7 @@ export default function OrdersPanel() {
                          } else {
                            doTransition(pendingReason.orderId, pendingReason.to, reason);
                          }
-                       }}>Confirm</button>
+                       }}>{pendingReason.to === "FAILED_DELIVERY" ? "Mark failed" : "Cancel order"}</button>
                 </div>
               </div>
             </div>
@@ -831,9 +952,9 @@ export default function OrdersPanel() {
                   <input className="form-control form-control-sm" placeholder="Reason (optional)" value={reason} onChange={(e) => setReason(e.target.value)} />
                 </div>
                 <div className="modal-footer">
-                  <button type="button" className="btn btn-outline-secondary" onClick={() => setConfirmAction(null)}>Cancel</button>
+                  <button type="button" className="btn btn-outline-secondary" onClick={() => setConfirmAction(null)}>Go back</button>
                   <button className="btn btn-danger" disabled={transitioning === confirmAction.orderId} onClick={() => doVoidRefund(confirmAction.orderId, confirmAction.kind, reason)}>
-                    {transitioning === confirmAction.orderId ? "Working…" : "Confirm"}
+                    {transitioning === confirmAction.orderId ? "Working…" : confirmAction.kind === "refund" ? "Refund" : "Void"}
                   </button>
                 </div>
               </div>
@@ -1041,125 +1162,6 @@ export default function OrdersPanel() {
               </>
             )}
 
-            {orderDetail && (
-        <>
-          <div className="modal fade show d-block" tabIndex={-1}>
-            <div className="modal-dialog modal-dialog-centered">
-              <div className="modal-content">
-                <div className="modal-header">
-                                  <h5 className="modal-title">{orderDetail.orderNumber}</h5>
-                                  <button type="button" className="btn-close" onClick={() => setOrderDetail(null)}></button>
-                                </div>
-                                <div className="modal-body small">
-                                                  {/* Contact actions */}
-                                                  {orderDetail.customerPhone && (
-                                                    <div className="d-flex flex-wrap gap-1 mb-2">
-                                                      <a className="btn btn-sm btn-outline-success" href={`tel:${orderDetail.customerPhone}`}><i className="bi bi-telephone me-1"></i>Call</a>
-                                                      <a className="btn btn-sm btn-outline-primary" href={`sms:${orderDetail.customerPhone}`}><i className="bi bi-chat-dots me-1"></i>SMS</a>
-                                                      <a className="btn btn-sm btn-outline-info" href={`https://wa.me/${orderDetail.customerPhone.replace(/\D/g, "")}`} target="_blank" rel="noreferrer"><i className="bi bi-whatsapp me-1"></i>WhatsApp</a>
-                                                      {detailToken && (
-                                                        <button className="btn btn-sm btn-outline-secondary" title="Copy tracking token" onClick={() => { navigator.clipboard?.writeText(detailToken); toast("Tracking token copied"); }}>
-                                                          <i className="bi bi-clipboard me-1"></i>Copy tracking
-                                                        </button>
-                                                      )}
-                                                    </div>
-                                                  )}
-                                  <dl className="row mb-2">
-                                    <dt className="col-5">Customer</dt><dd className="col-7">{orderDetail.customerName}</dd>
-                                    <dt className="col-5">Phone</dt><dd className="col-7">{orderDetail.customerPhone || "—"}</dd>
-                                    <dt className="col-5">Status</dt><dd className="col-7"><span className={`badge ${STATUS_BADGE[orderDetail.status] ?? "text-bg-secondary"}`}>{STATUS_LABEL[orderDetail.status] ?? orderDetail.status}</span></dd>
-                                    <dt className="col-5">Total</dt><dd className="col-7 fw-semibold">{toPesos(orderDetail.totalMinor)}</dd>
-                                    {orderDetail.paymentStatus && <><dt className="col-5">Payment</dt><dd className="col-7">{orderDetail.paymentStatus}</dd></>}
-                                    {orderDetail.paymentMethod && (
-                                      <><dt className="col-5">Method</dt><dd className="col-7">{orderDetail.paymentMethod === "credit" ? <><i className="bi bi-journal-text me-1 text-warning"></i>Credit</> : orderDetail.paymentMethod}</dd></>
-                                    )}
-                                    {orderDetail.source && <><dt className="col-5">Source</dt><dd className="col-7">{orderDetail.source === "PRE_ORDER" ? "Pre-order" : orderDetail.source === "pos" ? "POS" : "Online"}</dd></>}
-                                                                        {(orderDetail.deliveryType ?? "delivery") === "delivery" ? (
-                                                                          <><dt className="col-5">Fulfillment</dt><dd className="col-7"><i className="bi bi-truck me-1"></i>Delivery</dd></>
-                                                                        ) : (
-                                                                          <><dt className="col-5">Fulfillment</dt><dd className="col-7"><i className="bi bi-shop me-1"></i>Pickup</dd></>
-                                                                        )}
-                                                                        {orderDetail.deliveryAddressLine1 && (
-                                                                          <><dt className="col-5">Address</dt><dd className="col-7">
-                                                                            {orderDetail.deliveryAddressLine1}
-                                                                            {orderDetail.deliveryAddressLine2 ? `, ${orderDetail.deliveryAddressLine2}` : ""}
-                                                                            {orderDetail.landmark ? ` (${orderDetail.landmark})` : ""}
-                                                                          </dd></>
-                                                                        )}
-                                                                        {orderDetail.notes && <><dt className="col-5">Notes</dt><dd className="col-7">{orderDetail.notes}</dd></>}
-                                                                      </dl>
-                                                                        {typeof orderDetail.subtotalMinor === "number" && (
-                                                                          <div className="border rounded p-2 bg-light mb-2 small">
-                                                                            <div className="d-flex justify-content-between"><span>Subtotal</span><span>{toPesos(orderDetail.subtotalMinor)}</span></div>
-                                                                            {orderDetail.deliveryFeeMinor ? <div className="d-flex justify-content-between"><span>Delivery</span><span>{toPesos(orderDetail.deliveryFeeMinor)}</span></div> : null}
-                                                                            {orderDetail.discountMinor ? <div className="d-flex justify-content-between text-danger"><span>Discount</span><span>−{toPesos(orderDetail.discountMinor)}</span></div> : null}
-                                                                            <div className="d-flex justify-content-between fw-semibold border-top mt-1 pt-1"><span>Total</span><span>{toPesos(orderDetail.totalMinor)}</span></div>
-                                                                          </div>
-                                                                        )}
-                                                                    {detailItems && (
-                                                                      <div className="border rounded p-2 bg-light mb-2">
-                                                                        <div className="fw-semibold small mb-1"><i className="bi bi-box-seam me-1"></i>Items</div>
-                                                                        {detailItems.length === 0 ? (
-                                                                          <p className="text-muted small mb-0">No items.</p>
-                                                                        ) : (
-                                                                          <table className="table table-sm mb-0">
-                                                                            <tbody>
-                                                                              {detailItems.map((i, idx) => (
-                                                                                <tr key={idx}>
-                                                                                  <td className="small">{i.productName}</td>
-                                                                                  <td className="text-end small">×{i.quantity}</td>
-                                                                                  <td className="text-end small">{toPesos(i.lineTotalMinor)}</td>
-                                                                                </tr>
-                                                                              ))}
-                                                                            </tbody>
-                                                                          </table>
-                                                                        )}
-                                                                      </div>
-                                                                                                        )}
-                                                                                                        {detailHistory && detailHistory.length > 0 && (
-                                                                                                          <div className="border rounded p-2 bg-light mb-2">
-                                                                                                            <div className="fw-semibold small mb-1"><i className="bi bi-clock-history me-1"></i>Timeline</div>
-                                                                                                            <ul className="list-unstyled small mb-0">
-                                                                                                              {detailHistory.map((h, i) => (
-                                                                                                                <li key={i} className="d-flex justify-content-between align-items-start gap-2">
-                                                                                                                  <span>
-                                                                                                                    <span className={`badge ${STATUS_BADGE[h.toStatus] ?? "text-bg-secondary"} text-capitalize`}>{h.toStatus}</span>
-                                                                                                                    {h.reason && <span className="text-muted ms-1">— {h.reason}</span>}
-                                                                                                                  </span>
-                                                                                                                  <span className="text-muted text-nowrap">{new Date(h.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
-                                                                                                                </li>
-                                                                                                              ))}
-                                                                                                            </ul>
-                                                                                                          </div>
-                                                                                                        )}
-                                                                                                        {detailReceived.map((sg, i) => (
-                                                                                                          <div key={i} className="border rounded p-2 bg-light mb-2">
-                                                                                                            <div className="fw-semibold small mb-1"><i className="bi bi-pen me-1"></i>Received by {sg.signerName} · {new Date(sg.createdAt).toLocaleString()}</div>
-                                                                                                            <img src={sg.imagePng} alt={`Signature of ${sg.signerName}`} className="border rounded w-100" style={{ maxHeight: 140, objectFit: "contain", background: "#fff" }} />
-                                                                                                          </div>
-                                                                                                        ))}
-                                                                                                        {orderDetail.paymentMethod === "credit" && (
-                                    <div className="border rounded p-2 bg-light">
-                                      <div className="fw-semibold small mb-1"><i className="bi bi-pen me-1"></i>Customer signature</div>
-                                      {detailSignature === null ? (
-                                        <p className="text-muted small mb-0">Loading signature…</p>
-                                      ) : detailSignature ? (
-                                        <img src={detailSignature} alt="Customer signature" className="border rounded w-100" style={{ maxHeight: 140, objectFit: "contain", background: "#fff" }} />
-                                      ) : (
-                                        <p className="text-muted small mb-0">No signature on file.</p>
-                                      )}
-                                    </div>
-                                  )}
-                                </div>
-                <div className="modal-footer">
-                  <button className="btn btn-outline-secondary btn-sm" onClick={() => setOrderDetail(null)}>Close</button>
-                </div>
-              </div>
-            </div>
-          </div>
-          <div className="modal-backdrop fade show"></div>
-        </>
-      )}
     </div>
   );
 }
