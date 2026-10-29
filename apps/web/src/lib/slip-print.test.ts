@@ -25,3 +25,8 @@ test("a header line and two copies are printed when asked", () => {
   assert.equal(two.split("<section>").length - 1, 2);
   assert.equal(slipHtml({ storeName: "S", title: "T", copies: 9 }).split("<section>").length - 1, 2);
 });
+
+test("a contact line prints under the address", () => {
+  const html = slipHtml({ storeName: "S", title: "T", header: "Brgy. 1, Bulacan", contact: "0917 123 4567" });
+  assert.ok(html.indexOf("Brgy. 1, Bulacan") < html.indexOf("0917 123 4567"));
+});

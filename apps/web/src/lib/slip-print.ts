@@ -2,7 +2,8 @@
 // Used by Resack, Stock in and anything else that needs "print what happened".
 // The HTML builder is pure so its escaping and layout are unit-tested.
 
-import { getPrinterSettings } from "./printer-settings";
+import { getPrinterSettings, receiptName } from "./printer-settings";
+import { savedCopy } from "./offlineCache";
 import { printViaBluetooth } from "./bt-print";
 import { showPrinterPrompt } from "./print-prompt";
 
@@ -22,6 +23,7 @@ export interface Slip {
   footer?: string | null;
   widthMm?: 58 | 80;
   header?: string | null;        // a line under the store name
+  contact?: string | null;       // a second line under it (phone)
   copies?: number;               // 2 = one for the customer, one for the store
   a4?: boolean;                  // a full A4 page instead of a roll (statements)
 }
@@ -53,7 +55,7 @@ small { font-size: 9px; } .sig { margin-top: 8px; text-align: center; } .sig img
 .cut { page-break-after: always; break-after: page; }
 </style></head><body>
 ${Array.from({ length: Math.min(2, Math.max(1, Math.floor(s.copies ?? 1))) }, (_, i) => `${i > 0 ? '<div class="cut"></div>' : ""}<section>
-<h1>${esc(s.storeName)}</h1>${s.header ? `<div class="c">${esc(s.header)}</div>` : ""}<div class="c">${esc(s.title)}</div>
+<h1>${esc(s.storeName)}</h1>${s.header ? `<div class="c">${esc(s.header)}</div>` : ""}${s.contact ? `<div class="c">${esc(s.contact)}</div>` : ""}<div class="c">${esc(s.title)}</div>
 ${s.reference ? `<div class="c">${esc(s.reference)}</div>` : ""}${s.when ? `<div class="c">${esc(s.when)}</div>` : ""}
 <hr>${lines}${lines ? "<hr>" : ""}${rows}${rows ? "<hr>" : ""}${totals}${totals ? "<hr>" : ""}${sigs}
 ${s.footer ? `<hr><div class="c">${esc(s.footer)}</div>` : ""}
@@ -64,7 +66,11 @@ ${s.footer ? `<hr><div class="c">${esc(s.footer)}</div>` : ""}
 /** Print the slip through a hidden frame (works on phones and desktops; "Save as PDF" is in the print dialog). */
 export function printSlip(s: Slip): void {
   const cfg = getPrinterSettings();
-  s = { ...s, widthMm: s.widthMm ?? cfg.widthMm, header: s.header ?? (cfg.header || null), footer: cfg.footer || s.footer, copies: s.copies ?? cfg.copies };
+  s = {
+    ...s, storeName: receiptName(s.storeName, cfg.name, registeredStoreName()),
+    widthMm: s.widthMm ?? cfg.widthMm, header: s.header ?? (cfg.header || null), contact: s.contact ?? (cfg.contact || null),
+    footer: cfg.footer || s.footer, copies: s.copies ?? cfg.copies,
+  };
   if (cfg.bluetooth && !s.a4) {
     // Straight to the Bluetooth printer. If that fails, fall back to the normal print window so a receipt is never lost.
     const slip = s;
@@ -73,6 +79,11 @@ export function printSlip(s: Slip): void {
     return;
   }
   browserPrint(s);
+}
+
+/** The store's registered name from the copy of Settings kept on this tablet, so it prints offline too. */
+export function registeredStoreName(): string | null {
+  return savedCopy<{ store?: { name?: string } }>("/admin/settings")?.store?.name?.trim() || null;
 }
 
 // A receipt that could not reach the printer is kept on this device until it prints or the person closes
