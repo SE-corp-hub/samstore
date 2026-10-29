@@ -83,7 +83,7 @@ export function printSlip(s: Slip): void {
 
 /** The store's registered name from the copy of Settings kept on this tablet, so it prints offline too. */
 export function registeredStoreName(): string | null {
-  return savedCopy<{ store?: { name?: string } }>("/admin/settings")?.store?.name?.trim() || null;
+  return savedCopy<{ name?: string }>("/admin/settings")?.name?.trim() || null;
 }
 
 // A receipt that could not reach the printer is kept on this device until it prints or the person closes

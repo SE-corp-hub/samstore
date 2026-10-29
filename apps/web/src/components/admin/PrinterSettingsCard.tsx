@@ -22,7 +22,7 @@ export default function PrinterSettingsCard({ storeName }: { storeName?: string 
     setP(getPrinterSettings()); setBtOk(bluetoothSupported()); setBtName(connectedPrinterName());
     // The registered name (also saved on this tablet, so receipts know it offline).
     setRegistered(registeredStoreName());
-    void cachedGet<{ store?: { name?: string } }>("/admin/settings").then((d) => { if (d?.store?.name) setRegistered(d.store.name.trim() || null); });
+    void cachedGet<{ name?: string }>("/admin/settings").then((d) => { if (d?.name) setRegistered(d.name.trim() || null); });
   }, []);
   const clean = cleanPrinterSettings(p);
   // Only the top and bottom of a receipt, exactly as the Bluetooth printer lines them up.
