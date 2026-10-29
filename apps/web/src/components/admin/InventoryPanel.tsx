@@ -283,31 +283,31 @@ export default function InventoryPanel() {
       {error && <div className="alert alert-danger py-2 small">{error}</div>}
 
       <div className="row g-2 mb-2">
-        <div className="col-md-3">
-          <input className="form-control form-control-sm" placeholder="Search name or SKU…" value={search} onChange={(e) => setSearch(e.target.value)} />
+        <div className="col-12 col-lg-3">
+          <input className="form-control form-control-sm" aria-label="Search products" placeholder="Search name or SKU…" value={search} onChange={(e) => setSearch(e.target.value)} />
         </div>
-        <div className="col-md-2">
-          <select className="form-select form-select-sm" value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
+        <div className="col-6 col-lg-2">
+          <select className="form-select form-select-sm" aria-label="Category" value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
             <option value="">All categories</option>
             {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
         </div>
-        <div className="col-md-2">
-          <select className="form-select form-select-sm" value={warehouseId} onChange={(e) => setWarehouseId(e.target.value)}>
+        <div className="col-6 col-lg-3">
+          <select className="form-select form-select-sm" aria-label="Location" value={warehouseId} onChange={(e) => setWarehouseId(e.target.value)}>
             <option value="">All warehouses</option>
             {warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}{w.isDefault ? " (default)" : ""}</option>)}
           </select>
         </div>
-        <div className="col-md-2">
-          <select className="form-select form-select-sm" value={status} onChange={(e) => setStatus(e.target.value)}>
+        <div className="col-6 col-lg-2">
+          <select className="form-select form-select-sm" aria-label="Stock level" value={status} onChange={(e) => setStatus(e.target.value)}>
             <option value="">All stock</option>
             <option value="in">In stock</option>
             <option value="low">Low</option>
             <option value="out">Out</option>
           </select>
         </div>
-        <div className="col-md-3">
-          <select className="form-select form-select-sm" value={sort} onChange={(e) => setSort(e.target.value as "name" | "qty" | "value")}>
+        <div className="col-6 col-lg-2">
+          <select className="form-select form-select-sm" aria-label="Sort" value={sort} onChange={(e) => setSort(e.target.value as "name" | "qty" | "value")}>
             <option value="name">Sort: name</option>
             <option value="qty">Sort: quantity</option>
             <option value="value">Sort: value</option>
@@ -339,7 +339,7 @@ export default function InventoryPanel() {
         <div>
           <div className="row g-2 mb-2">
             <div className="col-md-4">
-              <select className="form-select form-select-sm" value={historyProduct} onChange={(e) => setHistoryProduct(e.target.value)}>
+              <select className="form-select form-select-sm" aria-label="Product" value={historyProduct} onChange={(e) => setHistoryProduct(e.target.value)}>
                 <option value="">All products</option>
                 {items.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
               </select>
@@ -391,26 +391,26 @@ export default function InventoryPanel() {
           <table className="table table-hover align-middle">
             <thead>
               <tr>
-                <th>Product</th><th>SKU</th><th>Category</th>
-                <th className="text-end">On hand</th><th className="text-end">Reserved</th>
-                <th className="text-end">Available</th>{hasCost && <th className="text-end">Unit cost</th>}
+                <th>Product</th><th className="col-wide">SKU</th><th className="col-wide">Category</th>
+                <th className="text-end">On hand</th><th className="text-end col-wide">Reserved</th>
+                <th className="text-end">Available</th>{hasCost && <th className="text-end col-wide">Unit cost</th>}
                 {hasCost && <th className="text-end">Value</th>}<th>Status</th><th></th>
               </tr>
             </thead>
             <tbody>
               {items.map((r) => (
                 <tr key={r.id}>
-                  <td className="fw-semibold">{r.name}</td>
-                  <td className="small text-muted">{r.sku}</td>
-                  <td className="small text-muted">{r.category ?? "—"}</td>
+                  <td className="fw-semibold">{r.name}<div className="small text-muted fw-normal d-lg-none">{r.sku}{r.quantityReserved > 0 ? ` · ${r.quantityReserved} reserved` : ""}</div></td>
+                  <td className="small text-muted col-wide">{r.sku}</td>
+                  <td className="small text-muted col-wide">{r.category ?? "—"}</td>
                   <td className="text-end">{r.quantityOnHand}</td>
-                  <td className="text-end text-muted">{r.quantityReserved}</td>
+                  <td className="text-end text-muted col-wide">{r.quantityReserved}</td>
                   <td className="text-end fw-semibold">{r.availableQuantity}</td>
-                  {hasCost && <td className="text-end">{toPesos(r.costMinor)}</td>}
+                  {hasCost && <td className="text-end col-wide">{toPesos(r.costMinor)}</td>}
                   {hasCost && <td className="text-end">{toPesos(r.valueMinor)}</td>}
                   <td><span className={`badge ${STATUS_BADGE[r.status]}`}>{r.status}{r.reorderThreshold > 0 ? ` ≤${r.reorderThreshold}` : ""}</span></td>
                   <td className="text-end">
-                    <button type="button" className="btn btn-sm btn-outline-primary"
+                    <button type="button" className="btn btn-sm btn-outline-primary text-nowrap" aria-label={`Adjust ${r.name}`}
                       onClick={() => { setAdjust(r); setAdjustMode("delta"); setAdjustQty(""); setAdjustReason(""); setAdjustAllowNegative(false); setAdjustError(null); }}>
                       <i className="bi bi-sliders me-1"></i>Adjust
                     </button>

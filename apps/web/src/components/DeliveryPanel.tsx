@@ -261,8 +261,8 @@ export default function DeliveryPanel() {
                   <button type="button" className="btn-close" onClick={() => setFailTarget(null)}></button>
                 </div>
                 <div className="modal-body">
-                  <label className="form-label small">Reason (required)</label>
-                  <textarea className="form-control" rows={2} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Customer not home, wrong address…" />
+                  <label htmlFor="delivery-reason-required" className="form-label small">Reason (required)</label>
+                  <textarea id="delivery-reason-required" className="form-control" rows={2} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Customer not home, wrong address…" />
                 </div>
                 <div className="modal-footer">
                   <button className="btn btn-outline-secondary" onClick={() => setFailTarget(null)}>Cancel</button>

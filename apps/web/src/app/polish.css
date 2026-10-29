@@ -1,0 +1,147 @@
+/* ───────────── Whole-app polish (UI/UX Pro Max pass, 2026-10-29) ─────────────
+   Loaded after globals.css. Keeps the warm SAM STORE look but makes every owner and
+   staff screen pass the same rules the store screens already follow:
+   - text and buttons at least 4.5:1 against their background (WCAG AA),
+   - no Bootstrap blue/yellow mixed into the brown + terracotta + green palette,
+   - icon-only buttons as wide as they are tall (44px) on touch screens,
+   - table headings readable (13px, darker), chart labels 12px. */
+
+:root {
+  /* Terracotta a shade deeper: white text on it was 4.1:1, now 5.2:1. */
+  --sam-primary: #c0421f;
+  --sam-primary-dark: #a1361a;
+  /* Muted text was 3.9:1 on the cream page, now 5.9:1. */
+  --sam-muted: #6b5d50;
+  --bs-focus-ring-color: rgba(192, 66, 31, 0.4);
+}
+
+.btn-primary {
+  --bs-btn-bg: var(--sam-primary);
+  --bs-btn-border-color: var(--sam-primary);
+  --bs-btn-hover-bg: var(--sam-primary-dark);
+  --bs-btn-hover-border-color: var(--sam-primary-dark);
+  --bs-btn-active-bg: var(--sam-primary-dark);
+  --bs-btn-active-border-color: var(--sam-primary-dark);
+  --bs-btn-disabled-bg: var(--sam-primary);
+  --bs-btn-disabled-border-color: var(--sam-primary);
+}
+.badge.text-bg-primary { background-color: var(--sam-primary) !important; }
+
+/* Admin shell: links, tabs and outline buttons in the brand colours, all ≥ 4.5:1 on the cream page. */
+.admin-shell {
+  --bs-link-color: #0b4f8a;
+  --bs-link-color-rgb: 11, 79, 138;
+  --bs-link-hover-color: #083a66;
+  --bs-link-hover-color-rgb: 8, 58, 102;
+  --bs-secondary-color: var(--sam-muted);
+}
+.admin-shell .text-muted, .admin-shell .text-body-secondary { color: var(--sam-muted) !important; }
+.admin-shell .text-primary { color: var(--sam-primary) !important; }
+.admin-shell .text-success { color: #1f6f3f !important; }
+.admin-shell .text-danger { color: #a3201b !important; }
+.admin-shell .text-warning { color: #8a5a00 !important; }
+
+.admin-shell .btn-outline-primary {
+  --bs-btn-color: var(--sam-primary-dark);
+  --bs-btn-border-color: var(--sam-primary);
+  --bs-btn-hover-bg: var(--sam-primary);
+  --bs-btn-hover-border-color: var(--sam-primary);
+  --bs-btn-hover-color: #fff;
+  --bs-btn-active-bg: var(--sam-primary-dark);
+  --bs-btn-active-border-color: var(--sam-primary-dark);
+  --bs-btn-active-color: #fff;
+  --bs-btn-disabled-color: var(--sam-primary-dark);
+  --bs-btn-disabled-border-color: var(--sam-primary);
+}
+.admin-shell .btn-outline-secondary {
+  --bs-btn-color: #4a4844;
+  --bs-btn-border-color: #8c857c;
+  --bs-btn-hover-bg: #4a4844;
+  --bs-btn-hover-border-color: #4a4844;
+  --bs-btn-hover-color: #fff;
+  --bs-btn-active-bg: #33261d;
+  --bs-btn-active-border-color: #33261d;
+  --bs-btn-disabled-color: #6b5d50;
+}
+.admin-shell .btn-outline-success {
+  --bs-btn-color: #1f6f3f;
+  --bs-btn-border-color: #1f6f3f;
+  --bs-btn-hover-bg: #1f6f3f;
+  --bs-btn-hover-border-color: #1f6f3f;
+  --bs-btn-hover-color: #fff;
+  --bs-btn-active-bg: #185a33;
+  --bs-btn-active-border-color: #185a33;
+  --bs-btn-disabled-color: #1f6f3f;
+}
+.admin-shell .btn-outline-danger {
+  --bs-btn-color: #a3201b;
+  --bs-btn-border-color: #a3201b;
+  --bs-btn-hover-bg: #a3201b;
+  --bs-btn-hover-border-color: #a3201b;
+  --bs-btn-active-bg: #861a16;
+  --bs-btn-active-border-color: #861a16;
+}
+/* Yellow outline text is unreadable on cream (1.6:1): use dark amber. */
+.admin-shell .btn-outline-warning {
+  --bs-btn-color: #8a5a00;
+  --bs-btn-border-color: #b37700;
+  --bs-btn-hover-bg: #8a5a00;
+  --bs-btn-hover-border-color: #8a5a00;
+  --bs-btn-hover-color: #fff;
+  --bs-btn-active-bg: #6f4800;
+  --bs-btn-active-border-color: #6f4800;
+  --bs-btn-active-color: #fff;
+}
+.admin-shell .btn-success {
+  --bs-btn-bg: #1f6f3f;
+  --bs-btn-border-color: #1f6f3f;
+  --bs-btn-hover-bg: #185a33;
+  --bs-btn-hover-border-color: #185a33;
+  --bs-btn-active-bg: #185a33;
+  --bs-btn-active-border-color: #185a33;
+  --bs-btn-disabled-bg: #1f6f3f;
+  --bs-btn-disabled-border-color: #1f6f3f;
+}
+/* Disabled buttons look clearly off (not just a paler green). */
+.admin-shell .btn:disabled, .admin-shell .btn.disabled { opacity: 0.5; }
+
+/* Tabs: brand ink instead of Bootstrap blue; the open tab is marked by a bar, not colour alone. */
+.admin-shell .nav-tabs .nav-link { color: #4a4844; }
+.admin-shell .nav-tabs .nav-link:hover { color: var(--sam-text); border-color: var(--sam-border) var(--sam-border) transparent; }
+.admin-shell .nav-tabs .nav-link.active { color: var(--sam-text); font-weight: 600; box-shadow: inset 0 -3px 0 var(--sam-primary); }
+.admin-shell .nav-pills .nav-link { color: #4a4844; }
+.admin-shell .nav-pills .nav-link.active { background: var(--sam-text); color: #fff; }
+
+/* Info strips in warm colours (the blue box clashed and its green buttons fell to 3.4:1). */
+.admin-shell .alert-primary, .admin-shell .alert-info {
+  --bs-alert-bg: #f4efe7;
+  --bs-alert-border-color: #e1d6c6;
+  --bs-alert-color: var(--sam-text);
+  --bs-alert-link-color: var(--sam-text);
+}
+
+/* Table headings: 13px and darker (were 12px at 3.6:1). */
+.admin-shell .table thead th { font-size: 0.8125rem; color: #5a4d42; }
+.admin-shell .table { --bs-table-color: var(--sam-text); }
+
+/* Small type never under 13px on the admin screens. */
+.admin-shell .small, .admin-shell small { font-size: max(0.8125rem, 0.875em); }
+.admin-shell .badge { font-size: 0.8125rem; }
+
+/* Touch screens: icon-only buttons as wide as they are tall, so a finger can hit them. */
+@media (max-width: 767.98px), (pointer: coarse) {
+  .admin-shell .btn { min-width: 44px; }
+  .admin-shell .btn-group > .btn { min-width: 44px; }
+  .admin-shell .form-control-color { min-width: 56px; }
+  /* The store screens' small buttons were 40px tall; on touch they match the 44px rule too. */
+  .rice-ui .btn-sm { min-height: 44px; }
+}
+
+/* Columns that only fit sideways or on a PC (upright tablets and phones keep the key columns). */
+@media (max-width: 991.98px) {
+  .admin-shell .col-wide { display: none !important; }
+}
+
+/* Overview: the four numbers share the row evenly. */
+.stat-grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
+.stat-grid > .card { margin: 0; }

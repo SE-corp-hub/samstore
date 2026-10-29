@@ -316,28 +316,28 @@ export default function ProductsPanel() {
 
             {/* P7 filter bar */}
             <div className="row g-2 mb-3">
-              <div className="col-md-3">
-                <input className="form-control form-control-sm" placeholder="Search name / SKU (jump)…" value={search} onChange={(e) => setSearch(e.target.value)} />
+              <div className="col-12 col-lg-3">
+                <input className="form-control form-control-sm" aria-label="Search products" placeholder="Search name / SKU (jump)…" value={search} onChange={(e) => setSearch(e.target.value)} />
               </div>
-              <div className="col-md-2">
-                <select className="form-select form-select-sm" value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
+              <div className="col-6 col-lg-2">
+                <select className="form-select form-select-sm" aria-label="Category" value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
                   <option value="">All categories</option>
                   {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
               </div>
-              <div className="col-md-2 d-flex gap-1">
-                <input className="form-control form-control-sm" type="number" min="0" step="0.01" placeholder="Min ₱" value={minPrice} onChange={(e) => setMinPrice(e.target.value)} />
-                <input className="form-control form-control-sm" type="number" min="0" step="0.01" placeholder="Max ₱" value={maxPrice} onChange={(e) => setMaxPrice(e.target.value)} />
+              <div className="col-6 col-lg-2 d-flex gap-1">
+                <input className="form-control form-control-sm" type="number" min="0" step="0.01" aria-label="Lowest price" placeholder="Min ₱" value={minPrice} onChange={(e) => setMinPrice(e.target.value)} />
+                <input className="form-control form-control-sm" type="number" min="0" step="0.01" aria-label="Highest price" placeholder="Max ₱" value={maxPrice} onChange={(e) => setMaxPrice(e.target.value)} />
               </div>
-              <div className="col-md-2">
-                <select className="form-select form-select-sm" value={active} onChange={(e) => setActive(e.target.value)}>
+              <div className="col-6 col-lg-2">
+                <select className="form-select form-select-sm" aria-label="Status" value={active} onChange={(e) => setActive(e.target.value)}>
                   <option value="">All status</option>
                   <option value="true">Active</option>
                   <option value="false">Inactive</option>
                 </select>
               </div>
-              <div className="col-md-3">
-                <select className="form-select form-select-sm" value={sort} onChange={(e) => setSort(e.target.value as "created" | "name" | "price" | "stock")}>
+              <div className="col-6 col-lg-3">
+                <select className="form-select form-select-sm" aria-label="Sort" value={sort} onChange={(e) => setSort(e.target.value as "created" | "name" | "price" | "stock")}>
                   <option value="created">Sort: newest</option>
                   <option value="name">Sort: name</option>
                   <option value="price">Sort: price</option>
@@ -365,11 +365,11 @@ export default function ProductsPanel() {
                   />
                 </th>
                 <th>Product</th>
-                <th>SKU</th>
+                <th className="col-wide">SKU</th>
                 <th className="text-end">Selling price</th>
-                {hasCost && <th className="text-end">Unit cost</th>}
+                {hasCost && <th className="text-end col-wide">Unit cost</th>}
                 <th className="text-end">Stock</th>
-                <th>Category</th>
+                <th className="col-wide">Category</th>
                 <th>Status</th>
                 <th className="text-end">Actions</th>
               </tr>
@@ -395,33 +395,34 @@ export default function ProductsPanel() {
                       {p.stockConversionFamily && <span className="badge text-bg-info ms-1">{p.stockConversionFamily}</span>}
                       {p.soldByWeight && <span className="badge text-bg-secondary ms-1" title="Sold by weight">per-kilo</span>}
                       {p.trackStock === false && <span className="badge text-bg-warning ms-1" title="Sells at any time — stock is not counted">Not tracked</span>}
+                      <div className="small text-muted fw-normal d-lg-none">{p.sku}</div>
                     </td>
-                  <td className="text-muted small">
+                  <td className="text-muted small col-wide">
                     {p.sku}
                     {p.barcode && <div className="text-muted text-opacity-75" style={{ fontSize: "0.8em" }} title="Barcode">{p.barcode}</div>}
                   </td>
                   <td className="text-end">{toPesos(p.priceMinor)}</td>
-                  {hasCost && <td className="text-end text-muted">{toPesos(p.costMinor)}</td>}
+                  {hasCost && <td className="text-end text-muted col-wide">{toPesos(p.costMinor)}</td>}
                   <td className={`text-end ${p.trackStock !== false && p.reorderThreshold > 0 && p.availableQuantity <= p.reorderThreshold ? "text-danger fw-semibold" : ""}`}>
                     {p.trackStock === false ? <span className="text-muted">—</span> : p.availableQuantity}
                     {p.trackStock !== false && p.reorderThreshold > 0 && <small className="text-muted"> ≤{p.reorderThreshold}</small>}
                     {p.quantityReserved > 0 && <small className="text-muted"> ({p.quantityReserved} reserved)</small>}
                   </td>
-                  <td className="small">{p.category?.name ?? "—"}</td>
+                  <td className="small col-wide">{p.category?.name ?? "—"}</td>
                   <td>
                     <span className={`badge ${p.isActive ? "text-bg-success" : "text-bg-secondary"}`}>
                       {p.isActive ? "Active" : "Hidden"}
-                        {p.taxExempt && <span className="badge text-bg-info ms-1" title="VAT-exempt">VAT-exempt</span>}
                     </span>
+                    {p.taxExempt && <span className="badge text-bg-info ms-1" title="VAT-exempt">VAT-exempt</span>}
                   </td>
-                  <td className="text-end">
-                    <button className="btn btn-sm btn-outline-secondary me-1" title="Variants & add-ons" onClick={() => setOptionsFor(p)}>
+                  <td className="text-end text-nowrap">
+                    <button className="btn btn-sm btn-outline-secondary me-1" title="Variants & add-ons" aria-label={`Variants and add-ons for ${p.name}`} onClick={() => setOptionsFor(p)}>
                       <i className="bi bi-sliders"></i>
                     </button>
-                    <button className="btn btn-sm btn-outline-secondary me-1" onClick={() => openEdit(p)}>
+                    <button className="btn btn-sm btn-outline-secondary me-1" title="Edit" aria-label={`Edit ${p.name}`} onClick={() => openEdit(p)}>
                       <i className="bi bi-pencil"></i>
                     </button>
-                    <button className="btn btn-sm btn-outline-secondary" onClick={() => toggleActive(p)}>
+                    <button className="btn btn-sm btn-outline-secondary" title={p.isActive ? "Hide from sale" : "Show for sale"} aria-label={`${p.isActive ? "Hide" : "Show"} ${p.name}`} onClick={() => toggleActive(p)}>
                       <i className={`bi ${p.isActive ? "bi-eye-slash" : "bi-eye"}`}></i>
                     </button>
                   </td>
@@ -445,21 +446,21 @@ export default function ProductsPanel() {
                   </div>
                   <div className="modal-body">
                     <div className="mb-2">
-                      <label className="form-label small">Name *</label>
-                      <input className="form-control" required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+                      <label htmlFor="products-name" className="form-label small">Name *</label>
+                      <input id="products-name" className="form-control" required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
                     </div>
                     <div className="mb-2">
-                      <label className="form-label small">SKU *</label>
-                      <input className="form-control" required value={form.sku} onChange={(e) => setForm({ ...form, sku: e.target.value })} />
+                      <label htmlFor="products-sku" className="form-label small">SKU *</label>
+                      <input id="products-sku" className="form-control" required value={form.sku} onChange={(e) => setForm({ ...form, sku: e.target.value })} />
                     </div>
                     <div className="row">
                       <div className="col-6 mb-2">
-                        <label className="form-label small">Barcode</label>
-                        <input className="form-control" placeholder="e.g. 4801234567890" value={form.barcode} onChange={(e) => setForm({ ...form, barcode: e.target.value })} />
+                        <label htmlFor="products-barcode" className="form-label small">Barcode</label>
+                        <input id="products-barcode" className="form-control" placeholder="e.g. 4801234567890" value={form.barcode} onChange={(e) => setForm({ ...form, barcode: e.target.value })} />
                       </div>
                       <div className="col-6 mb-2">
-                        <label className="form-label small">Unit</label>
-                        <input className="form-control" placeholder="pc · pack · kilo · bottle" value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value })} />
+                        <label htmlFor="products-unit" className="form-label small">Unit</label>
+                        <input id="products-unit" className="form-control" placeholder="pc · pack · kilo · bottle" value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value })} />
                       </div>
                     </div>
                     <div className="form-check form-switch mb-2">
@@ -542,8 +543,8 @@ export default function ProductsPanel() {
                       )}
                     </div>
                     <div className="mb-2">
-                      <label className="form-label small">Description</label>
-                      <textarea className="form-control" rows={2} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
+                      <label htmlFor="products-description" className="form-label small">Description</label>
+                      <textarea id="products-description" className="form-control" rows={2} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
                     <div className="form-check form-switch mt-2">
                       <input className="form-check-input" type="checkbox" id="taxExempt" checked={form.taxExempt} onChange={(e) => setForm({ ...form, taxExempt: e.target.checked })} />
                       <label className="form-check-label" htmlFor="taxExempt">VAT-exempt product <span className="text-muted small">(basic/zero-rated goods — reported as non-VAT sales on the BIR slip)</span></label>
@@ -555,8 +556,8 @@ export default function ProductsPanel() {
                       <label className="form-check-label" htmlFor="featured">Featured <span className="text-muted small">(show in the storefront "Featured" section)</span></label>
                     </div>
                     <div className="mb-2">
-                      <label className="form-label small">Tags</label>
-                      <input className="form-control" placeholder="new, best seller" value={form.tags} onChange={(e) => setForm({ ...form, tags: e.target.value })} />
+                      <label htmlFor="products-tags" className="form-label small">Tags</label>
+                      <input id="products-tags" className="form-control" placeholder="new, best seller" value={form.tags} onChange={(e) => setForm({ ...form, tags: e.target.value })} />
                       <small className="text-muted d-block">Comma-separated display tags.</small>
                     </div>
                     {modal.editing && (

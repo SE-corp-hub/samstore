@@ -181,8 +181,8 @@ export default function AdminLogin() {
 
             <form onSubmit={changePassword}>
               <div className="mb-3">
-                <label className="form-label small">New password</label>
-                <input
+                <label htmlFor="adminlog-new-password" className="form-label small">New password</label>
+                <input id="adminlog-new-password"
                   className="form-control"
                   type="password"
                   required
@@ -194,8 +194,8 @@ export default function AdminLogin() {
                 <div className="form-text small">Minimum 8 characters. You will be signed in with the new password.</div>
               </div>
               <div className="mb-3">
-                <label className="form-label small">Retype new password</label>
-                <input
+                <label htmlFor="adminlog-retype-new-password" className="form-label small">Retype new password</label>
+                <input id="adminlog-retype-new-password"
                   className="form-control"
                   type="password"
                   required
@@ -295,8 +295,8 @@ export default function AdminLogin() {
 
             <form onSubmit={login}>
               <div className="mb-3">
-                <label className="form-label small">Phone or email</label>
-                <input
+                <label htmlFor="adminlog-phone-or-email" className="form-label small">Phone or email</label>
+                <input id="adminlog-phone-or-email"
                   className="form-control"
                   value={identifier}
                   onChange={(e) => setIdentifier(e.target.value)}
@@ -304,8 +304,8 @@ export default function AdminLogin() {
                 />
               </div>
               <div className="mb-3">
-                <label className="form-label small">Password</label>
-                <input
+                <label htmlFor="adminlog-password" className="form-label small">Password</label>
+                <input id="adminlog-password"
                   className="form-control"
                   type="password"
                   required
