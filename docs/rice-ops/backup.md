@@ -39,6 +39,8 @@ Make a backup by hand at any time with **`backup-now.bat`**. Always do this just
 
 ## Stop or change it
 
+- The daily run has no window (`run-nightly-backup-hidden.vbs`). A failed run still shows a "Samstore backup" message box. To watch a run, use `backup-now.bat`.
+
 - Change the time or the folder: run `setup-nightly-backup.bat` again (it replaces the old schedule).
 - Remove it: in Windows, search "Task Scheduler", find **Samstore nightly backup**, and delete it. Or run `schtasks /Delete /TN "Samstore nightly backup" /F`.
 

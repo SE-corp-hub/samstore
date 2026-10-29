@@ -33,7 +33,7 @@ if errorlevel 1 (
   exit /b 1
 )
 echo.
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$a = New-ScheduledTaskAction -Execute '%~dp0run-nightly-backup.bat' -WorkingDirectory '%~dp0'; $t = New-ScheduledTaskTrigger -Daily -At '%AT%'; $s = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Hours 2); Register-ScheduledTask -TaskName 'Samstore nightly backup' -Action $a -Trigger $t -Settings $s -Description 'Backs up the shop database every day' -Force | Out-Null"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$a = New-ScheduledTaskAction -Execute 'wscript.exe' -Argument '\"%~dp0run-nightly-backup-hidden.vbs\"' -WorkingDirectory '%~dp0'; $t = New-ScheduledTaskTrigger -Daily -At '%AT%'; $s = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Hours 2); Register-ScheduledTask -TaskName 'Samstore nightly backup' -Action $a -Trigger $t -Settings $s -Description 'Backs up the shop database every day' -Force | Out-Null"
 if errorlevel 1 (
   echo.
   echo The first backup worked, but the daily schedule could not be created. Tell Claude.
