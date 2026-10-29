@@ -48,7 +48,7 @@ export default function QuickCount({ productId, name, loose, locationId, onDone,
     setBusy(true); setError(null);
     const r = await sendStep("/admin/counts/quick", { productId, locationId: locationId ?? undefined, counted: loose ? (value || "0") : Number(value || "0"), signatures: [{ signerKind: "STAFF", imagePng: sig }] }, `Count: ${name}`);
     setBusy(false);
-    if (r.status === "queued") { toast(t("queue.queuedToast")); await onDone(); return; }
+    if (r.status === "queued") { await onDone(); return; }
     const d = r.data as ApiBody | null;
     if (!r.ok) { setError(d?.errors?.join(", ") ?? d?.message ?? "Could not save"); return; }
     if (d?.verdict === "TAMA") { toast("The count is correct"); await onDone(); return; }

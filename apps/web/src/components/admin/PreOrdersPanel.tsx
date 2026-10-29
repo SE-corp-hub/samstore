@@ -414,7 +414,6 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
         };
         const sent = await sendStep(PREORDER_PATH, body, `Pre-order ${customerName}`, view);
         if (sent.status === "queued") {
-          toast("No internet — the pre-order is saved on this tablet and will be sent when the internet is back");
           clearBuild();
           setSubTab("list");
           return;

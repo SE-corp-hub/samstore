@@ -14,7 +14,7 @@ import { saveCopy, savedCopy } from "../../../lib/offlineCache";
 const STORES_PATH = "/admin/stores/mine";
 import { resumePendingReceipt } from "../../../lib/slip-print";
 import { useLang, LANG_WORDS } from "../../../lib/lang";
-import QueueBadge from "../../../components/admin/QueueBadge";
+import QueueBadge, { SyncBar } from "../../../components/admin/QueueBadge";
 import StaffHome from "../../../components/admin/StaffHome";
 
 /** Rice Ops M10: the store screens get the large, high-contrast look (globals.css .rice-ui). */
@@ -432,6 +432,7 @@ export default function AdminDashboard() {
             </div>
           </div>
         </nav>
+        <SyncBar />
 
         <main className={`container-fluid py-4 flex-grow-1${BAR_ROLES.includes(role) ? " has-staff-bar" : ""}`} style={{ background: "#faf7f2" }}>
           {RICE_TABS.has(tab) ? <div className="rice-ui p-2 rounded">{renderTab()}</div> : renderTab()}

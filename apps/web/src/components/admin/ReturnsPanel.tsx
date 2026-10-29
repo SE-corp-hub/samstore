@@ -78,7 +78,7 @@ export default function ReturnsPanel() {
     setError(null);
     const r = await sendStep("/admin/returns", { locationId, productId, quantity: n, condition, reason: reason.trim(), ...(orderId ? { orderId } : {}) }, "Customer return");
     setBusy(false);
-    if (r.status === "queued") { toast("No signal — saved on this phone, will be sent when the signal is back"); return; }
+    if (r.status === "queued") { setQty("1"); setReason(""); setProductId(""); setCondition("GOOD"); setOrderId(""); return; } // saved offline: shown in the upload bar
     const d = r.data as Body | null;
     if (!r.ok) { setError(d?.errors?.join(", ") ?? d?.message ?? "The return did not go through"); return; }
     toast(condition === "GOOD" ? `Back on the shelf — ${d?.docNumber ?? "done"}. The owner was told to refund or lower the credit.` : `Recorded — ${d?.docNumber ?? "done"}. Damaged rice is not added to stock.`);
