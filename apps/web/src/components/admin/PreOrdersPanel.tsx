@@ -23,6 +23,13 @@ import { peso } from "../../lib/number-format";
 import ProductFinder from "./ProductFinder";
 import { noteUse } from "../../lib/product-find";
 import { printSlip, type Slip } from "../../lib/slip-print";
+import { cachedGet, offlineRef } from "../../lib/offlineCache";
+import { QUEUE_EVENT, queuedSteps, sendStep } from "../../lib/offlineQueue";
+import { newSaleKey } from "../../lib/saleKey";
+
+const PREORDER_PATH = "/admin/pos/preorder";
+/** Pre-orders saved on this tablet with no internet, not on the server yet (shown with Print only). */
+const waitingHere = (): Preorder[] => queuedSteps().filter((s) => s.path === PREORDER_PATH && s.view).map((s) => s.view as Preorder);
 
 interface Preorder {
   id: string; orderNumber: string; customerName: string; storeCustomerId: string | null;
@@ -159,6 +166,7 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
   const [preFrom, setPreFrom] = useState(localToday());
   const [preTo, setPreTo] = useState(localToday());
   const [preorders, setPreorders] = useState<Preorder[]>([]);
+  const [here, setHere] = useState<Preorder[]>([]); // saved on this tablet, waiting for the internet
   const [preLoading, setPreLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [receiptOrder, setReceiptOrder] = useState<string | null>(null);
@@ -202,9 +210,9 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
     setPreLoading(true);
     try {
       // All pre-orders: every waiting one shows whatever its date; Done filters by date below.
-      const res = await fetch(`${API_URL}/admin/pos/preorders`, { headers: adminHeaders() });
-      if (!res.ok) throw new Error("Failed to load pre-orders");
-      const d = await res.json();
+      // Offline in the store: the list last saved on this tablet.
+      const d = await cachedGet<{ preorders?: Preorder[] }>("/admin/pos/preorders");
+      if (!d) throw new Error("Failed to load pre-orders");
       setPreorders(d.preorders ?? []);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Load pre-orders failed");
@@ -212,18 +220,31 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
   }, []);
 
   useEffect(() => { void loadPreorders(); }, [loadPreorders]);
+  // When a pre-order saved offline reaches the server, show the list from the server again.
+  useEffect(() => {
+    let count = waitingHere().length;
+    const refresh = () => {
+      const now = waitingHere();
+      setHere(now);
+      if (now.length < count) void loadPreorders();
+      count = now.length;
+    };
+    refresh();
+    window.addEventListener(QUEUE_EVENT, refresh);
+    return () => window.removeEventListener(QUEUE_EVENT, refresh);
+  }, [loadPreorders]);
 
   const loadBuilder = useCallback(async () => {
     try {
       const [p, c, s] = await Promise.all([
-        fetch(`${API_URL}/admin/products`, { headers: adminHeaders() }).then((r) => r.json()),
-        fetch(`${API_URL}/admin/customers`, { headers: adminHeaders() }).then((r) => r.json()),
-        fetch(`${API_URL}/admin/settings`, { headers: adminHeaders() }).then((r) => r.json()),
+        cachedGet<{ products?: PosProduct[] }>("/admin/products"),
+        cachedGet<{ customers?: PosCustomer[] }>("/admin/customers"),
+        cachedGet<{ settings?: { hidePricePreOrder?: boolean }; store?: { name?: string } }>("/admin/settings"),
       ]);
       setHidePrice(Boolean(s?.settings?.hidePricePreOrder));
       setStoreName(s?.store?.name ?? "");
-      setBuildProducts(p.products ?? []);
-      setBuildCustomers(c.customers ?? []);
+      setBuildProducts(p?.products ?? []);
+      setBuildCustomers(c?.customers ?? []);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Load failed");
     }
@@ -363,22 +384,6 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
     changeLine(lineKey(l), (x) => ({ ...x, priceText: v, price: same || !Number.isFinite(m) ? undefined : m, reason: same ? undefined : x.reason }));
   };
 
-  // Customer: select existing, or quick-create (autosave) by name/phone.
-  const ensureCustomer = async (): Promise<string | null> => {
-    if (buildCustomerId) return buildCustomerId;
-    if (!buildNewName.trim()) return null;
-    const res = await fetch(`${API_URL}/admin/pos/quick-customer`, {
-      method: "POST", headers: { "Content-Type": "application/json", ...adminHeaders() },
-      body: JSON.stringify({ name: buildNewName.trim(), phone: buildNewPhone.trim() || undefined }),
-    });
-    const d = await readJson(res);
-    if (!d) throw new Error("The server took too long to answer (it may have been asleep). Tap Save again.");
-    if (!res.ok) return null;
-    setBuildCustomerId(d.id);
-    await loadBuilder();
-    return d.id;
-  };
-
   const overridePart = (l: CartLine) => (l.price !== undefined && l.price !== l.product.priceMinor ? { unitPriceMinorOverride: l.price, priceOverrideReason: l.reason?.trim() } : {});
 
   // Save a new ON_HOLD pre-order, or the changed lines of the one being edited; then back to the list.
@@ -389,22 +394,42 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
     try {
       let res: Response;
       if (editingPre) {
+        if (typeof navigator !== "undefined" && navigator.onLine === false) { setError("Changing a pre-order needs the internet. Make a new one, or try again when the internet is back."); return; }
         res = await fetch(`${API_URL}/admin/pos/preorders/${editingPre.id}/items`, {
           method: "PATCH", headers: { "Content-Type": "application/json", ...adminHeaders() },
           body: JSON.stringify({ items: buildCart.map((l) => ({ productId: l.product.id, variantId: l.variantId ?? undefined, quantity: l.quantity, ...overridePart(l) })) }),
         });
       } else {
-        const customer = await ensureCustomer();
-        if (!customer) { setError("Choose a customer or type a new name."); return; }
-        res = await fetch(`${API_URL}/admin/pos/preorder`, {
-          method: "POST", headers: { "Content-Type": "application/json", ...adminHeaders() },
-          body: JSON.stringify({ items: buildCart.map((l) => ({ productId: l.product.id, quantity: l.quantity, ...overridePart(l) })), customerId: customer }),
-        });
+        // A new customer is made by the server with the pre-order, so this works with no internet too.
+        const name = buildNewName.trim();
+        if (!buildCustomerId && !name) { setError("Choose a customer or type a new name."); return; }
+        const key = newSaleKey();
+        const who = buildCustomerId ? { customerId: buildCustomerId } : { customerName: name, customerPhone: buildNewPhone.trim() || undefined };
+        const body = { items: buildCart.map((l) => ({ productId: l.product.id, quantity: l.quantity, ...overridePart(l) })), ...who, idempotencyKey: key };
+        const customerName = buildCustomerId ? (buildCustomers.find((c) => c.id === buildCustomerId)?.name ?? "") : name;
+        const view: Preorder = {
+          id: key, orderNumber: offlineRef(key), customerName, storeCustomerId: buildCustomerId || null, status: "ON_HOLD",
+          totalMinor: buildCart.reduce((t, l) => t + unitOf(l) * l.quantity, 0), createdAt: new Date().toISOString(), dueAt: null,
+          items: buildCart.map((l) => ({ productId: l.product.id, productName: l.product.name, unitPriceMinor: unitOf(l), quantity: l.quantity, lineTotalMinor: unitOf(l) * l.quantity })),
+        };
+        const sent = await sendStep(PREORDER_PATH, body, `Pre-order ${customerName}`, view);
+        if (sent.status === "queued") {
+          toast("No internet — the pre-order is saved on this tablet and will be sent when the internet is back");
+          clearBuild();
+          setSubTab("list");
+          return;
+        }
+        if (!sent.ok) { setError(sent.data?.errors?.join(", ") ?? sent.data?.message ?? SLOW_SERVER); return; }
+        toast(`Pre-order saved — ${String(sent.data?.orderNumber ?? "")}`);
+        clearBuild();
+        await Promise.all([loadPreorders(), loadBuilder()]);
+        setSubTab("list");
+        return;
       }
       const data = await readJson(res);
       if (!data) { setError(SLOW_SERVER); await loadPreorders(); return; }
       if (!res.ok) { setError(data?.errors?.join(", ") ?? data?.message ?? "Could not save the pre-order"); return; }
-      toast(editingPre ? `Saved — ${editingPre.orderNumber}` : `Pre-order saved — ${data.orderNumber}`);
+      toast(`Saved — ${editingPre.orderNumber}`);
       clearBuild();
       await loadPreorders();
       setSubTab("list");
@@ -506,7 +531,7 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
   });
 
   /** One pre-order as a card: who, what, how much, then the actions (Complete sale first). */
-  const preCard = (p: Preorder, pastDue: boolean) => (
+  const preCard = (p: Preorder, pastDue: boolean, local = false) => (
     <div className="col" key={p.id}>
       <div className={`card h-100 ${pastDue ? "border-danger" : ""}`}>
         <div className="card-body d-flex flex-column">
@@ -519,7 +544,13 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
           </div>
           {p.dueAt && <div className={`small mb-1 ${pastDue ? "text-danger fw-semibold" : "text-muted"}`}>Due {fmtDate(p.dueAt)}{pastDue ? " (late)" : ""}</div>}
           <div className="mb-3 flex-grow-1">{itemLines(p, 4)}</div>
-          {p.status === "ON_HOLD" && (
+          {local && (
+            <>
+              <div className="small text-warning-emphasis mb-2"><i className="bi bi-wifi-off me-1"></i>Saved on this tablet — it is sent when the internet is back. Complete, change or delete it after that.</div>
+              <button className="btn btn-outline-dark w-100" onClick={() => printSlip(preorderSlip(p))}><i className="bi bi-printer me-1"></i>Print</button>
+            </>
+          )}
+          {!local && p.status === "ON_HOLD" && (
             <>
               <button className="btn btn-success btn-lg w-100 mb-2" onClick={() => openFinalize(p)}><i className="bi bi-check2-circle me-1"></i>Complete sale</button>
               <div className="d-flex gap-2">
@@ -540,10 +571,16 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
   const renderList = (done: boolean) => {
     if (preLoading) return <p className="text-muted text-center py-4">Loading pre-orders…</p>;
     const rows = done ? completed : drafts;
+    const local = done ? [] : here;
     return (
       <>
         {summaryCard()}
-        {rows.length === 0 ? (
+        {local.length > 0 && (
+          <div className="row row-cols-1 row-cols-md-2 row-cols-xl-3 g-3 mb-3">
+            {local.map((p) => preCard(p, false, true))}
+          </div>
+        )}
+        {rows.length === 0 && local.length > 0 ? null : rows.length === 0 ? (
           <div className="text-muted text-center py-4">
             <i className={`${done ? "bi bi-check2-circle" : "bi bi-bag-check"} fs-1 d-block mb-2`} aria-hidden="true"></i>
             {done ? "No completed pre-orders on these dates." : "No pre-orders waiting."}
@@ -729,7 +766,7 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
 
       {subTab !== "build" && (
         <div className="btn-group w-100 mb-3" role="group" aria-label="Pre-order list">
-          <button type="button" className={`btn btn-lg ${subTab === "list" ? "btn-dark" : "btn-outline-dark"}`} aria-pressed={subTab === "list"} onClick={() => setSubTab("list")}>Waiting ({drafts.length})</button>
+          <button type="button" className={`btn btn-lg ${subTab === "list" ? "btn-dark" : "btn-outline-dark"}`} aria-pressed={subTab === "list"} onClick={() => setSubTab("list")}>Waiting ({drafts.length + here.length})</button>
           <button type="button" className={`btn btn-lg ${subTab === "finalize" ? "btn-dark" : "btn-outline-dark"}`} aria-pressed={subTab === "finalize"} onClick={() => setSubTab("finalize")}>Done</button>
         </div>
       )}

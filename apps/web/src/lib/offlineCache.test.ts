@@ -1,0 +1,64 @@
+// Offline in the store — screens open from the last good answer when the server can't be reached.
+import { test, beforeEach } from "node:test";
+import assert from "node:assert/strict";
+import { cachedGet, isOffline, offlineRef, savedCopy } from "./offlineCache";
+
+const mem = new Map<string, string>();
+const storage = { getItem: (k: string) => mem.get(k) ?? null, setItem: (k: string, v: string) => void mem.set(k, v), removeItem: (k: string) => void mem.delete(k) };
+Object.assign(globalThis, { window: { localStorage: storage, sessionStorage: storage, dispatchEvent: () => true, location: { pathname: "/admin/dashboard", assign: () => {} } }, localStorage: storage, sessionStorage: storage });
+Object.defineProperty(globalThis, "navigator", { value: { onLine: true }, configurable: true });
+
+const answer = (status: number, body: unknown, headers: Record<string, string> = { "x-request-id": "r1" }) => async () => new Response(JSON.stringify(body), { status, headers });
+const nav = globalThis.navigator as { onLine: boolean };
+
+beforeEach(() => { mem.clear(); mem.set("samstore.admin.storeId", "s1"); nav.onLine = true; });
+
+test("a good answer is saved and returned", async () => {
+  globalThis.fetch = answer(200, { products: [1, 2] }) as typeof fetch;
+  assert.deepEqual(await cachedGet("/admin/benta/catalog"), { products: [1, 2] });
+  assert.deepEqual(savedCopy("/admin/benta/catalog"), { products: [1, 2] });
+  assert.equal(isOffline(), false);
+});
+
+test("no internet: the saved copy, without asking the server", async () => {
+  globalThis.fetch = answer(200, { products: [1] }) as typeof fetch;
+  await cachedGet("/admin/benta/catalog");
+  nav.onLine = false;
+  globalThis.fetch = (async () => { throw new Error("must not be called"); }) as typeof fetch;
+  assert.deepEqual(await cachedGet("/admin/benta/catalog"), { products: [1] });
+  assert.equal(isOffline(), true);
+});
+
+test("server asleep (proxy 500 without X-Request-Id) or unreachable: the saved copy", async () => {
+  globalThis.fetch = answer(200, { a: 1 }) as typeof fetch;
+  await cachedGet("/admin/settings");
+  globalThis.fetch = answer(500, "Internal Server Error", {}) as typeof fetch;
+  assert.deepEqual(await cachedGet("/admin/settings"), { a: 1 });
+  globalThis.fetch = (async () => { throw new TypeError("Failed to fetch"); }) as typeof fetch;
+  assert.deepEqual(await cachedGet("/admin/settings"), { a: 1 });
+  assert.equal(isOffline(), true);
+  globalThis.fetch = answer(200, { a: 2 }) as typeof fetch;
+  assert.deepEqual(await cachedGet("/admin/settings"), { a: 2 });
+  assert.equal(isOffline(), false, "a good answer ends offline mode");
+});
+
+test("too slow: the saved copy after the wait", async () => {
+  globalThis.fetch = answer(200, { a: 1 }) as typeof fetch;
+  await cachedGet("/admin/me/rice");
+  globalThis.fetch = ((_u: string, init: RequestInit) => new Promise((_r, rej) => init.signal?.addEventListener("abort", () => rej(new Error("aborted"))))) as typeof fetch;
+  assert.deepEqual(await cachedGet("/admin/me/rice", { waitMs: 20 }), { a: 1 });
+});
+
+test("a clear no (403) is not hidden behind an old copy; each store has its own copy", async () => {
+  globalThis.fetch = answer(200, { a: 1 }) as typeof fetch;
+  await cachedGet("/admin/customers");
+  globalThis.fetch = answer(403, { message: "no" }) as typeof fetch;
+  assert.equal(await cachedGet("/admin/customers"), null);
+  mem.set("samstore.admin.storeId", "s2");
+  nav.onLine = false;
+  assert.equal(await cachedGet("/admin/customers"), null, "store 2 never sees store 1's copy");
+});
+
+test("offline receipt reference", () => {
+  assert.equal(offlineRef("sale-1b2c3d4e-aaaa-bbbb-cccc-0123456789ab"), "OFFLINE-6789AB");
+});

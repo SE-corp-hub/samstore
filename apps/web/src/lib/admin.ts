@@ -26,10 +26,17 @@ export function removeAuthItem(key: string) {
   try { sessionStorage.removeItem(key); } catch { /* ignore */ }
 }
 
-/** Forget the sign-in and the chosen store on this phone. */
+/** Where lib/offlineCache.ts keeps the screens' saved copies. */
+export const SAVED_COPY_PREFIX = "rice-cache-v1:";
+
+/** Forget the sign-in, the chosen store and the screens' saved copies on this phone. */
 export function clearAdminSession() {
   removeAuthItem("samstore.admin.token");
   removeAuthItem("samstore.admin.storeId");
+  try {
+    const ls = window.localStorage;
+    for (let i = ls.length - 1; i >= 0; i--) { const k = ls.key(i); if (k?.startsWith(SAVED_COPY_PREFIX)) ls.removeItem(k); }
+  } catch { /* nothing saved */ }
 }
 
 /** Active store id (set by the store switcher). */

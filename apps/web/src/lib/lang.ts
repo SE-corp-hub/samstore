@@ -45,6 +45,7 @@ const WORDS: Record<string, [tl: string, en: string]> = {
   "queue.failed": ["Hindi naipadala", "Not sent"],
   "queue.sendNow": ["Ipadala ngayon", "Send now"],
   "queue.clear": ["Alisin sa listahan", "Clear the list"],
+  "queue.offline": ["Walang internet", "No internet"],
   "queue.queuedToast": ["Walang signal — naka-save sa phone, ipapadala pagbalik ng signal", "No signal — saved on this phone, it will be sent when the signal returns"],
   "lang.switch": ["English", "English"],
 };

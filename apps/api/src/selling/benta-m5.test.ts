@@ -261,6 +261,27 @@ test("M5: an encoded paper slip keeps its real time and number, once", async () 
   assert.equal(future.ok, false);
 });
 
+test("Offline: a sale that waited on the tablet keeps the time it was made; sent twice it is one sale", async () => {
+  const fx = await fixture();
+  const soldAt = new Date(Date.now() - 3 * 3_600_000).toISOString();
+  const k = key();
+  const sale = { idempotencyKey: k, lines: [{ productId: fx.sin25.id, quantity: 1 }], payment: { method: "cash", tenderedMinor: 130_000 }, soldAt };
+  const r = await svc.sell(fx.storeId, fx.staff1, sale);
+  assert.equal(r.ok, true, msg(r));
+  if (!r.ok) return;
+  const o = await prisma.order.findUniqueOrThrow({ where: { id: r.value.orderId } });
+  assert.equal(o.occurredAt?.toISOString(), soldAt, "the tablet time, not the sync time");
+  assert.equal(o.encodedLater, false);
+  const again = await svc.sell(fx.storeId, fx.staff1, sale);
+  assert.equal(again.ok && again.value.replayed, true);
+  assert.equal(await onHand(fx, fx.sin25.id, fx.s1), 9, "one sack left the shelf");
+  const old = await svc.sell(fx.storeId, fx.staff1, { ...sale, idempotencyKey: key(), soldAt: new Date(Date.now() - 9 * 86_400_000).toISOString() });
+  assert.equal(old.ok, true, msg(old));
+  if (!old.ok) return;
+  const o2 = await prisma.order.findUniqueOrThrow({ where: { id: old.value.orderId } });
+  assert.ok(Date.now() - (o2.occurredAt?.getTime() ?? 0) < 60_000, "too old: counted now");
+});
+
 test("M5: utang needs a customer on the list and their signature; GCash needs a reference", async () => {
   const fx = await fixture();
   const noCust = await svc.sell(fx.storeId, fx.staff1, { idempotencyKey: key(), lines: [{ productId: fx.sin25.id, quantity: 1 }], payment: { method: "utang" } });

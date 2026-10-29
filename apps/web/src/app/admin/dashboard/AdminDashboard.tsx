@@ -9,6 +9,9 @@ import {
 import dynamic from "next/dynamic";
 import { API_URL } from "../../../config";
 import { wakeFetch } from "../../../lib/wake-fetch";
+import { saveCopy, savedCopy } from "../../../lib/offlineCache";
+
+const STORES_PATH = "/admin/stores/mine";
 import { resumePendingReceipt } from "../../../lib/slip-print";
 import { useLang, LANG_WORDS } from "../../../lib/lang";
 import QueueBadge from "../../../components/admin/QueueBadge";
@@ -112,34 +115,44 @@ export default function AdminDashboard() {
   const loadStores = useCallback(async () => {
     const token = getAdminToken();
     if (!token) return;
-    setStoresStatus("loading");
+    // Offline in the store: open right away with the store list saved on this tablet, then refresh it.
+    const kept = savedCopy<{ stores?: MyStore[] }>(STORES_PATH, { perStore: false });
+    const applyStores = (mine: MyStore[]) => {
+      setStores(mine);
+      const firstId = mine[0]?.id;
+      if (!getAdminStoreId() && firstId) setAdminStoreId(firstId);
+      setActiveStore(getAdminStoreId());
+      // M7 vocab fix: nav role comes from the ACTIVE store's membership role
+      // (OWNER/…) — the JWT global role can lag it (e.g. an owner whose global
+      // role is still STORE_OWNER or a stale STAFF after promotion).
+      const member = mine.find((s) => s.id === getAdminStoreId());
+      if (member?.role) {
+        if (member.role === "DELIVERY") {
+          router.replace("/admin/delivery");
+          return;
+        }
+        setRole(isOwnerRole(member.role) ? "OWNER" : member.role);
+        if (!userNavigated.current) setTab(defaultTabFor(isOwnerRole(member.role) ? "OWNER" : member.role));
+      }
+      setStoresStatus("ready");
+    };
+    const keptStores = kept?.stores ?? [];
+    const fromKept = keptStores.length > 0;
+    if (fromKept) applyStores(keptStores);
+    else setStoresStatus("loading");
     try {
-      const res = await wakeFetch(`${API_URL}/admin/stores/mine`, { headers: { Authorization: `Bearer ${token}` } }, setWaking);
+      if (fromKept && typeof navigator !== "undefined" && navigator.onLine === false) return;
+      const res = await wakeFetch(`${API_URL}${STORES_PATH}`, { headers: { Authorization: `Bearer ${token}` } }, fromKept ? () => {} : setWaking);
       if (handleUnauthorized(res)) return;
       if (!res.ok) {
-        setStoresStatus("error");
+        if (!fromKept) setStoresStatus("error");
         return;
       }
       const data = await res.json();
       const mine: MyStore[] = (data?.stores ?? []) as MyStore[];
       if (mine.length > 0) {
-        setStores(mine);
-        const firstId = mine[0]?.id;
-        if (!getAdminStoreId() && firstId) setAdminStoreId(firstId);
-        setActiveStore(getAdminStoreId());
-        // M7 vocab fix: nav role comes from the ACTIVE store's membership role
-        // (OWNER/…) — the JWT global role can lag it (e.g. an owner whose global
-        // role is still STORE_OWNER or a stale STAFF after promotion).
-        const member = mine.find((s) => s.id === getAdminStoreId());
-        if (member?.role) {
-          if (member.role === "DELIVERY") {
-            router.replace("/admin/delivery");
-            return;
-          }
-          setRole(isOwnerRole(member.role) ? "OWNER" : member.role);
-          if (!userNavigated.current) setTab(defaultTabFor(isOwnerRole(member.role) ? "OWNER" : member.role));
-        }
-        setStoresStatus("ready");
+        saveCopy(STORES_PATH, data, { perStore: false });
+        applyStores(mine);
         return;
       }
 
@@ -161,7 +174,7 @@ export default function AdminDashboard() {
       }
       setStoresStatus("ready");
     } catch {
-      setStoresStatus("error");
+      if (!fromKept) setStoresStatus("error");
     }
   }, [router]);
 

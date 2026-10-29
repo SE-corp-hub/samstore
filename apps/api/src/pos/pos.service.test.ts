@@ -174,6 +174,22 @@ test("pre-order create ok: ON_HOLD, listed with dueAt, excluded from holds", asy
   }
 });
 
+test("pre-order with an idempotency key: sent twice (offline retry) makes one pre-order", async () => {
+  const fx = await makeFixture();
+  try {
+    const body = { customerId: fx.storeCustomerId, items: [{ productId: fx.productId, quantity: 1 }], idempotencyKey: `pre-${randomId()}` };
+    const first = await svc.createPreOrder(fx.storeId, "actorX", body);
+    const again = await svc.createPreOrder(fx.storeId, "actorX", body);
+    assert.equal(first.ok && again.ok, true);
+    if (!first.ok || !again.ok) return;
+    assert.equal(again.value.orderId, first.value.orderId);
+    assert.equal(again.value.orderNumber, first.value.orderNumber);
+    assert.equal(await fixtureOrderCount(fx.storeId), 1);
+  } finally {
+    await cleanupFixture(fx.storeId, fx.customerId);
+  }
+});
+
 test("finalize requires signature (missing / invalid rejected)", async () => {
   const fx = await makeFixture();
   try {

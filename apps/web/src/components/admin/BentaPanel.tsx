@@ -14,6 +14,7 @@ import { API_URL } from "../../config";
 import { adminHeaders, getAdminStoreId } from "../../lib/admin";
 import { toast } from "../../lib/toast";
 import { sendStep } from "../../lib/offlineQueue";
+import { cachedGet, offlineRef } from "../../lib/offlineCache";
 import { newSaleKey } from "../../lib/saleKey";
 import { photoToJpeg } from "../../lib/photo";
 import NumPad from "./NumPad";
@@ -115,7 +116,7 @@ export default function BentaPanel() {
   const [slipTime, setSlipTime] = useState("");
   const [slipPhoto, setSlipPhoto] = useState<string | null>(null);
   const [staffSig, setStaffSig] = useState<string | null>(null);
-  const [last, setLast] = useState<{ status: "COMPLETED" | "WAITING_OWNER" | "DECLINED"; smsStatus: string | null; orderNumber: string; totalMinor: number; changeMinor: number; lines: { name: string; soldBy: string | null; quantity: number; grams: number | null; lineTotalMinor: number }[]; releases: { docNumber: string }[]; zeroCheck: { productId: string; name: string }[]; belowCost?: string[] } | null>(null);
+  const [last, setLast] = useState<{ status: "COMPLETED" | "WAITING_OWNER" | "DECLINED"; /** Saved on this tablet, not sent yet. */ offline?: boolean; smsStatus: string | null; orderNumber: string; totalMinor: number; changeMinor: number; lines: { name: string; soldBy: string | null; quantity: number; grams: number | null; lineTotalMinor: number }[]; releases: { docNumber: string }[]; zeroCheck: { productId: string; name: string }[]; belowCost?: string[] } | null>(null);
   const [checking, setChecking] = useState<{ productId: string; name: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -136,9 +137,9 @@ export default function BentaPanel() {
 
   const loadCatalog = useCallback(async (loc?: string) => {
     const q = loc ? `?locationId=${encodeURIComponent(loc)}` : "";
-    const res = await fetch(`${API_URL}/admin/benta/catalog${q}`, { headers: adminHeaders() });
-    const d = (await res.json().catch(() => null)) as ApiBody | null;
-    if (!res.ok || !d) { setError(errText(d, "Could not load the products")); return; }
+    // Offline in the store: the last product list and prices saved on this tablet.
+    const d = await cachedGet<ApiBody>(`/admin/benta/catalog${q}`);
+    if (!d?.products) { setError(errText(d, "Could not load the products — connect to the internet once so the tablet can save them")); return; }
     setLocations((d.locations as Loc[]).filter((l) => (l as { type?: string }).type !== "BUFFER"));
     setItems(d.products as Item[]);
     setLocationId((d.location as Loc).id);
@@ -149,8 +150,7 @@ export default function BentaPanel() {
     setPriceCustomer(id); setCustomerId(id); setCustomerSig(null); setSpecialCount(0);
     await loadCatalog(locationId);
     if (!id) return;
-    const res = await fetch(`${API_URL}/admin/benta/customer-prices?customerId=${encodeURIComponent(id)}`, { headers: adminHeaders() });
-    const d = (await res.json().catch(() => null)) as { prices?: { productId: string; priceMinor: number }[] } | null;
+    const d = await cachedGet<{ prices?: { productId: string; priceMinor: number }[] }>(`/admin/benta/customer-prices?customerId=${encodeURIComponent(id)}`);
     const m = new Map((d?.prices ?? []).map((x) => [x.productId, x.priceMinor]));
     setItems((prev) => prev.map((i) => (m.has(i.id) ? { ...i, priceMinor: m.get(i.id)! } : i)));
     setSpecialCount(m.size);
@@ -159,11 +159,11 @@ export default function BentaPanel() {
   useEffect(() => {
     (async () => {
       const [me, cs] = await Promise.all([
-        fetch(`${API_URL}/admin/me/rice`, { headers: adminHeaders() }).then((r) => (r.ok ? r.json() : null)),
-        fetch(`${API_URL}/admin/customers`, { headers: adminHeaders() }).then((r) => (r.ok ? r.json() : null)),
+        cachedGet<{ homeLocationId?: string | null }>("/admin/me/rice"),
+        cachedGet<{ customers?: Customer[] }>("/admin/customers"),
       ]);
       setHomeLocationId(me?.homeLocationId ?? null);
-      fetch(`${API_URL}/admin/settings`, { headers: adminHeaders() }).then((r) => (r.ok ? r.json() : null)).then((d) => setStoreName(d?.store?.name ?? "")).catch(() => {});
+      void cachedGet<{ store?: { name?: string } }>("/admin/settings").then((d) => setStoreName(d?.store?.name ?? ""));
       setCustomers(((cs?.customers ?? []) as Customer[]));
       // A kept cart belongs to the location it was started at.
       const kept = savedCart();
@@ -179,7 +179,7 @@ export default function BentaPanel() {
   }, [cart, locationId]);
 
   const checkDrawer = useCallback(async () => {
-    const r = await fetch(`${API_URL}/admin/registers/current`, { headers: adminHeaders() }).then((x) => (x.ok ? x.json() : null)).catch(() => null);
+    const r = await cachedGet<{ session?: unknown; required?: boolean }>("/admin/registers/current");
     setDrawerOpen(r ? !!r.session : null);
     setShiftRequired(r?.required !== false);
   }, []);
@@ -189,7 +189,7 @@ export default function BentaPanel() {
     storeName: storeName || "SAM STORE", title: "SALES RECEIPT", reference: l.orderNumber, when: new Date().toLocaleString("en-PH"),
     rows: l.lines.map((x) => ({ name: x.name, qty: `${x.soldBy === "PIECE" || !x.grams ? `${x.quantity}` : kg(x.grams)}  ${peso(x.lineTotalMinor)}` })),
     totals: [{ label: "TOTAL", value: peso(l.totalMinor) }, ...(l.changeMinor > 0 ? [{ label: "Change", value: peso(l.changeMinor) }] : [])],
-    footer: l.status === "WAITING_OWNER" ? "Waiting for owner approval" : "Salamat po!",
+    footer: l.status === "WAITING_OWNER" ? "Waiting for owner approval" : l.offline ? "Saved offline · Salamat po!" : "Salamat po!",
   });
   // "Print the receipt right after each sale" (Printer settings on this phone): once per sale.
   const printedFor = useRef<string | null>(null);
@@ -257,13 +257,27 @@ export default function BentaPanel() {
       customerId: pay === "utang" ? customerId : priceCustomer || undefined,
       paperSlip: paper ? { slipNo: slipNo.trim(), occurredAt: new Date(slipTime).toISOString() } : undefined,
       signatures,
+      soldAt: new Date().toISOString(), // a sale that waits offline keeps its real time
     };
     try {
       // Rice Ops M10: with no signal the sale waits on the phone and is sent later — once (same key).
       const sent = await sendStep("/admin/benta", body, `Sale ${peso(total)}`);
       if (sent.status === "queued") {
-        toast("No signal — the sale is saved on this phone and will be sent when the signal is back");
-        reset();
+        // Offline: the sale is done at the counter — show it and print the receipt from this tablet.
+        setLast({
+          status: "COMPLETED", offline: true, smsStatus: null, orderNumber: offlineRef(keyRef.current), totalMinor: total, changeMinor: Math.max(0, change),
+          lines: cart.map((l) => {
+            const it = byId.get(l.productId);
+            const c = lineOf(it, l);
+            return { name: it?.name ?? "Item", soldBy: l.mode === "PIECE" ? "PIECE" : "WEIGHT", quantity: c.units, grams: c.grams, lineTotalMinor: c.totalMinor };
+          }),
+          releases: [], zeroCheck: [],
+        });
+        setTextInfo(null);
+        toast("No internet — the sale is saved on this tablet and will be sent when the internet is back");
+        keyRef.current = null;
+        try { window.sessionStorage.removeItem(cartKey()); } catch { /* convenience only */ }
+        setStep("done");
         return;
       }
       const d = sent.data as ApiBody | null;
@@ -302,6 +316,7 @@ export default function BentaPanel() {
           <div className="alert alert-success">
             <div className="h4 mb-1">Sold</div>
             <div>{last.orderNumber}</div>
+            {last.offline && <div className="small">No internet — saved on this tablet. It is sent by itself when the internet is back (see &quot;Waiting to send&quot; at the top).</div>}
             {last.smsStatus === "QUEUED" && <div className="small">Sending a text to the customer.</div>}
             {last.smsStatus === "SKIPPED" && <div className="small">No text — the customer has no mobile number.</div>}
           </div>
