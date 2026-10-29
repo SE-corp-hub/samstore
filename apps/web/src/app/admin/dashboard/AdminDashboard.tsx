@@ -12,7 +12,7 @@ import { wakeFetch } from "../../../lib/wake-fetch";
 import { saveCopy, savedCopy, useOffline } from "../../../lib/offlineCache";
 
 /** Screens that work with no internet; every other screen still opens, but read-only (its buttons are off). */
-const OFFLINE_READY = new Set(["home", "pos", "preorders"]);
+const OFFLINE_READY = new Set(["home", "pos", "preorders", "orders"]);
 
 const STORES_PATH = "/admin/stores/mine";
 import { resumePendingReceipt } from "../../../lib/slip-print";
