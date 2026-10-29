@@ -39,6 +39,7 @@ Make a backup by hand at any time with **`backup-now.bat`**. Always do this just
 
 ## Stop or change it
 
+- Back up a different database than the one in `.env` (for example the shop on Neon): run `set-backup-database.bat` and paste its address. It is saved in `go-live/backup-database-url.txt`; delete that file to go back to `.env`.
 - The daily run has no window (`run-nightly-backup-hidden.vbs`). A failed run still shows a "Samstore backup" message box. To watch a run, use `backup-now.bat`.
 
 - Change the time or the folder: run `setup-nightly-backup.bat` again (it replaces the old schedule).

@@ -111,9 +111,22 @@ function status() {
   return existsSync(failedFile) ? 1 : 0;
 }
 
+// The shop database may differ from the one in .env (e.g. the shop on Neon while .env is the dev
+// database): go-live/backup-database-url.txt (one line, git ignores it) then wins over .env.
+function useBackupDatabase() {
+  const f = join(root, "go-live", "backup-database-url.txt");
+  if (!existsSync(f)) return;
+  const line = readFileSync(f, "utf8").split(/\r?\n/).map((l) => l.trim()).find((l) => l && !l.startsWith("#"));
+  if (!line) return;
+  let url = line.replace(/^["']|["']$/g, "");
+  if (!/sslmode=/i.test(url)) url += (url.includes("?") ? "&" : "?") + "sslmode=require";
+  process.env.DATABASE_URL = url;
+}
+
 function main() {
   if (process.argv.includes("--status")) return status();
   mkdirSync(dir, { recursive: true });
+  useBackupDatabase();
 
   let run = runBackupOnce();
   if (!run.file) {
