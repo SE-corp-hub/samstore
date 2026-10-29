@@ -16,8 +16,10 @@ export const CACHE_WAIT_MS = 8_000;
 export const OFFLINE_WAIT_MS = 2_000;
 
 let usingSaved = false;
-/** The last real check (see watchConnection) could not reach this app's own web server. */
+/** The last real check (see watchConnection) found no internet at all. */
 let netDown = false;
+/** The internet works but this app's server did not answer in time (free Render waking up). */
+let serverSlow = false;
 
 const changed = () => { try { window.dispatchEvent(new Event(OFFLINE_EVENT)); } catch { /* not in a browser */ } };
 
@@ -31,28 +33,48 @@ function setUsingSaved(v: boolean) {
 export const CHECK_EVERY_MS = 5_000;
 const CHECK_WAIT_MS = 4_000;
 
-/**
- * Ask this app's own web server for a tiny file. Chrome inside GBox can keep saying "online"
- * (navigator.onLine) with the Wi-Fi off, so only a real answer counts as online.
- */
-export async function checkConnection(): Promise<boolean> {
+/** Always awake (unlike the free server), so it tells "no internet" apart from "server asleep". */
+export const INTERNET_PROBE = "https://www.gstatic.com/generate_204";
+
+async function answers(url: string, init: RequestInit, good: (res: Response) => boolean): Promise<boolean> {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), CHECK_WAIT_MS);
-  let ok = false;
   try {
-    const res = await fetch(`/manifest.webmanifest?ping=${Date.now()}`, { method: "HEAD", cache: "no-store", signal: ctl.signal });
-    ok = res.ok || res.status === 405;
+    return good(await fetch(url, { cache: "no-store", ...init, signal: ctl.signal }));
   } catch {
-    ok = false;
+    return false;
   } finally {
     clearTimeout(timer);
   }
-  if (netDown === ok) {
-    netDown = !ok;
-    if (ok) usingSaved = false; // back online: screens ask the server again (it says if it is still asleep)
-    changed();
+}
+
+/**
+ * Is there internet? Chrome inside GBox can keep saying "online" (navigator.onLine) with the
+ * Wi-Fi off, so only a real answer counts. First this app's own web server; when it is slow
+ * (asleep on the free plan) a tiny always-awake Google address decides, so a sleeping server
+ * shows "Connecting to the server…" instead of a false "Offline".
+ */
+export async function checkConnection(): Promise<boolean> {
+  const own = await answers(`/manifest.webmanifest?ping=${Date.now()}`, { method: "HEAD" }, (r) => r.ok || r.status === 405);
+  const ok = own || (await answers(INTERNET_PROBE, { mode: "no-cors" }, () => true));
+  let slow = !own && ok;
+  // While the screens show the saved copy, ask the API too, so the top bar turns Online once it wakes.
+  if (ok && !slow && usingSaved) {
+    const api = await answers(`${API_URL}/health`, {}, (r) => r.ok && !notFromApi(r));
+    if (api) usingSaved = false; else slow = true;
   }
+  const was = connectionState();
+  netDown = !ok;
+  serverSlow = slow;
+  if (ok && !slow) usingSaved = false;
+  if (connectionState() !== was) changed();
   return ok;
+}
+
+/** What the top bar shows: online, offline (no internet), or waking (internet, but the server is not answering yet). */
+export function connectionState(): "online" | "offline" | "waking" {
+  if ((typeof navigator !== "undefined" && navigator.onLine === false) || netDown) return "offline";
+  return serverSlow || usingSaved ? "waking" : "online";
 }
 
 let watching = false;
@@ -85,9 +107,9 @@ export function useOffline(): boolean {
   return offline;
 }
 
-/** True with no internet, or while screens show the saved copy because the server did not answer. */
+/** True with no internet, or while the server does not answer (screens show the saved copy, steps wait on the tablet). */
 export function isOffline(): boolean {
-  return (typeof navigator !== "undefined" && navigator.onLine === false) || netDown || usingSaved;
+  return connectionState() !== "online";
 }
 
 /** Most answers belong to one store; the account's own store list does not. */
