@@ -10,7 +10,9 @@ import { printSlip } from "../../lib/slip-print";
 import { pesoText as peso } from "../../lib/count-view";
 
 interface Store { id: string; name: string; thisMinor: number; lastMinor: number; changePct: number | null; count: number; profitMinor: number }
-interface Consignment { id: string; name: string; owesMinor: number; paidThisWeekMinor: number; lastPaymentAt: string | null; daysSincePayment: number | null; late: boolean }
+interface Consignment { id: string; name: string; mainName?: string; owesMinor: number; paidThisWeekMinor: number; sharesThisWeekMinor?: number; lastPaymentAt: string | null; daysSincePayment: number | null; late: boolean }
+/** Below 0 the main store owes the consignment store its profit share. */
+const whoOwes = (c: Consignment) => (c.owesMinor < 0 ? `${c.mainName ?? "Store 1"} owes ${c.name}` : `${c.name} owes`);
 interface Supplier { id: string; name: string; owedMinor: number; overdueOrders: number }
 interface Reason { code: string; label: string; items: number; shortValueMinor: number; overValueMinor: number }
 interface Running { productId: string; name: string; loose: boolean; urgency: "OUT" | "NOW" | "SOON"; daysLeft: number | null; suggestedQty: number }
@@ -62,7 +64,7 @@ export default function WeeklySummary({ onNavigate }: { onNavigate?: (tab: strin
         { label: "Credit collected", value: peso(d.credit.collectedMinor) },
         { label: "Customers owe now", value: peso(d.credit.owedNowMinor) },
         { label: "You owe suppliers", value: peso(d.suppliers.owedMinor) },
-        ...d.consignment.map((c) => ({ label: `${c.name} owes`, value: peso(c.owesMinor) })),
+        ...d.consignment.map((c) => ({ label: whoOwes(c), value: peso(Math.abs(c.owesMinor)) })),
       ],
       rows: [
         ...d.sales.stores.map((s) => ({ name: `Sales: ${s.name}`, qty: `${peso(s.thisMinor)} (${pctText(s.changePct)})` })),
@@ -124,11 +126,11 @@ export default function WeeklySummary({ onNavigate }: { onNavigate?: (tab: strin
               {data.consignment.map((c) => (
                 <div key={c.id} className="d-flex flex-wrap justify-content-between gap-2 py-1">
                   <div>
-                    <span className="fw-semibold">{c.name}</span> owes <span className="fw-semibold">{peso(c.owesMinor)}</span>
+                    <span className="fw-semibold">{whoOwes(c)}</span> <span className="fw-semibold">{peso(Math.abs(c.owesMinor))}</span>
                     {c.late && <span className="badge text-bg-danger ms-2">Payment late</span>}
                   </div>
                   <div className="small text-muted">
-                    Paid this week {peso(c.paidThisWeekMinor)} · last payment {when(c.lastPaymentAt)}{c.daysSincePayment !== null ? ` (${c.daysSincePayment} day${c.daysSincePayment === 1 ? "" : "s"} ago)` : ""}
+                    Paid this week {peso(c.paidThisWeekMinor)}{c.sharesThisWeekMinor ? ` · profit share this week ${peso(c.sharesThisWeekMinor)}` : ""} · last payment {when(c.lastPaymentAt)}{c.daysSincePayment !== null ? ` (${c.daysSincePayment} day${c.daysSincePayment === 1 ? "" : "s"} ago)` : ""}
                   </div>
                 </div>
               ))}

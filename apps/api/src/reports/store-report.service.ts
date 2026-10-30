@@ -4,6 +4,7 @@
 
 import type { ApiError } from "@sam-store/contracts";
 import { prisma } from "../persistence/prisma-repositories.js";
+import { profitShareByLocation } from "../payable/charges.js";
 import { dayRange, lineCost, manilaDate, ReportError, stockFlag } from "../domain/reports.js";
 import { isLooseP } from "../domain/counting.js";
 import { locationRefusal, type Actor } from "../people/people.service.js";
@@ -24,7 +25,7 @@ function valueOf(loose: boolean, qty: number, unitMinor: number): number {
   return loose ? Math.round((qty * unitMinor) / 1000) : qty * unitMinor;
 }
 
-type SalesTotalsOut = { count: number; totalMinor: number; cashMinor: number; gcashMinor: number; creditMinor: number; otherMinor: number; costMinor?: number; grossProfitMinor?: number };
+type SalesTotalsOut = { count: number; totalMinor: number; cashMinor: number; gcashMinor: number; creditMinor: number; otherMinor: number; costMinor?: number; grossProfitMinor?: number; profitShareMinor?: number };
 type RecordRow = { at: string; kind: "SALE" | "STOCK" | "MONEY"; title: string; detail: string; store: string | null; docNumber: string | null; amountMinor: number | null; qtyText: string | null; balanceText: string | null; by: string | null };
 type CompareRow = {
   location: { id: string; name: string; type: string }; sales: SalesTotalsOut; cashInMinor: number; creditGivenMinor: number; creditCollectedMinor: number;
@@ -158,8 +159,10 @@ export class StoreReportService {
         if (p) { const c = lineCost(i, p.costMinor, loose); t.costMinor += c; cur.costMinor += c; }
       }
     }
+    // Profit share (owner): + at the consignment store for rice the main store took from it, − at the main store.
+    const share = owner ? (await profitShareByLocation(prisma, storeId, range)).get(locationId) ?? 0 : 0;
     return {
-      sales: { count: t.count, totalMinor: t.totalMinor, cashMinor: t.cashMinor, gcashMinor: t.gcashMinor, creditMinor: t.creditMinor, otherMinor: t.otherMinor, ...(owner ? { costMinor: t.costMinor, grossProfitMinor: t.totalMinor - t.costMinor } : {}) },
+      sales: { count: t.count, totalMinor: t.totalMinor, cashMinor: t.cashMinor, gcashMinor: t.gcashMinor, creditMinor: t.creditMinor, otherMinor: t.otherMinor, ...(owner ? { costMinor: t.costMinor, profitShareMinor: share, grossProfitMinor: t.totalMinor - t.costMinor + share } : {}) },
       cashInMinor: payments.filter((p) => p.method === "cash").reduce((s, p) => s + p.amountMinor, 0),
       creditGivenMinor: credits.reduce((s, c) => s + c.amountMinor, 0),
       creditCollectedMinor: payments.filter((p) => !p.orderId && p.method !== "credit").reduce((s, p) => s + p.amountMinor, 0),

@@ -182,3 +182,21 @@ export async function takeBackShare(
   }
   return total;
 }
+
+/**
+ * Profit share by location in a period, for the reports: + at the consignment store (it earned its margin on
+ * rice the main store took), − at the main store (that margin is not its profit). Take-backs and undone shares count.
+ */
+export async function profitShareByLocation(db: Tx, storeId: string, range: { gte: Date; lt: Date }): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  const rows = await db.storePayableEntry.findMany({ where: { storeId, createdAt: range, kind: { in: ["PROFIT_SHARE", "SHARE_BACK", "REVERSAL"] } }, select: { kind: true, locationId: true, amountMinor: true, sourceLocationId: true, reversesId: true } });
+  const undoneIds = rows.flatMap((r) => (r.kind === "REVERSAL" && r.reversesId ? [r.reversesId] : []));
+  const undone = new Map(undoneIds.length ? (await db.storePayableEntry.findMany({ where: { id: { in: undoneIds }, kind: "PROFIT_SHARE" }, select: { id: true, sourceLocationId: true } })).map((e) => [e.id, e.sourceLocationId]) : []);
+  for (const r of rows) {
+    if (r.kind === "REVERSAL" && !undone.has(r.reversesId ?? "")) continue;
+    const main = r.kind === "REVERSAL" ? undone.get(r.reversesId ?? "") : r.sourceLocationId;
+    out.set(r.locationId, (out.get(r.locationId) ?? 0) - r.amountMinor);
+    if (main) out.set(main, (out.get(main) ?? 0) + r.amountMinor);
+  }
+  return out;
+}

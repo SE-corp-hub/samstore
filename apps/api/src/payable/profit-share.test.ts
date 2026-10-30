@@ -12,6 +12,10 @@ import { BentaService } from "../selling/benta.service.js";
 import { PayableService } from "../payable/payable.service.js";
 import { TransferFlowService } from "../transfers/transfer-flow.service.js";
 import { WarehouseService } from "../admin/warehouse.service.js";
+import { RiceReportsService } from "../reports/rice-reports.service.js";
+import { StoreReportService } from "../reports/store-report.service.js";
+import { WeeklySummaryService } from "../reports/weekly-summary.service.js";
+import { manilaDate } from "../domain/reports.js";
 import { type Actor, type SignatureInput } from "../people/people.service.js";
 
 const PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==";
@@ -181,4 +185,48 @@ test("Phase 3: a trip from Store 2 — the share is on what arrived, never on ri
   const got = await flow.receive(fx.storeId, fx.staff1, req.value.id, { quantity: 4, signatures: sigs });
   assert.equal(got.ok, true, msg(got));
   assert.equal(await owes(fx, fx.s2), -80_000, "4 arrived × ₱200; the sack lost on the road earns no share");
+});
+
+test("Phase 4: the reports — Store 2's profit is ₱3,200 and Store 1's is ₱0 on the moved rice; the weekly summary says who owes", async () => {
+  const fx = await fixture();
+  // Store 1 starts with its own 4 sacks out of the way: sell them first, so only moved rice is left at Store 1.
+  assert.equal((await benta.sell(fx.storeId, fx.staff1, { idempotencyKey: key(), locationId: fx.s1, lines: [{ productId: fx.jasmine.id, quantity: 4 }], payment: { method: "cash" } })).ok, true);
+  const before = await new StoreReportService().sales(fx.storeId, fx.owner, { locationId: fx.s1 });
+  assert.equal(before.ok, true, msg(before));
+  const s1Before = before.ok ? before.value.sales.grossProfitMinor ?? 0 : 0;
+  assert.equal(s1Before, 4 * 20_000);
+
+  assert.equal((await flow.moveNow(fx.storeId, fx.owner, { fromLocationId: fx.s2, toLocationId: fx.s1, productId: fx.jasmine.id, quantity: 10 })).ok, true);
+  assert.equal((await benta.sell(fx.storeId, fx.staff1, { idempotencyKey: key(), locationId: fx.s1, lines: [{ productId: fx.jasmine.id, quantity: 10 }], payment: { method: "cash" } })).ok, true);
+  assert.equal((await benta.sell(fx.storeId, fx.staff2, { idempotencyKey: key(), lines: [{ productId: fx.jasmine.id, quantity: 5 }], payment: { method: "cash" } })).ok, true);
+  const countId = await closing(fx, fx.staff2, fx.s2, { [fx.jasmine.id]: 14 });
+  assert.equal((await benta.sellCountShorts(fx.storeId, fx.owner, countId)).ok, true); // the missing sack was a walk-in
+
+  const s1 = await new StoreReportService().sales(fx.storeId, fx.owner, { locationId: fx.s1 });
+  const s2 = await new StoreReportService().sales(fx.storeId, fx.owner, { locationId: fx.s2 });
+  assert.equal(s1.ok && (s1.value.sales.grossProfitMinor ?? 0) - s1Before, 0, "Store 1 earns ₱0 on the moved rice: ₱2,000 margin − ₱2,000 share");
+  assert.equal(s1.ok && s1.value.sales.profitShareMinor, -200_000);
+  assert.equal(s2.ok && s2.value.sales.grossProfitMinor, 320_000, "Store 2: 6 sold × ₱200 + ₱2,000 share");
+  assert.equal(s2.ok && s2.value.sales.profitShareMinor, 200_000);
+  assert.equal(await owes(fx, fx.s2), 490_000);
+
+  const month = await new RiceReportsService().monthly(fx.storeId, fx.owner, manilaDate(new Date()).slice(0, 7));
+  assert.equal(month.ok, true, msg(month));
+  if (!month.ok) return;
+  const at = (id: string) => month.value.locations.find((l) => l.location.id === id)!;
+  assert.equal(at(fx.s2).grossProfitMinor, 320_000);
+  assert.equal(at(fx.s1).grossProfitMinor, 4 * 20_000);
+  assert.equal(month.value.profit.grossProfitMinor, 400_000, "the shares move profit between stores; the total stays 20 sold × ₱200");
+
+  // When the shares are bigger, the weekly summary says the main store owes Store 2.
+  await payable.payment(fx.storeId, fx.owner, { locationId: fx.s2, amountMinor: 490_000 });
+  assert.equal((await flow.moveNow(fx.storeId, fx.owner, { fromLocationId: fx.s2, toLocationId: fx.s1, productId: fx.jasmine.id, quantity: 3 })).ok, true);
+  const week = await new WeeklySummaryService().summary(fx.storeId, fx.owner, {});
+  assert.equal(week.ok, true, msg(week));
+  if (!week.ok) return;
+  const c = week.value.consignment.find((x) => x.id === fx.s2)!;
+  assert.equal(c.owesMinor, -60_000);
+  assert.equal(c.mainName, "Store 1");
+  assert.equal(c.sharesThisWeekMinor, 260_000);
+  assert.equal(c.paidThisWeekMinor, 490_000);
 });

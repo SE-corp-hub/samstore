@@ -15,6 +15,7 @@ import { costModeOf, effectiveCost } from "../domain/shelf-cost.js";
 import type { ApiError } from "@sam-store/contracts";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../persistence/prisma-repositories.js";
+import { profitShareByLocation } from "../payable/charges.js";
 import { aging, dayRange, lineCost, lineGrams, manilaDate, monthRange, pct, ReportError, stockFlag } from "../domain/reports.js";
 import { varietyOf } from "../domain/resack.js";
 import { costValue, isLooseP } from "../domain/counting.js";
@@ -214,8 +215,10 @@ export class RiceReportsService {
       cur.transactions++;
       kargadors.set(s.kargadorId!, cur);
     }
+    // Profit share: + at the consignment store for rice the main store took from it, − at the main store.
+    const share = (await profitShareByLocation(prisma, storeId, range)).get(locationId) ?? 0;
     return {
-      sales: { ...sales, grossProfitMinor: sales.totalMinor - sales.costMinor },
+      sales: { ...sales, profitShareMinor: share, grossProfitMinor: sales.totalMinor - sales.costMinor + share },
       kilosByVariety: [...varieties.entries()].map(([variety, v]) => ({ variety, grams: v.grams, salesMinor: v.salesMinor })).sort((a, b) => b.grams - a.grams),
       utang: { givenMinor: credits.reduce((s, c) => s + c.amountMinor, 0), collectedMinor: utangCollected },
       cash: { expectedMinor: cashIn },
@@ -303,7 +306,7 @@ export class RiceReportsService {
       const dayBounds = dayRange(date);
       const expensesMinor = isOwnerRole ? (await prisma.expense.aggregate({ where: { storeId, spentAt: { gte: dayBounds.from, lt: dayBounds.to } }, _sum: { amountMinor: true } }))._sum.amountMinor ?? 0 : 0;
       // Staff never see profit: it is taken out here, not just hidden on the screen.
-      const shown = isOwnerRole ? sections : sections.map((s) => ({ ...s, sales: { ...s.sales, grossProfitMinor: undefined as unknown as number } }));
+      const shown = isOwnerRole ? sections : sections.map((s) => ({ ...s, sales: { ...s.sales, grossProfitMinor: undefined as unknown as number, profitShareMinor: undefined as unknown as number } }));
       return {
         date, sections: shown,
         total: {
@@ -427,11 +430,13 @@ export class RiceReportsService {
       const stockValue = levels.reduce((s, l) => { const p = byProduct.get(l.productId); return s + (p ? costValue(p, Math.max(0, l.quantityOnHand)) : 0); }, 0);
       const expensesMinor = (await prisma.expense.aggregate({ where: { storeId, spentAt: range }, _sum: { amountMinor: true } }))._sum.amountMinor ?? 0;
       const grossMinor = [...perLoc.values()].reduce((s, L) => s + L.salesMinor - L.costMinor, 0);
+      // The shares move profit between stores and add up to 0, so the total above stays as it is.
+      const shares = await profitShareByLocation(prisma, storeId, range);
       return {
         month: m,
         profit: { grossProfitMinor: grossMinor, expensesMinor, netProfitMinor: grossMinor - expensesMinor },
         locations: [...perLoc.values()].map((L) => ({
-          ...L, grossProfitMinor: L.salesMinor - L.costMinor, resackLossPct: pct(L.resackLossGrams, L.resackGramsIn),
+          ...L, profitShareMinor: shares.get(L.location.id) ?? 0, grossProfitMinor: L.salesMinor - L.costMinor + (shares.get(L.location.id) ?? 0), resackLossPct: pct(L.resackLossGrams, L.resackGramsIn),
         })),
         varieties: [...perVariety.entries()].map(([variety, v]) => ({ variety, ...v, grossProfitMinor: v.salesMinor - v.costMinor })).sort((a, b) => b.grams - a.grams),
         kargadorLoss: [...perKargador.entries()].map(([id, k]) => ({ kargadorId: id, ...k, resackLossPct: pct(k.resackLossGrams, k.resackGramsIn) })),

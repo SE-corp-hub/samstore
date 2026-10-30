@@ -18,7 +18,8 @@ const OWNERS = ["OWNER", "MANAGER", "STORE_OWNER", "PLATFORM_ADMIN"];
 const DAY_MS = 86_400_000;
 
 export interface WeeklyStore { id: string; name: string; thisMinor: number; lastMinor: number; changePct: number | null; count: number; profitMinor: number }
-export interface WeeklyConsignment { id: string; name: string; owesMinor: number; paidThisWeekMinor: number; lastPaymentAt: string | null; daysSincePayment: number | null; late: boolean }
+/** owesMinor below 0: the main store (mainName) owes the consignment store its profit share; `late` is about whoever owes. */
+export interface WeeklyConsignment { id: string; name: string; mainName: string; owesMinor: number; paidThisWeekMinor: number; sharesThisWeekMinor: number; lastPaymentAt: string | null; daysSincePayment: number | null; late: boolean }
 export interface WeeklySupplier { id: string; name: string; owedMinor: number; overdueOrders: number }
 export interface WeeklyReason { code: string; label: string; items: number; shortValueMinor: number; overValueMinor: number }
 export interface WeeklyRunning { productId: string; name: string; loose: boolean; urgency: "OUT" | "NOW" | "SOON"; daysLeft: number | null; suggestedQty: number }
@@ -75,18 +76,27 @@ export class WeeklySummaryService {
     if (consignStores.length > 0) {
       const ids = consignStores.map((c) => c.id);
       const weekStart = new Date(`${w.thisFrom}T00:00:00+08:00`);
+      const mainName = (await prisma.warehouse.findFirst({ where: { storeId, isDefault: true }, select: { name: true } }))?.name ?? "Store 1";
       const owes = await prisma.storePayableEntry.groupBy({ by: ["locationId"], where: { storeId, locationId: { in: ids } }, _sum: { amountMinor: true } });
-      const paid = await prisma.storePayableEntry.groupBy({ by: ["locationId"], where: { storeId, locationId: { in: ids }, kind: "PAYMENT", createdAt: { gte: weekStart } }, _sum: { amountMinor: true } });
-      const lastPay = await prisma.storePayableEntry.groupBy({ by: ["locationId"], where: { storeId, locationId: { in: ids }, kind: "PAYMENT" }, _max: { createdAt: true } });
+      // A payment by the store is below 0; the main store paying the store its profit share is above 0.
+      const pay = (toStore: boolean) => ({ storeId, locationId: { in: ids }, kind: "PAYMENT", amountMinor: toStore ? { gt: 0 } : { lt: 0 } });
+      const paid = await prisma.storePayableEntry.groupBy({ by: ["locationId"], where: { ...pay(false), createdAt: { gte: weekStart } }, _sum: { amountMinor: true } });
+      const shares = await prisma.storePayableEntry.groupBy({ by: ["locationId"], where: { storeId, locationId: { in: ids }, kind: { in: ["PROFIT_SHARE", "SHARE_BACK"] }, createdAt: { gte: weekStart } }, _sum: { amountMinor: true } });
+      const lastPay = await prisma.storePayableEntry.groupBy({ by: ["locationId"], where: pay(false), _max: { createdAt: true } });
+      const lastPaidTo = await prisma.storePayableEntry.groupBy({ by: ["locationId"], where: pay(true), _max: { createdAt: true } });
       const firstCharge = await prisma.storePayableEntry.groupBy({ by: ["locationId"], where: { storeId, locationId: { in: ids }, kind: "CHARGE" }, _min: { createdAt: true } });
+      const firstShare = await prisma.storePayableEntry.groupBy({ by: ["locationId"], where: { storeId, locationId: { in: ids }, kind: "PROFIT_SHARE" }, _min: { createdAt: true } });
       for (const c of consignStores) {
         const owesMinor = owes.find((x) => x.locationId === c.id)?._sum.amountMinor ?? 0;
-        const last = lastPay.find((x) => x.locationId === c.id)?._max.createdAt ?? null;
-        const since = last ?? firstCharge.find((x) => x.locationId === c.id)?._min.createdAt ?? null;
+        // Whoever owes is reminded: the store when it owes, the main store when the shares are bigger.
+        const mainOwes = owesMinor < 0;
+        const last = (mainOwes ? lastPaidTo : lastPay).find((x) => x.locationId === c.id)?._max.createdAt ?? null;
+        const since = last ?? (mainOwes ? firstShare : firstCharge).find((x) => x.locationId === c.id)?._min.createdAt ?? null;
         consignment.push({
-          id: c.id, name: c.name, owesMinor, paidThisWeekMinor: -(paid.find((x) => x.locationId === c.id)?._sum.amountMinor ?? 0),
+          id: c.id, name: c.name, mainName, owesMinor, paidThisWeekMinor: -(paid.find((x) => x.locationId === c.id)?._sum.amountMinor ?? 0),
+          sharesThisWeekMinor: -(shares.find((x) => x.locationId === c.id)?._sum.amountMinor ?? 0),
           lastPaymentAt: last ? last.toISOString() : null, daysSincePayment: daysSince(last, now),
-          late: owesMinor > 0 && !!since && since.getTime() < now.getTime() - 7 * DAY_MS,
+          late: owesMinor !== 0 && !!since && since.getTime() < now.getTime() - 7 * DAY_MS,
         });
       }
     }
