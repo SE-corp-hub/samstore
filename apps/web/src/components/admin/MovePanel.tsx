@@ -15,7 +15,7 @@ import { peso } from "../../lib/number-format";
 
 interface Place { id: string; name: string; code: string | null; isActive: boolean }
 interface ProductOption { id: string; name: string }
-interface MoveRow { id: string; docNumber: string | null; productName: string; quantity: number; from: string; to: string; note: string | null; at: string; profitShareMinor?: number | null }
+interface MoveRow { id: string; docNumber: string | null; productName: string; quantity: number; from: string; to: string; note: string | null; at: string; profitShareMinor?: number | null; undone?: boolean; canUndo?: boolean }
 type Body = { message?: string; errors?: string[]; docNumber?: string; profitShareMinor?: number };
 
 /** Owner/manager only (the server leaves it out for staff): the profit share this move booked for the store it came from. */
@@ -36,6 +36,7 @@ export default function MovePanel() {
   const [rows, setRows] = useState<MoveRow[]>([]);
   const [storeName, setStoreName] = useState("");
   const [receipt, setReceipt] = useState<Slip | null>(null);
+  const [undoing, setUndoing] = useState<string | null>(null);
   useEffect(() => { void fetch(`${API_URL}/admin/settings`, { headers: adminHeaders() }).then((r) => (r.ok ? r.json() : null)).then((d) => setStoreName(d?.name ?? "")).catch(() => {}); }, []);
   useEffect(() => { if (receipt && getPrinterSettings().autoPrint) printSlip(receipt); }, [receipt]);
   const slipOf = (m: MoveRow): Slip => ({
@@ -49,6 +50,22 @@ export default function MovePanel() {
     const r = await fetch(`${API_URL}/admin/moves`, { headers: adminHeaders() });
     if (r.ok) setRows(((await r.json()).moves ?? []) as MoveRow[]);
   }, []);
+
+  const undo = async (m: MoveRow) => {
+    setBusy(true); setError(null);
+    try {
+      const r = await fetch(`${API_URL}/admin/moves/${m.id}/undo`, { method: "POST", headers: adminHeaders() });
+      const d = (await r.json().catch(() => null)) as Body | null;
+      if (!r.ok) { setError(d?.errors?.join(", ") ?? d?.message ?? "Could not undo the move"); return; }
+      toast(`${m.docNumber ?? "Move"} undone: ${m.quantity} × ${m.productName} back at ${m.from}`);
+      setUndoing(null);
+      await loadRows();
+    } catch {
+      setError("No internet. Undo needs the internet.");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   useEffect(() => {
     (async () => {
@@ -94,7 +111,7 @@ export default function MovePanel() {
   return (
     <div className="container py-3" style={{ maxWidth: 640 }}>
       <h5 className="mb-3">Move stock</h5>
-      {error && <div className="alert alert-danger py-2">{error}</div>}
+      {error && !undoing && <div className="alert alert-danger py-2">{error}</div>}
       <StoreBar label="Moving to" locations={places} value={to} homeLocationId={home} includeBuffer onPick={(id) => { setTo(id); if (id === from) setFrom(""); }} />
       <div className="mb-3">
         <div className="small text-muted mb-1">Taking from</div>
@@ -130,13 +147,25 @@ export default function MovePanel() {
       {rows.length === 0 ? <p className="text-muted small">None yet.</p> : (
         <ul className="list-group">
           {rows.map((m) => (
-            <li key={m.id} className="list-group-item small">
-              <b>{m.quantity} × {m.productName}</b> · {m.from} → {m.to}
-              {!!m.profitShareMinor && <div className="text-info-emphasis">{m.profitShareMinor > 0 ? `Profit share ${m.to} owes ${m.from}: ${peso(m.profitShareMinor)}` : `Profit share taken back: ${peso(-m.profitShareMinor)}`}</div>}
+            <li key={m.id} className={`list-group-item small${m.undone ? " text-muted" : ""}`}>
+              <b className={m.undone ? "text-decoration-line-through" : ""}>{m.quantity} × {m.productName}</b> · {m.from} → {m.to}
+              {m.undone && <span className="badge text-bg-secondary ms-2">Undone</span>}
+              {!!m.profitShareMinor && !m.undone && <div className="text-info-emphasis">{m.profitShareMinor > 0 ? `Profit share ${m.to} owes ${m.from}: ${peso(m.profitShareMinor)}` : `Profit share taken back: ${peso(-m.profitShareMinor)}`}</div>}
               <div className="d-flex align-items-center gap-2">
                 <div className="text-muted me-auto">{m.docNumber} · {new Date(m.at).toLocaleString()}{m.note && m.note !== "Moved" ? ` · ${m.note}` : ""}</div>
-                <button type="button" className="btn btn-outline-dark btn-sm text-nowrap" onClick={() => printSlip(slipOf(m))}><i className="bi bi-receipt me-1"></i>Receipt</button>
+                {m.canUndo && undoing !== m.id && <button type="button" className="btn btn-outline-danger btn-sm text-nowrap" disabled={busy} onClick={() => { setError(null); setUndoing(m.id); }}><i className="bi bi-arrow-counterclockwise me-1" aria-hidden="true"></i>Undo</button>}
+                {!m.undone && <button type="button" className="btn btn-outline-dark btn-sm text-nowrap" onClick={() => printSlip(slipOf(m))}><i className="bi bi-receipt me-1"></i>Receipt</button>}
               </div>
+              {undoing === m.id && (
+                <div className="border border-danger-subtle rounded p-2 mt-2 bg-danger-subtle bg-opacity-25" role="group" aria-label={`Undo ${m.docNumber ?? "move"}`}>
+                  {error && <div className="alert alert-danger py-2 mb-2" role="alert">{error}</div>}
+                  <div className="mb-2">Send {m.quantity} × {m.productName} back from {m.to} to {m.from}?{m.profitShareMinor ? " The profit share comes off too." : ""}</div>
+                  <div className="d-flex flex-wrap gap-2">
+                    <button type="button" className="btn btn-danger flex-grow-1 text-nowrap" style={{ minHeight: 44 }} disabled={busy} aria-busy={busy} onClick={() => void undo(m)}>{busy ? "Undoing…" : "Yes, undo the move"}</button>
+                    <button type="button" className="btn btn-outline-secondary text-nowrap" style={{ minHeight: 44 }} disabled={busy} onClick={() => setUndoing(null)}>Keep it</button>
+                  </div>
+                </div>
+              )}
             </li>
           ))}
         </ul>

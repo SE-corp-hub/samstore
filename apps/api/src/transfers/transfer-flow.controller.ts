@@ -117,6 +117,13 @@ export class TransferFlowController {
     return unwrap(await this.flow.moveNow(storeId, actor, { fromLocationId: str(body?.fromLocationId), toLocationId: str(body?.toLocationId), productId: str(body?.productId), quantity: body?.quantity, note: str(body?.note) }));
   }
 
+  /** POST /admin/moves/:id/undo — owner/manager, a one-step move made today. */
+  @Post("moves/:id/undo")
+  async undoMove(@Req() req: Req_, @Param("id") id: string, @Headers("x-store-id") h?: string) {
+    const { storeId, actor } = await this.ctx(req, h, TENANT_ROLES.OWNER_MANAGER);
+    return unwrap(await this.flow.undoMove(storeId, actor, id));
+  }
+
   /** GET /admin/moves?locationId= — recent moves. */
   @Get("moves")
   async moves(@Req() req: Req_, @Query("locationId") locationId?: string, @Headers("x-store-id") h?: string) {

@@ -294,3 +294,49 @@ test("D4: opening sacks at Store 2 — 1 kg per 25 kg is allowed, only the kilos
   assert.equal((await open(fx.staff1, fx.s1, 1, 22_000)).ok, true);
   assert.equal(await prisma.storePayableEntry.count({ where: { storeId: fx.storeId, locationId: fx.s1 } }), 0);
 });
+
+test("G7: undo a move the same day — the stock goes back and the profit share (or the share taken back) comes off", async () => {
+  const fx = await fixture();
+  const move = async (from: string, to: string, quantity: number) => {
+    const r = await flow.moveNow(fx.storeId, fx.owner, { fromLocationId: from, toLocationId: to, productId: fx.jasmine.id, quantity });
+    assert.equal(r.ok, true, msg(r));
+    return r.ok ? r.value.id : "";
+  };
+  const row = async (id: string) => (await flow.recentMoves(fx.storeId, fx.owner)).find((m) => m.id === id);
+
+  // 10 from Store 2 → Store 1: ₱2,000 share. Undo: stock back, share off.
+  const m1 = await move(fx.s2, fx.s1, 10);
+  assert.equal(await owes(fx, fx.s2), -200_000);
+  assert.equal((await row(m1))?.canUndo, true);
+  assert.equal((await flow.recentMoves(fx.storeId, fx.staff1)).find((m) => m.id === m1)?.canUndo, false, "staff cannot undo");
+  const u = await flow.undoMove(fx.storeId, fx.owner, m1);
+  assert.equal(u.ok, true, msg(u));
+  assert.equal(await onHand(fx, fx.jasmine.id, fx.s1), 4);
+  assert.equal(await onHand(fx, fx.jasmine.id, fx.s2), 30);
+  assert.equal(await owes(fx, fx.s2), 0);
+  const r1 = await row(m1);
+  assert.equal(r1?.undone, true);
+  assert.equal(r1?.canUndo, false);
+  assert.match(msg(await flow.undoMove(fx.storeId, fx.owner, m1)), /made today/);
+
+  // 6 to Store 1 (₱1,200), 3 back to Store 2 (₱600 taken back); undo the move back → ₱1,200 again,
+  // and a later move back still finds those 3 sacks to take back.
+  await move(fx.s2, fx.s1, 6);
+  const back = await move(fx.s1, fx.s2, 3);
+  assert.equal(await owes(fx, fx.s2), -60_000);
+  assert.equal((await flow.undoMove(fx.storeId, fx.owner, back)).ok, true);
+  assert.equal(await owes(fx, fx.s2), -120_000);
+  await move(fx.s1, fx.s2, 3);
+  assert.equal(await owes(fx, fx.s2), -60_000);
+
+  // Rice already gone from where it went cannot be sent back.
+  const m3 = await move(fx.s2, fx.s1, 2);
+  const left = await onHand(fx, fx.jasmine.id, fx.s1);
+  await prisma.stockLevel.updateMany({ where: { storeId: fx.storeId, productId: fx.jasmine.id, warehouseId: fx.s1 }, data: { quantityOnHand: 1 } });
+  assert.match(msg(await flow.undoMove(fx.storeId, fx.owner, m3)), /Only 1 of the 2/);
+  await prisma.stockLevel.updateMany({ where: { storeId: fx.storeId, productId: fx.jasmine.id, warehouseId: fx.s1 }, data: { quantityOnHand: left } });
+
+  // A move from an earlier day cannot be undone.
+  await prisma.stockTransfer.update({ where: { id: m3 }, data: { completedAt: new Date(Date.now() - 2 * 86_400_000) } });
+  assert.match(msg(await flow.undoMove(fx.storeId, fx.owner, m3)), /made today/);
+});

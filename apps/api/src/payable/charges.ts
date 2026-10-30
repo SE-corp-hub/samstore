@@ -49,12 +49,24 @@ export async function chargeSale(
 
 /** A voided sale takes its charges (and the profit share of rice it took from a consignment store) away again. */
 export async function reverseSaleCharges(tx: Tx, storeId: string, orderId: string, actorId: string, why: string): Promise<void> {
-  const charges = await tx.storePayableEntry.findMany({ where: { storeId, orderId, kind: { in: ["CHARGE", "PROFIT_SHARE"] } } });
+  await reverseEntries(tx, storeId, await tx.storePayableEntry.findMany({ where: { storeId, orderId, kind: { in: ["CHARGE", "PROFIT_SHARE"] } } }), actorId, why);
+}
+
+/** An undone move: its profit share (or share taken back) comes off. */
+export async function reverseMoveEntries(tx: Tx, storeId: string, transferId: string, actorId: string, why: string): Promise<void> {
+  await reverseEntries(tx, storeId, await tx.storePayableEntry.findMany({ where: { storeId, transferId, kind: { in: ["PROFIT_SHARE", "SHARE_BACK"] } } }), actorId, why);
+}
+
+async function reverseEntries(
+  tx: Tx, storeId: string,
+  charges: { id: string; docNumber: string; locationId: string; amountMinor: number; productId: string | null; quantity: number | null; unitCostMinor: number | null; orderId: string | null; transferId: string | null }[],
+  actorId: string, why: string,
+): Promise<void> {
   for (const c of charges) {
     if (await tx.storePayableEntry.findFirst({ where: { reversesId: c.id }, select: { id: true } })) continue;
     const docNumber = await nextDocNumber(tx, storeId, "SP");
     await tx.storePayableEntry.create({
-      data: { storeId, docNumber, locationId: c.locationId, kind: "REVERSAL", amountMinor: -c.amountMinor, productId: c.productId, quantity: c.quantity, unitCostMinor: c.unitCostMinor, orderId, reversesId: c.id, note: `Undo ${c.docNumber}: ${why}`.slice(0, 200), createdById: actorId },
+      data: { storeId, docNumber, locationId: c.locationId, kind: "REVERSAL", amountMinor: -c.amountMinor, productId: c.productId, quantity: c.quantity, unitCostMinor: c.unitCostMinor, orderId: c.orderId, transferId: c.transferId, reversesId: c.id, note: `Undo ${c.docNumber}: ${why}`.slice(0, 200), createdById: actorId },
     });
   }
 }
@@ -190,7 +202,9 @@ export async function takeBackShare(
   const where = { storeId: input.storeId, locationId: input.toId, productId: input.productId, createdAt: { gte: since } };
   const shares = await tx.storePayableEntry.findMany({ where: { ...where, kind: "PROFIT_SHARE" }, orderBy: { createdAt: "desc" }, select: { id: true, quantity: true, unitCostMinor: true } });
   const undone = new Set((await tx.storePayableEntry.findMany({ where: { reversesId: { in: shares.map((s) => s.id) } }, select: { reversesId: true } })).map((r) => r.reversesId));
-  let back = (await tx.storePayableEntry.aggregate({ where: { ...where, kind: "SHARE_BACK" }, _sum: { quantity: true } }))._sum.quantity ?? 0;
+  const backs = await tx.storePayableEntry.findMany({ where: { ...where, kind: "SHARE_BACK" }, select: { id: true, quantity: true } });
+  const backUndone = new Set((await tx.storePayableEntry.findMany({ where: { reversesId: { in: backs.map((b) => b.id) } }, select: { reversesId: true } })).map((r) => r.reversesId));
+  let back = backs.filter((b) => !backUndone.has(b.id)).reduce((a, b) => a + (b.quantity ?? 0), 0);
   const product = await tx.product.findFirstOrThrow({ where: { id: input.productId }, select: { stockBaseUnit: true, stockBaseQuantity: true } });
   // The newest shares are taken back first; what earlier take-backs used is skipped oldest-first.
   const open: { qty: number; margin: number }[] = [];
@@ -228,7 +242,7 @@ export async function profitShareByLocation(db: Tx, storeId: string, range: { gt
   const out = new Map<string, number>();
   const rows = await db.storePayableEntry.findMany({ where: { storeId, createdAt: range, kind: { in: ["PROFIT_SHARE", "SHARE_BACK", "REVERSAL"] } }, select: { kind: true, locationId: true, amountMinor: true, sourceLocationId: true, reversesId: true } });
   const undoneIds = rows.flatMap((r) => (r.kind === "REVERSAL" && r.reversesId ? [r.reversesId] : []));
-  const undone = new Map(undoneIds.length ? (await db.storePayableEntry.findMany({ where: { id: { in: undoneIds }, kind: "PROFIT_SHARE" }, select: { id: true, sourceLocationId: true } })).map((e) => [e.id, e.sourceLocationId]) : []);
+  const undone = new Map(undoneIds.length ? (await db.storePayableEntry.findMany({ where: { id: { in: undoneIds }, kind: { in: ["PROFIT_SHARE", "SHARE_BACK"] } }, select: { id: true, sourceLocationId: true } })).map((e) => [e.id, e.sourceLocationId]) : []);
   for (const r of rows) {
     if (r.kind === "REVERSAL" && !undone.has(r.reversesId ?? "")) continue;
     const main = r.kind === "REVERSAL" ? undone.get(r.reversesId ?? "") : r.sourceLocationId;
