@@ -307,6 +307,9 @@ test("Move stock: one step changes both counts and keeps a record; staff can't m
   assert.deepEqual(await level(fx, fx.wh), { quantityOnHand: 16, quantityReserved: 0 });
   assert.deepEqual(await level(fx, fx.s1), { quantityOnHand: 5, quantityReserved: 0 });
   assert.equal((await flow.recentMoves(fx.storeId, fx.staff1)).length, 1);
+  const hour = 3_600_000;
+  assert.equal((await flow.recentMoves(fx.storeId, fx.staff1, undefined, { from: new Date(Date.now() - hour).toISOString(), to: new Date(Date.now() + hour).toISOString() })).length, 1, "the date range includes today's move");
+  assert.equal((await flow.recentMoves(fx.storeId, fx.staff1, undefined, { to: new Date(Date.now() - hour).toISOString() })).length, 0, "a range that ends before the move leaves it out");
   const between = await flow.moveNow(fx.storeId, fx.staff1, { fromLocationId: fx.wh, toLocationId: fx.s2, productId: fx.productId, quantity: 1 });
   assert.equal(!between.ok && between.error.type, "forbidden");
   const tooMany = await flow.moveNow(fx.storeId, fx.owner, { fromLocationId: fx.s2, toLocationId: fx.s1, productId: fx.productId, quantity: 50 });
