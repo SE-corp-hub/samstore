@@ -3,9 +3,11 @@
 // Overview — KPI landing (U3): today's sales, pending, out-for-delivery, low stock, utang.
 // Numbers come from the live API (analytics/status, analytics/daily, inventory, credit/utang).
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { API_URL } from "../../config";
-import { adminHeaders, handleUnauthorized } from "../../lib/admin";
+import { adminHeaders } from "../../lib/admin";
+import { connectionState } from "../../lib/offlineCache";
+import { getWidget, overviewNotice, RETRY_EVERY_MS, type Notice } from "../../lib/overview-load";
 import BarChart from "./BarChart";
 import { peso } from "../../lib/number-format";
 
@@ -31,51 +33,47 @@ export default function OverviewPanel({ onNavigate, storeSlug, storeName }: Over
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [top, setTop] = useState<{ byVisits: { id: string; name: string; visits: number; totalMinor: number }[]; byAmount: { id: string; name: string; visits: number; totalMinor: number }[] } | null>(null);
   const [topBy, setTopBy] = useState<"amount" | "visits">("amount");
-  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<Notice | null>(null);
   const [loading, setLoading] = useState(true);
-  const [partial, setPartial] = useState(false); // true when some widgets failed but page still renders
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    setPartial(false);
+  const tries = useRef(0);
+  const [liveRound, setLiveRound] = useState(0);
+  const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // quiet: a background ask while the server wakes keeps the cards on screen (no spinner).
+  const load = useCallback(async (quiet = false) => {
+    if (retryTimer.current) clearTimeout(retryTimer.current);
+    if (!quiet) { setLoading(true); tries.current = 0; }
     // Each widget fetches independently — one failure never blanks the whole page.
-    const [sRes, dRes, iRes] = await Promise.all([
-      fetch(`${API_URL}/admin/analytics/status`, { headers: adminHeaders() }).catch(() => null),
-      fetch(`${API_URL}/admin/analytics/daily?days=7`, { headers: adminHeaders() }).catch(() => null),
-      fetch(`${API_URL}/admin/inventory?status=low`, { headers: adminHeaders() }).catch(() => null),
+    const [s, d, i] = await Promise.all([
+      getWidget<{ rows?: StatusRow[] }>("/admin/analytics/status"),
+      getWidget<{ days?: DayRow[] }>("/admin/analytics/daily?days=7"),
+      getWidget<{ items?: any[] }>("/admin/inventory?status=low"),
     ]);
-    let failed = 0;
-    let forbidden = 0;
-    let unauthorized = false;
-    if (sRes?.ok) setStatus((await sRes.json()).rows ?? []);
-    else { failed++; if (sRes?.status === 403) forbidden++; }
-    if (dRes?.ok) setDaily((await dRes.json()).days ?? []);
-    else { failed++; if (dRes?.status === 403) forbidden++; }
-    if (iRes?.ok) {
-      const items = ((await iRes.json()).items ?? []);
+    // A dead session explains every widget failing at once — getWidget already sent the operator to login.
+    if ([s, d, i].some((w) => w.kind === "unauthorized")) return;
+    if (s.kind === "live" || s.kind === "saved") setStatus(s.data.rows ?? []);
+    if (d.kind === "live" || d.kind === "saved") setDaily(d.data.days ?? []);
+    if (i.kind === "live" || i.kind === "saved") {
+      const items = i.data.items ?? [];
       setLowStockCount(items.length);
       setLowItems(items.slice(0, 5).map((x: any) => ({ name: x.name ?? x.productName ?? "Item", availableQuantity: x.availableQuantity ?? 0 })));
-    } else { failed++; if (iRes?.status === 403) forbidden++; }
-    // A dead session explains every widget failing at once — send the operator to
-    // login instead of reporting a generic load failure they cannot act on.
-    unauthorized = [sRes, dRes, iRes].some((r) => handleUnauthorized(r));
-    if (unauthorized) return;
-    if (failed === 3 && forbidden === 3) {
-      // Every widget was refused for want of a store: a platform operator who hasn't
-      // picked a tenant yet. Say what to do instead of blaming a failed load.
-      setError("Select a store from the switcher above to view its dashboard.");
-      setPartial(false);
-    } else if (failed === 3) {
-      setError("Failed to load overview");
-      setPartial(false);
-    } else if (failed > 0) {
-      setPartial(true); // page renders; banner says some widgets couldn't load
-      setError("Some widgets couldn't load — showing what's available.");
+    }
+    const n = overviewNotice([s, d, i], { offline: connectionState() === "offline", tries: tries.current });
+    setNotice(n);
+    // The free server is still waking (or no internet): ask again by itself until the numbers are live.
+    if (n?.askAgain) {
+      tries.current++;
+      retryTimer.current = setTimeout(() => { void load(true); }, RETRY_EVERY_MS);
+    } else if (tries.current > 0) {
+      // Awake now: the cards below (credit, top customers, target) asked while it slept, so ask again.
+      tries.current = 0;
+      setLiveRound((r) => r + 1);
     }
     setLoading(false);
   }, []);
 
+  useEffect(() => () => { if (retryTimer.current) clearTimeout(retryTimer.current); }, []);
   useEffect(() => { load(); }, [load]);
 
   // Utang owed (owner/manager surface — silently skip on 403)
@@ -88,7 +86,7 @@ export default function OverviewPanel({ onNavigate, storeSlug, storeName }: Over
         setUtangOverdue(custs.filter((c) => (c.daysOverdue ?? 0) > 0).length);
       })
       .catch(() => setUtangMinor(null));
-  }, []);
+  }, [liveRound]);
 
   // Top 10 customers, last 30 days (owner only — silently skipped for other roles)
   useEffect(() => {
@@ -96,7 +94,7 @@ export default function OverviewPanel({ onNavigate, storeSlug, storeName }: Over
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => setTop(d && d.byAmount ? d : null))
       .catch(() => setTop(null));
-  }, []);
+  }, [liveRound]);
 
   // Daily sales target (from store settings) — 0/absent = off.
   useEffect(() => {
@@ -104,7 +102,7 @@ export default function OverviewPanel({ onNavigate, storeSlug, storeName }: Over
       .then((r) => (r.ok ? r.json() : null) as Promise<{ settings?: { dailySalesTargetMinor?: number } } | null>)
       .then((d) => setDailyTargetMinor(d?.settings?.dailySalesTargetMinor ?? 0))
       .catch(() => setDailyTargetMinor(0));
-  }, []);
+  }, [liveRound]);
 
   // Auto-refresh toggle (30s) — persisted per browser.
   useEffect(() => {
@@ -112,7 +110,7 @@ export default function OverviewPanel({ onNavigate, storeSlug, storeName }: Over
   }, []);
   useEffect(() => {
     if (!autoRefresh) return;
-    const id = setInterval(() => { void load(); }, 30_000);
+    const id = setInterval(() => { void load(true); }, 30_000);
     return () => clearInterval(id);
   }, [autoRefresh, load]);
 
@@ -144,7 +142,7 @@ export default function OverviewPanel({ onNavigate, storeSlug, storeName }: Over
               <i className="bi bi-box-arrow-up-right me-1"></i>Open storefront
             </a>
           )}
-          <button className="btn btn-sm btn-outline-secondary" onClick={load} title="Refresh" aria-label="Refresh" disabled={loading}>
+          <button className="btn btn-sm btn-outline-secondary" onClick={() => load()} title="Refresh" aria-label="Refresh" disabled={loading}>
             <i className="bi bi-arrow-clockwise"></i>
           </button>
           <div className="form-check form-switch form-check-sm ms-1" title="Auto-refresh every 30s">
@@ -154,10 +152,10 @@ export default function OverviewPanel({ onNavigate, storeSlug, storeName }: Over
         </div>
       </div>
 
-      {error && (
-        <div className={`alert ${partial ? "alert-warning" : "alert-danger"} py-2 small d-flex justify-content-between align-items-center mb-2`}>
-          <span>{error}</span>
-          <button className="btn btn-sm btn-outline-secondary ms-2" onClick={load} disabled={loading}><i className="bi bi-arrow-clockwise me-1"></i>Retry</button>
+      {notice && (
+        <div className={`alert alert-${notice.tone} py-2 small d-flex justify-content-between align-items-center mb-2`} role="status">
+          <span>{notice.tone === "info" && <span className="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>}{notice.text}</span>
+          <button className="btn btn-sm btn-outline-secondary ms-2" onClick={() => load()} disabled={loading}><i className="bi bi-arrow-clockwise me-1"></i>Retry</button>
         </div>
       )}
 
