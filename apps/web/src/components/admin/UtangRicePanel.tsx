@@ -6,6 +6,10 @@
 //     drawer; a text goes out with what is left.
 //   * Texts: each one shows Sent / Failed (with Send again) / No number.
 //   * Settings (owner): texts on/off, monthly balance text, overdue reminder.
+// Layout (same pattern as Orders): filter chips with counts, list rows ≥64px; sideways (WIDE) the list
+// and the chosen customer sit side by side, upright the customer opens full screen with "← Back".
+// The daily jobs (take a payment, text, print) are at the top of a customer; the owner's limit and
+// special prices fold away under "Customer settings".
 
 import { useCallback, useEffect, useState } from "react";
 import { API_URL } from "../../config";
@@ -19,6 +23,7 @@ import { buildText, openTextApp, type TextKind } from "../../lib/text-message";
 import { creditStatusWords, limitPhrase } from "../../lib/credit-status";
 import { printSlip } from "../../lib/slip-print";
 import { peso } from "../../lib/number-format";
+import { useMediaQuery, WIDE } from "../../lib/use-media-query";
 
 interface Cust {
   id: string; name: string; phone: string | null; balanceMinor: number; creditApproved: boolean; limitMinor: number | null; unlimited: boolean; ownLimit: boolean; status: string; availableMinor: number | null;
@@ -26,7 +31,10 @@ interface Cust {
 }
 interface Sms { id: string; template: string; text: string; status: "QUEUED" | "SENT" | "FAILED" | "SKIPPED" | "OPENED"; provider: string | null; lastError: string | null; createdAt: string; storeCustomer: { customer: { name: string | null } } | null }
 interface Settings { utangSmsEnabled: boolean; utangMonthlyReminder: boolean; utangOverdueReminder: boolean; utangOverdueDays: number; smsSenderName: string | null }
+interface Entry { id: string; type: string; amountMinor: number; startAt: string; dueAt: string | null; note: string | null }
+interface Paid { paidMinor: number; balanceMinor: number; method: "cash" | "gcash"; reference: string; queued: boolean }
 type ApiBody = { message?: string; errors?: string[] } & Record<string, unknown>;
+type Filter = "owing" | "overdue" | "limit" | "all";
 
 /** Days the oldest unpaid purchase is past its due date (payments are applied to the oldest purchases first). */
 function overdueDays(entries: { type: string; amountMinor: number; startAt: string; dueAt: string | null }[], now = Date.now()): number {
@@ -44,6 +52,8 @@ function overdueDays(entries: { type: string; amountMinor: number; startAt: stri
 const errText = (d: ApiBody | null, f: string) => d?.errors?.join(", ") ?? d?.message ?? f;
 const toMinor = (s: string) => Math.round(Number(s || "0") * 100);
 const days = (iso: string | null) => (iso ? Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000) : 0);
+const date = (iso: string) => new Date(iso).toLocaleDateString("en-PH", { month: "short", day: "numeric", year: "numeric" });
+const NUM = { fontVariantNumeric: "tabular-nums" } as const;
 
 function SmsBadge({ s }: { s: Sms["status"] }) {
   if (s === "SENT") return <span className="badge text-bg-success">Sent</span>;
@@ -58,10 +68,23 @@ async function post(path: string, body: unknown): Promise<{ ok: boolean; data: A
   return { ok: res.ok, data: (await res.json().catch(() => null)) as ApiBody | null };
 }
 
+/** One row of pill buttons (44px+), the selected one filled — the same chips as Orders. */
+function Chips<T extends string>({ value, onChange, items, label }: { value: T; onChange: (v: T) => void; items: { id: T; label: string }[]; label: string }) {
+  return (
+    <div className="d-flex flex-wrap gap-2 mb-3" role="group" aria-label={label}>
+      {items.map((it) => (
+        <button key={it.id} type="button" aria-pressed={value === it.id} style={{ minHeight: 44 }}
+          className={`btn rounded-pill px-3 ${value === it.id ? "btn-dark" : "btn-outline-dark"}`} onClick={() => onChange(it.id)}>{it.label}</button>
+      ))}
+    </div>
+  );
+}
+
 export default function UtangRicePanel({ role }: { role?: string; onNavigate?: (tab: string) => void }) {
   const owner = !!role && (isOwnerRole(role) || role === "MANAGER");
+  const wide = useMediaQuery(WIDE);
   const [tab, setTab] = useState<"list" | "texts" | "settings">("list");
-  const [customers, setCustomers] = useState<Cust[]>([]);
+  const [customers, setCustomers] = useState<Cust[] | null>(null);
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<Cust | null>(null);
   const [adding, setAdding] = useState(false);
@@ -70,21 +93,32 @@ export default function UtangRicePanel({ role }: { role?: string; onNavigate?: (
   const [settings, setSettings] = useState<Settings | null>(null);
   const [locationId, setLocationId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [filter, setFilter] = useState<"owing" | "all">("owing");
+  const [filter, setFilter] = useState<Filter>("owing");
   const [storeName, setStoreName] = useState("");
-  const [history, setHistory] = useState<{ id: string; type: string; amountMinor: number; startAt: string; dueAt: string | null; note: string | null }[] | null>(null);
-  const [justPaid, setJustPaid] = useState<{ paidMinor: number; balanceMinor: number } | null>(null);
+  const [history, setHistory] = useState<Entry[] | null>(null);
+  const [justPaid, setJustPaid] = useState<Paid | null>(null);
+  const [showAllHistory, setShowAllHistory] = useState(false);
+  // Entries ticked for the statement; null = not choosing, the statement prints everything.
+  const [pick, setPick] = useState<Set<string> | null>(null);
 
   const load = useCallback(async () => {
     const q = search.trim() ? `?search=${encodeURIComponent(search.trim())}` : "";
     const res = await fetch(`${API_URL}/admin/utang/customers${q}`, { headers: adminHeaders() });
     const d = await res.json().catch(() => null);
     if (!res.ok) { setError(errText(d, "Could not load")); return; }
-    setCustomers(d.customers as Cust[]);
+    const list = d.customers as Cust[];
+    setError(null);
+    setCustomers(list);
+    // Keep the open customer's numbers fresh (a payment, a new limit).
+    setSelected((s) => (s ? list.find((c) => c.id === s.id) ?? s : s));
   }, [search]);
   const loadTexts = useCallback(async (customerId?: string) => {
     const res = await fetch(`${API_URL}/admin/sms${customerId ? `?customerId=${encodeURIComponent(customerId)}` : ""}`, { headers: adminHeaders() });
     if (res.ok) setTexts((await res.json()).messages as Sms[]);
+  }, []);
+  const loadHistory = useCallback(async (id: string) => {
+    const d = await fetch(`${API_URL}/admin/credit/${encodeURIComponent(id)}`, { headers: adminHeaders() }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+    setHistory((d?.entries ?? []) as Entry[]);
   }, []);
   useEffect(() => { void load(); }, [load]);
   useEffect(() => {
@@ -93,32 +127,46 @@ export default function UtangRicePanel({ role }: { role?: string; onNavigate?: (
     void fetch(`${API_URL}/admin/utang/settings`, { headers: adminHeaders() }).then((r) => (r.ok ? r.json() : null)).then((d) => d && setSettings(d.settings as Settings));
   }, []);
   useEffect(() => { if (tab === "texts") void loadTexts(); }, [tab, loadTexts]);
-  useEffect(() => { if (selected) void loadTexts(selected.id); }, [selected, loadTexts]);
   useEffect(() => {
-    setHistory(null); setJustPaid(null);
+    setHistory(null); setJustPaid(null); setPaying(false); setShowAllHistory(false); setPick(null);
     if (!selected) return;
-    void fetch(`${API_URL}/admin/credit/${encodeURIComponent(selected.id)}`, { headers: adminHeaders() }).then((r) => (r.ok ? r.json() : null)).then((d) => setHistory(d?.entries ?? [])).catch(() => setHistory([]));
+    void loadTexts(selected.id);
+    void loadHistory(selected.id);
   }, [selected?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /** Open the phone's text app with the customer's balance (or a payment receipt) ready. */
+  const open = (c: Cust | null) => { setAdding(false); setSelected(c); };
+
+  /** Slip or A4 statement. With entries ticked, only those print; each keeps its real balance after. */
   const printStatement = (c: Cust, a4: boolean) => {
     const entries = [...(history ?? [])].sort((x, y) => new Date(x.startAt).getTime() - new Date(y.startAt).getTime());
     let run = 0;
     const over = overdueDays(entries);
+    const rows = entries.map((e) => {
+      run += e.amountMinor;
+      return {
+        id: e.id,
+        name: `${new Date(e.startAt).toLocaleDateString("en-PH")} ${e.type === "payment" ? "Payment" : "Utang"}${e.dueAt && e.type === "purchase" ? ` (due ${new Date(e.dueAt).toLocaleDateString("en-PH")})` : ""}${e.note ? ` ${e.note}` : ""}`,
+        qty: `${e.type === "payment" ? "-" : ""}${peso(Math.abs(e.amountMinor))}  bal ${peso(run)}`,
+      };
+    });
+    const chosen = pick ? rows.filter((r) => pick.has(r.id)) : rows;
     printSlip({
       storeName: storeName || "SAM STORE", title: "CREDIT STATEMENT", reference: c.name, when: new Date().toLocaleDateString("en-PH"), a4,
-      lines: [...(c.phone ? [{ label: "Phone", value: c.phone }] : []), { label: "Limit", value: limitPhrase(c, peso) }],
-      rows: entries.map((e) => {
-        run += e.amountMinor;
-        return {
-          name: `${new Date(e.startAt).toLocaleDateString("en-PH")} ${e.type === "payment" ? "Payment" : "Utang"}${e.dueAt && e.type === "purchase" ? ` (due ${new Date(e.dueAt).toLocaleDateString("en-PH")})` : ""}${e.note ? ` ${e.note}` : ""}`,
-          qty: `${e.type === "payment" ? "-" : ""}${peso(Math.abs(e.amountMinor))}  bal ${peso(run)}`,
-        };
-      }),
+      lines: [...(c.phone ? [{ label: "Phone", value: c.phone }] : []), { label: "Limit", value: limitPhrase(c, peso) },
+        ...(pick ? [{ label: "Entries", value: `${chosen.length} of ${rows.length}` }] : [])],
+      rows: chosen.map(({ name, qty }) => ({ name, qty })),
       totals: [{ label: "Balance", value: peso(c.balanceMinor) }, { label: "Days overdue", value: over > 0 ? String(over) : "none" }],
       signatures: [{ role: "Received by", name: "" }],
     });
   };
+  /** The customer's copy of a credit payment: what was paid and what is left. */
+  const printPayment = (c: Cust, p: Paid) => printSlip({
+    storeName: storeName || "SAM STORE", title: "CREDIT PAYMENT", reference: c.name, when: new Date().toLocaleString("en-PH"),
+    lines: [{ label: "Paid by", value: p.method === "gcash" ? `GCash ${p.reference}` : "Cash" }],
+    totals: [{ label: "Paid", value: peso(p.paidMinor) }, { label: "Balance left", value: peso(p.balanceMinor) }],
+    signatures: [{ role: "Received by", name: "" }],
+  });
+  /** Open the phone's text app with the customer's balance (or a payment receipt) ready. */
   const textCustomer = (c: Cust, kind: TextKind, extra: { paidMinor?: number; balanceMinor: number }) => {
     const text = buildText(kind, { storeName: storeName || "SAM STORE", customerName: c.name, paidMinor: extra.paidMinor, balanceMinor: extra.balanceMinor });
     if (!openTextApp({ phone: c.phone, text, template: kind, storeCustomerId: c.id })) { toast("This customer has no valid mobile number — add it first", "danger"); return; }
@@ -139,103 +187,226 @@ export default function UtangRicePanel({ role }: { role?: string; onNavigate?: (
     toast("Saved");
   };
 
-  const owing = customers.filter((c) => c.balanceMinor > 0);
-  const shown = filter === "owing" ? owing : customers;
+  const all = customers ?? [];
+  const overAfter = settings?.utangOverdueDays ?? 30;
+  const owing = all.filter((c) => c.balanceMinor > 0);
+  const overdue = owing.filter((c) => days(c.oldestUtangAt) > overAfter).sort((a, b) => days(b.oldestUtangAt) - days(a.oldestUtangAt));
+  const atLimit = owing.filter((c) => c.status === "AT_LIMIT" || c.status === "NEAR_LIMIT");
+  const shown = filter === "owing" ? owing : filter === "overdue" ? overdue : filter === "limit" ? atLimit : all;
   const totalOwed = owing.reduce((s, c) => s + c.balanceMinor, 0);
+  const emptyWords: Record<Filter, string> = {
+    owing: "Nobody owes right now.", overdue: `Nobody has owed for more than ${overAfter} days.`, limit: "Nobody is near or at their limit.", all: "No customers yet.",
+  };
 
-  return (
-    <div style={{ fontSize: 18 }}>
-      <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
-        <h1 className="h4 mb-0">Credit</h1>
-        <span className="fs-5" style={{ fontVariantNumeric: "tabular-nums" }}>Total: <strong>{peso(totalOwed)}</strong> · {owing.length} customers</span>
+  const list = (
+    <>
+      <div className="d-flex gap-2 mb-3">
+        <input type="search" className="form-control form-control-lg" placeholder="Search name or number" aria-label="Search customers" value={search} onChange={(e) => setSearch(e.target.value)} />
+        <button type="button" className="btn btn-success btn-lg text-nowrap" onClick={() => { setSelected(null); setAdding(true); }}><i className="bi bi-person-plus me-1" aria-hidden="true"></i>New</button>
       </div>
-      <ul className="nav nav-tabs mb-3">
-        <li className="nav-item"><button className={`nav-link ${tab === "list" ? "active" : ""}`} onClick={() => { setTab("list"); setSelected(null); }}>Customers</button></li>
-        <li className="nav-item"><button className={`nav-link ${tab === "texts" ? "active" : ""}`} onClick={() => { setTab("texts"); setSelected(null); }}>Texts</button></li>
-        {owner && <li className="nav-item"><button className={`nav-link ${tab === "settings" ? "active" : ""}`} onClick={() => { setTab("settings"); setSelected(null); }}>Settings</button></li>}
-      </ul>
-      {error && <div className="alert alert-danger py-2" role="alert">{error}</div>}
-
-      {tab === "list" && !selected && !adding && (
-        <>
-          <div className="d-flex gap-2 mb-3">
-            <input className="form-control form-control-lg" placeholder="Search (name or number)" aria-label="Search" value={search} onChange={(e) => setSearch(e.target.value)} />
-            <button type="button" className="btn btn-success btn-lg text-nowrap" onClick={() => setAdding(true)}>+ Customer</button>
-          </div>
-          <div className="btn-group mb-3" role="group" aria-label="Who to show">
-            <button type="button" className={`btn ${filter === "owing" ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setFilter("owing")}>Who owes ({owing.length})</button>
-            <button type="button" className={`btn ${filter === "all" ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setFilter("all")}>All customers ({customers.length})</button>
-          </div>
-          <div className="list-group">
-            {shown.map((c) => (
-              <button key={c.id} type="button" className="list-group-item list-group-item-action py-3 d-flex justify-content-between align-items-center" onClick={() => setSelected(c)}>
-                <span>
-                  <span className="fw-semibold">{c.name}</span>
-                  <span className="d-block small text-muted">{c.phone ?? "no number"} · limit {limitPhrase(c, peso)}{c.balanceMinor > 0 && c.oldestUtangAt ? ` · ${days(c.oldestUtangAt)} days` : ""}</span>
+      <Chips label="Who to show" value={filter} onChange={setFilter} items={[
+        { id: "owing", label: `Owes (${owing.length})` },
+        { id: "overdue", label: `Over ${overAfter} days (${overdue.length})` },
+        { id: "limit", label: `Near limit (${atLimit.length})` },
+        { id: "all", label: `All (${all.length})` },
+      ]} />
+      {customers === null ? <p className="text-muted">Loading…</p> : shown.length === 0 ? (
+        <div className="text-center text-muted border rounded-3 py-4 px-3">
+          <i className="bi bi-emoji-smile fs-2 d-block mb-1" aria-hidden="true"></i>{search.trim() ? `No customer matches “${search.trim()}”.` : emptyWords[filter]}
+        </div>
+      ) : (
+        <div className="list-group">
+          {shown.map((c) => {
+            const d = days(c.oldestUtangAt);
+            const late = c.balanceMinor > 0 && d > overAfter;
+            const st = creditStatusWords(c.status);
+            const isOpen = selected?.id === c.id;
+            return (
+              <button key={c.id} type="button" aria-current={isOpen || undefined} onClick={() => open(c)}
+                className={`list-group-item list-group-item-action d-flex align-items-center gap-3 py-2 ${isOpen ? "bg-light" : ""}`}
+                style={{ minHeight: 64, borderLeft: isOpen ? "6px solid #1f1d1a" : undefined }}>
+                <span className="flex-grow-1" style={{ minWidth: 0 }}>
+                  <span className="fw-semibold d-block text-break">{c.name}</span>
+                  <span className="small text-muted d-block">
+                    {c.phone ?? "No number"}{c.balanceMinor > 0 && c.oldestUtangAt ? ` · owing ${d} day${d === 1 ? "" : "s"}` : ""}
+                  </span>
                 </span>
-                <span className="text-end" style={{ fontVariantNumeric: "tabular-nums" }}>
-                  <span className={`fs-5 ${c.status === "AT_LIMIT" ? "text-danger" : ""}`}>{peso(c.balanceMinor)}</span>
-                  {c.creditApproved && <span className="d-block"><span className={`badge ${creditStatusWords(c.status).cls}`}>{creditStatusWords(c.status).label}</span></span>}
-                  {c.lastText?.status === "FAILED" && <span className="d-block"><span className="badge text-bg-danger">Failed</span></span>}
+                <span className="text-end flex-shrink-0" style={NUM}>
+                  <span className={`fs-5 fw-semibold d-block ${c.balanceMinor > 0 ? "" : "text-muted"}`}>{peso(c.balanceMinor)}</span>
+                  <span className="d-inline-flex flex-wrap justify-content-end gap-1">
+                    {late && <span className="badge text-bg-warning">Over {overAfter} days</span>}
+                    {(c.status === "AT_LIMIT" || c.status === "NEAR_LIMIT" || !c.creditApproved) && <span className={`badge ${st.cls}`}>{st.label}</span>}
+                    {c.lastText?.status === "FAILED" && <span className="badge text-bg-danger">Text failed</span>}
+                  </span>
                 </span>
+                <i className="bi bi-chevron-right text-muted" aria-hidden="true"></i>
               </button>
-            ))}
-            {shown.length === 0 && <p className="text-muted">{filter === "owing" ? "Nobody owes right now." : "No customers yet."}</p>}
-          </div>
-        </>
+            );
+          })}
+        </div>
       )}
+    </>
+  );
 
-      {tab === "list" && adding && <AddCustomer owner={owner} onCancel={() => setAdding(false)} onDone={async () => { setAdding(false); await load(); }} />}
-
-      {tab === "list" && selected && !paying && (
-        <div style={{ maxWidth: 620 }}>
-          <button type="button" className="btn btn-link px-0 mb-2" onClick={() => setSelected(null)}>← Customers</button>
-          <div className="card mb-3">
-            <div className="card-body">
-              <div className="h5 mb-1">{selected.name}</div>
-              <div className="text-muted mb-2">{selected.phone ?? "no number"}</div>
-              <div className="fs-3" style={{ fontVariantNumeric: "tabular-nums" }}>Owes: <strong>{peso(selected.balanceMinor)}</strong></div>
-              <div>Limit: {limitPhrase(selected, peso)}{!selected.creditApproved && " — cannot buy on credit yet"}</div>
-              {selected.creditApproved && <div className="mb-1">Status: <span className={`badge ${creditStatusWords(selected.status).cls}`}>{creditStatusWords(selected.status).label}</span>{selected.availableMinor !== null && <span className="ms-2">can still borrow {peso(selected.availableMinor)}</span>}</div>}
-              {selected.status === "AT_LIMIT" && <div className="alert alert-warning py-2 mt-2 mb-0">At the limit. The customer must pay some of the balance first, then can buy on credit again.</div>}
-              {owner && <SpecialPrices customerId={selected.id} />}
-              {owner && <LimitEditor customer={selected} onSaved={async () => { setSelected(null); await load(); }} />}
-              <div className="d-grid gap-2 mt-3">
-                <button type="button" className="btn btn-success btn-lg" disabled={selected.balanceMinor <= 0} onClick={() => setPaying(true)}>Credit payment</button>
-                <button type="button" className="btn btn-outline-primary btn-lg" onClick={() => textCustomer(selected, "balance", { balanceMinor: selected.balanceMinor })}><i className="bi bi-chat-dots me-1"></i>Text the balance ({peso(selected.balanceMinor)})</button>
-              </div>
-              <div className="d-flex flex-wrap gap-2 mt-2">
-                <button type="button" className="btn btn-outline-dark" disabled={!history} onClick={() => printStatement(selected, false)}><i className="bi bi-printer me-1"></i>Print statement (slip)</button>
-                <button type="button" className="btn btn-outline-dark" disabled={!history} onClick={() => printStatement(selected, true)}><i className="bi bi-file-earmark-text me-1"></i>Print statement (A4)</button>
-              </div>
-              {justPaid && (
-                <div className="alert alert-success mt-3 mb-0">
-                  Received {peso(justPaid.paidMinor)} — {peso(justPaid.balanceMinor)} left.
-                  <button type="button" className="btn btn-primary btn-sm ms-2" onClick={() => textCustomer(selected, "payment_received", { paidMinor: justPaid.paidMinor, balanceMinor: justPaid.balanceMinor })}>Text the customer</button>
-                </div>
-              )}
+  const detail = (c: Cust) => {
+    const st = creditStatusWords(c.status);
+    const sorted = [...(history ?? [])].sort((x, y) => new Date(x.startAt).getTime() - new Date(y.startAt).getTime());
+    let run = 0;
+    const rows = sorted.map((e) => ({ ...e, after: (run += e.amountMinor) })).reverse();
+    const failedTexts = texts.filter((t) => t.status === "FAILED").length;
+    const printBtn = (cust: Cust, a4: boolean, full = false) => (
+      <button type="button" className={`btn btn-outline-dark ${full ? "w-100" : ""}`} disabled={!history || pick?.size === 0} onClick={() => printStatement(cust, a4)}>
+        <i className={`bi ${a4 ? "bi-file-earmark-text" : "bi-printer"} me-1`} aria-hidden="true"></i>{a4 ? "Statement (A4)" : "Print statement"}{pick ? ` (${pick.size})` : ""}
+      </button>
+    );
+    return (
+      <div>
+        {justPaid && (
+          <div className="alert alert-success d-flex flex-wrap align-items-center gap-2 mb-3" role="status">
+            <i className="bi bi-check-circle-fill fs-3" aria-hidden="true"></i>
+            <div className="flex-grow-1">
+              <div className="fw-semibold fs-5">Received {peso(justPaid.paidMinor)}</div>
+              <div style={NUM}>{peso(justPaid.balanceMinor)} left{justPaid.queued ? " · saved on the tablet, uploads when online" : ""}</div>
+            </div>
+            <div className="d-flex flex-wrap gap-2">
+              <button type="button" className="btn btn-outline-dark" onClick={() => printPayment(c, justPaid)}><i className="bi bi-printer me-1" aria-hidden="true"></i>Print receipt</button>
+              <button type="button" className="btn btn-outline-dark" disabled={!c.phone} onClick={() => textCustomer(c, "payment_received", { paidMinor: justPaid.paidMinor, balanceMinor: justPaid.balanceMinor })}><i className="bi bi-chat-dots me-1" aria-hidden="true"></i>Text receipt</button>
             </div>
           </div>
-          <h2 className="h6">History</h2>
-          {history === null ? <p className="text-muted">Loading…</p> : history.length === 0 ? <p className="text-muted">No credit entries yet.</p> : (
-            <ul className="list-group mb-3" style={{ fontVariantNumeric: "tabular-nums" }}>
-              {history.slice(0, 30).map((e) => (
-                <li key={e.id} className="list-group-item d-flex justify-content-between gap-2">
-                  <span className="small">{new Date(e.startAt).toLocaleDateString("en-PH")} · {e.type === "purchase" ? "Utang" : e.type === "payment" ? "Payment" : e.type}{e.dueAt && e.type === "purchase" ? ` · due ${new Date(e.dueAt).toLocaleDateString("en-PH")}` : ""}{e.note ? ` · ${e.note}` : ""}</span>
-                  <span className={e.type === "payment" ? "text-success" : ""}>{e.type === "payment" ? "−" : ""}{peso(Math.abs(e.amountMinor))}</span>
+        )}
+        <div className="card mb-3">
+          <div className="card-body">
+            <div className="d-flex flex-wrap justify-content-between gap-2">
+              <div style={{ minWidth: 0 }}>
+                <h2 className="h4 mb-1 text-break">{c.name}</h2>
+                <div className="text-muted">{c.phone ? <a href={`tel:${c.phone}`} className="link-dark"><i className="bi bi-telephone me-1" aria-hidden="true"></i>{c.phone}</a> : "No mobile number"}</div>
+              </div>
+              <div className="text-end" style={NUM}>
+                <div className="small text-muted">Owes</div>
+                <div className={`fw-bold ${c.status === "AT_LIMIT" ? "text-danger" : ""}`} style={{ fontSize: 34, lineHeight: 1.1 }}>{peso(c.balanceMinor)}</div>
+              </div>
+            </div>
+            <div className="d-flex flex-wrap align-items-center gap-2 mt-2" style={NUM}>
+              <span className={`badge ${st.cls}`}>{st.label}</span>
+              {limitPhrase(c, peso) !== st.label && <span>Limit {limitPhrase(c, peso)}</span>}
+              {c.creditApproved && c.availableMinor !== null && <span className="text-muted">· can still borrow {peso(c.availableMinor)}</span>}
+              {c.balanceMinor > 0 && c.oldestUtangAt && <span className="text-muted">· owing {days(c.oldestUtangAt)} days</span>}
+            </div>
+            {!c.creditApproved && <div className="small text-muted mt-1">Cannot buy on credit yet{owner ? " — set a limit under Customer settings." : " — ask the owner to set a limit."}</div>}
+            {c.status === "AT_LIMIT" && <div className="alert alert-warning py-2 mt-2 mb-0">At the limit. The customer must pay some of the balance first, then can buy on credit again.</div>}
+
+            <div className="row g-2 mt-2">
+              <div className="col-12 col-md-6">
+                <button type="button" className="btn btn-success btn-lg w-100 h-100" style={{ minHeight: 64 }} disabled={c.balanceMinor <= 0} onClick={() => setPaying(true)}>
+                  <i className="bi bi-cash-coin me-2" aria-hidden="true"></i>{c.balanceMinor > 0 ? "Receive payment" : "Nothing to pay"}
+                </button>
+              </div>
+              <div className="col-12 col-md-6">
+                <button type="button" className="btn btn-outline-dark btn-lg w-100 h-100" style={{ minHeight: 64 }} disabled={!c.phone} onClick={() => textCustomer(c, "balance", { balanceMinor: c.balanceMinor })}>
+                  <i className="bi bi-chat-dots me-2" aria-hidden="true"></i>Text the balance
+                </button>
+              </div>
+              <div className="col-6">{printBtn(c, false, true)}</div>
+              <div className="col-6">{printBtn(c, true, true)}</div>
+            </div>
+          </div>
+        </div>
+
+        <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+          <h3 className="h6 text-uppercase text-muted mb-0">History</h3>
+          {rows.length > 0 && (pick ? (
+            <div className="d-flex flex-wrap gap-2">
+              <button type="button" className="btn btn-outline-dark btn-sm" onClick={() => setPick(new Set(rows.map((e) => e.id)))}>All</button>
+              <button type="button" className="btn btn-outline-dark btn-sm" onClick={() => setPick(new Set())}>None</button>
+              <button type="button" className="btn btn-outline-secondary btn-sm" onClick={() => setPick(null)}>Cancel</button>
+            </div>
+          ) : (
+            <button type="button" className="btn btn-outline-dark btn-sm" onClick={() => { setPick(new Set(rows.map((e) => e.id))); setShowAllHistory(true); }}>
+              <i className="bi bi-check2-square me-1" aria-hidden="true"></i>Choose what to print
+            </button>
+          ))}
+        </div>
+        {pick && rows.length > 0 && (
+          <div className="alert alert-info py-2">
+            <div className="mb-2">Tick the entries for the statement · <strong>{pick.size} of {rows.length}</strong></div>
+            <div className="d-flex flex-wrap gap-2">{printBtn(c, false)}{printBtn(c, true)}</div>
+          </div>
+        )}
+        {history === null ? <p className="text-muted">Loading…</p> : rows.length === 0 ? <p className="text-muted">No credit entries yet.</p> : (
+          <>
+            <ul className="list-group mb-2" style={NUM}>
+              {(showAllHistory ? rows : rows.slice(0, 10)).map((e) => (
+                <li key={e.id} className="list-group-item d-flex align-items-center gap-3 py-2" style={{ minHeight: 56, cursor: pick ? "pointer" : undefined }}
+                  onClick={pick ? () => setPick((p) => { const n = new Set(p); if (n.has(e.id)) n.delete(e.id); else n.add(e.id); return n; }) : undefined}>
+                  {pick ? <input type="checkbox" className="form-check-input m-0 flex-shrink-0" style={{ width: 28, height: 28 }} checked={pick.has(e.id)} readOnly aria-label={`Print ${e.type === "payment" ? "payment" : "utang"} of ${date(e.startAt)}`} />
+                    : <i className={`bi ${e.type === "payment" ? "bi-arrow-down-circle text-success" : "bi-bag"} fs-5`} aria-hidden="true"></i>}
+                  <span className="flex-grow-1" style={{ minWidth: 0 }}>
+                    <span className="d-block">{e.type === "purchase" ? "Utang" : e.type === "payment" ? "Payment" : e.type}{e.note ? <span className="text-muted"> · {e.note}</span> : null}</span>
+                    <span className="small text-muted">{date(e.startAt)}{e.dueAt && e.type === "purchase" ? ` · due ${date(e.dueAt)}` : ""}</span>
+                  </span>
+                  <span className="text-end">
+                    <span className={`d-block fw-semibold ${e.type === "payment" ? "text-success" : ""}`}>{e.type === "payment" ? "−" : "+"}{peso(Math.abs(e.amountMinor))}</span>
+                    <span className="small text-muted">bal {peso(e.after)}</span>
+                  </span>
                 </li>
               ))}
             </ul>
-          )}
-          <h2 className="h6">Texts</h2>
-          <TextList texts={texts} onResend={resend} />
-        </div>
-      )}
+            {rows.length > 10 && !showAllHistory && <button type="button" className="btn btn-link px-0 mb-2" onClick={() => setShowAllHistory(true)}>Show all {rows.length}</button>}
+          </>
+        )}
 
-      {tab === "list" && selected && paying && (
-        <PayForm customer={selected} locationId={locationId} onCancel={() => setPaying(false)}
-          onDone={async (balanceMinor, paidMinor) => { setPaying(false); setSelected({ ...selected, balanceMinor }); await load(); await loadTexts(selected.id); setJustPaid({ paidMinor, balanceMinor }); }} />
-      )}
+        <details className="border rounded-3 mb-3 bg-white">
+          <summary className="p-3 fw-semibold" style={{ minHeight: 44 }}>Texts ({texts.length}){failedTexts > 0 && <span className="badge text-bg-danger ms-2">{failedTexts} failed</span>}</summary>
+          <div className="px-3 pb-3"><TextList texts={texts} onResend={resend} /></div>
+        </details>
+
+        {owner && (
+          <details className="border rounded-3 mb-3 bg-white">
+            <summary className="p-3 fw-semibold" style={{ minHeight: 44 }}>Customer settings <span className="fw-normal text-muted">· limit and special prices</span></summary>
+            <div className="px-3 pb-3">
+              <div className="fw-semibold mb-1">Credit limit <span className="fw-normal text-muted">(now: {limitPhrase(c, peso)})</span></div>
+              <LimitEditor customer={c} onSaved={load} />
+              <SpecialPrices customerId={c.id} />
+            </div>
+          </details>
+        )}
+      </div>
+    );
+  };
+
+  const back = <button type="button" className="btn btn-link px-0 mb-2 fs-5" onClick={() => open(null)}>← Customers</button>;
+  const pay = selected && (
+    <PayForm customer={selected} locationId={locationId} wide={wide} onCancel={() => setPaying(false)}
+      onDone={async (p) => { setPaying(false); setSelected({ ...selected, balanceMinor: p.balanceMinor }); setJustPaid(p); await load(); void loadTexts(selected.id); void loadHistory(selected.id); }} />
+  );
+  const add = <AddCustomer owner={owner} onCancel={() => setAdding(false)} onDone={async () => { setAdding(false); await load(); }} />;
+
+  return (
+    <div style={{ fontSize: 18 }}>
+      <div className="d-flex flex-wrap align-items-baseline justify-content-between gap-2 mb-2">
+        <h1 className="h4 mb-0">Credit</h1>
+        <span style={NUM}><span className="fs-4 fw-bold">{peso(totalOwed)}</span> <span className="text-muted">owed by {owing.length} customer{owing.length === 1 ? "" : "s"}</span></span>
+      </div>
+      <ul className="nav nav-tabs mb-3">
+        <li className="nav-item"><button className={`nav-link ${tab === "list" ? "active" : ""}`} onClick={() => { setTab("list"); open(null); }}>Customers</button></li>
+        <li className="nav-item"><button className={`nav-link ${tab === "texts" ? "active" : ""}`} onClick={() => { setTab("texts"); open(null); }}>Texts</button></li>
+        {owner && <li className="nav-item"><button className={`nav-link ${tab === "settings" ? "active" : ""}`} onClick={() => { setTab("settings"); open(null); }}>Settings</button></li>}
+      </ul>
+      {error && <div className="alert alert-danger py-2" role="alert">{error}</div>}
+
+      {tab === "list" && (paying && selected ? pay : wide ? (
+        <div className="row g-3">
+          <div className="col-lg-5">{list}</div>
+          <div className="col-lg-7 pos-side">
+            {adding ? add : selected ? detail(selected) : (
+              <div className="text-center text-muted border rounded-3 py-5 px-4 bg-white">
+                <i className="bi bi-person-lines-fill d-block mb-2" style={{ fontSize: 40 }} aria-hidden="true"></i>
+                Tap a customer to take a payment, text the balance or print a statement.
+              </div>
+            )}
+          </div>
+        </div>
+      ) : adding ? add : selected ? <>{back}{detail(selected)}</> : list)}
 
       {tab === "texts" && <TextList texts={texts} onResend={resend} showName />}
 
@@ -342,7 +513,8 @@ function AddCustomer({ owner, onCancel, onDone }: { owner: boolean; onCancel: ()
   );
 }
 
-function PayForm({ customer, locationId, onCancel, onDone }: { customer: Cust; locationId: string | null; onCancel: () => void; onDone: (balanceMinor: number, paidMinor: number) => void | Promise<void> }) {
+/** Receive a credit payment: amount (big pad + quick amounts), cash or GCash, signatures, then one Receive button that says the amount. */
+function PayForm({ customer, locationId, wide, onCancel, onDone }: { customer: Cust; locationId: string | null; wide: boolean; onCancel: () => void; onDone: (p: Paid) => void | Promise<void> }) {
   const [amount, setAmount] = useState("");
   const [method, setMethod] = useState<"cash" | "gcash">("cash");
   const [reference, setReference] = useState("");
@@ -350,46 +522,72 @@ function PayForm({ customer, locationId, onCancel, onDone }: { customer: Cust; l
   const [custSig, setCustSig] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const owed = customer.balanceMinor;
   const amt = toMinor(amount);
-  const ready = amt > 0 && amt <= customer.balanceMinor && !!staffSig && (method === "cash" || reference.trim().length >= 4) && !busy;
+  // What still stops the Receive button, in words (the button never just sits grey).
+  const missing = amt <= 0 ? "Enter the amount paid" : amt > owed ? `Too much — they only owe ${peso(owed)}` : method === "gcash" && reference.trim().length < 4 ? "Enter the GCash reference no." : !staffSig ? "Staff signature needed" : null;
+  const ready = !missing && !busy;
+  const quick = [10000, 20000, 50000, 100000].filter((m) => m < owed);
   const save = async () => {
     setBusy(true); setError(null);
     const signatures = [{ signerKind: "STAFF", imagePng: staffSig }, ...(custSig ? [{ signerKind: "CUSTOMER", signerName: customer.name, imagePng: custSig }] : [])];
-    const sent = await sendStep("/admin/utang/payments", { customerId: customer.id, amountMinor: amt, method, reference: method === "gcash" ? reference.trim() : undefined, locationId: locationId ?? undefined, signatures }, `Payment from ${customer.name}`);
+    const ref = method === "gcash" ? reference.trim() : "";
+    const sent = await sendStep("/admin/utang/payments", { customerId: customer.id, amountMinor: amt, method, reference: ref || undefined, locationId: locationId ?? undefined, signatures }, `Payment from ${customer.name}`);
     setBusy(false);
-    if (sent.status === "queued") { await onDone(customer.balanceMinor - amt, amt); return; }
-    const r = { ok: sent.ok, data: sent.data as ApiBody | null };
-    if (!r.ok) { setError(errText(r.data, "Did not go through")); return; }
-    const bal = Number(r.data?.balanceMinor ?? 0);
-    toast(`Received ${peso(amt)} — ${peso(bal)} left${r.data?.smsStatus === "SKIPPED" ? " (no number, no text sent)" : ""}`);
-    await onDone(bal, amt);
+    if (sent.status === "queued") { await onDone({ paidMinor: amt, balanceMinor: owed - amt, method, reference: ref, queued: true }); return; }
+    const data = sent.data as ApiBody | null;
+    if (!sent.ok) { setError(errText(data, "Did not go through")); return; }
+    const bal = Number(data?.balanceMinor ?? 0);
+    if (data?.smsStatus === "SKIPPED") toast("No mobile number, so no text was sent");
+    await onDone({ paidMinor: amt, balanceMinor: bal, method, reference: ref, queued: false });
   };
+  const step = (n: number, title: string) => <div className="d-flex align-items-center gap-2 fw-semibold mb-2"><span className="badge rounded-pill text-bg-dark" style={{ fontSize: 14 }}>{n}</span>{title}</div>;
   return (
-    <div className="card border-success" style={{ maxWidth: 520 }}>
-      <div className="card-body">
-        <h2 className="h5">Credit payment — {customer.name}</h2>
-        <div className="mb-2">Owes: <strong>{peso(customer.balanceMinor)}</strong></div>
-        {error && <div className="alert alert-danger py-2">{error}</div>}
-        <div className="btn-group w-100 mb-2" role="group" aria-label="Method">
-          <button type="button" className={`btn btn-lg ${method === "cash" ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setMethod("cash")}>Cash</button>
-          <button type="button" className={`btn btn-lg ${method === "gcash" ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setMethod("gcash")}>GCash</button>
+    <div className="card border-success">
+      <div className="card-body pb-0">
+        <div className="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
+          <div>
+            <button type="button" className="btn btn-link px-0 fs-5" disabled={busy} onClick={onCancel}>← {customer.name}</button>
+            <h2 className="h4 mb-0">Receive payment</h2>
+          </div>
+          <div className="text-end" style={NUM}><div className="small text-muted">Owes now</div><div className="fs-3 fw-bold">{peso(owed)}</div></div>
         </div>
-        <NumPad value={amount} onChange={setAmount} decimals={2} label="Amount paid" unit="₱" />
-        <button type="button" className="btn btn-link px-0" onClick={() => setAmount(String(customer.balanceMinor / 100))}>Pay all ({peso(customer.balanceMinor)})</button>
-        {amt > customer.balanceMinor && <div className="text-danger">Too much — they only owe {peso(customer.balanceMinor)}.</div>}
-        {amt > 0 && amt <= customer.balanceMinor && <div className="fs-5">Left after: <strong>{peso(customer.balanceMinor - amt)}</strong></div>}
-        {method === "gcash" && (
-          <><label className="form-label mt-2" htmlFor="pf-ref">GCash reference no.</label>
-            <input id="pf-ref" className="form-control form-control-lg" inputMode="numeric" value={reference} onChange={(e) => setReference(e.target.value.replace(/\s/g, "").slice(0, 40))} /></>
-        )}
-        <div className="fw-semibold mt-3">Your signature (staff)</div>
-        <SignaturePad onSignature={setStaffSig} />
-        <div className="fw-semibold mt-2">Signature of {customer.name} (if here)</div>
-        <SignaturePad onSignature={setCustSig} />
-        <div className="d-flex justify-content-between mt-3">
-          <button type="button" className="btn btn-outline-secondary btn-lg" disabled={busy} onClick={onCancel}>Back</button>
-          <button type="button" className="btn btn-success btn-lg" disabled={!ready} onClick={() => void save()}>{busy ? "Please wait…" : "Receive"}</button>
+        {error && <div className="alert alert-danger py-2" role="alert">{error}</div>}
+        <div className="row g-4">
+          <div className={wide ? "col-lg-6" : "col-12"}>
+            {step(1, "How much did they pay?")}
+            <div className="d-flex flex-wrap gap-2 mb-2">
+              <button type="button" className={`btn rounded-pill px-3 ${amt === owed ? "btn-dark" : "btn-outline-dark"}`} style={{ minHeight: 44 }} onClick={() => setAmount(String(owed / 100))}>All {peso(owed)}</button>
+              {quick.map((m) => <button key={m} type="button" className={`btn rounded-pill px-3 ${amt === m ? "btn-dark" : "btn-outline-dark"}`} style={{ minHeight: 44 }} onClick={() => setAmount(String(m / 100))}>{peso(m).replace(".00", "")}</button>)}
+            </div>
+            <NumPad value={amount} onChange={setAmount} decimals={2} label="Amount paid" unit="₱" />
+          </div>
+          <div className={wide ? "col-lg-6" : "col-12"}>
+            {step(2, "Paid by")}
+            <div className="btn-group w-100 mb-2" role="group" aria-label="Paid by">
+              <button type="button" aria-pressed={method === "cash"} className={`btn btn-lg ${method === "cash" ? "btn-dark" : "btn-outline-dark"}`} style={{ minHeight: 56 }} onClick={() => setMethod("cash")}><i className="bi bi-cash me-1" aria-hidden="true"></i>Cash</button>
+              <button type="button" aria-pressed={method === "gcash"} className={`btn btn-lg ${method === "gcash" ? "btn-dark" : "btn-outline-dark"}`} style={{ minHeight: 56 }} onClick={() => setMethod("gcash")}><i className="bi bi-phone me-1" aria-hidden="true"></i>GCash</button>
+            </div>
+            {method === "gcash" && (
+              <div className="mb-2"><label className="form-label mb-1" htmlFor="pf-ref">GCash reference no.</label>
+                <input id="pf-ref" className="form-control form-control-lg" inputMode="numeric" value={reference} onChange={(e) => setReference(e.target.value.replace(/\s/g, "").slice(0, 40))} /></div>
+            )}
+            <div className="mt-3">{step(3, "Signatures")}</div>
+            <div className="mb-1">Staff (you) <span className="text-danger">*</span></div>
+            {/* Kept narrow so both pads and the Receive bar fit a sideways tablet without much scrolling. */}
+            <div style={{ maxWidth: 440 }}><SignaturePad onSignature={setStaffSig} /></div>
+            <div className="mt-2 mb-1">{customer.name} <span className="text-muted">(if here)</span></div>
+            <div style={{ maxWidth: 440 }}><SignaturePad onSignature={setCustSig} /></div>
+          </div>
         </div>
+      </div>
+      <div className="position-sticky bottom-0 sticky-above-bar bg-white border-top border-success rounded-bottom p-3 mt-3 d-flex flex-wrap align-items-center gap-2" style={{ zIndex: 5 }}>
+        <div className="flex-grow-1" style={NUM} aria-live="polite">
+          {amt > 0 && amt <= owed ? <><div className="fw-semibold">Paid {peso(amt)} · {method === "gcash" ? "GCash" : "Cash"}</div><div className="text-muted">{peso(owed - amt)} left after</div></> : null}
+          {missing && <div className={amt > owed ? "text-danger fw-semibold" : "text-muted"}>{missing}</div>}
+        </div>
+        <button type="button" className="btn btn-outline-secondary btn-lg" disabled={busy} onClick={onCancel}>Back</button>
+        <button type="button" className="btn btn-success btn-lg px-4" style={{ minHeight: 56 }} disabled={!ready} onClick={() => void save()}>{busy ? "Please wait…" : amt > 0 ? `Receive ${peso(amt)}` : "Receive"}</button>
       </div>
     </div>
   );
