@@ -367,7 +367,7 @@ function StockLive() {
 
 interface DaySection {
   location: Loc; locked: boolean; closedAt: string | null; cashCountedMinor: number | null; cashVarianceMinor: number | null;
-  sales: { count: number; totalMinor: number; cashMinor: number; gcashMinor: number; utangMinor: number; encodedLater: number; grossProfitMinor: number };
+  sales: { count: number; totalMinor: number; cashMinor: number; gcashMinor: number; utangMinor: number; encodedLater: number; grossProfitMinor: number; profitShareMinor?: number };
   kilosByVariety: { variety: string; grams: number; salesMinor: number }[];
   utang: { givenMinor: number; collectedMinor: number }; cash: { expectedMinor: number };
   stockIn: { documents: number }; trips: { releasedOut: number; receivedIn: number; returnedIn: number };
@@ -414,7 +414,7 @@ function Daily({ owner }: { owner: boolean }) {
               </div>
               <div className="fs-4 mt-1">Sales {peso(s.sales.totalMinor)} <span className="fs-6 text-muted">({s.sales.count})</span></div>
               <div className="small">Cash {peso(s.sales.cashMinor)} · GCash {peso(s.sales.gcashMinor)} · Credit {peso(s.sales.utangMinor)}{s.sales.encodedLater ? ` · ${s.sales.encodedLater} from paper slips` : ""}</div>
-              {owner && <div className="small">Profit (gross) {peso(s.sales.grossProfitMinor)}</div>}
+              {owner && <div className="small">Profit (gross) {peso(s.sales.grossProfitMinor)}{s.sales.profitShareMinor ? <span className="text-muted"> (incl. profit share {s.sales.profitShareMinor > 0 ? "+" : "−"}{peso(Math.abs(s.sales.profitShareMinor))})</span> : null}</div>}
               <div className="small">Kilos: {s.kilosByVariety.map((v) => `${v.variety} ${kg(v.grams)}`).join(" · ") || "—"}</div>
               <div className="small">Credit given {peso(s.utang.givenMinor)} · paid {peso(s.utang.collectedMinor)}</div>
               <div className="small">Cash that should be in the drawer {peso(s.cash.expectedMinor)}{s.cashCountedMinor !== null && <> · counted {peso(s.cashCountedMinor)} <strong className={s.cashVarianceMinor && s.cashVarianceMinor < 0 ? "text-danger" : ""}>({s.cashVarianceMinor! >= 0 ? "+" : ""}{peso(s.cashVarianceMinor!)})</strong></>}</div>
@@ -514,7 +514,7 @@ function Monthly() {
   useEffect(() => { void getJson(`/admin/rice/monthly?month=${month}`).then((r) => { if (!r.ok) setError(errText(r.data, "Could not load")); else { setError(null); setData(r.data); } }); }, [month]);
   const d = data as null | {
     profit?: { grossProfitMinor: number; expensesMinor: number; netProfitMinor: number };
-    locations: { location: Loc; salesMinor: number; grossProfitMinor: number; grams: number; resackLossPct: number; transitShortGrams: number; writeOffMinor: number }[];
+    locations: { location: Loc; salesMinor: number; grossProfitMinor: number; profitShareMinor?: number; grams: number; resackLossPct: number; transitShortGrams: number; writeOffMinor: number }[];
     varieties: { variety: string; grams: number; salesMinor: number; grossProfitMinor: number }[];
     kargadorLoss: { name: string; resackLossPct: number; transitShortGrams: number }[];
     utangAging: { d0_30: number; d31_60: number; d60plus: number }; manualItemsForReview: number;
@@ -533,7 +533,7 @@ function Monthly() {
           )}
           <h2 className="h6">Sales and profit by location <button type="button" className="btn btn-link btn-sm" onClick={() => downloadCsv(`month-${month}.csv`, [["Location", "Sales", "Profit", "Kilos", "Resack short %", "Transfer short (kg)", "Write-offs"], ...d.locations.map((l) => [l.location.name, l.salesMinor / 100, l.grossProfitMinor / 100, l.grams / 1000, l.resackLossPct, l.transitShortGrams / 1000, l.writeOffMinor / 100])])}>Excel</button></h2>
           <table className="table table-sm"><thead><tr><th>Location</th><th className="text-end">Sales</th><th className="text-end">Profit</th><th className="text-end">Kilos</th><th className="text-end">Resack short</th><th className="text-end">Write-offs</th></tr></thead>
-            <tbody>{d.locations.map((l) => <tr key={l.location.id}><td>{l.location.name}</td><td className="text-end">{peso(l.salesMinor)}</td><td className="text-end">{peso(l.grossProfitMinor)}</td><td className="text-end">{kg(l.grams)}</td><td className="text-end">{l.resackLossPct}%</td><td className="text-end">{peso(l.writeOffMinor)}</td></tr>)}</tbody></table>
+            <tbody>{d.locations.map((l) => <tr key={l.location.id}><td>{l.location.name}</td><td className="text-end">{peso(l.salesMinor)}</td><td className="text-end">{peso(l.grossProfitMinor)}{l.profitShareMinor ? <div className="small text-muted">incl. profit share {l.profitShareMinor > 0 ? "+" : "−"}{peso(Math.abs(l.profitShareMinor))}</div> : null}</td><td className="text-end">{kg(l.grams)}</td><td className="text-end">{l.resackLossPct}%</td><td className="text-end">{peso(l.writeOffMinor)}</td></tr>)}</tbody></table>
           <h2 className="h6">By rice variety</h2>
           <table className="table table-sm"><tbody>{d.varieties.map((v) => <tr key={v.variety}><td className="text-capitalize">{v.variety}</td><td className="text-end">{kg(v.grams)}</td><td className="text-end">{peso(v.salesMinor)}</td><td className="text-end">profit {peso(v.grossProfitMinor)}</td></tr>)}</tbody></table>
           <h2 className="h6">Credit (age)</h2>

@@ -50,7 +50,7 @@ export default function PayablePanel() {
   const [payAmount, setPayAmount] = useState("");
   const [payNote, setPayNote] = useState("");
   const [adding, setAdding] = useState(false);
-  const [recon, setRecon] = useState<{ store: { name: string }; rows: { productId: string; name: string; loose: boolean; supplied: number; sold: number; returned: number; movedBack: number; countFix: number; resack: number; onHand: number; costOwedMinor: number }[]; varieties?: { variety: string; suppliedG: number; soldG: number; returnedG: number; movedBackG: number; countFixG: number; onHandG: number }[] } | null>(null);
+  const [recon, setRecon] = useState<{ store: { name: string }; rows: { productId: string; name: string; loose: boolean; supplied: number; sold: number; returned: number; movedBack: number; countFix: number; resack: number; onHand: number; costOwedMinor: number; profitShareMinor?: number }[]; varieties?: { variety: string; suppliedG: number; soldG: number; returnedG: number; movedBackG: number; countFixG: number; onHandG: number }[] } | null>(null);
   const [sales, setSales] = useState<{ store: { id: string; name: string }; fromAt: string; expectedMinor: number; recent: { id: string; toAt: string; reportedMinor: number; expectedMinor: number; differenceMinor: number }[] } | null>(null);
   const [salesAmt, setSalesAmt] = useState("");
   const openSales = async (s: Bal) => {
@@ -157,10 +157,10 @@ export default function PayablePanel() {
         <div className="border rounded p-3 mb-3">
           <div className="d-flex justify-content-between mb-2"><div className="fw-semibold">{recon.store.name}: supplied − sold − returned − moved back ± count = on shelf</div><button type="button" className="btn btn-sm btn-outline-secondary" onClick={() => setRecon(null)}>Close</button></div>
           <div className="table-responsive"><table className="table table-sm mb-0">
-            <thead><tr><th>Item</th><th className="text-end">Supplied</th><th className="text-end">Sold</th><th className="text-end">Returned</th><th className="text-end">Moved back</th><th className="text-end">Resack from count</th><th className="text-end">Count fix</th><th className="text-end">On shelf</th><th className="text-end">Cost owed</th></tr></thead>
+            <thead><tr><th>Item</th><th className="text-end">Supplied</th><th className="text-end">Sold</th><th className="text-end">Returned</th><th className="text-end">Moved back</th><th className="text-end">Resack from count</th><th className="text-end">Count fix</th><th className="text-end">On shelf</th><th className="text-end">Cost owed</th><th className="text-end">Profit share</th></tr></thead>
             <tbody>{recon.rows.map((r) => {
               const f = (n: number) => (r.loose ? `${(n / 1000).toLocaleString(undefined, { maximumFractionDigits: 3 })} kg` : n.toLocaleString());
-              return <tr key={r.productId}><td>{r.name}</td><td className="text-end">{f(r.supplied)}</td><td className="text-end">{f(r.sold)}</td><td className="text-end">{f(r.returned)}</td><td className="text-end">{f(r.movedBack)}</td><td className="text-end">{f(r.resack)}</td><td className={`text-end ${r.countFix < 0 ? "text-danger" : ""}`}>{f(r.countFix)}</td><td className="text-end fw-semibold">{f(r.onHand)}</td><td className="text-end">{peso(r.costOwedMinor)}</td></tr>;
+              return <tr key={r.productId}><td>{r.name}</td><td className="text-end">{f(r.supplied)}</td><td className="text-end">{f(r.sold)}</td><td className="text-end">{f(r.returned)}</td><td className="text-end">{f(r.movedBack)}</td><td className="text-end">{f(r.resack)}</td><td className={`text-end ${r.countFix < 0 ? "text-danger" : ""}`}>{f(r.countFix)}</td><td className="text-end fw-semibold">{f(r.onHand)}</td><td className="text-end">{peso(r.costOwedMinor)}</td><td className="text-end">{r.profitShareMinor ? `−${peso(r.profitShareMinor)}` : ""}</td></tr>;
             })}</tbody>
           </table></div>
           {(recon.varieties?.length ?? 0) > 0 && (

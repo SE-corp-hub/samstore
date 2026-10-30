@@ -286,6 +286,10 @@ export class PayableService {
       const prods = new Map((await prisma.product.findMany({ where: { storeId, id: { in: ids } }, select: productSelect })).map((p) => [p.id, p]));
       const charges = await prisma.storePayableEntry.groupBy({ by: ["productId"], where: { storeId, locationId: store.id, kind: { in: ["CHARGE", "REVERSAL"] }, productId: { not: null }, OR: [{ reversesId: null }, { reversesId: { notIn: await this.shareIds(storeId, store.id) } }] }, _sum: { amountMinor: true } });
       const owed = new Map(charges.map((c) => [c.productId!, c._sum.amountMinor ?? 0]));
+      // Profit share per item (what the main store owes this store for rice it took), in its own column.
+      const shareIds = await this.shareIds(storeId, store.id);
+      const shareRows = await prisma.storePayableEntry.groupBy({ by: ["productId"], where: { storeId, locationId: store.id, productId: { not: null }, OR: [{ kind: { in: ["PROFIT_SHARE", "SHARE_BACK"] } }, { kind: "REVERSAL", reversesId: { in: shareIds } }] }, _sum: { amountMinor: true } });
+      const shared = new Map(shareRows.map((c) => [c.productId ?? "", -(c._sum.amountMinor ?? 0)]));
       const at = (pid: string, types: string[], resack = false) => moves.filter((m) => m.productId === pid && types.includes(m.type) && (m.documentType === "COUNT_RESACK") === resack).reduce((a, m) => a + (m._sum.delta ?? 0), 0);
       const rows = ids.map((pid) => {
         const p = prods.get(pid);
@@ -296,7 +300,7 @@ export class PayableService {
         const countFix = at(pid, ["COUNT_ADJUST", "ADJUST"]);
         const resack = at(pid, ["COUNT_ADJUST"], true);
         const onHand = levels.find((l) => l.productId === pid)?.quantityOnHand ?? 0;
-        return { productId: pid, name: p?.name ?? "", loose: p ? isLooseP(p) : false, supplied, sold, returned, movedBack, countFix, resack, onHand, costOwedMinor: owed.get(pid) ?? 0 };
+        return { productId: pid, name: p?.name ?? "", loose: p ? isLooseP(p) : false, supplied, sold, returned, movedBack, countFix, resack, onHand, costOwedMinor: owed.get(pid) ?? 0, profitShareMinor: shared.get(pid) ?? 0 };
       }).filter((r) => r.supplied || r.sold || r.onHand || r.countFix).sort((a, b) => a.name.localeCompare(b.name));
       // The same, added up in kilos per rice variety: sacks, bags and loose kilos together.
       const varieties = new Map<string, { variety: string; suppliedG: number; soldG: number; returnedG: number; movedBackG: number; countFixG: number; onHandG: number }>();
