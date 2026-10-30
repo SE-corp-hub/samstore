@@ -12,7 +12,11 @@ name: Keep beta awake
 # Render would stop both services until the next month.
 #
 # GitHub runs scheduled workflows only from the default branch (main), and may start
-# them a few minutes late; every 5 minutes keeps a margin under the 15-minute sleep.
+# them late or skip runs (on 2026-10-30 it ran only twice all day); every 5 minutes keeps
+# a margin under the 15-minute sleep when it does run.
+#
+# The API is also visited at its own address: once it sleeps, Render answers the web
+# server's /backend proxy with an instant 429 (hibernate-rate-limited) and does not wake it.
 
 on:
   schedule:
@@ -23,8 +27,10 @@ on:
 jobs:
   ping:
     runs-on: ubuntu-latest
-    timeout-minutes: 4
+    timeout-minutes: 6
     steps:
       - name: Visit the beta
         # A slow wake is not a failure worth an email: report the answer and move on.
-        run: curl -sS -o /dev/null -w "%{http_code} in %{time_total}s\n" --max-time 150 https://samstore-beta-web.onrender.com/backend/health || true
+        run: |
+          curl -sS -o /dev/null -w "api %{http_code} in %{time_total}s\n" --max-time 150 https://samstore-beta-api.onrender.com/health || true
+          curl -sS -o /dev/null -w "web %{http_code} in %{time_total}s\n" --max-time 150 https://samstore-beta-web.onrender.com/backend/health || true
