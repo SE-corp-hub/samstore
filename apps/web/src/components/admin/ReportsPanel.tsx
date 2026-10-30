@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { API_URL } from "../../config";
 import { adminHeaders, getAdminRole, getAdminStoreId, roleCan } from "../../lib/admin";
 import NoStoreScope from "./NoStoreScope";
+import { peso } from "../../lib/number-format";
 
 interface ProfitData {
   revenueMinor: number; refundsMinor: number; netRevenueMinor: number;
@@ -23,7 +24,7 @@ interface CustomerStatementRow { name: string; totalPaidMinor: number; creditBal
 
 type ReportTab = "profit" | "sales" | "stock-low" | "sold-stock" | "income-loss" | "sales-by-payment" | "customer-statement";
 
-const toPesos = (m: number) => `₱${(m / 100).toFixed(2)}`;
+const toPesos = (m: number) => peso(m);
 
 export default function ReportsPanel() {
   const storeId = getAdminStoreId();

@@ -12,6 +12,7 @@ import {
   type PhCityOption,
   type PhBarangayOption,
 } from "../api/address";
+import { peso } from "../lib/number-format";
 
 interface CheckoutFormProps {
   cartToken: string;
@@ -22,7 +23,7 @@ interface CheckoutFormProps {
   onClose: () => void;
 }
 
-const toPesos = (m: number) => `₱${(m / 100).toFixed(2)}`;
+const toPesos = (m: number) => peso(m);
 
 const EMPTY_PH = { code: "", name: "" };
 

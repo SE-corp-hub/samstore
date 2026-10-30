@@ -7,8 +7,9 @@ import { useCallback, useEffect, useState } from "react";
 import { API_URL } from "../../config";
 import { adminHeaders, handleUnauthorized } from "../../lib/admin";
 import BarChart from "./BarChart";
+import { peso } from "../../lib/number-format";
 
-const toPesos = (m: number) => `₱${(m / 100).toFixed(2)}`;
+const toPesos = (m: number) => peso(m);
 
 interface OverviewProps {
   onNavigate: (tab: string) => void;

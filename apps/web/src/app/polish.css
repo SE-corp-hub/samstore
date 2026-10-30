@@ -7,6 +7,7 @@
    - table headings readable (13px, darker), chart labels 12px. */
 
 :root {
+  --sam-font: "SAM Digits", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   /* Terracotta a shade deeper: white text on it was 4.1:1, now 5.2:1. */
   --sam-primary: #c0421f;
   --sam-primary-dark: #a1361a;
@@ -125,8 +126,9 @@
 .admin-shell .table { --bs-table-color: var(--sam-text); }
 
 /* Small type never under 13px on the admin screens. */
-.admin-shell .small, .admin-shell small { font-size: max(0.8125rem, 0.875em); }
-.admin-shell .badge { font-size: 0.8125rem; }
+.admin-shell .small, .admin-shell small { font-size: max(0.875rem, 0.875em); }
+/* Badges may wrap onto two lines instead of running over the text next to them. */
+.admin-shell .badge { font-size: 0.875rem; white-space: normal; text-align: start; line-height: 1.25; }
 
 /* Touch screens: icon-only buttons as wide as they are tall, so a finger can hit them. */
 @media (max-width: 767.98px), (pointer: coarse) {
@@ -145,3 +147,33 @@
 /* Overview: the four numbers share the row evenly. */
 .stat-grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
 .stat-grid > .card { margin: 0; }
+
+/* ───────────── Numbers that read the same everywhere (2026-10-30) ─────────────
+   Staff found the numbers hard to read: the store font draws 0 with a slash (Ø), and the
+   owner screens used the phone's own font, so ₱ amounts looked different from screen to
+   screen. Every digit, the peso sign and the signs around numbers now come from Inter
+   (plain 0, flagged 1, open 6/9, all the same width so columns line up). Words keep their font.
+   The files are on this site (cached for offline), only the characters below: 9 kB in all. */
+@font-face {
+  font-family: "SAM Digits";
+  src: url("/fonts/inter-digits-v1.woff2") format("woff2");
+  font-weight: 100 900;
+  font-display: swap;
+  unicode-range: U+0030-0039, U+002B-002E, U+0025, U+003A, U+00B7, U+2013, U+2212;
+}
+@font-face {
+  font-family: "SAM Digits";
+  src: url("/fonts/inter-peso-v1.woff2") format("woff2");
+  font-weight: 100 900;
+  font-display: swap;
+  unicode-range: U+20B1;
+}
+body { font-family: var(--sam-font); font-variant-numeric: tabular-nums; }
+.rice-ui { font-family: "SAM Digits", "Atkinson Hyperlegible", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+.rice-ui .num, .admin-shell .num { font-weight: 600; letter-spacing: 0.01em; }
+/* Long names, emails and notes wrap inside their box instead of running over the next one. */
+.admin-shell main { overflow-wrap: break-word; }
+.admin-shell .list-group-item > :not(.btn), .admin-shell .d-flex.justify-content-between > :not(.btn) { min-width: 0; }
+/* Tappable list rows (Credit customers and others) in full ink, not Bootstrap's faded grey. */
+.admin-shell .list-group-item-action { color: var(--sam-text); }
+.rice-ui .list-group-item-action { color: var(--rice-ink); }

@@ -10,6 +10,7 @@ import { API_URL } from "../config";
 import { getAdminToken, clearAdminSession } from "../lib/admin";
 import SignaturePad from "./admin/SignaturePad";
 import { PesoInput } from "./NumberBoxes";
+import { peso } from "../lib/number-format";
 
 interface DeliveryOrder {
   id: string;
@@ -38,7 +39,7 @@ interface RecentOrder {
   createdAt: string;
 }
 
-const toPesos = (m: number) => `₱${(m / 100).toFixed(2)}`;
+const toPesos = (m: number) => peso(m);
 const STATUS_BADGE: Record<string, string> = {
   DELIVERED: "text-bg-success",
   FAILED_DELIVERY: "text-bg-danger",

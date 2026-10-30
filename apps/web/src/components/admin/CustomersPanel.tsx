@@ -7,6 +7,7 @@ import { toast } from "../../lib/toast";
 import CustomerBarcode from "./CustomerBarcode";
 import { creditStatusWords } from "../../lib/credit-status";
 import { buildText, openTextApp } from "../../lib/text-message";
+import { peso } from "../../lib/number-format";
 
 interface CustomerRow {
   id: string;
@@ -46,7 +47,8 @@ const APPROVAL_BADGE: Record<string, string> = {
   SUSPENDED: "text-bg-danger",
 };
 
-const toPesos = (m: number) => `₱${(m / 100).toFixed(2)}`;
+const toPesos = peso;
+const APPROVAL_WORDS: Record<string, string> = { NOT_REQUIRED: "No approval needed", PENDING: "Waiting", APPROVED: "Approved", REJECTED: "Rejected", SUSPENDED: "Suspended" };
 
 const apiError = (d: unknown, fallback: string): string => {
   if (!d || typeof d !== "object") return fallback;
@@ -300,26 +302,28 @@ export default function CustomersPanel() {
       ) : customers.length === 0 ? (
         <p className="text-muted">No customers match.</p>
       ) : (
+        <div className="table-responsive">
         <table className="table table-hover align-middle">
           <thead>
             <tr>
               <th>Customer</th>
-                            <th>Contact</th>
-                            <th>Status</th>
+                            <th className="col-wide">Contact</th>
+                            <th className="col-wide">Status</th>
                             <th>Approval</th>
                             <th>Credit</th>
-                            <th>Joined</th>
+                            <th className="col-wide">Joined</th>
             </tr>
           </thead>
           <tbody>
             {customers.map((c) => (
               <tr key={c.id} style={{ cursor: "pointer" }} onClick={() => openProfile(c.id)}>
                 <td>
-                  <div className="d-flex align-items-center">
-                    <span className="fw-semibold">{c.name ?? c.email ?? c.phone ?? "Guest"}</span>
+                  <div className="d-flex align-items-center flex-wrap gap-1">
+                    <span className="fw-semibold">{c.name ?? c.email ?? c.phone ?? "Guest"}<span className="d-block small text-muted fw-normal d-lg-none">{c.phone ?? c.email ?? ""}</span></span>
                     <button
                                           className="btn btn-sm btn-outline-secondary ms-1"
                                           title="Edit customer"
+                                          aria-label={`Edit ${c.name ?? "customer"}`}
                                           onClick={(e) => { e.stopPropagation(); openEdit(c); }}
                                         >
                                           <i className="bi bi-pencil"></i>
@@ -327,24 +331,25 @@ export default function CustomersPanel() {
                                         <button
                                           className="btn btn-sm btn-outline-secondary ms-1"
                                           title="Customer barcode"
+                                          aria-label={`Barcode for ${c.name ?? "customer"}`}
                                           onClick={(e) => { e.stopPropagation(); setBarcodeTarget({ id: c.id, name: c.name }); }}
                                         >
                                           <i className="bi bi-upc-scan"></i>
                                         </button>
                   </div>
                 </td>
-                <td className="small text-muted">{c.email ?? c.phone ?? "—"}</td>
-                                <td><span className="badge text-bg-secondary">{c.approvalStatus}</span></td>
+                <td className="small text-muted col-wide">{c.email ?? c.phone ?? "—"}</td>
+                                <td className="col-wide"><span className="badge text-bg-secondary">{APPROVAL_WORDS[c.approvalStatus] ?? c.approvalStatus}</span></td>
                 <td>
                   {c.approvalStatus === "PENDING" ? (
                     <div className="d-flex gap-1">
-                      <button className="btn btn-sm btn-outline-success" onClick={(e) => { e.stopPropagation(); setApproval(c.id, "APPROVED"); }}><i className="bi bi-check-lg"></i></button>
-                      <button className="btn btn-sm btn-outline-danger" onClick={(e) => { e.stopPropagation(); setApproval(c.id, "REJECTED"); }}><i className="bi bi-x-lg"></i></button>
+                      <button className="btn btn-sm btn-outline-success" aria-label="Approve" title="Approve" onClick={(e) => { e.stopPropagation(); setApproval(c.id, "APPROVED"); }}><i className="bi bi-check-lg"></i></button>
+                      <button className="btn btn-sm btn-outline-danger" aria-label="Reject" title="Reject" onClick={(e) => { e.stopPropagation(); setApproval(c.id, "REJECTED"); }}><i className="bi bi-x-lg"></i></button>
                     </div>
                   ) : c.approvalStatus === "APPROVED" ? (
                     <button className="btn btn-sm btn-outline-warning" onClick={(e) => { e.stopPropagation(); setApproval(c.id, "SUSPENDED"); }}>Suspend</button>
                   ) : (
-                    <button className="btn btn-sm btn-outline-secondary" onClick={(e) => { e.stopPropagation(); setApproval(c.id, "APPROVED"); }}>Re-approve</button>
+                    <button className="btn btn-sm btn-outline-secondary text-nowrap" onClick={(e) => { e.stopPropagation(); setApproval(c.id, "APPROVED"); }}>Re-approve</button>
                   )}
                 </td>
                 <td>
@@ -359,11 +364,12 @@ export default function CustomersPanel() {
                     <button className="btn btn-sm btn-outline-warning" onClick={(e) => { e.stopPropagation(); setApproveTarget(c); }}>Approve credit</button>
                   )}
                 </td>
-                <td className="small text-muted">{new Date(c.joinedAt).toLocaleDateString()}</td>
+                <td className="small text-muted col-wide">{new Date(c.joinedAt).toLocaleDateString()}</td>
               </tr>
             ))}
           </tbody>
         </table>
+        </div>
       )}
 
       {/* Add customer modal */}

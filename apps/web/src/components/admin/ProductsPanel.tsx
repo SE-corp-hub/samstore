@@ -7,6 +7,7 @@ import { API_URL } from "../../config";
 import { adminHeaders } from "../../lib/admin";
 import LabelSheet from "./LabelSheet";
 import VariantEditor from "./VariantEditor";
+import { peso } from "../../lib/number-format";
 
 export interface AdminProduct {
   id: string;
@@ -90,7 +91,7 @@ type PriceHistoryRow = { id: string; field: string; oldMinor: number; newMinor: 
 const HISTORY_SOURCE: Record<string, string> = { MANUAL: "Edited by hand", PURCHASE: "New stock received", CONVERSION: "Resack", LOCATION: "Location price" };
 
 /** Every cost and price change for one product, newest first. Opens on tap. */
-const pesosText = (minor: number) => `₱${(minor / 100).toFixed(2)}`;
+const pesosText = (minor: number) => peso(minor);
 
 function PriceHistoryList({ productId }: { productId: string }) {
   const [rows, setRows] = useState<PriceHistoryRow[] | null>(null);
@@ -291,7 +292,7 @@ export default function ProductsPanel() {
     await load();
   };
 
-  const toPesos = (minor: number) => `₱${(minor / 100).toFixed(2)}`;
+  const toPesos = (minor: number) => peso(minor);
 
   return (
     <div>

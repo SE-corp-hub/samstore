@@ -5,6 +5,7 @@ import { API_URL } from "../../config";
 import { adminHeaders, getAdminStoreId } from "../../lib/admin";
 import BarChart from "./BarChart";
 import NoStoreScope from "./NoStoreScope";
+import { peso } from "../../lib/number-format";
 
 interface Summary {
   totalOrders: number;
@@ -46,7 +47,7 @@ export default function AnalyticsPanel() {
 
   if (!storeId) return <NoStoreScope />;
 
-  const pesos = (m: number) => `₱${(m / 100).toFixed(2)}`;
+  const pesos = (m: number) => peso(m);
 
   return (
     <div>

@@ -2,8 +2,9 @@
 
 import { useState } from "react";
 import type { ProductDTO } from "../types";
+import { peso } from "../lib/number-format";
 
-const toPesos = (minor: number) => `₱${(minor / 100).toFixed(2)}`;
+const toPesos = (minor: number) => peso(minor);
 
 interface ProductCardProps {
   product: ProductDTO;

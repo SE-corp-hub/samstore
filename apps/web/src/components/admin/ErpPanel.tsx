@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import { API_URL } from "../../config";
 import { adminHeaders } from "../../lib/admin";
 import { toast } from "../../lib/toast";
+import { peso } from "../../lib/number-format";
 
 interface AccountRow { id: string; code: string; name: string; type: string; isActive: boolean }
 
@@ -14,7 +15,7 @@ interface TrialBalanceRow { code: string; name: string; type: string; debitMinor
 
 interface IncomeStatement { revenueMinor: number; cogsMinor: number; expensesMinor: number; grossProfitMinor: number; netProfitMinor: number }
 
-const toPesos = (m: number) => `₱${(m / 100).toFixed(2)}`;
+const toPesos = (m: number) => peso(m);
 
 export default function ErpPanel() {
   const [accounts, setAccounts] = useState<AccountRow[]>([]);

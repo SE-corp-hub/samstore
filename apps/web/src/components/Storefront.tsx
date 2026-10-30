@@ -18,8 +18,9 @@ import {
   removeItem,
   clearStoredCartToken,
 } from "../lib/cart-client";
+import { peso } from "../lib/number-format";
 
-const toPesos = (minor: number) => `₱${(minor / 100).toFixed(2)}`;
+const toPesos = (minor: number) => peso(minor);
 
 interface StorefrontProps {
   store: PublicStoreDTO;
