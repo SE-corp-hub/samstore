@@ -1,0 +1,14 @@
+name: Diag beta probe
+on: push
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - run: |
+          for u in https://samstore-beta-web.onrender.com/manifest.webmanifest https://samstore-beta-web.onrender.com/backend/health https://samstore-beta-web.onrender.com/backend/health/ready https://samstore-beta-api.onrender.com/health https://samstore-beta-api.onrender.com/health/ready; do
+            out=$(curl -sS -D /tmp/h -o /tmp/b -w "%{http_code} %{time_total}s" --max-time 120 "$u" 2>&1)
+            hdr=$(grep -iE "^(x-render|x-request-id|content-type|server)" /tmp/h | tr -d '\r' | tr '\n' ' ')
+            body=$(head -c 300 /tmp/b | tr '\n\r%' '   ')
+            echo "::notice title=$u::$out | $hdr | $body"
+          done
