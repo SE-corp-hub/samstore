@@ -25,6 +25,8 @@ import SignaturePad from "./SignaturePad";
 import QuickCount from "./QuickCount";
 import StoreBar from "./StoreBar";
 import PriceReason, { reasonOk } from "./PriceReason";
+import { askBelowCost, saveUnitCost } from "./BelowCostDialog";
+import { isBelowCost, okKey } from "../../lib/below-cost";
 import LocationPicker from "../LocationPicker";
 import { PesoInput } from "../NumberBoxes";
 import { buildText, openTextApp } from "../../lib/text-message";
@@ -42,6 +44,8 @@ interface Loc { id: string; name: string; code: string | null; type: string }
 interface Item {
   id: string; name: string; loose: boolean; gramsPerUnit: number | null; priceMinor: number; forReview: boolean;
   stock: Record<string, number>; tracked: boolean;
+  /** Unit cost here (per piece, or per kilo): selling under it loses money. Staff get it only to compare. */
+  floorMinor?: number; ownShelfCost?: boolean;
 }
 // Shape of GET /admin/customers (flat: name/phone on the row).
 interface Customer { id: string; name: string | null; phone: string | null; creditApproved: boolean; creditLimitMinor: number; creditUnlimited?: boolean; creditStatus?: string; creditAvailableMinor?: number | null; creditBalanceMinor: number }
@@ -138,6 +142,8 @@ export default function BentaPanel() {
   const [morePay, setMorePay] = useState(false);
   const [priceOpen, setPriceOpen] = useState(false);
   const [fromOpen, setFromOpen] = useState(false);
+  const [seesCost, setSeesCost] = useState(false);
+  const keptBelow = useRef(new Set<string>()); // below-cost prices someone chose to sell at anyway
 
   const loadCatalog = useCallback(async (loc?: string) => {
     const q = loc ? `?locationId=${encodeURIComponent(loc)}` : "";
@@ -146,6 +152,7 @@ export default function BentaPanel() {
     if (!d?.products) { setError(errText(d, "Could not load the products — connect to the internet once so the tablet can save them")); return; }
     setLocations((d.locations as Loc[]).filter((l) => (l as { type?: string }).type !== "BUFFER"));
     setItems(d.products as Item[]);
+    setSeesCost(d.seesCost === true);
     setLocationId((d.location as Loc).id);
   }, []);
 
@@ -411,6 +418,43 @@ export default function BentaPanel() {
       </div>
     </>
   );
+  /**
+   * Below cost: ask before the line goes in (or before paying). Resolves true when the line may stay as it is.
+   * "Fix selling price" puts the new price on the line card (a reason is still asked for), "Change unit cost"
+   * saves the product cost (owner/manager, online), "Sell anyway" is remembered for this price.
+   */
+  const passesCost = async (l: CartLine, idx: number | null): Promise<boolean> => {
+    const it = byId.get(l.productId);
+    if (!it) return true;
+    const unit = l.price ?? it.priceMinor;
+    let floor = it.floorMinor ?? 0;
+    for (;;) {
+      if (!isBelowCost(unit, floor) || keptBelow.current.has(okKey(it.id, unit, floor))) return true;
+      const pick = await askBelowCost({
+        name: it.name, priceMinor: unit, costMinor: floor, unit: it.loose ? "kilo" : it.gramsPerUnit ? "sack" : "piece", showCost: seesCost, proceed: "Sell anyway",
+        canChangeCost: !seesCost ? false : offline ? NEEDS_NET : it.ownShelfCost ? "This location has its own cost. Change it in Inventory." : true,
+      });
+      if (!pick) return false;
+      if (pick.kind === "proceed") { keptBelow.current.add(okKey(it.id, unit, floor)); return true; }
+      if (pick.kind === "price") {
+        const price = pick.priceMinor === it.priceMinor ? undefined : pick.priceMinor;
+        startEdit({ ...l, price, reason: price === undefined ? undefined : l.reason }, idx);
+        setPriceOpen(price !== undefined);
+        return false;
+      }
+      const err = await saveUnitCost(it.id, pick.costMinor);
+      if (err) { toast(err); return false; }
+      toast("Unit cost saved");
+      floor = pick.costMinor;
+      const saved = floor;
+      setItems((prev) => prev.map((x) => (x.id === it.id ? { ...x, floorMinor: saved } : x)));
+    }
+  };
+  const goPay = async () => {
+    for (let i = 0; i < cart.length; i++) if (!(await passesCost(cart[i]!, i))) return;
+    if (!pay) setPay("cash");
+    setStep("pay");
+  };
   const holdSale = () => {
     const first = byId.get(cart[0]!.productId)?.name ?? "Sale";
     const h: Held = { id: `${Date.now()}`, label: `${first}${cart.length > 1 ? ` +${cart.length - 1}` : ""} · ${peso(total)}`, at: Date.now(), locationId, cart };
@@ -433,6 +477,7 @@ export default function BentaPanel() {
                     {l.mode === "PESO" && <span className="text-muted"> (₱{l.value})</span>}
                     {l.sourceLocationId && <span className="badge text-bg-info ms-1">from {code(l.sourceLocationId)}</span>}
                     {l.price !== undefined && <span className="badge text-bg-warning ms-1">new price</span>}
+                    {it && isBelowCost(l.price ?? it.priceMinor, it.floorMinor) && <span className="badge text-bg-danger ms-1">below cost</span>}
                   </span>
                   <span className="fw-semibold text-nowrap">{peso(c.totalMinor)}</span>
                 </button>
@@ -446,7 +491,7 @@ export default function BentaPanel() {
         <div className="text-center text-muted small mb-2">Tap a line to change it.</div>
         <div className="d-flex gap-2">
           <button type="button" className="btn btn-outline-dark btn-lg" onClick={holdSale}>Hold</button>
-          <button type="button" className="btn btn-success btn-lg flex-fill py-3 fw-bold" style={{ fontSize: 22, fontVariantNumeric: "tabular-nums" }} onClick={() => { if (!pay) setPay("cash"); setStep("pay"); }}>
+          <button type="button" className="btn btn-success btn-lg flex-fill py-3 fw-bold" style={{ fontSize: 22, fontVariantNumeric: "tabular-nums" }} onClick={() => void goPay()}>
             Pay {peso(total)}
           </button>
         </div>
@@ -525,7 +570,7 @@ export default function BentaPanel() {
           <div className="d-flex justify-content-between mt-3 pos-actions">
             <button type="button" className="btn btn-outline-secondary btn-lg" onClick={() => { setEditing(null); setEditIdx(null); }}>Back</button>
             <button type="button" className="btn btn-success btn-lg px-5" disabled={c.totalMinor <= 0 || short || !reasonGiven || (editing.mode === "PIECE" && !Number.isInteger(c.units))}
-              onClick={() => { setCart(editIdx === null ? [...cart, editing] : cart.map((x, j) => (j === editIdx ? editing : x))); setEditing(null); setEditIdx(null); setCleared((n) => n + 1); }}>{editIdx === null ? "Add to sale" : "Save"}</button>
+              onClick={async () => { const line = editing, at = editIdx; if (!(await passesCost(line, at))) return; setCart(at === null ? [...cart, line] : cart.map((x, j) => (j === at ? line : x))); setEditing(null); setEditIdx(null); setCleared((n) => n + 1); }}>{editIdx === null ? "Add to sale" : "Save"}</button>
           </div>
         </div>
       </div>
@@ -795,11 +840,19 @@ export function NewItemForm({ locationId, onCancel, onDone, preorder = false }: 
   const ready = name.trim().length >= 2 && Number(price) > 0 && (preorder || (skipCount || Number(onHand) > 0) && !!sig) && (soldAs !== "SACK" || Number(kilosPerSack) > 0);
 
   const save = async () => {
+    // The person typed both numbers here, so the popup may show them.
+    let priceMinor = toMinor(price), costMinor = toMinor(cost);
+    if (isBelowCost(priceMinor, costMinor)) {
+      const pick = await askBelowCost({ name: name.trim(), priceMinor, costMinor, unit: soldAs === "KILO" ? "kilo" : soldAs === "SACK" ? "sack" : "piece", showCost: true, canChangeCost: true, proceed: "Save anyway" });
+      if (!pick) return;
+      if (pick.kind === "price") { priceMinor = pick.priceMinor; setPrice((priceMinor / 100).toFixed(2)); }
+      if (pick.kind === "cost") { costMinor = pick.costMinor; setCost((costMinor / 100).toFixed(2)); }
+    }
     setBusy(true); setError(null);
     const body = {
       name: name.trim(), soldAs, locationId,
       gramsPerSack: soldAs === "SACK" ? Math.round(Number(kilosPerSack) * 1000) : undefined,
-      priceMinor: toMinor(price), costMinor: toMinor(cost),
+      priceMinor, costMinor,
       ...(preorder ? { noOpeningStock: true } : {}),
       openingQty: preorder || skipCount ? 0 : soldAs === "KILO" ? Math.round(Number(onHand) * 1000) : Math.floor(Number(onHand)),
       trackStock: skipCount ? false : undefined,
@@ -810,7 +863,7 @@ export function NewItemForm({ locationId, onCancel, onDone, preorder = false }: 
     setBusy(false);
     if (!res.ok) { setError(errText(d, "Could not add")); return; }
     toast(`Added: ${name.trim()}`);
-    await onDone({ productId: String(d?.productId ?? ""), name: name.trim(), costMinor: toMinor(cost), priceMinor: toMinor(price) });
+    await onDone({ productId: String(d?.productId ?? ""), name: name.trim(), costMinor, priceMinor });
   };
 
   const num = (v: string) => v.replace(/[^\d.]/g, "").replace(/(\..*)\./g, "$1").slice(0, 10);

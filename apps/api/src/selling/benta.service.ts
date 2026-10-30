@@ -16,7 +16,7 @@
 // Totals are server-computed. Stock leaves the selling location in the same
 // transaction as the order, its payment and its signatures.
 
-import { costModeOf, recordCostIn, shelfCostFor } from "../domain/shelf-cost.js";
+import { costModeOf, effectiveCost, recordCostIn, shelfCostFor } from "../domain/shelf-cost.js";
 import type { ApiError } from "@sam-store/contracts";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../persistence/prisma-repositories.js";
@@ -24,7 +24,7 @@ import { cacheBust, cacheKey } from "../persistence/ttl-cache.js";
 import { PrismaOrderSequenceRepository } from "../persistence/prisma-repositories.js";
 import { randomId } from "../persistence/repositories.js";
 import { addForTrip, deductStock, InsufficientStockError, recordMovement, releaseForTrip, reserveForTrip, unreserveForTrip, type TripLeg } from "../domain/movements.js";
-import { chargeSale } from "../payable/charges.js";
+import { chargeSale, consignmentMain } from "../payable/charges.js";
 import { seesCost } from "../domain/cost-redact.js";
 import { applyReceipt, loadOpenOrder } from "../purchase-orders/receive.js";
 import { coverShortage, deductWithBuffer } from "../domain/buffer.js";
@@ -201,6 +201,14 @@ export class BentaService {
         prisma.orderItem.groupBy({ by: ["productId"], where: { storeId, order: { createdAt: { gte: new Date(Date.now() - 30 * 86_400_000) }, status: { not: "CANCELLED" } } }, _count: { _all: true } }),
       ]);
       const priceBy = new Map(prices.map((p) => [p.productId, p.priceMinor]));
+      // The cost a sale here is measured against (a consignment store: the main store's cost), so the
+      // tablet can warn about a price below cost with no internet. Staff get the number only to compare
+      // with; their screen never shows it (seesCost tells the screen which way to word the warning).
+      const costLoc = (await consignmentMain(prisma, storeId, loc.id)) ?? loc.id;
+      const costMode = await costModeOf(prisma, storeId);
+      const shelfCost = new Map(costMode === "PER_LOCATION"
+        ? (await prisma.stockLevel.findMany({ where: { storeId, warehouseId: costLoc, costMinor: { not: null } }, select: { productId: true, costMinor: true } })).map((l) => [l.productId, l.costMinor!])
+        : []);
       const soldBy = new Map(sold.map((s) => [s.productId ?? "", s._count._all]));
       const stockBy = new Map<string, Record<string, number>>();
       for (const l of levels) {
@@ -213,9 +221,12 @@ export class BentaService {
           id: p.id, name: p.name, sku: p.sku, loose: isLoose(p), gramsPerUnit: p.stockBaseUnit === "g" ? p.stockBaseQuantity : null,
           priceMinor: priceAt(p.priceMinor, priceBy.get(p.id)), mainPriceMinor: p.priceMinor, forReview: p.reviewStatus === "FOR_REVIEW",
           stock: stockBy.get(p.id) ?? {}, tracked: p.trackStock !== false && stockBy.has(p.id), sold30d: soldBy.get(p.id) ?? 0,
+          floorMinor: effectiveCost(costMode, shelfCost.get(p.id), p.costMinor ?? 0),
+          /** This shelf counts its own cost: changing the product cost would not move it. */
+          ownShelfCost: shelfCost.has(p.id),
         }))
         .sort((a, b) => b.sold30d - a.sold30d || a.name.localeCompare(b.name));
-      return { location: loc, locations, products: items };
+      return { location: loc, locations, products: items, seesCost: seesCost(actor.role) };
     });
   }
 

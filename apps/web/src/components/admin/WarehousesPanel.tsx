@@ -7,6 +7,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { API_URL } from "../../config";
 import { adminHeaders } from "../../lib/admin";
 import { toast } from "../../lib/toast";
+import { isBelowCost } from "../../lib/below-cost";
+import { askBelowCost, saveUnitCost } from "./BelowCostDialog";
 import SignCapture, { type SignatureOut } from "./SignCapture";
 import { peso } from "../../lib/number-format";
 
@@ -44,6 +46,10 @@ interface PriceRow {
   mainPriceMinor: number;
   locationPriceMinor: number | null;
   effectivePriceMinor: number;
+  /** Unit cost here (owner/manager only). */
+  costMinor?: number;
+  loose?: boolean;
+  ownShelfCost?: boolean;
 }
 type ApiBody = { message?: string; errors?: string[]; prices?: PriceRow[] };
 
@@ -191,6 +197,19 @@ export default function WarehousesPanel() {
       const value = Number(raw);
       if (!raw || !Number.isFinite(value) || value <= 0) { setError("Enter a price above ₱0, or choose Use main."); return; }
       priceMinor = Math.round(value * 100);
+    }
+    // A location price (or going back to the main price) that sells under the unit cost: ask first.
+    const willSell = priceMinor ?? row.mainPriceMinor;
+    if (isBelowCost(willSell, row.costMinor)) {
+      const pick = await askBelowCost({ name: row.name, priceMinor: willSell, costMinor: row.costMinor!, unit: row.loose ? "kilo" : "piece", showCost: true, proceed: "Save anyway",
+        canChangeCost: row.ownShelfCost ? "This location has its own cost. Change it in Inventory." : true });
+      if (!pick) return;
+      if (pick.kind === "price") priceMinor = pick.priceMinor;
+      if (pick.kind === "cost") {
+        const err = await saveUnitCost(row.productId, pick.costMinor);
+        if (err) { setError(err); return; }
+        toast("Unit cost saved");
+      }
     }
     const { ok, data } = await call(`${API_URL}/admin/warehouses/${priceLocation}/prices/${row.productId}`, "PUT", { priceMinor });
     if (!ok) { setError(errorText(data, "Could not save the price")); return; }
@@ -393,7 +412,7 @@ export default function WarehousesPanel() {
               <tbody>
                 {prices.map((row) => (
                   <tr key={row.productId}>
-                    <td className="small">{row.name}<div className="text-muted">{row.sku}</div></td>
+                    <td className="small">{row.name}{isBelowCost(row.effectivePriceMinor, row.costMinor) && <span className="badge text-bg-danger ms-1">Below cost {peso(row.costMinor!)}</span>}<div className="text-muted">{row.sku}</div></td>
                     <td className="text-end small">{peso(row.mainPriceMinor)}</td>
                     <td className="text-end small fw-semibold">{row.locationPriceMinor === null ? <span className="text-muted fw-normal">uses main</span> : peso(row.locationPriceMinor)}</td>
                     <td>

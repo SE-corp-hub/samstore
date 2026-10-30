@@ -1291,10 +1291,10 @@ export class AdminController {
   ) {
     const user = req.user;
     requireUser(user);
-    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
+    const { storeId, role } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
     const result = await this.warehouses.listPrices(storeId, id);
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
-    return { prices: result.value, storeId };
+    return { prices: seesCost(role) ? result.value : redactCost(result.value), storeId };
   }
 
   /** PUT /admin/warehouses/:id/prices/:productId — set (or null to clear) a location's own price. */
