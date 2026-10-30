@@ -10,7 +10,8 @@
 // step's signatures — all in ONE transaction, so a step either happens completely or
 // not at all. Short on a trip goes to the owner's "Para sa iyo".
 
-import { bookProfitShare, consignmentMain, reduceForReturn, takeBackShare } from "../payable/charges.js";
+import { bookProfitShare, consignmentMain, reduceForReturn, reverseMoveEntries, takeBackShare } from "../payable/charges.js";
+import { manilaDate } from "../domain/reports.js";
 import type { ApiError } from "@sam-store/contracts";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../persistence/prisma-repositories.js";
@@ -26,6 +27,12 @@ import {
 } from "../people/people.service.js";
 import { txOptions } from "../persistence/tx-options.js";
 import { seesCost } from "../domain/cost-redact.js";
+
+const OWNER_MANAGER = new Set(["OWNER", "MANAGER"]);
+
+/** A one-step move (released and received in the same instant) made today, Manila time. */
+const undoable = (t: { releasedAt: Date | null; receivedAt: Date | null; completedAt: Date | null }) =>
+  !!t.completedAt && !!t.releasedAt && t.releasedAt.getTime() === t.receivedAt?.getTime() && manilaDate(t.completedAt) === manilaDate(new Date());
 
 export type FlowResult<T> = { ok: true; value: T } | { ok: false; error: ApiError };
 type Tx = Prisma.TransactionClient;
@@ -463,10 +470,36 @@ export class TransferFlowService {
     }, product.name, from.name);
   }
 
+  /**
+   * Undo a one-step move made today: the stock goes back and its profit share (or share taken back) comes off.
+   * Refused when the rice is no longer there to send back (sold or moved on).
+   */
+  async undoMove(storeId: string, actor: Actor, id: string): Promise<FlowResult<{ id: string; status: string }>> {
+    const t = await this.load(storeId, id);
+    if (!t || t.kind !== "RESTOCK") return notFound();
+    if (t.status !== "COMPLETED" || !undoable(t)) return conflict("Only a move made today with Move stock can be undone");
+    return this.step(async () => {
+      await prisma.$transaction(async (tx) => {
+        await this.claim(tx, storeId, id, ["COMPLETED"], { status: "CANCELLED" });
+        const ref = `${t.docNumber ?? "move"} undone`;
+        await recordCostIn(tx, { storeId, productId: t.productId, warehouseId: t.fromWarehouseId }, t.quantity, await shelfCostFor(tx, storeId, t.productId, t.toWarehouseId));
+        try {
+          await transferStock(tx, { storeId, productId: t.productId, fromWarehouseId: t.toWarehouseId, toWarehouseId: t.fromWarehouseId, quantity: t.quantity, actorId: actor.userId, documentType: "TRANSFER", documentId: id, note: ref, sourceMayGoNegative: t.toWarehouse.type === "BUFFER" });
+        } catch (e) {
+          if (e instanceof InsufficientStockError) throw new StepError(conflict(`Only ${t.quantity - e.shortfall} of the ${t.quantity} × ${t.product.name} are still at ${placeName(t.toWarehouse)}, so this move can't be undone. Move the rest back with Move stock instead.`));
+          throw e;
+        }
+        await reverseMoveEntries(tx, storeId, id, actor.userId, ref);
+        await tx.auditLog.create({ data: { storeId, actorType: "USER", actorId: actor.userId, action: "transfer.undo_move", entityType: "StockTransfer", entityId: id, after: { quantity: t.quantity } } });
+      }, txOptions());
+      return { id, status: "CANCELLED" };
+    }, t.product.name, placeName(t.toWarehouse));
+  }
+
   /** Recent one-step moves (newest first). */
   async recentMoves(storeId: string, actor: Actor, locationId?: string) {
     const rows = await prisma.stockTransfer.findMany({
-      where: { storeId, kind: "RESTOCK", status: "COMPLETED", ...(locationId ? { OR: [{ fromWarehouseId: locationId }, { toWarehouseId: locationId }] } : {}) },
+      where: { storeId, kind: "RESTOCK", status: { in: ["COMPLETED", "CANCELLED"] }, completedAt: { not: null }, ...(locationId ? { OR: [{ fromWarehouseId: locationId }, { toWarehouseId: locationId }] } : {}) },
       orderBy: { createdAt: "desc" }, take: 30, include: tripInclude,
     });
     // The profit share each move booked (+ owed to the store, − taken back), for those who see cost.
@@ -475,7 +508,7 @@ export class TransferFlowService {
       const entries = await prisma.storePayableEntry.findMany({ where: { storeId, transferId: { in: rows.map((t) => t.id) }, kind: { in: ["PROFIT_SHARE", "SHARE_BACK"] } }, select: { transferId: true, amountMinor: true } });
       for (const e of entries) if (e.transferId) shares.set(e.transferId, (shares.get(e.transferId) ?? 0) - e.amountMinor);
     }
-    return rows.map((t) => ({ id: t.id, docNumber: t.docNumber, productName: t.product.name, quantity: t.quantity, from: t.fromWarehouse.name, to: t.toWarehouse.name, note: t.reason, at: t.completedAt ?? t.createdAt, profitShareMinor: shares.get(t.id) ?? null }));
+    return rows.map((t) => ({ id: t.id, docNumber: t.docNumber, productName: t.product.name, quantity: t.quantity, from: t.fromWarehouse.name, to: t.toWarehouse.name, note: t.reason, at: t.completedAt ?? t.createdAt, profitShareMinor: shares.get(t.id) ?? null, undone: t.status === "CANCELLED", canUndo: t.status === "COMPLETED" && undoable(t) && OWNER_MANAGER.has(actor.role) }));
   }
 
   /** Recent customer returns (newest first). */
