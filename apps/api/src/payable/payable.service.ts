@@ -74,10 +74,10 @@ export class PayableService {
         b.weeklyDue = b.owesMinor > 0 && !!since && since.getTime() < week;
         b.countDue = !b.lastCountAt || b.lastCountAt.getTime() < week;
       }
-      // Shortages found by approved counts that nobody has been charged for yet.
+      // Shortages found by approved counts that nobody has been charged for yet (and were not sold to walk-ins).
       const used = new Set((await prisma.storePayableEntry.findMany({ where: { storeId, sourceLineId: { not: null } }, select: { sourceLineId: true } })).map((x) => x.sourceLineId!));
       const lines = await prisma.stockCountLine.findMany({
-        where: { storeId, postedQty: { lt: 0 }, count: { status: "APPROVED" } }, orderBy: { countedAt: "desc" }, take: 200,
+        where: { storeId, postedQty: { lt: 0 }, walkInOrderId: null, count: { status: "APPROVED" } }, orderBy: { countedAt: "desc" }, take: 200,
         select: { id: true, productId: true, postedQty: true, countedAt: true, product: { select: productSelect }, count: { select: { docNumber: true, locationId: true, location: { select: { name: true } } } } },
       });
       const toAssign = [];
@@ -114,7 +114,7 @@ export class PayableService {
   async chargeFromCount(storeId: string, actor: Actor, input: { lineId?: string; locationId?: string }) {
     return this.run(actor, async () => {
       const line = input.lineId ? await prisma.stockCountLine.findFirst({
-        where: { id: input.lineId, storeId, postedQty: { lt: 0 }, count: { status: "APPROVED" } },
+        where: { id: input.lineId, storeId, postedQty: { lt: 0 }, walkInOrderId: null, count: { status: "APPROVED" } },
         select: { id: true, productId: true, postedQty: true, product: { select: productSelect }, count: { select: { docNumber: true, locationId: true } } },
       }) : null;
       if (!line) throw new StepError(notFound("That shortage was not found"));

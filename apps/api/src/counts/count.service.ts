@@ -16,6 +16,7 @@
 
 import { chargeCountShort, consignmentMain } from "../payable/charges.js";
 import { autoResackFromCount } from "../payable/count-resack.js";
+import { walkInLines, type WalkInLine } from "./count-walk-in.js";
 import type { ApiError } from "@sam-store/contracts";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../persistence/prisma-repositories.js";
@@ -53,6 +54,8 @@ type P = Prisma.ProductGetPayload<{ select: typeof productSelect }>;
 export interface ReportLine {
   productId: string; name: string; loose: boolean; countedQty: number; expectedQty: number; firstCountedQty: number | null;
   varianceQty: number; varianceValueMinor: number; explainedQty: number; verdict: string; reason: string | null; reasonLabel: string | null; note: string | null; countedBy: string | null;
+  /** Recorded as sold to walk-ins (the sale it became). */
+  soldToWalkIns: boolean;
   since: { from: { docNumber: string; countedQty: number; countedAt: Date } | null; buckets: Record<string, number>; ledgerShouldBe: number } | null;
 }
 export interface ReportDifference {
@@ -417,7 +420,7 @@ export class CountService {
         lines.push({
           productId: l.productId, name: l.product.name, loose: isLooseP(l.product), countedQty: l.countedQty!, expectedQty: l.expectedQty!, firstCountedQty: l.firstCountedQty,
           varianceQty: r.varianceQty, varianceValueMinor: leftoverValueMinor, explainedQty: r.varianceQty - leftoverQty, verdict: r.verdict,
-          reason: l.reason, reasonLabel: l.reason ? REASON_LABEL[l.reason as CountReason] ?? null : null, note: l.note, countedBy: names.get(l.countedById ?? "") ?? null, since,
+          reason: l.reason, reasonLabel: l.reason ? REASON_LABEL[l.reason as CountReason] ?? null : null, note: l.note, countedBy: names.get(l.countedById ?? "") ?? null, soldToWalkIns: !!l.walkInOrderId, since,
         });
       }
 
@@ -464,6 +467,21 @@ export class CountService {
         }
       }
 
+      // "Missing = sold to walk-ins" (owner/manager): what can still be recorded, and the sales already made from this count.
+      let walkIn: { open: WalkInLine[]; openMinor: number; drawerOpen: boolean; sales: { orderId: string; orderNumber: string; totalMinor: number; lines: number; inDrawer: boolean }[] } | null = null;
+      if (owner && c.status === "APPROVED") {
+        const open = await walkInLines(prisma, storeId, c.id);
+        const orderIds = [...new Set(c.lines.map((l) => l.walkInOrderId).filter((x): x is string => !!x))];
+        const orders = orderIds.length ? await prisma.order.findMany({ where: { storeId, id: { in: orderIds } }, select: { id: true, orderNumber: true, totalMinor: true, registerSessionId: true, _count: { select: { items: true } } }, orderBy: { createdAt: "asc" } }) : [];
+        const drawer = open.length ? await prisma.registerSession.findFirst({ where: { storeId, status: "OPEN", register: { OR: [{ locationId: c.locationId }, { locationId: null }] } }, select: { id: true } }) : null;
+        if (open.length || orders.length) {
+          walkIn = {
+            open, openMinor: open.reduce((s, l) => s + l.amountMinor, 0), drawerOpen: !!drawer,
+            sales: orders.map((o) => ({ orderId: o.id, orderNumber: o.orderNumber, totalMinor: o.totalMinor, lines: o._count.items, inDrawer: !!o.registerSessionId })),
+          };
+        }
+      }
+
       const opened = await prisma.auditLog.findMany({ where: { storeId, action: "count.auto_resack", entityId: c.id }, select: { after: true }, orderBy: { createdAt: "asc" } });
       const openedByCount = opened.map((o) => {
         const a = (o.after ?? {}) as { variety?: string; sacksOpened?: number; grams?: number; unexplainedGrams?: number; automatic?: boolean };
@@ -477,7 +495,7 @@ export class CountService {
         },
         openedByCount,
         lines, correct: correct.map((x) => ({ productId: x.l.productId, name: x.l.product.name, loose: isLooseP(x.l.product), countedQty: x.l.countedQty! })).sort((a, b) => a.name.localeCompare(b.name)),
-        weight, resacks, charge,
+        weight, resacks, charge, walkIn,
       };
     });
   }
