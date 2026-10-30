@@ -768,7 +768,7 @@ export default function BentaPanel() {
 }
 
 /** Cash needs an open cash drawer. Staff open it right here instead of going to POS. */
-function OpenDrawer({ onOpened }: { onOpened: () => void }) {
+export function OpenDrawer({ onOpened }: { onOpened: () => void }) {
   const [float, setFloat] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);

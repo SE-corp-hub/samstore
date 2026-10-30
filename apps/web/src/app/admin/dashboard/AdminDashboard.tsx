@@ -65,7 +65,7 @@ const KargadorsPanel = panel(() => import("../../../components/admin/KargadorsPa
 const MovePanel = panel(() => import("../../../components/admin/MovePanel"));
 const ReturnsPanel = panel(() => import("../../../components/admin/ReturnsPanel"));
 const ResackPanel = panel(() => import("../../../components/admin/ResackPanel"));
-const BentaPanel = panel(() => import("../../../components/admin/BentaPanel"));
+const PosPanel = panel(() => import("../../../components/admin/PosPanel"));
 const PasokPanel = panel(() => import("../../../components/admin/PasokPanel"));
 const UtangRicePanel = panel(() => import("../../../components/admin/UtangRicePanel"));
 const AgentPanel = panel(() => import("../../../components/admin/AgentPanel"));
@@ -296,7 +296,7 @@ export default function AdminDashboard() {
       case "home": return <StaffHome role={role} onNavigate={(id) => { userNavigated.current = true; setTab(id); }} labelFor={navLabel} />;
       case "overview": return <OverviewPanel onNavigate={setTab} storeSlug={active?.slug} storeName={active?.name} />;
       // One POS: the rice-ready counter screen.
-      case "pos": return <BentaPanel />;
+      case "pos": return <PosPanel />;
       case "preorders": return <PreOrdersPanel onNavigate={setTab} />;
       case "utang": // the bar id; the menu id is "utangrice" (one merged Credit screen)
       case "utangrice": return <UtangRicePanel role={role} />;
