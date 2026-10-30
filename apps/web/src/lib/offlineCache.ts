@@ -7,7 +7,7 @@
 import { useEffect, useState } from "react";
 import { API_URL } from "../config";
 import { adminHeaders, getAdminStoreId, handleUnauthorized, SAVED_COPY_PREFIX as PREFIX } from "./admin";
-import { notFromApi } from "./wake-fetch";
+import { notFromApi, wakeApi } from "./wake-fetch";
 
 export const OFFLINE_EVENT = "rice-offline";
 /** How long to wait for the server before opening the saved copy instead. */
@@ -67,6 +67,7 @@ export async function checkConnection(): Promise<boolean> {
   netDown = !ok;
   serverSlow = slow;
   if (ok && !slow) usingSaved = false;
+  if (ok && slow) wakeApi();
   if (connectionState() !== was) changed();
   return ok;
 }
@@ -156,6 +157,7 @@ export async function cachedGet<T = unknown>(path: string, { headers, waitMs = C
       clearTimeout(timer);
     }
   }
+  if (!netDown) wakeApi();
   const kept = savedCopy<T>(path);
   if (kept !== null) setUsingSaved(true);
   return kept;

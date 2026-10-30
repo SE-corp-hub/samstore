@@ -4,6 +4,8 @@
 const apiInternal = process.env.API_INTERNAL_URL ?? "http://localhost:4100";
 
 const nextConfig = {
+  // The API's public https address, for the tablet to wake it directly (lib/offlineCache.ts).
+  env: { NEXT_PUBLIC_API_DIRECT_URL: process.env.NEXT_PUBLIC_API_DIRECT_URL ?? (apiInternal.startsWith("https://") ? apiInternal.replace(/\/+$/, "") : "") },
   eslint: {
     ignoreDuringBuilds: true,
   },

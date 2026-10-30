@@ -102,3 +102,14 @@ test("Wi-Fi on but the free server asleep: 'Connecting to server', not a false '
   globalThis.fetch = answer(200, {}) as typeof fetch;
   await checkConnection();
 });
+
+test("API asleep behind the proxy (Render 429 hibernate-rate-limited): the saved copy, not an empty screen", async () => {
+  globalThis.fetch = answer(200, { a: 1 }) as typeof fetch;
+  await cachedGet("/admin/settings");
+  globalThis.fetch = answer(429, "Too Many Requests", { "x-render-routing": "hibernate-rate-limited" }) as typeof fetch;
+  assert.deepEqual(await cachedGet("/admin/settings"), { a: 1 });
+  assert.equal(connectionState(), "waking");
+  globalThis.fetch = answer(200, {}) as typeof fetch;
+  await checkConnection();
+  assert.equal(connectionState(), "online");
+});
