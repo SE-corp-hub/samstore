@@ -1,7 +1,8 @@
 "use client";
 
-// Store payable: what each store owes the main store for rice that left without a record.
-//   Balance cards   one per store: owes, paid, balance — Record payment / Statement
+// Store payable: what each store owes the main store for rice that left without a record, less the profit
+// share the main store owes it for rice it took from that store (below zero: the main store owes the store).
+//   Balance cards   one per store: owes, profit share, paid, balance — Record payment / Pay the store / Statement
 //   To charge       shortages found by counts that nobody has been charged for yet (at the main store's cost price)
 //   Add by hand     charge a quantity directly
 //   All entries     every charge, payment and undo, newest first
@@ -17,8 +18,14 @@ import { PesoInput, KiloInput, WholeInput } from "../NumberBoxes";
 import { peso, kg } from "../../lib/number-format";
 
 const qtyText = (loose: boolean, q: number) => (loose ? kg(q) : `${q.toLocaleString("en-PH")} pcs`);
+const KIND: Record<string, { label: string; badge: string }> = {
+  CHARGE: { label: "Charge", badge: "text-bg-warning" }, PAYMENT: { label: "Payment", badge: "text-bg-success" }, REVERSAL: { label: "Undo", badge: "text-bg-secondary" },
+  PROFIT_SHARE: { label: "Profit share", badge: "text-bg-info" }, SHARE_BACK: { label: "Share taken back", badge: "text-bg-light border" },
+};
+/** A payment is the store paying (−), or the main store paying the store its profit share (+). */
+const kindLabel = (kind: string, amountMinor: number) => (kind === "PAYMENT" && amountMinor > 0 ? "Paid to the store" : KIND[kind]?.label ?? kind);
 
-interface Bal { id: string; name: string; code: string | null; isMain: boolean; chargesMinor: number; paymentsMinor: number; reversedMinor: number; owesMinor: number; consignment?: boolean; lastPaymentAt?: string | null; lastCountAt?: string | null; weeklyDue?: boolean; countDue?: boolean }
+interface Bal { id: string; name: string; code: string | null; isMain: boolean; chargesMinor: number; paymentsMinor: number; reversedMinor: number; sharesMinor?: number; owesMinor: number; consignment?: boolean; lastPaymentAt?: string | null; lastCountAt?: string | null; weeklyDue?: boolean; countDue?: boolean }
 interface ToCharge { lineId: string; countDoc: string; countedAt: string | null; atId: string; at: string; productId: string; name: string; loose: boolean; quantity: number; unitCostMinor: number; amountMinor: number }
 interface Entry { id: string; docNumber: string; kind: string; locationId: string; store: string; amountMinor: number; productName: string | null; loose: boolean; quantity: number | null; unitCostMinor: number | null; note: string | null; by: string | null; at: string; reversed: boolean; canReverse: boolean }
 interface Summary { stores: Bal[]; toAssign: ToCharge[]; entries: Entry[]; totalOwesMinor: number }
@@ -38,6 +45,8 @@ export default function PayablePanel() {
   const [busy, setBusy] = useState(false);
   const [debtor, setDebtor] = useState("");
   const [paying, setPaying] = useState<Bal | null>(null);
+  /** The payment goes the other way: the main store pays the store its profit share. */
+  const payingToStore = !!paying && paying.owesMinor < 0;
   const [payAmount, setPayAmount] = useState("");
   const [payNote, setPayNote] = useState("");
   const [adding, setAdding] = useState(false);
@@ -93,14 +102,15 @@ export default function PayablePanel() {
     if (!reason) return;
     await act(`/admin/payable/entries/${e.id}/reverse`, { reason }, "Undone");
   };
+  const mainName = data?.stores.find((x) => x.isMain)?.name ?? "Store 1";
   const statement = async (b: Bal) => {
     const r = await call(`/admin/payable/statement?locationId=${b.id}`, "GET");
     if (!r.ok) { setError(errText(r.data, "Could not load the statement")); return; }
     const s = r.data as unknown as { store: { name: string }; owesMinor: number; entries: { docNumber: string; kind: string; at: string; productName: string | null; loose: boolean; quantity: number | null; amountMinor: number; balanceMinor: number; note: string | null }[] };
     printSlip({
       storeName: "Store payable", title: `STATEMENT — ${s.store.name}`, when: new Date().toLocaleString(),
-      rows: s.entries.map((e) => ({ name: `${e.docNumber} ${e.kind === "CHARGE" ? (e.productName ?? "Charge") : e.kind === "PAYMENT" ? "Payment" : "Undo"}`, qty: e.quantity !== null && e.productName ? qtyText(e.loose, e.quantity) : "", note: `${e.amountMinor < 0 ? "−" : ""}${peso(Math.abs(e.amountMinor))} → ${peso(e.balanceMinor)}` })),
-      totals: [{ label: `${s.store.name} owes`, value: peso(s.owesMinor) }],
+      rows: s.entries.map((e) => ({ name: `${e.docNumber} ${e.kind === "CHARGE" ? (e.productName ?? "Charge") : `${kindLabel(e.kind, e.amountMinor)}${e.kind !== "PAYMENT" && e.productName ? ` ${e.productName}` : ""}`}`, qty: e.quantity !== null && e.productName ? qtyText(e.loose, e.quantity) : "", note: `${e.amountMinor < 0 ? "−" : ""}${peso(Math.abs(e.amountMinor))} → ${peso(e.balanceMinor)}` })),
+      totals: [{ label: s.owesMinor < 0 ? `${mainName} owes ${s.store.name}` : `${s.store.name} owes`, value: peso(Math.abs(s.owesMinor)) }],
     });
   };
 
@@ -113,27 +123,29 @@ export default function PayablePanel() {
   return (
     <div className="container-fluid py-3" style={{ maxWidth: 900 }}>
       <h5 className="mb-1">Store payable</h5>
-      <p className="text-muted small">What each store owes the main store for rice that left without a record, at the main store&apos;s cost price.</p>
+      <p className="text-muted small">What each store owes the main store for rice it sold or lost, at the main store&apos;s cost price, less the profit share the main store owes it for rice taken from that store.</p>
       {error && <div className="alert alert-danger py-2">{error}</div>}
 
       <div className="row g-2 mb-3">
         {others.map((s) => (
           <div key={s.id} className="col-12 col-md-6">
-            <div className={`border rounded p-3 ${s.owesMinor > 0 ? "border-warning" : ""}`}>
-              <div className="small text-muted">{s.name} owes</div>
-              <div className="fs-3 fw-semibold">{peso(s.owesMinor)}</div>
-              <div className="small text-muted mb-2">Charged {peso(s.chargesMinor)} · Paid {peso(s.paymentsMinor)}</div>
+            <div className={`border rounded p-3 ${s.owesMinor > 0 ? "border-warning" : s.owesMinor < 0 ? "border-info" : ""}`}>
+              <div className="small text-muted">{s.owesMinor < 0 ? `${mainName} owes ${s.name}` : `${s.name} owes`}</div>
+              <div className="fs-3 fw-semibold">{peso(Math.abs(s.owesMinor))}</div>
+              <div className="small text-muted mb-2">Charged {peso(s.chargesMinor)}{s.sharesMinor ? <> · Profit share −{peso(s.sharesMinor)}</> : null} · Paid {peso(s.paymentsMinor)}</div>
               {(s.weeklyDue || s.countDue) && (
                 <div className="mb-2">
                   {s.weeklyDue && <span className="badge text-bg-danger me-1">Weekly payment due</span>}
                   {s.countDue && <span className="badge text-bg-warning">Count the shelf this week</span>}
                 </div>
               )}
-              <div className="d-flex gap-2">
-                <button type="button" className="btn btn-success" disabled={s.owesMinor <= 0} onClick={() => { setPaying(s); setPayAmount(""); setPayNote(""); }}>Record payment</button>
-                <button type="button" className="btn btn-outline-dark" onClick={() => void statement(s)}>Print statement</button>
-                <button type="button" className="btn btn-outline-dark" onClick={() => void checkShelf(s)}>Check shelf</button>
-                {s.consignment && <button type="button" className="btn btn-outline-dark" onClick={() => void openSales(s)}>Weekly sales total</button>}
+              <div className="d-flex flex-wrap gap-2">
+                {s.owesMinor < 0
+                  ? <button type="button" className="btn btn-success text-nowrap" onClick={() => { setPaying(s); setPayAmount(""); setPayNote(""); }}>Pay {s.name}</button>
+                  : <button type="button" className="btn btn-success text-nowrap" disabled={s.owesMinor <= 0} onClick={() => { setPaying(s); setPayAmount(""); setPayNote(""); }}>Record payment</button>}
+                <button type="button" className="btn btn-outline-dark text-nowrap" onClick={() => void statement(s)}>Print statement</button>
+                <button type="button" className="btn btn-outline-dark text-nowrap" onClick={() => void checkShelf(s)}>Check shelf</button>
+                {s.consignment && <button type="button" className="btn btn-outline-dark text-nowrap" onClick={() => void openSales(s)}>Weekly sales total</button>}
               </div>
             </div>
           </div>
@@ -187,13 +199,13 @@ export default function PayablePanel() {
 
       {paying && (
         <div className="border rounded p-3 mb-3 bg-body-tertiary">
-          <div className="fw-semibold mb-2">{paying.name} pays ({peso(paying.owesMinor)} owed)</div>
+          <div className="fw-semibold mb-2">{payingToStore ? `${mainName} pays ${paying.name} its profit share (${peso(-paying.owesMinor)} owed)` : `${paying.name} pays (${peso(paying.owesMinor)} owed)`}</div>
           <div className="row g-2 align-items-end">
             <div className="col-6 col-md-4"><label className="form-label small mb-1" htmlFor="pp-amt">Amount paid</label><PesoInput id="pp-amt" className="form-control form-control-lg" value={payAmount} onChange={setPayAmount} placeholder="0.00" /></div>
             <div className="col-12 col-md-4"><label className="form-label small mb-1" htmlFor="pp-note">Note (optional)</label><input id="pp-note" className="form-control form-control-lg" value={payNote} maxLength={200} onChange={(e) => setPayNote(e.target.value)} /></div>
             <div className="col-12 col-md-4 d-flex gap-2">
-              <button type="button" className="btn btn-outline-secondary btn-lg" onClick={() => setPaying(null)}>Cancel</button>
-              <button type="button" className="btn btn-success btn-lg flex-fill" disabled={busy || !(Number(payAmount) > 0)} onClick={async () => { if (await act("/admin/payable/payment", { locationId: paying.id, amountMinor: Math.round(Number(payAmount) * 100), note: payNote }, "Payment recorded")) setPaying(null); }}>Save payment</button>
+              <button type="button" className="btn btn-outline-secondary btn-lg text-nowrap" onClick={() => setPaying(null)}>Cancel</button>
+              <button type="button" className="btn btn-success btn-lg flex-fill text-nowrap" disabled={busy || !(Number(payAmount) > 0)} onClick={async () => { if (await act("/admin/payable/payment", { locationId: paying.id, amountMinor: Math.round(Number(payAmount) * 100), note: payNote, toStore: payingToStore }, "Payment recorded")) setPaying(null); }}>Save payment</button>
             </div>
           </div>
         </div>
@@ -256,8 +268,8 @@ export default function PayablePanel() {
             <li key={e.id} className={`py-2 border-bottom small ${e.reversed ? "text-decoration-line-through text-muted" : ""}`}>
               <div className="d-flex justify-content-between gap-2">
                 <span>
-                  <span className={`badge me-1 ${e.kind === "CHARGE" ? "text-bg-warning" : e.kind === "PAYMENT" ? "text-bg-success" : "text-bg-secondary"}`}>{e.kind === "CHARGE" ? "Charge" : e.kind === "PAYMENT" ? "Payment" : "Undo"}</span>
-                  <b>{e.store}</b>{e.productName && e.quantity !== null ? ` · ${qtyText(e.loose, e.quantity)} ${e.productName}${e.unitCostMinor !== null ? ` @ ${peso(e.unitCostMinor)}` : ""}` : ""}
+                  <span className={`badge me-1 ${KIND[e.kind]?.badge ?? "text-bg-secondary"}`}>{kindLabel(e.kind, e.amountMinor)}</span>
+                  <b>{e.store}</b>{e.productName && e.quantity !== null ? ` · ${qtyText(e.loose, e.quantity)} ${e.productName}${e.unitCostMinor !== null ? ` @ ${peso(e.unitCostMinor)}${e.kind === "PROFIT_SHARE" || e.kind === "SHARE_BACK" ? " profit" : ""}` : ""}` : ""}
                 </span>
                 <span className="text-nowrap fw-semibold">{e.amountMinor < 0 ? "−" : ""}{peso(Math.abs(e.amountMinor))}</span>
               </div>

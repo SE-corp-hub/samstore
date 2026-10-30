@@ -64,7 +64,8 @@ export class PayableService {
       const balances = stores.map((s) => {
         const mine = sums.filter((x) => x.locationId === s.id);
         const sum = (k: string) => mine.filter((x) => x.kind === k).reduce((a, x) => a + (x._sum.amountMinor ?? 0), 0);
-        return { id: s.id, name: s.name, code: s.code, isMain: s.isDefault, chargesMinor: sum("CHARGE"), paymentsMinor: -sum("PAYMENT"), reversedMinor: sum("REVERSAL"), owesMinor: mine.reduce((a, x) => a + (x._sum.amountMinor ?? 0), 0),
+        // sharesMinor: what the main store owes this store for rice it took (profit shares net of take-backs; undone shares are in reversedMinor).
+        return { id: s.id, name: s.name, code: s.code, isMain: s.isDefault, chargesMinor: sum("CHARGE"), paymentsMinor: -sum("PAYMENT"), reversedMinor: sum("REVERSAL"), sharesMinor: -(sum("PROFIT_SHARE") + sum("SHARE_BACK")), owesMinor: mine.reduce((a, x) => a + (x._sum.amountMinor ?? 0), 0),
           consignment: consign.get(s.id) === true, lastPaymentAt: lastPay.get(s.id) ?? null, lastCountAt: lastCount.get(s.id) ?? null,
           weeklyDue: false, countDue: false };
       });
@@ -103,7 +104,7 @@ export class PayableService {
           return {
             id: r.id, docNumber: r.docNumber, kind: r.kind, locationId: r.locationId, store: names.get(r.locationId) ?? "", amountMinor: r.amountMinor,
             productName: p?.name ?? null, loose: p ? isLooseP(p) : false, quantity: r.quantity, unitCostMinor: r.unitCostMinor, note: r.note,
-            by: users.get(r.createdById) ?? null, at: r.createdAt, reversed: reversed.has(r.id), canReverse: (r.kind === "CHARGE" || r.kind === "PAYMENT") && !reversed.has(r.id),
+            by: users.get(r.createdById) ?? null, at: r.createdAt, reversed: reversed.has(r.id), canReverse: (r.kind === "CHARGE" || r.kind === "PAYMENT" || r.kind === "PROFIT_SHARE") && !reversed.has(r.id),
           };
         }),
       };
@@ -165,7 +166,7 @@ export class PayableService {
   }
 
   /** The store pays (a part, or all). */
-  async payment(storeId: string, actor: Actor, input: { locationId?: string; amountMinor?: unknown; note?: string }) {
+  async payment(storeId: string, actor: Actor, input: { locationId?: string; amountMinor?: unknown; note?: string; toStore?: boolean }) {
     return this.run(actor, async () => {
       const amount = input.amountMinor;
       if (typeof amount !== "number" || !Number.isInteger(amount) || amount < 1) throw new StepError(invalid("Enter the amount paid"));
@@ -173,16 +174,28 @@ export class PayableService {
       if (!debtor) throw new StepError(invalid("Choose the store that paid"));
       return prisma.$transaction(async (tx) => {
         const owes = (await tx.storePayableEntry.aggregate({ where: { storeId, locationId: debtor.id }, _sum: { amountMinor: true } }))._sum.amountMinor ?? 0;
-        if (amount > owes) throw new StepError(conflict(`${debtor.name} owes only ₱${(owes / 100).toLocaleString("en-PH", { minimumFractionDigits: 2 })}. Enter that or less.`));
+        const pesos = (m: number) => `₱${(m / 100).toLocaleString("en-PH", { minimumFractionDigits: 2 })}`;
+        // toStore: the balance is below zero (the main store owes this store its profit share) and the main store pays it.
+        if (input.toStore) {
+          if (amount > -owes) throw new StepError(conflict(owes >= 0 ? `The main store owes ${debtor.name} nothing now.` : `The main store owes ${debtor.name} only ${pesos(-owes)}. Enter that or less.`));
+        } else if (amount > owes) {
+          throw new StepError(conflict(owes <= 0 ? `${debtor.name} owes nothing now.` : `${debtor.name} owes only ${pesos(owes)}. Enter that or less.`));
+        }
+        const signed = input.toStore ? amount : -amount;
         const docNumber = await nextDocNumber(tx, storeId, "SP");
         const e = await tx.storePayableEntry.create({
-          data: { storeId, docNumber, locationId: debtor.id, kind: "PAYMENT", amountMinor: -amount, note: input.note?.trim().slice(0, 200) || "Payment received", createdById: actor.userId },
+          data: { storeId, docNumber, locationId: debtor.id, kind: "PAYMENT", amountMinor: signed, note: input.note?.trim().slice(0, 200) || (input.toStore ? "Profit share paid to the store" : "Payment received"), createdById: actor.userId },
           select: { id: true },
         });
-        await tx.auditLog.create({ data: { storeId, actorType: "USER", actorId: actor.userId, action: "payable.payment", entityType: "StorePayableEntry", entityId: e.id, after: { docNumber, locationId: debtor.id, amountMinor: amount } } });
-        return { id: e.id, docNumber, balanceMinor: owes - amount };
+        await tx.auditLog.create({ data: { storeId, actorType: "USER", actorId: actor.userId, action: "payable.payment", entityType: "StorePayableEntry", entityId: e.id, after: { docNumber, locationId: debtor.id, amountMinor: amount, toStore: !!input.toStore } } });
+        return { id: e.id, docNumber, balanceMinor: owes + signed };
       }, txOptions());
     });
+  }
+
+  /** The profit shares of a store (their undo entries are not charges). */
+  private async shareIds(storeId: string, locationId: string): Promise<string[]> {
+    return (await prisma.storePayableEntry.findMany({ where: { storeId, locationId, kind: "PROFIT_SHARE" }, select: { id: true } })).map((e) => e.id);
   }
 
   /** What the rice that left a store since its last sales report is worth at selling price. */
@@ -191,7 +204,8 @@ export class PayableService {
     const toAt = new Date();
     const first = last ? null : await prisma.storePayableEntry.findFirst({ where: { storeId, locationId, kind: "CHARGE" }, orderBy: { createdAt: "asc" }, select: { createdAt: true } });
     const fromAt = last?.toAt ?? first?.createdAt ?? new Date(toAt.getTime() - 7 * 24 * 3600 * 1000);
-    const rows = await prisma.storePayableEntry.findMany({ where: { storeId, locationId, kind: { in: ["CHARGE", "REVERSAL"] }, productId: { not: null }, createdAt: { gt: fromAt, lte: toAt } }, select: { kind: true, productId: true, quantity: true } });
+    const shareIds = await this.shareIds(storeId, locationId);
+    const rows = await prisma.storePayableEntry.findMany({ where: { storeId, locationId, kind: { in: ["CHARGE", "REVERSAL"] }, productId: { not: null }, createdAt: { gt: fromAt, lte: toAt }, OR: [{ reversesId: null }, { reversesId: { notIn: shareIds } }] }, select: { kind: true, productId: true, quantity: true } });
     const net = new Map<string, number>();
     for (const r of rows) net.set(r.productId!, (net.get(r.productId!) ?? 0) + (r.kind === "CHARGE" ? 1 : -1) * (r.quantity ?? 0));
     const ids = [...net.keys()];
@@ -241,16 +255,13 @@ export class PayableService {
       if (why.length < 3) throw new StepError(invalid("Enter the reason"));
       const e = await prisma.storePayableEntry.findFirst({ where: { id, storeId } });
       if (!e) throw new StepError(notFound("Entry not found"));
-      if (e.kind !== "CHARGE" && e.kind !== "PAYMENT") throw new StepError(conflict("This entry cannot be undone"));
+      if (e.kind !== "CHARGE" && e.kind !== "PAYMENT" && e.kind !== "PROFIT_SHARE") throw new StepError(conflict("This entry cannot be undone"));
       return prisma.$transaction(async (tx) => {
         if (await tx.storePayableEntry.findFirst({ where: { reversesId: e.id }, select: { id: true } })) throw new StepError(conflict("Already undone"));
         if (e.kind === "CHARGE" && e.orderId && (await tx.storePayableEntry.findFirst({ where: { storeId, orderId: e.orderId, productId: e.productId, kind: "REVERSAL" }, select: { id: true } }))) {
           throw new StepError(conflict("This sale was already voided or partly returned, so its charge cannot be undone by hand"));
         }
-        if (e.kind === "CHARGE") {
-          const owes = (await tx.storePayableEntry.aggregate({ where: { storeId, locationId: e.locationId }, _sum: { amountMinor: true } }))._sum.amountMinor ?? 0;
-          if (owes - e.amountMinor < 0) throw new StepError(conflict("Payments already cover this charge — undo the payment first"));
-        }
+        // A balance below zero is allowed: it means the main store owes this store (its profit share).
         const docNumber = await nextDocNumber(tx, storeId, "SP");
         // The count line is free to be charged again (to the right store).
         if (e.sourceLineId) await tx.storePayableEntry.update({ where: { id: e.id }, data: { sourceLineId: null } });
@@ -273,7 +284,7 @@ export class PayableService {
       const levels = await prisma.stockLevel.findMany({ where: { storeId, warehouseId: store.id }, select: { productId: true, quantityOnHand: true } });
       const ids = [...new Set([...moves.map((m) => m.productId), ...levels.map((l) => l.productId)])];
       const prods = new Map((await prisma.product.findMany({ where: { storeId, id: { in: ids } }, select: productSelect })).map((p) => [p.id, p]));
-      const charges = await prisma.storePayableEntry.groupBy({ by: ["productId"], where: { storeId, locationId: store.id, kind: { in: ["CHARGE", "REVERSAL"] }, productId: { not: null } }, _sum: { amountMinor: true } });
+      const charges = await prisma.storePayableEntry.groupBy({ by: ["productId"], where: { storeId, locationId: store.id, kind: { in: ["CHARGE", "REVERSAL"] }, productId: { not: null }, OR: [{ reversesId: null }, { reversesId: { notIn: await this.shareIds(storeId, store.id) } }] }, _sum: { amountMinor: true } });
       const owed = new Map(charges.map((c) => [c.productId!, c._sum.amountMinor ?? 0]));
       const at = (pid: string, types: string[], resack = false) => moves.filter((m) => m.productId === pid && types.includes(m.type) && (m.documentType === "COUNT_RESACK") === resack).reduce((a, m) => a + (m._sum.delta ?? 0), 0);
       const rows = ids.map((pid) => {

@@ -2228,13 +2228,14 @@ model StorePayableEntry {
   storeId          String
   docNumber        String // SP-000001
   locationId       String // the store that owes
-  kind             String // CHARGE | PAYMENT | REVERSAL
-  amountMinor      Int // signed: + owes more, − paid / reduced
+  kind             String // CHARGE | PAYMENT | REVERSAL | PROFIT_SHARE (− : the main store owes this store its margin) | SHARE_BACK (+ : rice went back, the share is taken back)
+  amountMinor      Int // signed: + owes more, − paid / reduced (below 0 in total: the main store owes this store)
   productId        String?
   quantity         Int? // stock units (loose rice: grams)
   unitCostMinor    Int? // cost at the time (loose rice: per kilo)
   sourceLocationId String? // the store the rice was taken from
   orderId          String? // the sale this charge came from (so a void or a return can reduce it)
+  transferId       String? // the move a profit share came from
   sourceLineId     String?  @unique // the count line this charge came from (so it is charged once)
   reversesId       String?  @unique // the entry this one undoes
   note             String?
