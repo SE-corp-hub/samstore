@@ -151,6 +151,8 @@ registerApprovalHandler("UTANG_OVER_LIMIT", async (tx, a) => {
     } else {
       // From another location: the hold is released and the stock leaves that place now.
       await releaseForTrip(tx, leg(i.productId, i.sourceLocationId), i.quantity, i.quantity, "CONSUME");
+      // Taken from Store 2's shelf: Store 2 earns its profit share, as on any sale (see sell()).
+      if (order.sellingLocationId) await bookProfitShare(tx, { storeId: a.storeId, fromId: i.sourceLocationId, toId: order.sellingLocationId, productId: i.productId, quantity: i.quantity, actorId: a.decidedById, ref: `sale ${order.orderNumber}`, orderId: order.id });
     }
   }
   await tx.payment.create({ data: { orderId: order.id, storeId: a.storeId, method: "credit", amountMinor: order.totalMinor, type: "payment", note: "Credit (approved by the owner)", createdBy: a.decidedById } });

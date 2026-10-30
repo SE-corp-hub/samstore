@@ -12,7 +12,8 @@ import { shelfCostFor } from "../domain/shelf-cost.js";
 import { isLooseP } from "../domain/counting.js";
 import { nextDocNumber, type Actor } from "../people/people.service.js";
 import { txOptions } from "../persistence/tx-options.js";
-import { chargeAmount } from "./charges.js";
+import { chargeAmount, consignmentMain } from "./charges.js";
+import { WRITE_OFF_LABEL } from "../domain/counting.js";
 import { varietyOf } from "../domain/resack.js";
 
 export type PayableResult<T> = { ok: true; value: T } | { ok: false; error: ApiError };
@@ -92,13 +93,29 @@ export class PayableService {
           productId: l.productId, name: l.product.name, loose, quantity: qty, unitCostMinor: unit, amountMinor: chargeAmount(loose, qty, unit),
         });
       }
+      // Damage at a consignment store (last 30 days): Store 1's loss unless the owner charges it to that store.
+      const consignIds = stores.filter((s) => consign.get(s.id)).map((s) => s.id);
+      const wos = consignIds.length ? await prisma.stockWriteOff.findMany({
+        where: { storeId, locationId: { in: consignIds }, createdAt: { gte: new Date(Date.now() - 30 * 86_400_000) } }, orderBy: { createdAt: "desc" }, take: 50,
+        include: { product: { select: productSelect }, location: { select: { name: true } } },
+      }) : [];
+      const chargedWo = new Map((await prisma.storePayableEntry.findMany({ where: { storeId, writeOffId: { in: wos.map((w) => w.id) } }, select: { writeOffId: true, docNumber: true } })).map((e) => [e.writeOffId ?? "", e.docNumber]));
+      const damage = [];
+      for (const w of wos) {
+        const main = await consignmentMain(prisma, storeId, w.locationId);
+        const unit = main ? await shelfCostFor(prisma, storeId, w.productId, main) : 0;
+        damage.push({
+          writeOffId: w.id, docNumber: w.docNumber, at: w.createdAt, atId: w.locationId, store: w.location.name, name: w.product.name, loose: isLooseP(w.product), quantity: w.quantity,
+          reasonLabel: WRITE_OFF_LABEL[w.reason], note: w.note, amountMinor: chargeAmount(isLooseP(w.product), w.quantity, unit), chargedAs: chargedWo.get(w.id) ?? null,
+        });
+      }
       const rows = await prisma.storePayableEntry.findMany({ where: { storeId }, orderBy: { createdAt: "desc" }, take: 100 });
       const names = new Map(stores.map((s) => [s.id, s.name]));
       const prods = new Map((await prisma.product.findMany({ where: { storeId, id: { in: [...new Set(rows.map((r) => r.productId).filter((x): x is string => !!x))] } }, select: productSelect })).map((p) => [p.id, p]));
       const users = new Map((await prisma.user.findMany({ where: { id: { in: [...new Set(rows.map((r) => r.createdById))] } }, select: { id: true, name: true } })).map((u) => [u.id, u.name]));
       const reversed = new Set(rows.map((r) => r.reversesId).filter((x): x is string => !!x));
       return {
-        stores: balances, toAssign, totalOwesMinor: balances.reduce((a, b) => a + b.owesMinor, 0),
+        stores: balances, toAssign, damage, totalOwesMinor: balances.reduce((a, b) => a + b.owesMinor, 0),
         entries: rows.map((r) => {
           const p = r.productId ? prods.get(r.productId) : undefined;
           return {
@@ -160,6 +177,28 @@ export class PayableService {
           select: { id: true },
         });
         await tx.auditLog.create({ data: { storeId, actorType: "USER", actorId: actor.userId, action: "payable.charge", entityType: "StorePayableEntry", entityId: e.id, after: { docNumber, locationId: debtor.id, amountMinor: amount, quantity: qty } } });
+        return { id: e.id, docNumber, amountMinor: amount };
+      }, txOptions());
+    });
+  }
+
+  /** Damage written off at a consignment store is Store 1's loss by default; the owner may charge it to that store, at Store 1's cost. */
+  async chargeDamage(storeId: string, actor: Actor, writeOffId: string) {
+    return this.run(actor, async () => {
+      const w = await prisma.stockWriteOff.findFirst({ where: { id: writeOffId, storeId }, include: { product: { select: productSelect } } });
+      if (!w) throw new StepError(notFound("Write-off not found"));
+      const main = await consignmentMain(prisma, storeId, w.locationId);
+      if (!main) throw new StepError(conflict("Only damage at a consignment store can be charged to it"));
+      const unit = await shelfCostFor(prisma, storeId, w.productId, main);
+      const amount = chargeAmount(isLooseP(w.product), w.quantity, unit);
+      if (amount <= 0) throw new StepError(invalid(`${w.product.name} has no cost price yet — set its cost first`));
+      return prisma.$transaction(async (tx) => {
+        const docNumber = await nextDocNumber(tx, storeId, "SP");
+        const e = await tx.storePayableEntry.create({
+          data: { storeId, docNumber, locationId: w.locationId, kind: "CHARGE", amountMinor: amount, productId: w.productId, quantity: w.quantity, unitCostMinor: unit, sourceLocationId: main, writeOffId: w.id, note: `Damage ${w.docNumber}: ${WRITE_OFF_LABEL[w.reason]}`.slice(0, 200), createdById: actor.userId },
+          select: { id: true },
+        });
+        await tx.auditLog.create({ data: { storeId, actorType: "USER", actorId: actor.userId, action: "payable.charge_damage", entityType: "StorePayableEntry", entityId: e.id, after: { docNumber, writeOff: w.docNumber, amountMinor: amount } } });
         return { id: e.id, docNumber, amountMinor: amount };
       }, txOptions());
     });
@@ -265,6 +304,8 @@ export class PayableService {
         const docNumber = await nextDocNumber(tx, storeId, "SP");
         // The count line is free to be charged again (to the right store).
         if (e.sourceLineId) await tx.storePayableEntry.update({ where: { id: e.id }, data: { sourceLineId: null } });
+        // Damage charged by mistake goes back to being Store 1's loss (and can be charged again).
+        if (e.writeOffId) await tx.storePayableEntry.update({ where: { id: e.id }, data: { writeOffId: null } });
         const r = await tx.storePayableEntry.create({
           data: { storeId, docNumber, locationId: e.locationId, kind: "REVERSAL", amountMinor: -e.amountMinor, productId: e.productId, quantity: e.quantity, unitCostMinor: e.unitCostMinor, reversesId: e.id, note: `Undo ${e.docNumber}: ${why}`.slice(0, 200), createdById: actor.userId },
           select: { id: true },

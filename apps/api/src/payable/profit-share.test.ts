@@ -32,6 +32,7 @@ after(async () => {
     await prisma.signature.deleteMany({ where });
     await prisma.approvalRequest.deleteMany({ where });
     await prisma.storePayableEntry.deleteMany({ where });
+    await prisma.stockWriteOff.deleteMany({ where });
     await prisma.stockCountLine.deleteMany({ where });
     await prisma.stockCount.deleteMany({ where });
     await prisma.stockInLine.deleteMany({ where });
@@ -229,4 +230,33 @@ test("Phase 4: the reports — Store 2's profit is ₱3,200 and Store 1's is ₱
   assert.equal(c.mainName, "Store 1");
   assert.equal(c.sharesThisWeekMinor, 260_000);
   assert.equal(c.paidThisWeekMinor, 490_000);
+});
+
+test("D3: damage at Store 2 is Store 1's loss unless the owner charges it to Store 2 (once; undo makes it Store 1's loss again)", async () => {
+  const fx = await fixture();
+  const wo = await counts.writeOff(fx.storeId, fx.staff2, { locationId: fx.s2, productId: fx.jasmine.id, quantity: 1, reason: "BASA", signatures: staffSig });
+  assert.equal(wo.ok, true, msg(wo));
+  if (!wo.ok) return;
+  assert.equal(await owes(fx, fx.s2), 0, "by default the damage is Store 1's loss");
+  const sum = await payable.summary(fx.storeId, fx.owner);
+  assert.equal(sum.ok && sum.value.damage.length, 1, msg(sum));
+  assert.equal(sum.ok && sum.value.damage[0]?.amountMinor, 115_000);
+  assert.equal(sum.ok && sum.value.damage[0]?.chargedAs, null);
+
+  const charged = await payable.chargeDamage(fx.storeId, fx.owner, wo.value.id);
+  assert.equal(charged.ok, true, msg(charged));
+  assert.equal(await owes(fx, fx.s2), 115_000);
+  assert.match(msg(await payable.chargeDamage(fx.storeId, fx.owner, wo.value.id)), /Already recorded/);
+  assert.match(msg(await payable.chargeDamage(fx.storeId, fx.staff2, wo.value.id)), /owner and manager/);
+
+  const entry = await prisma.storePayableEntry.findFirstOrThrow({ where: { storeId: fx.storeId, writeOffId: wo.value.id } });
+  assert.equal((await payable.reverse(fx.storeId, fx.owner, entry.id, "Store 2 was not at fault")).ok, true);
+  assert.equal(await owes(fx, fx.s2), 0);
+  const after = await payable.summary(fx.storeId, fx.owner);
+  assert.equal(after.ok && after.value.damage[0]?.chargedAs, null, "back to Store 1's loss, and it can be charged again");
+
+  // Damage at Store 1 (not consignment) cannot be charged to anyone.
+  const s1wo = await counts.writeOff(fx.storeId, fx.staff1, { locationId: fx.s1, productId: fx.jasmine.id, quantity: 1, reason: "TAPON", signatures: staffSig });
+  assert.equal(s1wo.ok, true, msg(s1wo));
+  assert.match(msg(await payable.chargeDamage(fx.storeId, fx.owner, s1wo.ok ? s1wo.value.id : "")), /consignment store/);
 });
