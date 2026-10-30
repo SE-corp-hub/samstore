@@ -109,13 +109,31 @@ export class PayableService {
           reasonLabel: WRITE_OFF_LABEL[w.reason], note: w.note, amountMinor: chargeAmount(isLooseP(w.product), w.quantity, unit), chargedAs: chargedWo.get(w.id) ?? null,
         });
       }
+      // Extra rice a count found after the store was charged for missing rice: the owner can take that charge off.
+      const extraLines = consignIds.length ? await prisma.stockCountLine.findMany({
+        where: { storeId, postedQty: { gt: 0 }, count: { status: "APPROVED", locationId: { in: consignIds }, decidedAt: { gte: new Date(Date.now() - 30 * 86_400_000) } } },
+        orderBy: { countedAt: "desc" }, take: 50,
+        select: { id: true, productId: true, postedQty: true, product: { select: productSelect }, count: { select: { docNumber: true, decidedAt: true, locationId: true, location: { select: { name: true } } } } },
+      }) : [];
+      const takenOff = new Map((await prisma.storePayableEntry.findMany({ where: { storeId, sourceLineId: { in: extraLines.map((l) => l.id) } }, select: { sourceLineId: true, docNumber: true, amountMinor: true } })).map((e) => [e.sourceLineId ?? "", e]));
+      const extras = [];
+      for (const l of extraLines) {
+        const done = takenOff.get(l.id);
+        const plan = done ? null : await extraUndoPlan(prisma, storeId, l);
+        if (!done && !plan) continue;
+        extras.push({
+          lineId: l.id, countDoc: l.count.docNumber, at: l.count.decidedAt, atId: l.count.locationId, store: l.count.location.name, name: l.product.name, loose: isLooseP(l.product),
+          extra: l.postedQty ?? 0, chargedQty: plan?.chargedQty ?? null, chargedOn: plan?.chargedOn ?? null, quantity: plan?.quantity ?? null,
+          amountMinor: done ? -done.amountMinor : plan?.amountMinor ?? 0, takenOffAs: done?.docNumber ?? null,
+        });
+      }
       const rows = await prisma.storePayableEntry.findMany({ where: { storeId }, orderBy: { createdAt: "desc" }, take: 100 });
       const names = new Map(stores.map((s) => [s.id, s.name]));
       const prods = new Map((await prisma.product.findMany({ where: { storeId, id: { in: [...new Set(rows.map((r) => r.productId).filter((x): x is string => !!x))] } }, select: productSelect })).map((p) => [p.id, p]));
       const users = new Map((await prisma.user.findMany({ where: { id: { in: [...new Set(rows.map((r) => r.createdById))] } }, select: { id: true, name: true } })).map((u) => [u.id, u.name]));
       const reversed = new Set(rows.map((r) => r.reversesId).filter((x): x is string => !!x));
       return {
-        stores: balances, toAssign, damage, totalOwesMinor: balances.reduce((a, b) => a + b.owesMinor, 0),
+        stores: balances, toAssign, damage, extras, totalOwesMinor: balances.reduce((a, b) => a + b.owesMinor, 0),
         entries: rows.map((r) => {
           const p = r.productId ? prods.get(r.productId) : undefined;
           return {
@@ -204,6 +222,32 @@ export class PayableService {
     });
   }
 
+  /** A count found extra rice after the store was charged for missing rice: take that charge off (up to the extra). Once per count line. */
+  async undoForExtra(storeId: string, actor: Actor, lineId: string) {
+    return this.run(actor, async () => {
+      const l = await prisma.stockCountLine.findFirst({
+        where: { id: lineId, storeId, postedQty: { gt: 0 }, count: { status: "APPROVED" } },
+        select: { id: true, productId: true, postedQty: true, product: { select: productSelect }, count: { select: { docNumber: true, decidedAt: true, locationId: true } } },
+      });
+      if (!l) throw new StepError(notFound("Count line not found"));
+      return prisma.$transaction(async (tx) => {
+        const plan = await extraUndoPlan(tx, storeId, l);
+        if (!plan) throw new StepError(conflict("Nothing to take off: no open charge for missing rice before this count"));
+        const docNumber = await nextDocNumber(tx, storeId, "SP");
+        const qtyText = isLooseP(l.product) ? `${plan.quantity / 1000} kg` : `${plan.quantity} ×`;
+        const e = await tx.storePayableEntry.create({
+          data: {
+            storeId, docNumber, locationId: l.count.locationId, kind: "REVERSAL", amountMinor: -plan.amountMinor, productId: l.productId, quantity: plan.quantity, unitCostMinor: plan.unitCostMinor,
+            sourceLineId: l.id, note: `Extra found in count ${l.count.docNumber}: ${qtyText} ${l.product.name} charged as missing taken off`.slice(0, 200), createdById: actor.userId,
+          },
+          select: { id: true },
+        });
+        await tx.auditLog.create({ data: { storeId, actorType: "USER", actorId: actor.userId, action: "payable.undo_for_extra", entityType: "StorePayableEntry", entityId: e.id, after: { docNumber, count: l.count.docNumber, amountMinor: plan.amountMinor } } });
+        return { id: e.id, docNumber, amountMinor: plan.amountMinor };
+      }, txOptions());
+    });
+  }
+
   /** The store pays (a part, or all). */
   async payment(storeId: string, actor: Actor, input: { locationId?: string; amountMinor?: unknown; note?: string; toStore?: boolean }) {
     return this.run(actor, async () => {
@@ -234,7 +278,7 @@ export class PayableService {
 
   /** The profit shares of a store (their undo entries are not charges). */
   private async shareIds(storeId: string, locationId: string): Promise<string[]> {
-    return (await prisma.storePayableEntry.findMany({ where: { storeId, locationId, kind: "PROFIT_SHARE" }, select: { id: true } })).map((e) => e.id);
+    return (await prisma.storePayableEntry.findMany({ where: { storeId, locationId, kind: { in: ["PROFIT_SHARE", "SHARE_BACK"] } }, select: { id: true } })).map((e) => e.id);
   }
 
   /** What the rice that left a store since its last sales report is worth at selling price. */
@@ -376,4 +420,41 @@ export class PayableService {
       };
     });
   }
+}
+
+/**
+ * What a count's extra rice can take off: the store's charges for missing rice of that item (from earlier counts,
+ * not undone, less what earlier extras took off), up to the extra, newest charges first. Null when nothing is open.
+ */
+async function extraUndoPlan(
+  db: Prisma.TransactionClient,
+  storeId: string,
+  l: { id: string; productId: string; postedQty: number | null; product: { stockBaseUnit: string | null; stockBaseQuantity: number | null }; count: { decidedAt: Date | null; locationId: string } },
+) {
+  const extra = l.postedQty ?? 0;
+  if (extra <= 0 || !l.count.decidedAt) return null;
+  const where = { storeId, locationId: l.count.locationId, productId: l.productId };
+  const charges = await db.storePayableEntry.findMany({ where: { ...where, kind: "CHARGE", sourceLineId: { not: null }, createdAt: { lt: l.count.decidedAt } }, orderBy: { createdAt: "desc" }, select: { id: true, quantity: true, unitCostMinor: true, createdAt: true } });
+  const undone = new Set((await db.storePayableEntry.findMany({ where: { reversesId: { in: charges.map((c) => c.id) } }, select: { reversesId: true } })).map((r) => r.reversesId));
+  const open = charges.filter((c) => !undone.has(c.id) && (c.quantity ?? 0) > 0 && (c.unitCostMinor ?? 0) > 0);
+  if (!open.length) return null;
+  // Earlier extras already took this much off (their lines are count lines, not charges).
+  let used = (await db.storePayableEntry.aggregate({ where: { ...where, kind: "REVERSAL", reversesId: null, sourceLineId: { not: null } }, _sum: { quantity: true } }))._sum.quantity ?? 0;
+  const loose = isLooseP(l.product);
+  let left = extra;
+  let quantity = 0;
+  let amountMinor = 0;
+  // Earlier extras use the oldest charges; this one takes from the newest.
+  const avail = [...open].reverse().map((c) => { const u = Math.min(used, c.quantity ?? 0); used -= u; return { qty: (c.quantity ?? 0) - u, unit: c.unitCostMinor ?? 0, at: c.createdAt }; }).filter((c) => c.qty > 0).reverse();
+  const [first] = avail;
+  if (!first) return null;
+  for (const c of avail) {
+    if (left <= 0) break;
+    const q = Math.min(left, c.qty);
+    left -= q;
+    quantity += q;
+    amountMinor += chargeAmount(loose, q, c.unit);
+  }
+  if (amountMinor <= 0) return null;
+  return { quantity, amountMinor, unitCostMinor: first.unit, chargedQty: avail.reduce((a, c) => a + c.qty, 0), chargedOn: first.at };
 }
