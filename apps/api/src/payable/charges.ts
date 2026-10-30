@@ -97,6 +97,44 @@ export async function chargeCountShort(
   }
 }
 
+const looseOf = (p: { stockBaseUnit: string | null; stockBaseQuantity: number | null }) => (p.stockBaseUnit ?? "").toLowerCase() === "g" && p.stockBaseQuantity === 1;
+
+// ─────────────────────────── Resack weight loss ───────────────────────────
+//   Opening sacks always loses a little rice. At a consignment store, the loss up to the allowance is
+//   the main store's; only the kilos lost beyond it are charged, at the main store's cost.
+
+/** Normal weight loss allowed when a consignment store opens sacks: grams per 25 kg (4%). */
+export const RESACK_ALLOWANCE_G_PER_25KG = 1000;
+
+export const resackAllowance = (gramsIn: number) => Math.round((gramsIn * RESACK_ALLOWANCE_G_PER_25KG) / 25_000);
+
+/** Charge a consignment store for resack loss beyond the allowance. Returns the amount (0 when nothing is charged). */
+export async function chargeResackLoss(
+  tx: Tx, input: { storeId: string; locationId: string; jobDoc: string; productId: string; gramsIn: number; lossGrams: number; actorId: string },
+): Promise<number> {
+  const main = await consignmentMain(tx, input.storeId, input.locationId);
+  if (!main) return 0;
+  const allowance = resackAllowance(input.gramsIn);
+  const over = input.lossGrams - allowance;
+  if (over <= 0) return 0;
+  const product = await tx.product.findFirstOrThrow({ where: { id: input.productId, storeId: input.storeId }, select: { stockBaseUnit: true, stockBaseQuantity: true } });
+  const unit = await shelfCostFor(tx, input.storeId, input.productId, main);
+  // The cost is per stock unit: per kilo for loose rice, per sack otherwise.
+  const gramsPerUnit = looseOf(product) ? 1000 : product.stockBaseQuantity ?? 0;
+  if (unit <= 0 || gramsPerUnit <= 0) return 0;
+  const amount = Math.round((over * unit) / gramsPerUnit);
+  if (amount <= 0) return 0;
+  const kg = (g: number) => `${(g / 1000).toLocaleString("en-PH", { maximumFractionDigits: 3 })} kg`;
+  const docNumber = await nextDocNumber(tx, input.storeId, "SP");
+  await tx.storePayableEntry.create({
+    data: {
+      storeId: input.storeId, docNumber, locationId: input.locationId, kind: "CHARGE", amountMinor: amount, sourceLocationId: main, createdById: input.actorId,
+      note: `Resack ${input.jobDoc}: ${kg(input.lossGrams)} lost, ${kg(allowance)} allowed, ${kg(over)} charged`.slice(0, 200),
+    },
+  });
+  return amount;
+}
+
 // ─────────────────────────── Profit share ───────────────────────────
 //   Store 1 (the main store) owns the rice at a consignment store. When Store 1 takes rice from it,
 //   Store 1 pays that store only the profit it would have made: its selling price − the main store's
@@ -105,7 +143,6 @@ export async function chargeCountShort(
 
 export const SHARE_BACK_DAYS = 30;
 
-const looseOf = (p: { stockBaseUnit: string | null; stockBaseQuantity: number | null }) => (p.stockBaseUnit ?? "").toLowerCase() === "g" && p.stockBaseQuantity === 1;
 
 /** The consignment store's margin on one stock unit (loose rice: per kilo): its selling price − the main store's cost. */
 export async function shareMargin(tx: Tx, storeId: string, productId: string, consignmentId: string, mainId: string): Promise<number> {

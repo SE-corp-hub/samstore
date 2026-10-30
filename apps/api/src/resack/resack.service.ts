@@ -17,6 +17,7 @@ import { bufferIdOf, coverShortage } from "../domain/buffer.js";
 import { addForTrip, InsufficientStockError, releaseForTrip, type TripLeg } from "../domain/movements.js";
 import { gramsOf, planResack, ResackError, valueOf, type ResackPlan } from "../domain/resack.js";
 import { formatKilos } from "../domain/weight.js";
+import { chargeResackLoss } from "../payable/charges.js";
 import {
   captureSignatures, locationRefusal, nextDocNumber, requestApproval, requireSignatures, signatureErrorResult,
   type Actor, type SignatureInput,
@@ -130,6 +131,7 @@ export class ResackService {
       await tx.resackOutput.create({ data: { storeId, jobId: job.id, productId: o.product.id, quantity: o.quantity, grams: o.grams, valueMinor: plan.outputValuesMinor[i] ?? 0 } });
       await addForTrip(tx, this.leg(storeId, o.product.id, job.locationId, actor, job.id, job.docNumber), o.quantity, "RESACK_IN");
     }
+    await chargeResackLoss(tx, { storeId, locationId: job.locationId, jobDoc: job.docNumber, productId: input.id, gramsIn: plan.gramsIn, lossGrams: plan.lossGrams, actorId: actor.userId });
     let approvalId: string | null = null;
     if (plan.needsApproval) {
       approvalId = (await requestApproval(tx, {
