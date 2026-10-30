@@ -19,6 +19,8 @@ import { buildText, openTextApp, type TextKind } from "../../lib/text-message";
 import { creditStatusWords, limitPhrase } from "../../lib/credit-status";
 import { printSlip } from "../../lib/slip-print";
 import { peso } from "../../lib/number-format";
+import { isBelowCost } from "../../lib/below-cost";
+import { askBelowCost, saveUnitCost } from "./BelowCostDialog";
 
 interface Cust {
   id: string; name: string; phone: string | null; balanceMinor: number; creditApproved: boolean; limitMinor: number | null; unlimited: boolean; ownLimit: boolean; status: string; availableMinor: number | null;
@@ -398,7 +400,7 @@ function PayForm({ customer, locationId, onCancel, onDone }: { customer: Cust; l
 /** Owner/manager: this customer's own prices (per piece, or per kilo for loose rice). They beat the store price at the counter. */
 function SpecialPrices({ customerId }: { customerId: string }) {
   const [rows, setRows] = useState<{ id: string; productId: string; name: string; loose: boolean; priceMinor: number; listPriceMinor: number }[] | null>(null);
-  const [products, setProducts] = useState<{ id: string; name: string; loose: boolean }[]>([]);
+  const [products, setProducts] = useState<{ id: string; name: string; loose: boolean; costMinor: number }[]>([]);
   const [productId, setProductId] = useState("");
   const [price, setPrice] = useState("");
   const [busy, setBusy] = useState(false);
@@ -411,7 +413,7 @@ function SpecialPrices({ customerId }: { customerId: string }) {
   useEffect(() => {
     setRows(null); void load();
     fetch(`${API_URL}/admin/products`, { headers: adminHeaders() }).then((r) => (r.ok ? r.json() : null)).then((ps) => {
-      setProducts(((ps?.products ?? ps?.items ?? []) as { id: string; name: string; stockBaseUnit?: string | null; stockBaseQuantity?: number | null }[]).map((p) => ({ id: p.id, name: p.name, loose: (p.stockBaseUnit ?? "").toLowerCase() === "g" && p.stockBaseQuantity === 1 })));
+      setProducts(((ps?.products ?? ps?.items ?? []) as { id: string; name: string; stockBaseUnit?: string | null; stockBaseQuantity?: number | null; costMinor?: number }[]).map((p) => ({ id: p.id, name: p.name, loose: (p.stockBaseUnit ?? "").toLowerCase() === "g" && p.stockBaseQuantity === 1, costMinor: p.costMinor ?? 0 })));
     }).catch(() => undefined);
   }, [load]);
   const post = async (path: string, body: unknown) => {
@@ -424,6 +426,23 @@ function SpecialPrices({ customerId }: { customerId: string }) {
     return true;
   };
   const chosen = products.find((p) => p.id === productId);
+  const costOf = (id: string) => products.find((p) => p.id === id)?.costMinor ?? 0;
+  // A special price under the unit cost: fix it, change the cost, or keep it anyway.
+  const saveSpecial = async () => {
+    let priceMinor = Math.round(Number(price) * 100);
+    if (chosen && isBelowCost(priceMinor, chosen.costMinor)) {
+      const pick = await askBelowCost({ name: chosen.name, priceMinor, costMinor: chosen.costMinor, unit: chosen.loose ? "kilo" : "piece", showCost: true, canChangeCost: true, proceed: "Save anyway" });
+      if (!pick) return;
+      if (pick.kind === "price") priceMinor = pick.priceMinor;
+      if (pick.kind === "cost") {
+        const err = await saveUnitCost(chosen.id, pick.costMinor);
+        if (err) { setError(err); return; }
+        setProducts((ps) => ps.map((p) => (p.id === chosen.id ? { ...p, costMinor: pick.costMinor } : p)));
+        toast("Unit cost saved");
+      }
+    }
+    if (await post("/admin/benta/customer-prices", { customerId, productId, priceMinor })) { setProductId(""); setPrice(""); }
+  };
   return (
     <div className="border rounded p-2 mt-3">
       <div className="fw-semibold mb-1">Special prices</div>
@@ -433,6 +452,7 @@ function SpecialPrices({ customerId }: { customerId: string }) {
           {rows.map((r) => (
             <li key={r.id} className="list-group-item d-flex align-items-center gap-2 py-1">
               <span className="me-auto">{r.name} <span className="text-muted small">store {peso(r.listPriceMinor)}{r.loose ? "/kg" : ""}</span></span>
+              {isBelowCost(r.priceMinor, costOf(r.productId)) && <span className="badge text-bg-danger">Below cost {peso(costOf(r.productId))}{r.loose ? "/kg" : ""}</span>}
               <strong>{peso(r.priceMinor)}{r.loose ? "/kg" : ""}</strong>
               <button type="button" className="btn btn-sm btn-outline-danger" disabled={busy} onClick={() => void post(`/admin/benta/customer-prices/${r.id}/remove`, {})}>Remove</button>
             </li>
@@ -447,7 +467,7 @@ function SpecialPrices({ customerId }: { customerId: string }) {
           </select>
         </div>
         <div className="col-6 col-md-3"><PesoInput id="sp-price" className="form-control" value={price} onChange={setPrice} placeholder={chosen?.loose ? "₱ per kilo" : "₱ each"} /></div>
-        <div className="col-6 col-md-3"><button type="button" className="btn btn-success w-100" disabled={busy || !productId || !(Number(price) > 0)} onClick={async () => { if (await post("/admin/benta/customer-prices", { customerId, productId, priceMinor: Math.round(Number(price) * 100) })) { setProductId(""); setPrice(""); } }}>Save price</button></div>
+        <div className="col-6 col-md-3"><button type="button" className="btn btn-success w-100" disabled={busy || !productId || !(Number(price) > 0)} onClick={() => void saveSpecial()}>Save price</button></div>
       </div>
     </div>
   );

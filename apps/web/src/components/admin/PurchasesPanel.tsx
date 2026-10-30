@@ -5,8 +5,9 @@ import { API_URL } from "../../config";
 import { adminHeaders } from "../../lib/admin";
 import { toast } from "../../lib/toast";
 import { peso } from "../../lib/number-format";
+import { checkNewCosts } from "./BelowCostDialog";
 
-interface ProductOption { id: string; name: string; sku: string; availableQuantity: number }
+interface ProductOption { id: string; name: string; sku: string; availableQuantity: number; priceMinor?: number; soldByWeight?: boolean }
 interface ReplenishItem { id: string; name: string; sku: string; availableQuantity: number; reorderThreshold: number }
 interface Line { productId: string; quantity: number; costMinor: number; productName?: string; unitCostPesos?: number }
 interface PurchaseRow {
@@ -68,6 +69,12 @@ export default function PurchasesPanel() {
   const submit = async () => {
     setError(null);
     if (lines.length === 0) { setError("Add at least one line"); return; }
+    // A cost above the selling price: fix the price, the cost, or buy anyway.
+    const priceOf = (id: string) => products.find((p) => p.id === id);
+    const ok = await checkNewCosts(lines.map((l) => ({ productId: l.productId, name: l.productName ?? "", priceMinor: priceOf(l.productId)?.priceMinor ?? 0, costMinor: l.costMinor, unit: priceOf(l.productId)?.soldByWeight ? "kilo" : "piece" })), { proceed: "Buy anyway", canChangePrice: true });
+    if (!ok) return;
+    const checked = lines.map((l, i) => ({ ...l, costMinor: ok[i]!.costMinor }));
+    setLines(checked);
     const res = await fetch(`${API_URL}/admin/purchases`, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...adminHeaders() },
@@ -75,7 +82,7 @@ export default function PurchasesPanel() {
         vendor: vendor || undefined,
         supplierId: supplierId || undefined,
         note: note || undefined,
-        items: lines.map((l) => ({ productId: l.productId, quantity: l.quantity, costMinor: l.costMinor })),
+        items: checked.map((l) => ({ productId: l.productId, quantity: l.quantity, costMinor: l.costMinor })),
       }),
     });
     if (res.ok) {

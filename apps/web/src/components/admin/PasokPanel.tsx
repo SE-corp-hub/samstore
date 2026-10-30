@@ -8,6 +8,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { API_URL } from "../../config";
 import { adminHeaders } from "../../lib/admin";
 import { toast } from "../../lib/toast";
+import { pesoToMinor, seesCostRole } from "../../lib/below-cost";
+import { checkNewCosts } from "./BelowCostDialog";
+import { useOffline } from "../../lib/offlineCache";
 import { sendStep } from "../../lib/offlineQueue";
 import SignaturePad from "./SignaturePad";
 import StoreBar from "./StoreBar";
@@ -17,7 +20,7 @@ import { NewItemForm } from "./BentaPanel";
 import { peso, kg } from "../../lib/number-format";
 
 interface Loc { id: string; name: string; code: string | null; isActive: boolean }
-interface Product { id: string; name: string; stockBaseUnit: string | null; stockBaseQuantity: number | null; isActive?: boolean; reviewStatus?: string }
+interface Product { id: string; name: string; stockBaseUnit: string | null; stockBaseQuantity: number | null; isActive?: boolean; reviewStatus?: string; priceMinor?: number }
 interface StockInDoc { id: string; docNumber: string; supplierName: string | null; createdAt: string; lines: { name: string; loose: boolean; quantity: number; unitCostMinor: number | null }[] }
 interface Row { productId: string; amount: string; cost: string }
 /** An open supplier order for this store: what was ordered, and what has not arrived yet. No costs (counter staff never see them). */
@@ -28,7 +31,7 @@ const isLoose = (p?: { stockBaseUnit: string | null; stockBaseQuantity: number |
 const errText = (d: ApiBody | null, f: string) => d?.errors?.join(", ") ?? d?.message ?? f;
 const num = (v: string) => v.replace(/[^\d.]/g, "").replace(/(\..*)\./g, "$1").slice(0, 10);
 
-export default function PasokPanel(_props: { role?: string; onNavigate?: (tab: string) => void }) {
+export default function PasokPanel({ role }: { role?: string; onNavigate?: (tab: string) => void }) {
   const [locations, setLocations] = useState<Loc[]>([]);
   const [homeLocationId, setHomeLocationId] = useState<string | null>(null);
   const [locationId, setLocationId] = useState("");
@@ -46,6 +49,7 @@ export default function PasokPanel(_props: { role?: string; onNavigate?: (tab: s
   const [justDone, setJustDone] = useState<string | null>(null); // docNumber just received
   const [orders, setOrders] = useState<PoOrder[]>([]); // open supplier orders for this store
   const [poId, setPoId] = useState(""); // the order this delivery is received against ("" = no order)
+  const offline = useOffline();
 
   const load = useCallback(async () => {
     const [me, locs, ps, st] = await Promise.all([
@@ -103,7 +107,25 @@ export default function PasokPanel(_props: { role?: string; onNavigate?: (tab: s
     signatures: [{ role: "Received by", name: "" }],
   });
 
+  /**
+   * A new cost above the selling price would sell this delivery at a loss: ask per line first.
+   * The owner/manager can raise the selling price right here; anyone can fix the cost they typed.
+   */
+  const passesCost = async (): Promise<Row[] | null> => {
+    if (po) return rows; // the cost comes from the order (checked when the order was made)
+    const lines = rows.map((r) => { const p = byId.get(r.productId); return { productId: r.productId, name: p?.name ?? "", priceMinor: p?.priceMinor ?? 0, costMinor: pesoToMinor(r.cost) ?? 0, unit: isLoose(p) ? "kilo" : p?.stockBaseUnit === "g" ? "sack" : "piece" }; });
+    const ok = await checkNewCosts(lines, { proceed: "Receive anyway", canChangePrice: !seesCostRole(role) ? false : offline ? "Needs internet" : true });
+    if (!ok) return null;
+    const next = rows.map((r, i) => (ok[i]!.costMinor === lines[i]!.costMinor ? r : { ...r, cost: (ok[i]!.costMinor / 100).toFixed(2) }));
+    setProducts((ps) => ps.map((x) => { const l = ok.find((y) => y.productId === x.id); return l && l.priceMinor !== x.priceMinor ? { ...x, priceMinor: l.priceMinor } : x; }));
+    setRows(next);
+    return next;
+  };
+
   const saveIn = async () => {
+    const checked = await passesCost();
+    if (!checked) return;
+    const rows = checked;
     setBusy(true); setError(null);
     const body = {
       locationId, supplierName: po ? undefined : supplier.trim() || undefined, purchaseOrderId: po?.id,

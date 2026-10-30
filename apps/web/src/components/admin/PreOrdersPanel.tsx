@@ -16,6 +16,8 @@ import ReceiptModal from "./ReceiptModal";
 import { PesoInput } from "../NumberBoxes";
 import { NewItemForm } from "./BentaPanel";
 import PriceReason, { reasonOk } from "./PriceReason";
+import { askBelowCost, saveUnitCost } from "./BelowCostDialog";
+import { isBelowCost, okKey } from "../../lib/below-cost";
 import { buildText, openTextApp } from "../../lib/text-message";
 import { useMediaQuery, WIDE } from "../../lib/use-media-query";
 import { quickCash } from "../../lib/quick-cash";
@@ -201,6 +203,10 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
 
   // New / change pre-order screen
   const [buildProducts, setBuildProducts] = useState<PosProduct[]>([]);
+  // Unit cost per product (from the counter list, saved for offline) and whether this login may see it.
+  const [floors, setFloors] = useState<Map<string, { floorMinor: number; ownShelfCost: boolean; unit: string }>>(new Map());
+  const [seesCost, setSeesCost] = useState(false);
+  const keptBelow = useRef(new Set<string>()); // below-cost prices someone chose to keep
   const [buildCustomers, setBuildCustomers] = useState<PosCustomer[]>([]);
   const [buildCart, setBuildCart] = useState<CartLine[]>([]);
   const [newItemOpen, setNewItemOpen] = useState(false);
@@ -246,11 +252,14 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
 
   const loadBuilder = useCallback(async () => {
     try {
-      const [p, c, s] = await Promise.all([
+      const [p, c, s, cat] = await Promise.all([
         cachedGet<{ products?: PosProduct[] }>("/admin/products"),
         cachedGet<{ customers?: PosCustomer[] }>("/admin/customers"),
         cachedGet<{ settings?: { hidePricePreOrder?: boolean }; name?: string }>("/admin/settings"),
+        cachedGet<{ products?: { id: string; floorMinor?: number; ownShelfCost?: boolean; loose?: boolean; gramsPerUnit?: number | null }[]; seesCost?: boolean }>("/admin/benta/catalog"),
       ]);
+      setFloors(new Map((cat?.products ?? []).map((x) => [x.id, { floorMinor: x.floorMinor ?? 0, ownShelfCost: !!x.ownShelfCost, unit: x.loose ? "kilo" : x.gramsPerUnit ? "sack" : "piece" }])));
+      setSeesCost(cat?.seesCost === true);
       setHidePrice(Boolean(s?.settings?.hidePricePreOrder));
       setStoreName(s?.name ?? "");
       setBuildProducts(p?.products ?? []);
@@ -407,9 +416,43 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
 
   const overridePart = (l: CartLine) => (l.price !== undefined && l.price !== l.product.priceMinor ? { unitPriceMinorOverride: l.price, priceOverrideReason: l.reason?.trim() } : {});
 
+  const floorOf = (l: CartLine) => (l.variantId ? 0 : floors.get(l.product.id)?.floorMinor ?? 0);
+  const lineBelow = (l: CartLine) => isBelowCost(unitOf(l), floorOf(l));
+
+  /** Below cost: one popup per line before saving. False = stop (the person went back or is fixing a price). */
+  const passesCost = async (): Promise<boolean> => {
+    for (const l of buildCart) {
+      let floor = floorOf(l);
+      const unit = unitOf(l);
+      while (isBelowCost(unit, floor) && !keptBelow.current.has(okKey(l.product.id, unit, floor))) {
+        const pick = await askBelowCost({
+          name: l.product.name, priceMinor: unit, costMinor: floor, unit: floors.get(l.product.id)?.unit, showCost: seesCost, proceed: "Save anyway",
+          canChangeCost: !seesCost ? false : offline ? "Needs internet" : floors.get(l.product.id)?.ownShelfCost ? "This location has its own cost. Change it in Inventory." : true,
+        });
+        if (!pick) return false;
+        if (pick.kind === "proceed") { keptBelow.current.add(okKey(l.product.id, unit, floor)); break; }
+        if (pick.kind === "price") {
+          setLinePrice(l, (pick.priceMinor / 100).toFixed(2));
+          // A changed price still needs its reason; the same price as the list saves straight away next time.
+          if (pick.priceMinor !== l.product.priceMinor && !reasonOk(l.reason)) setError(`Pick a reason for the new price of ${l.product.name}, then save.`);
+          else toast("New price set. Check it, then tap Save again.");
+          return false;
+        }
+        const err = await saveUnitCost(l.product.id, pick.costMinor);
+        if (err) { setError(err); return false; }
+        toast("Unit cost saved");
+        floor = pick.costMinor;
+        const saved = floor;
+        setFloors((m) => new Map(m).set(l.product.id, { floorMinor: saved, ownShelfCost: false, unit: m.get(l.product.id)?.unit ?? "piece" }));
+      }
+    }
+    return true;
+  };
+
   // Save a new ON_HOLD pre-order, or the changed lines of the one being edited; then back to the list.
   const savePreorder = async () => {
     if (buildCart.length === 0) { setError("Tap at least one item."); return; }
+    if (!(await passesCost())) return;
     if (buildCart.some(priceMissingReason)) { setError("Pick a reason for every price you changed."); return; }
     setBuildBusy(true); setError(null);
     try {
@@ -724,6 +767,12 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
                     value={l.priceText ?? (unitOf(l) / 100).toFixed(2)} placeholder={(l.product.priceMinor / 100).toFixed(2)} onChange={(v) => setLinePrice(l, v)} />
                 </label>
               </div>
+              {lineBelow(l) && (
+                <div className="small text-danger fw-semibold mt-1" role="status">
+                  <i className="bi bi-exclamation-triangle-fill me-1" aria-hidden="true"></i>
+                  {seesCost ? `Below the unit cost of ${toPesos(floorOf(l))}` : "Below cost: check with the owner"}
+                </div>
+              )}
               {changed && (
                 <div className="mt-2">
                   <div className="small text-muted mb-1">Usual price {toPesos(l.product.priceMinor)}. Why the new price?</div>

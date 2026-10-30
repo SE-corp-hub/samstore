@@ -1,6 +1,8 @@
 "use client";
 
 import { PesoInput, WholeInput } from "../NumberBoxes";
+import { askBelowCost } from "./BelowCostDialog";
+import { isBelowCost } from "../../lib/below-cost";
 import { useCallback, useEffect, useState } from "react";
 import AddSeveralProducts from "./AddSeveralProducts";
 import { API_URL } from "../../config";
@@ -161,6 +163,9 @@ export default function ProductsPanel() {
   const [several, setSeveral] = useState(false);
   // P2c: variant + add-on management modal
   const [optionsFor, setOptionsFor] = useState<AdminProduct | null>(null);
+  // Products whose selling price is under the unit cost (owner/manager only: staff get no cost).
+  const [onlyBelow, setOnlyBelow] = useState(false);
+  const belowCount = products.filter((p) => isBelowCost(p.priceMinor, p.costMinor)).length;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -232,10 +237,20 @@ export default function ProductsPanel() {
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
-    setSaving(true);
     setError(null);
     try {
-      const priceMinor = Math.round(parseFloat(form.priceMinor) * 100);
+      let priceMinor = Math.round(parseFloat(form.priceMinor) * 100);
+      let costMinor = form.costMinor.trim() === "" ? undefined : Math.round(parseFloat(form.costMinor) * 100);
+      // Selling price under the unit cost: fix the price, change the cost, or save anyway.
+      const costNow = costMinor ?? modal.editing?.costMinor;
+      if (isBelowCost(priceMinor, costNow)) {
+        const pick = await askBelowCost({ name: form.name.trim() || "This product", priceMinor, costMinor: costNow!, unit: form.soldByWeight ? "kilo" : form.conversionEnabled && form.packageUnit === "kg" ? "sack" : "piece", showCost: true, canChangeCost: hasCost, proceed: "Save anyway" });
+        if (!pick) return;
+        if (pick.kind === "price") priceMinor = pick.priceMinor;
+        if (pick.kind === "cost") costMinor = pick.costMinor;
+        setForm((f) => ({ ...f, priceMinor: (priceMinor / 100).toFixed(2), costMinor: costMinor === undefined ? f.costMinor : (costMinor / 100).toFixed(2) }));
+      }
+      setSaving(true);
       const measure = form.conversionEnabled ? stockMeasureToBase(form.packageSize, form.packageUnit) : { stockBaseUnit: null, stockBaseQuantity: null };
       const payload = {
         name: form.name,
@@ -245,7 +260,7 @@ export default function ProductsPanel() {
         soldByWeight: form.soldByWeight,
         trackStock: form.trackStock,
         priceMinor,
-        costMinor: form.costMinor.trim() === "" ? undefined : Math.round(parseFloat(form.costMinor) * 100),
+        costMinor,
         stockBaseUnit: measure.stockBaseUnit,
         stockBaseQuantity: measure.stockBaseQuantity,
         stockConversionFamily: form.conversionEnabled ? form.stockConversionFamily.trim() || null : null,
@@ -313,6 +328,12 @@ export default function ProductsPanel() {
                   </div>
                 </div>
       {error && <div className="alert alert-danger py-2 small">{error}</div>}
+      {belowCount > 0 && (
+        <div className="alert alert-danger d-flex flex-wrap align-items-center gap-2 py-2" role="status">
+          <span className="me-auto"><strong>{belowCount}</strong> {belowCount === 1 ? "product sells" : "products sell"} below the unit cost. Tap one to fix its price or cost.</span>
+          <button type="button" className="btn btn-outline-danger" aria-pressed={onlyBelow} onClick={() => setOnlyBelow((v) => !v)}>{onlyBelow ? "Show all" : "Show them"}</button>
+        </div>
+      )}
       {several && <AddSeveralProducts onClose={() => setSeveral(false)} onDone={load} />}
 
             {/* P7 filter bar */}
@@ -376,7 +397,7 @@ export default function ProductsPanel() {
               </tr>
             </thead>
             <tbody>
-              {products.map((p) => (
+              {(onlyBelow && belowCount > 0 ? products.filter((p) => isBelowCost(p.priceMinor, p.costMinor)) : products).map((p) => (
                 <tr key={p.id} className={p.isActive ? "" : "table-secondary"}>
                   <td>
                     <input
@@ -396,6 +417,7 @@ export default function ProductsPanel() {
                       {p.stockConversionFamily && <span className="badge text-bg-info ms-1">{p.stockConversionFamily}</span>}
                       {p.soldByWeight && <span className="badge text-bg-secondary ms-1" title="Sold by weight">per-kilo</span>}
                       {p.trackStock === false && <span className="badge text-bg-warning ms-1" title="Sells at any time — stock is not counted">Not tracked</span>}
+                      {isBelowCost(p.priceMinor, p.costMinor) && <span className="badge text-bg-danger ms-1">Below cost</span>}
                       <div className="small text-muted fw-normal d-lg-none">{p.sku}</div>
                     </td>
                   <td className="text-muted small col-wide">

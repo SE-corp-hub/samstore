@@ -564,3 +564,23 @@ test("reorder suggestions: fast sellers running low are listed with an amount; a
   assert.equal(back?.supplierName, "Mang Tonyo");
   assert.equal(back?.lastCostMinor, 101_000);
 });
+
+test("Below cost: the counter list carries each item's unit cost so the tablet can warn, also offline", async () => {
+  const fx = await fixture();
+  const cat = await svc.catalog(fx.storeId, fx.staff1, undefined);
+  assert.equal(cat.ok, true);
+  if (!cat.ok) return;
+  assert.equal(cat.value.seesCost, false, "staff: the screen words the warning without the peso cost");
+  const sack = cat.value.products.find((p) => p.id === fx.sin25.id);
+  assert.deepEqual([sack?.floorMinor, sack?.ownShelfCost], [110_000, false], "shared cost: the product cost");
+  const own = await svc.catalog(fx.storeId, fx.owner, fx.s1);
+  assert.equal(own.ok && own.value.seesCost, true);
+
+  // Each shelf its own cost: Store 1's shelf cost counts, and changing the product cost would not move it.
+  await prisma.storeSettings.update({ where: { storeId: fx.storeId }, data: { costMode: "PER_LOCATION" } });
+  await prisma.stockLevel.updateMany({ where: { storeId: fx.storeId, productId: fx.sin25.id, warehouseId: fx.s1 }, data: { costMinor: 135_000 } });
+  const per = await svc.catalog(fx.storeId, fx.staff1, undefined);
+  const shelf = per.ok ? per.value.products.find((p) => p.id === fx.sin25.id) : undefined;
+  assert.deepEqual([shelf?.floorMinor, shelf?.ownShelfCost], [135_000, true]);
+  assert.ok(shelf && shelf.priceMinor < shelf.floorMinor, "₱1,300 is below the ₱1,350 shelf cost");
+});
