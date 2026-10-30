@@ -47,9 +47,9 @@ export async function chargeSale(
   return { belowCost };
 }
 
-/** A voided sale takes its charges away again. */
+/** A voided sale takes its charges (and the profit share of rice it took from a consignment store) away again. */
 export async function reverseSaleCharges(tx: Tx, storeId: string, orderId: string, actorId: string, why: string): Promise<void> {
-  const charges = await tx.storePayableEntry.findMany({ where: { storeId, orderId, kind: "CHARGE" } });
+  const charges = await tx.storePayableEntry.findMany({ where: { storeId, orderId, kind: { in: ["CHARGE", "PROFIT_SHARE"] } } });
   for (const c of charges) {
     if (await tx.storePayableEntry.findFirst({ where: { reversesId: c.id }, select: { id: true } })) continue;
     const docNumber = await nextDocNumber(tx, storeId, "SP");
@@ -95,4 +95,90 @@ export async function chargeCountShort(
       data: { storeId: input.storeId, docNumber, locationId: input.locationId, kind: "CHARGE", amountMinor: amount, productId: l.productId, quantity: qty, unitCostMinor: unit, sourceLocationId: main, sourceLineId: l.id, note: `Short found in count ${input.countDoc}`, createdById: input.actorId },
     });
   }
+}
+
+// ─────────────────────────── Profit share ───────────────────────────
+//   Store 1 (the main store) owns the rice at a consignment store. When Store 1 takes rice from it,
+//   Store 1 pays that store only the profit it would have made: its selling price − the main store's
+//   cost, booked when the rice ARRIVES (sold or not). Rice lost on the road earns no share. Rice that
+//   goes back to the consignment store takes the share back (sacks shared in the last 30 days).
+
+export const SHARE_BACK_DAYS = 30;
+
+const looseOf = (p: { stockBaseUnit: string | null; stockBaseQuantity: number | null }) => (p.stockBaseUnit ?? "").toLowerCase() === "g" && p.stockBaseQuantity === 1;
+
+/** The consignment store's margin on one stock unit (loose rice: per kilo): its selling price − the main store's cost. */
+export async function shareMargin(tx: Tx, storeId: string, productId: string, consignmentId: string, mainId: string): Promise<number> {
+  const product = await tx.product.findFirst({ where: { id: productId, storeId }, select: { priceMinor: true } });
+  const price = (await tx.locationPrice.findFirst({ where: { storeId, warehouseId: consignmentId, productId }, select: { priceMinor: true } }))?.priceMinor ?? product?.priceMinor ?? 0;
+  return price - (await shelfCostFor(tx, storeId, productId, mainId));
+}
+
+/**
+ * Rice from a consignment store arrived at (or was sold by) its main store: the main store owes that store
+ * its margin. A negative entry on the consignment store's payable. Returns the amount (0 when not a share).
+ */
+export async function bookProfitShare(
+  tx: Tx, input: { storeId: string; fromId: string; toId: string; productId: string; quantity: number; actorId: string; ref: string; transferId?: string; orderId?: string },
+): Promise<number> {
+  if (input.quantity <= 0) return 0;
+  const main = await consignmentMain(tx, input.storeId, input.fromId);
+  if (!main || main !== input.toId) return 0;
+  const margin = await shareMargin(tx, input.storeId, input.productId, input.fromId, main);
+  if (margin <= 0) return 0;
+  const product = await tx.product.findFirstOrThrow({ where: { id: input.productId }, select: { stockBaseUnit: true, stockBaseQuantity: true } });
+  const amount = chargeAmount(looseOf(product), input.quantity, margin);
+  if (amount <= 0) return 0;
+  const docNumber = await nextDocNumber(tx, input.storeId, "SP");
+  await tx.storePayableEntry.create({
+    data: {
+      storeId: input.storeId, docNumber, locationId: input.fromId, kind: "PROFIT_SHARE", amountMinor: -amount, productId: input.productId, quantity: input.quantity,
+      unitCostMinor: margin, sourceLocationId: main, transferId: input.transferId ?? null, orderId: input.orderId ?? null, note: `Profit share: ${input.ref}`.slice(0, 200), createdById: input.actorId,
+    },
+  });
+  return amount;
+}
+
+/**
+ * Rice moved from the main store back to a consignment store: the share paid on it in the last 30 days
+ * comes back (at the margin it was shared at, newest first). Rice never shared earns nothing back.
+ */
+export async function takeBackShare(
+  tx: Tx, input: { storeId: string; fromId: string; toId: string; productId: string; quantity: number; actorId: string; ref: string; transferId?: string },
+): Promise<number> {
+  if (input.quantity <= 0) return 0;
+  const main = await consignmentMain(tx, input.storeId, input.toId);
+  if (!main || main !== input.fromId) return 0;
+  const since = new Date(Date.now() - SHARE_BACK_DAYS * 86_400_000);
+  const where = { storeId: input.storeId, locationId: input.toId, productId: input.productId, createdAt: { gte: since } };
+  const shares = await tx.storePayableEntry.findMany({ where: { ...where, kind: "PROFIT_SHARE" }, orderBy: { createdAt: "desc" }, select: { id: true, quantity: true, unitCostMinor: true } });
+  const undone = new Set((await tx.storePayableEntry.findMany({ where: { reversesId: { in: shares.map((s) => s.id) } }, select: { reversesId: true } })).map((r) => r.reversesId));
+  let back = (await tx.storePayableEntry.aggregate({ where: { ...where, kind: "SHARE_BACK" }, _sum: { quantity: true } }))._sum.quantity ?? 0;
+  const product = await tx.product.findFirstOrThrow({ where: { id: input.productId }, select: { stockBaseUnit: true, stockBaseQuantity: true } });
+  // The newest shares are taken back first; what earlier take-backs used is skipped oldest-first.
+  const open: { qty: number; margin: number }[] = [];
+  for (const s of [...shares].reverse()) {
+    if (undone.has(s.id)) continue;
+    const used = Math.min(back, s.quantity ?? 0);
+    back -= used;
+    if ((s.quantity ?? 0) - used > 0) open.push({ qty: (s.quantity ?? 0) - used, margin: s.unitCostMinor ?? 0 });
+  }
+  let left = input.quantity;
+  let total = 0;
+  for (const o of open.reverse()) {
+    if (left <= 0) break;
+    const qty = Math.min(left, o.qty);
+    left -= qty;
+    const amount = chargeAmount(looseOf(product), qty, o.margin);
+    if (amount <= 0) continue;
+    const docNumber = await nextDocNumber(tx, input.storeId, "SP");
+    await tx.storePayableEntry.create({
+      data: {
+        storeId: input.storeId, docNumber, locationId: input.toId, kind: "SHARE_BACK", amountMinor: amount, productId: input.productId, quantity: qty,
+        unitCostMinor: o.margin, sourceLocationId: main, transferId: input.transferId ?? null, note: `Share taken back: ${input.ref}`.slice(0, 200), createdById: input.actorId,
+      },
+    });
+    total += amount;
+  }
+  return total;
 }

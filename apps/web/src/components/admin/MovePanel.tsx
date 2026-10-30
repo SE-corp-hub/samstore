@@ -11,11 +11,16 @@ import { sendStep } from "../../lib/offlineQueue";
 import { printSlip, type Slip } from "../../lib/slip-print";
 import { getPrinterSettings } from "../../lib/printer-settings";
 import StoreBar from "./StoreBar";
+import { peso } from "../../lib/number-format";
 
 interface Place { id: string; name: string; code: string | null; isActive: boolean }
 interface ProductOption { id: string; name: string }
-interface MoveRow { id: string; docNumber: string | null; productName: string; quantity: number; from: string; to: string; note: string | null; at: string }
-type Body = { message?: string; errors?: string[]; docNumber?: string };
+interface MoveRow { id: string; docNumber: string | null; productName: string; quantity: number; from: string; to: string; note: string | null; at: string; profitShareMinor?: number | null }
+type Body = { message?: string; errors?: string[]; docNumber?: string; profitShareMinor?: number };
+
+/** Owner/manager only (the server leaves it out for staff): the profit share this move booked for the store it came from. */
+const shareLines = (share: number | null | undefined, from: string, to: string) =>
+  !share ? [] : share > 0 ? [{ label: `Profit share ${to} owes ${from}`, value: peso(share) }] : [{ label: `Profit share taken back (rice back at ${to})`, value: peso(-share) }];
 
 export default function MovePanel() {
   const [places, setPlaces] = useState<Place[]>([]);
@@ -35,7 +40,7 @@ export default function MovePanel() {
   useEffect(() => { if (receipt && getPrinterSettings().autoPrint) printSlip(receipt); }, [receipt]);
   const slipOf = (m: MoveRow): Slip => ({
     storeName: storeName || "SAM STORE", title: "MOVE STOCK RECEIPT", reference: m.docNumber, when: new Date(m.at).toLocaleString("en-PH"),
-    lines: [{ label: "From", value: m.from }, { label: "To", value: m.to }],
+    lines: [{ label: "From", value: m.from }, { label: "To", value: m.to }, ...shareLines(m.profitShareMinor, m.from, m.to)],
     rows: [{ name: m.productName, qty: String(m.quantity) }],
     signatures: [{ role: "Moved by", name: "" }, { role: "Received by", name: "" }], widthMm: 58,
   });
@@ -78,7 +83,7 @@ export default function MovePanel() {
     toast(`Moved ${n} — ${d?.docNumber ?? "done"}`);
     setReceipt({
       storeName: storeName || "SAM STORE", title: "MOVE STOCK RECEIPT", reference: d?.docNumber ?? null, when: new Date().toLocaleString("en-PH"),
-      lines: [{ label: "From", value: fromName ?? "" }, { label: "To", value: toName ?? "" }],
+      lines: [{ label: "From", value: fromName ?? "" }, { label: "To", value: toName ?? "" }, ...shareLines(d?.profitShareMinor, fromName ?? "", toName ?? "")],
       rows: [{ name: products.find((p) => p.id === productId)?.name ?? "", qty: String(n) }],
       signatures: [{ role: "Moved by", name: "" }, { role: "Received by", name: "" }], widthMm: 58,
     });
@@ -127,6 +132,7 @@ export default function MovePanel() {
           {rows.map((m) => (
             <li key={m.id} className="list-group-item small">
               <b>{m.quantity} × {m.productName}</b> · {m.from} → {m.to}
+              {!!m.profitShareMinor && <div className="text-info-emphasis">{m.profitShareMinor > 0 ? `Profit share ${m.to} owes ${m.from}: ${peso(m.profitShareMinor)}` : `Profit share taken back: ${peso(-m.profitShareMinor)}`}</div>}
               <div className="d-flex align-items-center gap-2">
                 <div className="text-muted me-auto">{m.docNumber} · {new Date(m.at).toLocaleString()}{m.note && m.note !== "Moved" ? ` · ${m.note}` : ""}</div>
                 <button type="button" className="btn btn-outline-dark btn-sm text-nowrap" onClick={() => printSlip(slipOf(m))}><i className="bi bi-receipt me-1"></i>Receipt</button>

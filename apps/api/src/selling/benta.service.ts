@@ -25,7 +25,7 @@ import { cacheBust, cacheKey } from "../persistence/ttl-cache.js";
 import { PrismaOrderSequenceRepository } from "../persistence/prisma-repositories.js";
 import { randomId } from "../persistence/repositories.js";
 import { addForTrip, deductStock, InsufficientStockError, recordMovement, releaseForTrip, reserveForTrip, unreserveForTrip, type TripLeg } from "../domain/movements.js";
-import { chargeSale, consignmentMain } from "../payable/charges.js";
+import { bookProfitShare, chargeSale, consignmentMain } from "../payable/charges.js";
 import { shortsBecomeSale, walkInLines, WalkInTaken } from "../counts/count-walk-in.js";
 import { seesCost } from "../domain/cost-redact.js";
 import { applyReceipt, loadOpenOrder } from "../purchase-orders/receive.js";
@@ -445,6 +445,8 @@ export class BentaService {
             for (const l of priced.filter((x) => x.sourceLocationId)) {
               await coverShortage(tx, storeId, { productId: l.product.id, warehouseId: l.sourceLocationId!, needed: l.stockQty, actorId: actor.userId, documentType: "SALE", documentId: orderId, reason: `sale ${orderNumber}` });
               await deductStock(tx, storeId, [{ productId: l.product.id, quantity: l.stockQty }], { type: "CONSUME", orderId, createdBy: actor.userId, warehouseId: l.sourceLocationId!, documentType: "SALE", documentId: orderId });
+              // Store 1 sells rice straight off Store 2's shelf: Store 1 owes Store 2 its profit, as if the rice had been moved.
+              await bookProfitShare(tx, { storeId, fromId: l.sourceLocationId!, toId: loc.id, productId: l.product.id, quantity: l.stockQty, actorId: actor.userId, ref: `sale ${orderNumber}`, orderId });
             }
             // A consignment store owes the main store's cost for what it sells.
             const charged = await chargeSale(tx, {

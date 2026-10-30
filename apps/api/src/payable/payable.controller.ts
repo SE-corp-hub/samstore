@@ -92,7 +92,7 @@ export class PayableController {
   @Post("payment")
   async payment(@Req() req: Req_, @Body() body: Record<string, unknown>, @Headers("x-store-id") h?: string) {
     const { storeId, actor } = await this.ctx(req, h);
-    return unwrap(await this.payable.payment(storeId, actor, { locationId: str(body?.locationId), amountMinor: body?.amountMinor, note: str(body?.note) }));
+    return unwrap(await this.payable.payment(storeId, actor, { locationId: str(body?.locationId), amountMinor: body?.amountMinor, note: str(body?.note), toStore: body?.toStore === true }));
   }
 
   /** POST /admin/payable/entries/:id/reverse — { reason } */
