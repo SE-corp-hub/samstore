@@ -95,6 +95,13 @@ export class PayableController {
     return unwrap(await this.payable.payment(storeId, actor, { locationId: str(body?.locationId), amountMinor: body?.amountMinor, note: str(body?.note), toStore: body?.toStore === true }));
   }
 
+  /** POST /admin/payable/write-offs/:id/charge — damage at a consignment store: the owner charges it to that store. */
+  @Post("write-offs/:id/charge")
+  async chargeDamage(@Req() req: Req_, @Param("id") id: string, @Headers("x-store-id") h?: string) {
+    const { storeId, actor } = await this.ctx(req, h);
+    return unwrap(await this.payable.chargeDamage(storeId, actor, id));
+  }
+
   /** POST /admin/payable/entries/:id/reverse — { reason } */
   @Post("entries/:id/reverse")
   async reverse(@Req() req: Req_, @Param("id") id: string, @Body() body: Record<string, unknown>, @Headers("x-store-id") h?: string) {

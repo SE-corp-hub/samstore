@@ -28,7 +28,8 @@ const kindLabel = (kind: string, amountMinor: number) => (kind === "PAYMENT" && 
 interface Bal { id: string; name: string; code: string | null; isMain: boolean; chargesMinor: number; paymentsMinor: number; reversedMinor: number; sharesMinor?: number; owesMinor: number; consignment?: boolean; lastPaymentAt?: string | null; lastCountAt?: string | null; weeklyDue?: boolean; countDue?: boolean }
 interface ToCharge { lineId: string; countDoc: string; countedAt: string | null; atId: string; at: string; productId: string; name: string; loose: boolean; quantity: number; unitCostMinor: number; amountMinor: number }
 interface Entry { id: string; docNumber: string; kind: string; locationId: string; store: string; amountMinor: number; productName: string | null; loose: boolean; quantity: number | null; unitCostMinor: number | null; note: string | null; by: string | null; at: string; reversed: boolean; canReverse: boolean }
-interface Summary { stores: Bal[]; toAssign: ToCharge[]; entries: Entry[]; totalOwesMinor: number }
+interface Damage { writeOffId: string; docNumber: string; at: string; atId: string; store: string; name: string; loose: boolean; quantity: number; reasonLabel: string; note: string | null; amountMinor: number; chargedAs: string | null }
+interface Summary { stores: Bal[]; toAssign: ToCharge[]; entries: Entry[]; totalOwesMinor: number; damage?: Damage[] }
 interface ProductOption { id: string; name: string; loose: boolean }
 type Body = { message?: string; errors?: string[] };
 
@@ -209,6 +210,30 @@ export default function PayablePanel() {
             </div>
           </div>
         </div>
+      )}
+
+      {(data.damage ?? []).length > 0 && (
+        <section className="mb-4" aria-labelledby="pp-damage">
+          <h6 id="pp-damage">Damage at the consignment store</h6>
+          <p className="text-muted small mb-2">Written off in the last 30 days. It is Store 1&apos;s loss unless you charge it to the store.</p>
+          <ul className="list-group" style={{ fontVariantNumeric: "tabular-nums" }}>
+            {(data.damage ?? []).map((d) => (
+              <li key={d.writeOffId} className="list-group-item d-flex flex-wrap justify-content-between align-items-center gap-2">
+                <div>
+                  <div>{qtyText(d.loose, d.quantity)} {d.name} <span className="badge text-bg-light border">{d.reasonLabel}</span></div>
+                  <div className="small text-muted">{d.docNumber} · {d.store} · {new Date(d.at).toLocaleDateString()}{d.note ? ` · ${d.note}` : ""}</div>
+                </div>
+                {d.chargedAs ? (
+                  <span className="badge text-bg-success fs-6"><i className="bi bi-check-circle me-1" aria-hidden="true"></i>Charged ({d.chargedAs})</span>
+                ) : (
+                  <button type="button" className="btn btn-outline-primary text-nowrap" style={{ minHeight: 44 }} disabled={busy} onClick={() => void act(`/admin/payable/write-offs/${d.writeOffId}/charge`, {}, `Charged ${peso(d.amountMinor)}`)}>
+                    Charge {d.store} · {peso(d.amountMinor)}
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
 
       <h6>To charge — shortages found by counts</h6>

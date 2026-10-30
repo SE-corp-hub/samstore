@@ -16,6 +16,7 @@ import { RiceReportsService } from "../reports/rice-reports.service.js";
 import { StoreReportService } from "../reports/store-report.service.js";
 import { WeeklySummaryService } from "../reports/weekly-summary.service.js";
 import { manilaDate } from "../domain/reports.js";
+import { ResackService } from "../resack/resack.service.js";
 import { type Actor, type SignatureInput } from "../people/people.service.js";
 
 const PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==";
@@ -32,6 +33,10 @@ after(async () => {
     await prisma.signature.deleteMany({ where });
     await prisma.approvalRequest.deleteMany({ where });
     await prisma.storePayableEntry.deleteMany({ where });
+    await prisma.stockWriteOff.deleteMany({ where });
+
+    await prisma.resackOutput.deleteMany({ where });
+    await prisma.resackJob.deleteMany({ where });
     await prisma.stockCountLine.deleteMany({ where });
     await prisma.stockCount.deleteMany({ where });
     await prisma.stockInLine.deleteMany({ where });
@@ -229,4 +234,63 @@ test("Phase 4: the reports — Store 2's profit is ₱3,200 and Store 1's is ₱
   assert.equal(c.mainName, "Store 1");
   assert.equal(c.sharesThisWeekMinor, 260_000);
   assert.equal(c.paidThisWeekMinor, 490_000);
+});
+
+test("D3: damage at Store 2 is Store 1's loss unless the owner charges it to Store 2 (once; undo makes it Store 1's loss again)", async () => {
+  const fx = await fixture();
+  const wo = await counts.writeOff(fx.storeId, fx.staff2, { locationId: fx.s2, productId: fx.jasmine.id, quantity: 1, reason: "BASA", signatures: staffSig });
+  assert.equal(wo.ok, true, msg(wo));
+  if (!wo.ok) return;
+  assert.equal(await owes(fx, fx.s2), 0, "by default the damage is Store 1's loss");
+  const sum = await payable.summary(fx.storeId, fx.owner);
+  assert.equal(sum.ok && sum.value.damage.length, 1, msg(sum));
+  assert.equal(sum.ok && sum.value.damage[0]?.amountMinor, 115_000);
+  assert.equal(sum.ok && sum.value.damage[0]?.chargedAs, null);
+
+  const charged = await payable.chargeDamage(fx.storeId, fx.owner, wo.value.id);
+  assert.equal(charged.ok, true, msg(charged));
+  assert.equal(await owes(fx, fx.s2), 115_000);
+  assert.match(msg(await payable.chargeDamage(fx.storeId, fx.owner, wo.value.id)), /Already recorded/);
+  assert.match(msg(await payable.chargeDamage(fx.storeId, fx.staff2, wo.value.id)), /owner and manager/);
+
+  const entry = await prisma.storePayableEntry.findFirstOrThrow({ where: { storeId: fx.storeId, writeOffId: wo.value.id } });
+  assert.equal((await payable.reverse(fx.storeId, fx.owner, entry.id, "Store 2 was not at fault")).ok, true);
+  assert.equal(await owes(fx, fx.s2), 0);
+  const after = await payable.summary(fx.storeId, fx.owner);
+  assert.equal(after.ok && after.value.damage[0]?.chargedAs, null, "back to Store 1's loss, and it can be charged again");
+
+  // Damage at Store 1 (not consignment) cannot be charged to anyone.
+  const s1wo = await counts.writeOff(fx.storeId, fx.staff1, { locationId: fx.s1, productId: fx.jasmine.id, quantity: 1, reason: "TAPON", signatures: staffSig });
+  assert.equal(s1wo.ok, true, msg(s1wo));
+  assert.match(msg(await payable.chargeDamage(fx.storeId, fx.owner, s1wo.ok ? s1wo.value.id : "")), /consignment store/);
+});
+
+test("D4: opening sacks at Store 2 — 1 kg per 25 kg is allowed, only the kilos lost beyond it are charged at Store 1's cost", async () => {
+  const fx = await fixture();
+  const k = await prisma.kargador.create({ data: { storeId: fx.storeId, name: "Mang Tony" } });
+  const resacks = new ResackService();
+  const open = (actor: Actor, locationId: string, sacks: number, grams: number) => resacks.resack(fx.storeId, actor, {
+    locationId, inputProductId: fx.jasmine.id, inputQty: sacks, outputs: [{ productId: fx.loose.id, quantity: grams }], kargadorId: k.id,
+    signatures: [{ signerKind: "KARGADOR", kargadorId: k.id, imagePng: PNG }],
+  });
+
+  // 2 sacks (50 kg) → 48.5 kg: 1.5 kg lost, 2 kg allowed → nothing charged.
+  assert.equal((await open(fx.staff2, fx.s2, 2, 48_500)).ok, true);
+  assert.equal(await owes(fx, fx.s2), 0);
+
+  // 1 sack → 23.5 kg: 1.5 kg lost, 1 kg allowed → 0.5 kg × ₱1,150/25 kg = ₱23.
+  const r = await open(fx.staff2, fx.s2, 1, 23_500);
+  assert.equal(r.ok, true, msg(r));
+  assert.equal(await owes(fx, fx.s2), 2_300);
+  const charge = await prisma.storePayableEntry.findFirstOrThrow({ where: { storeId: fx.storeId, locationId: fx.s2, kind: "CHARGE" } });
+  assert.match(charge.note ?? "", /1\.5 kg lost, 1 kg allowed, 0\.5 kg charged/);
+
+  // The shelf check does not count it as rice sold; the owner can undo it like any charge.
+  const undo = await payable.reverse(fx.storeId, fx.owner, charge.id, "Sack was light from the supplier");
+  assert.equal(undo.ok, true, msg(undo));
+  assert.equal(await owes(fx, fx.s2), 0);
+
+  // Store 1 opening sacks is its own rice: never charged.
+  assert.equal((await open(fx.staff1, fx.s1, 1, 22_000)).ok, true);
+  assert.equal(await prisma.storePayableEntry.count({ where: { storeId: fx.storeId, locationId: fx.s1 } }), 0);
 });
