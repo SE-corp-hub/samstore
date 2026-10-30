@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { CheckoutResponse } from "../types";
+import { peso } from "../lib/number-format";
 
 interface TrackerProps {
   /** Pass a claim token to auto-load (after checkout) or null to prompt for one. */
@@ -51,7 +52,7 @@ export default function OrderTracker({ initialToken = null }: TrackerProps) {
     } catch { setError("Network error"); } finally { setLoading(false); }
   };
 
-  const pesos = (m: number) => `₱${(m / 100).toFixed(2)}`;
+  const pesos = (m: number) => peso(m);
 
   if (order) {
     return (

@@ -7,6 +7,7 @@
 import { useEffect, useState } from "react";
 import { API_URL } from "../../config";
 import { adminHeaders } from "../../lib/admin";
+import { peso } from "../../lib/number-format";
 
 interface QueueItem {
   id: string;
@@ -18,7 +19,7 @@ interface QueueItem {
   payment: { id: string; proofData: string | null; reference: string | null } | undefined;
 }
 
-const toPesos = (m: number) => `₱${(m / 100).toFixed(2)}`;
+const toPesos = (m: number) => peso(m);
 
 interface PaymentReviewProps {
   onClose: () => void;

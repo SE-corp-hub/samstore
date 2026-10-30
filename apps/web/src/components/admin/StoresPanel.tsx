@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { API_URL } from "../../config";
 import { adminHeaders, getAdminRole } from "../../lib/admin";
 import { toast } from "../../lib/toast";
+import { peso } from "../../lib/number-format";
 
 interface StoreRow {
   id: string;
@@ -79,7 +80,7 @@ const MEMBER_ROLES = ["OWNER", "MANAGER", "STAFF", "SALES_AGENT", "DELIVERY"];
 
 const memberBadge = (status: string) => (status === "ACTIVE" ? "text-bg-success" : "text-bg-secondary");
 
-const toPesos = (m: number) => `₱${(m / 100).toFixed(2)}`;
+const toPesos = (m: number) => peso(m);
 
 const apiError = (d: unknown, fallback: string): string => {
   if (!d || typeof d !== "object") return fallback;

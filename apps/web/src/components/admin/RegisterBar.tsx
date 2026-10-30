@@ -7,8 +7,9 @@ import { useCallback, useEffect, useState } from "react";
 import { API_URL } from "../../config";
 import { adminHeaders } from "../../lib/admin";
 import { toast } from "../../lib/toast";
+import { peso } from "../../lib/number-format";
 
-const toPesos = (m: number) => `₱${(m / 100).toFixed(2)}`;
+const toPesos = (m: number) => peso(m);
 const toPesosInput = (m: number) => (m / 100).toFixed(2);
 
 interface SessionTotals {

@@ -160,7 +160,7 @@ export default function UtangRicePanel({ role }: { role?: string; onNavigate?: (
         <>
           <div className="d-flex gap-2 mb-3">
             <input className="form-control form-control-lg" placeholder="Search (name or number)" aria-label="Search" value={search} onChange={(e) => setSearch(e.target.value)} />
-            <button type="button" className="btn btn-success btn-lg text-nowrap" onClick={() => setAdding(true)}>+ Customer</button>
+            <button type="button" className="btn btn-success btn-lg text-nowrap flex-shrink-0" onClick={() => setAdding(true)}>+ Customer</button>
           </div>
           <div className="btn-group mb-3" role="group" aria-label="Who to show">
             <button type="button" className={`btn ${filter === "owing" ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setFilter("owing")}>Who owes ({owing.length})</button>

@@ -14,6 +14,7 @@ import PaymentReview from "./PaymentReview";
 import ChatPanel from "./ChatPanel";
 import { toast } from "../../lib/toast";
 import { useMediaQuery, WIDE } from "../../lib/use-media-query";
+import { peso } from "../../lib/number-format";
 
 const STATUS_BADGE: Record<string, string> = {
   RECEIVED: "text-bg-secondary",
@@ -51,7 +52,7 @@ interface OrderAction { key: string; label: string; icon: string; tone: "main" |
 interface EditLine { productId: string; productName: string; quantity: number; unitPriceMinor: number }
 interface ProductOption { id: string; name: string; sku: string }
 
-const toPesos = (m: number) => `₱${(m / 100).toFixed(2)}`;
+const toPesos = (m: number) => peso(m);
 const dayRange = (d: Date) => ({ from: new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0).toISOString(), to: new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59).toISOString() });
 
 export default function OrdersPanel() {

@@ -13,6 +13,7 @@ import {
   type PhCityOption,
   type PhBarangayOption,
 } from "../api/address";
+import { peso } from "../lib/number-format";
 
 // Customer account panel (U6): register / login + dashboard —
 // loyalty points, credit status, recent orders (track), saved PH addresses (P1.portal),
@@ -56,7 +57,7 @@ interface SavedAddress {
   isDefault: boolean;
 }
 
-const toPesos = (m: number) => `₱${(m / 100).toFixed(2)}`;
+const toPesos = (m: number) => peso(m);
 const STATUS_BADGE: Record<string, string> = {
   RECEIVED: "text-bg-secondary", CONFIRMED: "text-bg-info", PREPARING: "text-bg-warning",
   READY: "text-bg-primary", OUT_FOR_DELIVERY: "text-bg-dark", DELIVERED: "text-bg-success",

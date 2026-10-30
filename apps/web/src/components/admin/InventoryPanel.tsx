@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { API_URL } from "../../config";
 import { adminHeaders } from "../../lib/admin";
+import { peso } from "../../lib/number-format";
 
 interface InvItem {
   id: string; name: string; sku: string; category: string | null;
@@ -27,7 +28,7 @@ interface ConversionOption {
   available: number;
 }
 
-const toPesos = (m: number) => `₱${(m / 100).toFixed(2)}`;
+const toPesos = (m: number) => peso(m);
 const formatBaseQty = (qty: number, unit: string) => {
   if ((unit === "g" || unit === "ml") && qty % 1000 === 0) return `${qty / 1000} ${unit === "g" ? "kg" : "L"}`;
   return `${qty} ${unit}`;

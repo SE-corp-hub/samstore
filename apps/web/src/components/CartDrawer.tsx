@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { ProductDTO } from "../types";
+import { peso } from "../lib/number-format";
 
 export interface CartLineUI {
   lineId: string;
@@ -23,7 +24,7 @@ interface CartDrawerProps {
   minOrderMinor: number;
 }
 
-const toPesos = (minor: number) => `₱${(minor / 100).toFixed(2)}`;
+const toPesos = (minor: number) => peso(minor);
 
 export default function CartDrawer({
   open, onClose, lines, onUpdateQty, onCheckout, deliveryFeeMinor, minOrderMinor,

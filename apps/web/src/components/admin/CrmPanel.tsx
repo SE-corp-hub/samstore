@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import { API_URL } from "../../config";
 import { adminHeaders } from "../../lib/admin";
 import { toast } from "../../lib/toast";
+import { peso } from "../../lib/number-format";
 
 interface CrmCustomer {
   storeCustomerId: string;
@@ -33,7 +34,7 @@ interface Campaign {
   createdAt: string;
 }
 
-const toPesos = (m: number) => `₱${(m / 100).toFixed(2)}`;
+const toPesos = (m: number) => peso(m);
 
 export default function CrmPanel() {
   const [customers, setCustomers] = useState<CrmCustomer[] | null>(null);

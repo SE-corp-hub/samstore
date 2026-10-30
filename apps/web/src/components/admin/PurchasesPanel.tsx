@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { API_URL } from "../../config";
 import { adminHeaders } from "../../lib/admin";
 import { toast } from "../../lib/toast";
+import { peso } from "../../lib/number-format";
 
 interface ProductOption { id: string; name: string; sku: string; availableQuantity: number }
 interface ReplenishItem { id: string; name: string; sku: string; availableQuantity: number; reorderThreshold: number }
@@ -13,7 +14,7 @@ interface PurchaseRow {
   items: { id: string; product: { name: string; sku: string }; quantity: number; costMinor: number; lineCostMinor: number }[];
 }
 
-const toPesos = (m: number) => `₱${(m / 100).toFixed(2)}`;
+const toPesos = (m: number) => peso(m);
 
 export default function PurchasesPanel() {
   const [products, setProducts] = useState<ProductOption[]>([]);
