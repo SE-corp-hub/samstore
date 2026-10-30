@@ -18,6 +18,7 @@
 
 import { costModeOf, effectiveCost, recordCostIn, shelfCostFor } from "../domain/shelf-cost.js";
 import type { ApiError } from "@sam-store/contracts";
+import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../persistence/prisma-repositories.js";
 import { cacheBust, cacheKey } from "../persistence/ttl-cache.js";
@@ -25,6 +26,7 @@ import { PrismaOrderSequenceRepository } from "../persistence/prisma-repositorie
 import { randomId } from "../persistence/repositories.js";
 import { addForTrip, deductStock, InsufficientStockError, recordMovement, releaseForTrip, reserveForTrip, unreserveForTrip, type TripLeg } from "../domain/movements.js";
 import { chargeSale, consignmentMain } from "../payable/charges.js";
+import { shortsBecomeSale, walkInLines, WalkInTaken } from "../counts/count-walk-in.js";
 import { seesCost } from "../domain/cost-redact.js";
 import { applyReceipt, loadOpenOrder } from "../purchase-orders/receive.js";
 import { coverShortage, deductWithBuffer } from "../domain/buffer.js";
@@ -252,7 +254,7 @@ export class BentaService {
   }
 
   /** An open drawer shift at this location (or a location-less register); required only when the store says so. */
-  private async drawerFor(storeId: string, locationId: string): Promise<string | null> {
+  private async drawerFor(storeId: string, locationId: string, optional = false): Promise<string | null> {
     const sessions = await prisma.registerSession.findMany({
       where: { storeId, status: "OPEN", register: { OR: [{ locationId }, { locationId: null }] } },
       select: { id: true, register: { select: { locationId: true } } },
@@ -261,11 +263,13 @@ export class BentaService {
     const exact = sessions.find((s) => s.register.locationId === locationId) ?? sessions[0];
     if (exact) return exact.id;
     const settings = await prisma.storeSettings.findUnique({ where: { storeId }, select: { requireOpenShift: true } });
-    if (settings?.requireOpenShift) throw new StepError(conflict("No cash drawer is open here — open the drawer before taking cash"));
+    if (settings?.requireOpenShift && !optional) throw new StepError(conflict("No cash drawer is open here — open the drawer before taking cash"));
     return null;
   }
 
-  async sell(storeId: string, actor: Actor, input: BentaInput): Promise<BentaResult<BentaSaleView>> {
+  /** `fromCount`: the sale records a count's shortages (see sellCountShorts); only the server sets it. */
+  async sell(storeId: string, actor: Actor, input: BentaInput, internal: { fromCount?: { countId: string; countDoc: string; lineIds: string[] } } = {}): Promise<BentaResult<BentaSaleView>> {
+    const fromCount = internal.fromCount;
     let key: string;
     try {
       key = saleKey(storeId, input.idempotencyKey);
@@ -338,7 +342,7 @@ export class BentaService {
         customerName = pcust.customer.name ?? "Customer";
       }
       const paper = input.paperSlip ? checkPaperSlip(input.paperSlip, new Date()) : null;
-      const registerSessionId = method === "utang" ? null : await this.drawerFor(storeId, loc.id);
+      const registerSessionId = method === "utang" ? null : await this.drawerFor(storeId, loc.id, !!fromCount);
 
       const store = await prisma.store.findUnique({ where: { id: storeId }, include: { settings: true } });
       if (!store) throw new StepError(notFound("Store not found"));
@@ -387,7 +391,7 @@ export class BentaService {
             data: {
               id: orderId, orderNumber, storeId, status: waitOwner ? "ON_HOLD" : "COMPLETED", source: waitOwner ? "UTANG_PENDING" : "pos", currencyCode: store.currencyCode,
               subtotalMinor: subtotal, deliveryFeeMinor: 0, discountMinor: 0, totalMinor: subtotal, ...taxCols,
-              snapshot: { lines: items, source: "benta", paymentMethod: PAY_CODE[method], locationId: loc.id, ...(paper ? { paperSlip: { slipNo: paper.slipNo, occurredAt: paper.occurredAt.toISOString() } } : {}) } as Prisma.InputJsonValue,
+              snapshot: { lines: items, source: "benta", paymentMethod: PAY_CODE[method], locationId: loc.id, ...(fromCount ? { fromCount: { countId: fromCount.countId, docNumber: fromCount.countDoc } } : {}), ...(paper ? { paperSlip: { slipNo: paper.slipNo, occurredAt: paper.occurredAt.toISOString() } } : {}) } as Prisma.InputJsonValue,
               paymentMethod: PAY_CODE[method], paymentStatus: method === "utang" ? "PENDING" : "COLLECTED",
               idempotencyKey: key, cartToken: "", customerName, customerPhone: "", deliveryAddressLine1: "",
               storeCustomerId, fulfillmentType: "PICKUP", registerSessionId,
@@ -403,7 +407,7 @@ export class BentaService {
               catalogUnitPriceMinor: i.priceOverridden ? i.catalogUnitPriceMinor : null, unitCostMinor: i.unitCostMinor,
             })),
           });
-          await tx.orderStatusHistory.create({ data: { orderId, storeId, toStatus: waitOwner ? "ON_HOLD" : "COMPLETED", actorType: "pos", actorId: actor.userId, reason: waitOwner ? "Credit over the limit — waiting for the owner" : paper ? `From a paper slip #${paper.slipNo}` : null } });
+          await tx.orderStatusHistory.create({ data: { orderId, storeId, toStatus: waitOwner ? "ON_HOLD" : "COMPLETED", actorType: "pos", actorId: actor.userId, reason: waitOwner ? "Credit over the limit — waiting for the owner" : fromCount ? `Missing in count ${fromCount.countDoc} = sold to walk-ins` : paper ? `From a paper slip #${paper.slipNo}` : null } });
 
           // Signatures: utang → the customer signs; a paper slip → staff + the slip photo.
           if (method === "utang") {
@@ -430,7 +434,9 @@ export class BentaService {
               requestedById: actor.userId,
             })).id;
           } else {
-            await writeTenders(tx, { storeId, orderId, actorId: actor.userId, plan: plan!, note: paper ? `Benta (papel #${paper.slipNo})` : "Benta", registerSessionId });
+            // The count's shortages go back on the shelf first, so this sale takes them once.
+            if (fromCount) await shortsBecomeSale(tx, { storeId, countId: fromCount.countId, lineIds: fromCount.lineIds, orderId, orderNumber, actorId: actor.userId });
+            await writeTenders(tx, { storeId, orderId, actorId: actor.userId, plan: plan!, note: paper ? `Benta (papel #${paper.slipNo})` : fromCount ? `Walk-ins (count ${fromCount.countDoc})` : "Benta", registerSessionId });
             const local = priced.filter((l) => !l.sourceLocationId);
             for (const l of local) {
               await deductWithBuffer(tx, storeId, { productId: l.product.id, quantity: l.stockQty }, { orderId, createdBy: actor.userId, warehouseId: loc.id, documentType: "SALE", documentId: orderId });
@@ -456,10 +462,11 @@ export class BentaService {
             }
           }
           await tx.auditLog.create({
-            data: { storeId, actorType: "USER", actorId: actor.userId, action: paper ? "benta.paper_slip" : "benta.sell", entityType: "Order", entityId: orderId, after: { orderNumber, totalMinor: subtotal, method, locationId: loc.id, ...(paper ? { slipNo: paper.slipNo, occurredAt: paper.occurredAt.toISOString() } : at !== now ? { soldOfflineAt: at.toISOString() } : {}) } },
+            data: { storeId, actorType: "USER", actorId: actor.userId, action: paper ? "benta.paper_slip" : fromCount ? "benta.count_walk_in" : "benta.sell", entityType: "Order", entityId: orderId, after: { orderNumber, totalMinor: subtotal, method, locationId: loc.id, ...(paper ? { slipNo: paper.slipNo, occurredAt: paper.occurredAt.toISOString() } : at !== now ? { soldOfflineAt: at.toISOString() } : {}) } },
           });
         }, txOptions());
       } catch (e) {
+        if (e instanceof WalkInTaken) throw new StepError(conflict(e.message));
         if (e instanceof InsufficientStockError) throw new StepError(conflict(await this.shortText(storeId, e.productId, loc, priced.find((l) => l.product.id === e.productId)?.sourceLocationId ?? null)));
         if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
           const target = JSON.stringify(e.meta?.target ?? "");
@@ -494,6 +501,34 @@ export class BentaService {
       throw e;
     });
     return out;
+  }
+
+  /**
+   * "Missing = sold to walk-ins": record an approved count's shortages as one walk-in cash sale at the
+   * counted store's price, in the drawer that is open there (none open: the sale is kept without a drawer).
+   * Asking again for the same count gives back the same sale.
+   */
+  async sellCountShorts(storeId: string, actor: Actor, countId: string, lineIds?: string[]): Promise<BentaResult<BentaSaleView>> {
+    const count = await prisma.stockCount.findFirst({ where: { id: countId, storeId }, select: { id: true, docNumber: true, status: true, locationId: true } });
+    if (!count) return notFound("Count not found");
+    const refusal = locationRefusal(actor, count.locationId);
+    if (refusal) return forbidden(refusal);
+    if (count.status !== "APPROVED") return conflict("Post the count first");
+    const open = await walkInLines(prisma, storeId, count.id);
+    const pick = lineIds?.length ? open.filter((l) => lineIds.includes(l.lineId)) : open;
+    if (pick.length === 0) {
+      // Asked again (a double tap, or a retry after a lost answer): give back the sale they became.
+      const done = await prisma.stockCountLine.findFirst({ where: { countId: count.id, walkInOrderId: { not: null }, ...(lineIds?.length ? { id: { in: lineIds } } : {}) }, orderBy: { countedAt: "desc" }, select: { walkInOrderId: true } });
+      const order = done?.walkInOrderId ? await prisma.order.findFirst({ where: { id: done.walkInOrderId, storeId }, select: { idempotencyKey: true } }) : null;
+      const earlier = order?.idempotencyKey ? await this.replay(storeId, order.idempotencyKey) : null;
+      return earlier ? { ok: true, value: earlier } : conflict("Nothing missing to record in this count");
+    }
+    const idempotencyKey = `count-walk-in:${count.id}:${createHash("sha256").update(pick.map((l) => l.lineId).sort().join(",")).digest("hex").slice(0, 32)}`;
+    return this.sell(storeId, actor, {
+      idempotencyKey, locationId: count.locationId, customerName: "Walk-in",
+      lines: pick.map((l) => (l.loose ? { productId: l.productId, grams: l.quantity } : { productId: l.productId, quantity: l.quantity })),
+      payment: { method: "cash" },
+    }, { fromCount: { countId: count.id, countDoc: count.docNumber, lineIds: pick.map((l) => l.lineId) } });
   }
 
   /** "Isang sako na lang sa Store 2. Bawasan, o kunin sa WH." */

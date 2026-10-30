@@ -95,6 +95,16 @@ export class BentaController {
    * soldAt: when the tablet made the sale (a sale that waited with no signal keeps its real time, up to 3 days).
    * The same idempotencyKey always returns the same sale (replayed: true).
    */
+  /** POST /admin/benta/from-count/:countId — { lineIds? }: a posted count's shortages become one walk-in cash sale (owner/manager). */
+  @Post("benta/from-count/:countId")
+  async fromCount(@Req() req: Req_, @Param("countId") countId: string, @Body() body: Record<string, unknown>, @Headers("x-store-id") h?: string) {
+    const user = req.user;
+    requireUser(user);
+    const { storeId, role } = await resolveTenant(user, h, TENANT_ROLES.OWNER_MANAGER);
+    const lineIds = Array.isArray(body?.lineIds) ? (body.lineIds as unknown[]).filter((x): x is string => typeof x === "string") : undefined;
+    return unwrap(await this.benta.sellCountShorts(storeId, await loadActor(storeId, user.sub, role), countId, lineIds));
+  }
+
   @Post("benta")
   async sell(@Req() req: Req_, @Body() body: Record<string, unknown>, @Headers("x-store-id") h?: string, @Headers("idempotency-key") headerKey?: string) {
     const { storeId, actor } = await this.ctx(req, h);

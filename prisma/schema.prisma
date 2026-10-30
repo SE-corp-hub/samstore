@@ -2125,6 +2125,7 @@ model StockCountLine {
   reason             String? // why it is short/over: a code from domain/count-reasons.ts (a label only; it posts nothing by itself)
   note               String?
   firstCountedQty    Int? // the number first typed, kept when the line was counted again
+  walkInOrderId      String? // the walk-in sale this shortage was recorded as ("missing = sold to walk-ins"), so it is sold once
 
   @@unique([countId, productId])
   @@index([storeId, productId, countedAt])
