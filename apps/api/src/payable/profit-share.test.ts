@@ -108,13 +108,13 @@ const owes = async (fx: Fx, w: string) => (await prisma.storePayableEntry.aggreg
 const salesAt = async (fx: Fx, w: string) => (await prisma.order.aggregate({ where: { storeId: fx.storeId, sellingLocationId: w, status: "COMPLETED" }, _sum: { totalMinor: true } }))._sum.totalMinor ?? 0;
 
 /** A closing count where every line is counted as given (product id → counted). */
-async function closing(fx: Fx, staff: Actor, locationId: string, counted: Record<string, number | string>) {
+async function closing(fx: Fx, staff: Actor, locationId: string, counted: Record<string, number | string>, reason = "UNRINGED") {
   const c = await counts.start(fx.storeId, staff, { locationId, productIds: Object.keys(counted) });
   assert.equal(c.ok, true, msg(c));
   if (!c.ok) throw new Error("no count");
   assert.equal((await counts.record(fx.storeId, staff, c.value.id, Object.entries(counted).map(([productId, n]) => ({ productId, counted: n })))).ok, true);
   const lines = await prisma.stockCountLine.findMany({ where: { countId: c.value.id }, select: { productId: true } });
-  assert.equal((await counts.setReasons(fx.storeId, staff, c.value.id, lines.map((l) => ({ productId: l.productId, reason: "UNRINGED" })))).ok, true);
+  assert.equal((await counts.setReasons(fx.storeId, staff, c.value.id, lines.map((l) => ({ productId: l.productId, reason })))).ok, true);
   const sub = await counts.submit(fx.storeId, staff, c.value.id, staffSig);
   assert.equal(sub.ok && sub.value.status, "APPROVED", msg(sub));
   return c.value.id;
@@ -339,4 +339,39 @@ test("G7: undo a move the same day — the stock goes back and the profit share 
   // A move from an earlier day cannot be undone.
   await prisma.stockTransfer.update({ where: { id: m3 }, data: { completedAt: new Date(Date.now() - 2 * 86_400_000) } });
   assert.match(msg(await flow.undoMove(fx.storeId, fx.owner, m3)), /made today/);
+});
+
+test("G12: extra rice found after a charge — the owner takes that charge off (up to the extra, once per count line)", async () => {
+  const fx = await fixture();
+  // Count 1: 3 Jasmine missing at Store 2 → charged ₱3,450.
+  await closing(fx, fx.staff2, fx.s2, { [fx.jasmine.id]: 27 }, "MISCOUNT");
+  assert.equal(await owes(fx, fx.s2), 345_000);
+  let sum = await payable.summary(fx.storeId, fx.owner);
+  assert.equal(sum.ok && sum.value.extras.length, 0, "a shortage alone is not an extra");
+
+  // Count 2 finds 2 of them: listed, ₱2,300 to take off.
+  await closing(fx, fx.staff2, fx.s2, { [fx.jasmine.id]: 29 }, "MISCOUNT");
+  sum = await payable.summary(fx.storeId, fx.owner);
+  const ex = sum.ok ? sum.value.extras[0] : undefined;
+  assert.equal(ex?.extra, 2);
+  assert.equal(ex?.quantity, 2);
+  assert.equal(ex?.chargedQty, 3);
+  assert.equal(ex?.amountMinor, 230_000);
+  assert.equal(ex?.takenOffAs, null);
+  assert.match(msg(await payable.undoForExtra(fx.storeId, fx.staff2, ex?.lineId ?? "")), /owner|manager|allowed|forbidden/i);
+  const u = await payable.undoForExtra(fx.storeId, fx.owner, ex?.lineId ?? "");
+  assert.equal(u.ok, true, msg(u));
+  assert.equal(await owes(fx, fx.s2), 115_000);
+  assert.match(msg(await payable.undoForExtra(fx.storeId, fx.owner, ex?.lineId ?? "")), /Nothing to take off|already/i);
+  sum = await payable.summary(fx.storeId, fx.owner);
+  assert.equal(sum.ok && sum.value.extras.find((e) => e.lineId === ex?.lineId)?.takenOffAs, u.ok ? u.value.docNumber : "");
+
+  // Count 3 finds 5 more: only the 1 sack still charged can come off.
+  await closing(fx, fx.staff2, fx.s2, { [fx.jasmine.id]: 34 }, "MISCOUNT");
+  sum = await payable.summary(fx.storeId, fx.owner);
+  const ex3 = sum.ok ? sum.value.extras.find((e) => e.extra === 5) : undefined;
+  assert.equal(ex3?.quantity, 1);
+  assert.equal(ex3?.amountMinor, 115_000);
+  assert.equal((await payable.undoForExtra(fx.storeId, fx.owner, ex3?.lineId ?? "")).ok, true);
+  assert.equal(await owes(fx, fx.s2), 0);
 });
