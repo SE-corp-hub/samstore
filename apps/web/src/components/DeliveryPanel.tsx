@@ -132,7 +132,7 @@ export default function DeliveryPanel() {
           <h1 className="h5 mb-0">My deliveries</h1>
           <small className="text-muted">All orders out for delivery · refresh every 15s</small>
         </div>
-        <button className="btn btn-sm btn-outline-secondary" onClick={load} title="Refresh"><i className="bi bi-arrow-clockwise"></i></button>
+        <button className="btn btn-sm btn-outline-secondary" onClick={load} title="Refresh" aria-label="Refresh"><i className="bi bi-arrow-clockwise"></i></button>
         <button className="btn btn-sm btn-outline-danger" onClick={logout}><i className="bi bi-box-arrow-right me-1"></i>Log out</button>
       </div>
       {error && <div className="alert alert-danger py-2 small">{error}</div>}
