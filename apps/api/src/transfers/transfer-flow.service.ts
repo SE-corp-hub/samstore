@@ -455,11 +455,17 @@ export class TransferFlowService {
     }, product.name, from.name);
   }
 
-  /** Recent one-step moves (newest first). */
-  async recentMoves(storeId: string, actor: Actor, locationId?: string) {
+  /** Recent one-step moves (newest first): the last 30, or up to 500 between two times. */
+  async recentMoves(storeId: string, actor: Actor, locationId?: string, range: { from?: string; to?: string } = {}) {
+    const day = (v?: string) => { const d = v ? new Date(v) : null; return d && !Number.isNaN(d.getTime()) ? d : undefined; };
+    const from = day(range.from);
+    const to = day(range.to);
     const rows = await prisma.stockTransfer.findMany({
-      where: { storeId, kind: "RESTOCK", status: "COMPLETED", ...(locationId ? { OR: [{ fromWarehouseId: locationId }, { toWarehouseId: locationId }] } : {}) },
-      orderBy: { createdAt: "desc" }, take: 30, include: tripInclude,
+      where: {
+        storeId, kind: "RESTOCK", status: "COMPLETED", ...(locationId ? { OR: [{ fromWarehouseId: locationId }, { toWarehouseId: locationId }] } : {}),
+        ...(from || to ? { createdAt: { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) } } : {}),
+      },
+      orderBy: { createdAt: "desc" }, take: from || to ? 500 : 30, include: tripInclude,
     });
     return rows.map((t) => ({ id: t.id, docNumber: t.docNumber, productName: t.product.name, quantity: t.quantity, from: t.fromWarehouse.name, to: t.toWarehouse.name, note: t.reason, at: t.completedAt ?? t.createdAt }));
   }
