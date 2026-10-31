@@ -3,12 +3,23 @@ on: push
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 6
+    timeout-minutes: 8
     steps:
       - run: |
-          for u in https://samstore-beta-web.onrender.com/manifest.webmanifest https://samstore-beta-web.onrender.com/backend/health https://samstore-beta-web.onrender.com/backend/health/ready https://samstore-beta-api.onrender.com/health https://samstore-beta-api.onrender.com/health/ready; do
-            out=$(curl -sS -D /tmp/h -o /tmp/b -w "%{http_code} %{time_total}s" --max-time 120 "$u" 2>&1)
-            hdr=$(grep -iE "^(x-render|x-request-id|content-type|server)" /tmp/h | tr -d '\r' | tr '\n' ' ')
-            body=$(head -c 300 /tmp/b | tr '\n\r%' '   ')
-            echo "::notice title=$u::$out | $hdr | $body"
+          W=https://samstore-beta-web.onrender.com
+          A=https://samstore-beta-api.onrender.com
+          for u in $W/manifest.webmanifest $W/backend/health $W/backend/health/ready; do
+            out=$(curl -sS -D /tmp/h -o /tmp/b -w "%{http_code} %{time_total}s" --max-time 150 "$u" 2>&1)
+            hdr=$(grep -iE "^(x-render|x-request-id|content-type)" /tmp/h | tr -d '\r' | tr '\n' ' ')
+            echo "::notice title=1 $u::$out | $hdr | $(head -c 200 /tmp/b | tr '\n\r%' '   ')"
+          done
+          curl -sS --max-time 150 $W/admin/login -o /tmp/login.html -w "%{http_code}\n"
+          chunks=$(grep -oE '/_next/static/chunks/[^"]+\.js' /tmp/login.html | sort -u)
+          found=""; for c in $chunks; do curl -sS --max-time 60 "$W$c" | grep -oE 'https://[a-z0-9.-]*onrender\.com|hibernate-rate-limited|wake=' | sort -u | tr '\n' ' ' > /tmp/f; [ -s /tmp/f ] && found="$found $c: $(cat /tmp/f)"; done
+          echo "::notice title=2 deployed js::chunks=$(echo $chunks | wc -w) found=$found"
+          echo "::notice title=3 buildId::$(grep -oE '"buildId":"[^"]+"|/_next/static/[A-Za-z0-9_-]{15,}/' /tmp/login.html | head -2 | tr '\n' ' ')"
+          for u in $W/backend/health $A/health $W/backend/health; do
+            out=$(curl -sS -D /tmp/h -o /tmp/b -w "%{http_code} %{time_total}s" --max-time 150 "$u" 2>&1)
+            hdr=$(grep -iE "^(x-render|x-request-id)" /tmp/h | tr -d '\r' | tr '\n' ' ')
+            echo "::notice title=4 $u::$out | $hdr | $(head -c 120 /tmp/b | tr '\n\r%' '   ')"
           done
