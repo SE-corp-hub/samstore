@@ -6,13 +6,14 @@ jobs:
     timeout-minutes: 10
     steps:
       - run: |
+          set +e
           W=https://samstore-beta-web.onrender.com
           A=https://samstore-beta-api.onrender.com
           F='%{http_code} conn=%{time_connect} tls=%{time_appconnect} ttfb=%{time_starttransfer} total=%{time_total} size=%{size_download}'
           # 1. wake the API, note how long and its uptime at first answer
           start=$(date +%s)
           for i in $(seq 1 40); do
-            code=$(curl -s -o /tmp/b -w "%{http_code}" --max-time 20 "$A/health")
+            code=$(curl -s -o /tmp/b -w "%{http_code}" --max-time 30 "$A/health")
             if [ "$code" = "200" ] && grep -q uptimeSec /tmp/b; then break; fi
             sleep 3
           done
