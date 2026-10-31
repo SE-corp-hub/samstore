@@ -426,7 +426,9 @@ export class AdminController {
                         id: true, orderNumber: true, status: true, totalMinor: true, currencyCode: true,
                         customerName: true, customerPhone: true, createdAt: true, paymentStatus: true, source: true,
                         deliveryType: true, deliveryAddressLine1: true, fulfillmentType: true,
-                                                paymentMethod: true, signatureData: true, signatureAt: true,
+                                                // signatureData (a picture, often 10+ KB) only comes with one order (GET orders/:id):
+                                                // up to 200 of them made every list load slow and filled the tablet's saved copies.
+                                                paymentMethod: true, signatureAt: true,
                       },
           });
           await cacheSet(cacheKeyStr, list, 5_000);

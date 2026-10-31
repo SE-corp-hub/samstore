@@ -112,3 +112,37 @@ each endpoint's own work.
 ¹ In-process TTL cache hits (these endpoints already had a 5 s TTL); the run-to-run total varied 7.7–16.5 s, so treat sub-20 ms rows as cache, not as a measured speed-up of the endpoint itself.
 ² **Not attributable to this change** — pre-orders has no TTL cache and its runs swung 3.0–6.7 s across all measurements including the baseline. Tracked as an open item (find its query cost, then cache or index).
 Caveat: the pooler's run-to-run variance (2–3×) exceeds the effect being measured for uncached endpoints, so the statement-count probe is the metric that decides keep/revert.
+
+## 2026-10-31 — beta on Render + Neon: one round trip per wave, not per query
+
+Probe from a GitHub runner against the beta: `/health` 95 ms, `/health/ready` (one `SELECT 1`) 270 ms,
+`/health/metrics` (two queries in a row) 450 ms → **each query from the Render API to Neon
+(Singapore) costs ~177 ms**; the API and the database are in different regions. So the number of
+queries asked *one after another* decides every screen's speed.
+
+Local reproduction: a TCP proxy adding 88 ms each way in front of Postgres, data sized like a busy
+store (150 rice items, 4 locations, 400 customers, 14,400 sales / 28,800 lines). "Cold" = the first
+call after 11 s (the 10 s auth caches expired), as when the tablet opens a screen between customers.
+
+| Endpoint | before (cold) | after (cold) | sequential queries before → after |
+|---|---|---|---|
+| `/admin/benta/catalog` (the counter price list) | 2934 ms | 770 ms | 11–14 → 2 (+ Prisma's idle-connection `SELECT 1`) |
+| `/admin/products` | 3173 ms | 745 ms | 10 → 2 |
+| `/admin/customers` | 2073 ms | 923 ms | 6 → 2 |
+| `/admin/settings` | 1789 ms | 546 ms | 6 → 2 |
+| `/admin/utang/customers` | 1893 ms | 781 ms | 12 → 3 |
+| `/admin/registers/current` | 903–1084 ms | 724–904 ms | 2 → 1 after the auth reads |
+| `/admin/stores/mine` | 1078 ms | 719 ms | 5 → 2 |
+
+| Idea | Verdict | Why |
+|---|---|---|
+| Prisma `relationJoins` (nested relations in the same SQL query) | **kept** | One query per relation level was the biggest multiplier (memberships 2, settings 3, products 6). Full suite identical before/after: 847 tests, 818 pass, the same 22 environment failures (RLS roles, customers-v4, zones, notifications, validate). |
+| Guard asks token version, memberships and the store's role overrides together | **kept** | Three independent reads were sequential on every cold request. |
+| `loadActor` reads the cached membership (home location added to it) | **kept** | One uncached query on every counter request; every membership write already busts the cache. |
+| Counter catalog: one wave (locations, products, prices, stock + shelf cost, cost mode); most-sold counts cached 10 min | **kept** | Location, consignment main store and cost mode were asked one by one after the wave. The most-sold count only orders buttons. New test covers default/home/consignment/inactive/not-assigned. |
+| `connection_limit` 4 → 10 (`DB_CONNECTION_LIMIT`) | **kept** | With ~177 ms per query, 4 connections made the 6-query catalog wait for a second wave. Neon direct allows ~100. |
+| Orders list without `signatureData` | **kept** | Up to 200 signature pictures per list load; the screen reads the signature from `orders/:id`. |
+| Indexes: `OrderItem(storeId, orderId)`, `OrderItem(storeId, productId)`, `Order(storeId, createdAt)`, `Order(storeId, storeCustomerId, createdAt)` | **kept** | `OrderItem` had no index: every receipt, order and the most-sold count read all of a store's sale lines (grows with every sale). |
+| Calling the API directly instead of the web's `/backend` proxy (saves ~95 ms) | not tried | Needs CORS preflights per URL (more round trips) and Render refuses to wake a sleeping API through some paths; see connecting-stuck notes. |
+
+Largest remaining lever is not code: put the database in the API's region (or both in Singapore).

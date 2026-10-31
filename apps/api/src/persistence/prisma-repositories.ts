@@ -26,9 +26,12 @@ import { UNLIMITED_STOCK, isTracked } from "../domain/stock-tracking.js";
 // defaults are 5s timeout / 2s max wait — a cold first request then dies with
 // P2028 ("Transaction already closed"). Raise both globally so every interactive
 // transaction in the codebase inherits a budget that fits remote latency.
-// connection_limit: the Supabase session pooler caps at 15 clients; capping the
-// Prisma client (default 4) keeps a long sequential test suite from exhausting the
-// pool with parallel lookups (root cause of the documented EMAXCONNSESSION flakes).
+// connection_limit: 10 by default (DB_CONNECTION_LIMIT overrides it). It was 4 for the old
+// Supabase session pooler (15-client cap; the documented EMAXCONNSESSION flakes). The Neon
+// direct connection allows about 100, and with the database ~0.18 s away from the API every
+// query holds its connection that long: with 4, a screen that asks 6 things at once (the
+// counter list) waited for a second wave, and two screens opening together queued.
+// Set DB_CONNECTION_LIMIT=4 again if the database is ever behind a small pooler.
 // connect_timeout: the pooler intermittently refuses or delays a fresh connection
 // (measured 11s, occasionally P1001 "can't reach database server"), which is well
 // past Prisma's 10s default and surfaces as a 500 on a request that would have
@@ -42,7 +45,8 @@ import { UNLIMITED_STOCK, isTracked } from "../domain/stock-tracking.js";
 // PERF.md. This URL is the *session*-mode pooler (port 5432), where prepared statements are
 // supported; disabling them cost 6-16x on every endpoint.
 const DATABASE_URL = process.env.DATABASE_URL ?? "";
-const pooledUrl = `${DATABASE_URL}${DATABASE_URL.includes("?") ? "&" : "?"}connection_limit=4&connect_timeout=20&pool_timeout=30`;
+const CONNECTION_LIMIT = Number(process.env.DB_CONNECTION_LIMIT) || 10;
+const pooledUrl = `${DATABASE_URL}${DATABASE_URL.includes("?") ? "&" : "?"}connection_limit=${CONNECTION_LIMIT}&connect_timeout=20&pool_timeout=30`;
 
 export const prisma = new PrismaClient({
   transactionOptions: { timeout: 30_000, maxWait: 15_000 },

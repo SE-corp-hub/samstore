@@ -44,8 +44,10 @@ export class RegisterController {
   @Get("registers/current")
   async current(@Req() req: Request & { user?: AuthPrincipal }, @Headers("x-store-id") headerStoreId?: string) {
     const storeId = await this.guardStore(req, headerStoreId, TENANT_ROLES.VIEW);
-    const session = await this.registers.currentSession(storeId);
-    const settings = await prisma.storeSettings.findUnique({ where: { storeId }, select: { requireOpenShift: true } });
+    const [session, settings] = await Promise.all([
+      this.registers.currentSession(storeId),
+      prisma.storeSettings.findUnique({ where: { storeId }, select: { requireOpenShift: true } }),
+    ]);
     return { storeId, session, required: settings?.requireOpenShift ?? false };
   }
 
