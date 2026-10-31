@@ -58,6 +58,7 @@ const ExpensesPanel = panel(() => import("../../../components/admin/ExpensesPane
 const PurchasesPanel = panel(() => import("../../../components/admin/PurchasesPanel"));
 const InventoryPanel = panel(() => import("../../../components/admin/InventoryPanel"));
 const StoreLinkPanel = panel(() => import("../../../components/admin/StoreLinkPanel"));
+const ExportPanel = panel(() => import("../../../components/admin/ExportPanel"));
 const ReportsPanel = panel(() => import("../../../components/admin/ReportsPanel"));
 const ApprovalsPanel = panel(() => import("../../../components/admin/ApprovalsPanel"));
 const DraftsPanel = panel(() => import("../../../components/admin/DraftsPanel"));
@@ -305,6 +306,7 @@ export default function AdminDashboard() {
       case "purchases": return <PurchasesPanel />;
       case "storelink": return <StoreLinkPanel />;
       case "reports": return <ReportsPanel />;
+      case "export": return <ExportPanel />;
       case "orders": return <OrdersPanel />;
       case "products": return <ProductsPanel />;
       case "settings": return <SettingsPanel />;
