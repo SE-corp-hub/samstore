@@ -23,6 +23,7 @@ jobs:
           echo "::notice title=2 api /health x8 (ttfb)::$(r $A/health $A/health $A/health $A/health $A/health $A/health $A/health $A/health)"
           echo "::notice title=3 api /health/ready x8 (1 DB query)::$(r $A/health/ready $A/health/ready $A/health/ready $A/health/ready $A/health/ready $A/health/ready $A/health/ready $A/health/ready)"
           echo "::notice title=4 api /health/metrics x6 (2 DB queries in a row)::$(r $A/health/metrics $A/health/metrics $A/health/metrics $A/health/metrics $A/health/metrics $A/health/metrics)"
+          echo "::notice title=4b metrics body (outbox counts show the tables have data)::$(curl -sS $A/health/metrics | head -c 400)"
           echo "::notice title=5 web /manifest x6::$(r $W/manifest.webmanifest $W/manifest.webmanifest $W/manifest.webmanifest $W/manifest.webmanifest $W/manifest.webmanifest $W/manifest.webmanifest)"
           echo "::notice title=6 web /backend/health x6 (proxy hop)::$(r $W/backend/health $W/backend/health $W/backend/health $W/backend/health $W/backend/health $W/backend/health)"
           echo "::notice title=7 web /backend/health/ready x6::$(r $W/backend/health/ready $W/backend/health/ready $W/backend/health/ready $W/backend/health/ready $W/backend/health/ready $W/backend/health/ready)"
