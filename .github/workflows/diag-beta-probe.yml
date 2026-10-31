@@ -3,23 +3,45 @@ on: push
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 10
     steps:
       - run: |
           W=https://samstore-beta-web.onrender.com
           A=https://samstore-beta-api.onrender.com
-          for u in $W/manifest.webmanifest $W/backend/health $W/backend/health/ready; do
-            out=$(curl -sS -D /tmp/h -o /tmp/b -w "%{http_code} %{time_total}s" --max-time 150 "$u" 2>&1)
-            hdr=$(grep -iE "^(x-render|x-request-id|content-type)" /tmp/h | tr -d '\r' | tr '\n' ' ')
-            echo "::notice title=1 $u::$out | $hdr | $(head -c 200 /tmp/b | tr '\n\r%' '   ')"
+          F='%{http_code} conn=%{time_connect} tls=%{time_appconnect} ttfb=%{time_starttransfer} total=%{time_total} size=%{size_download}'
+          # 1. wake the API, note how long and its uptime at first answer
+          start=$(date +%s)
+          for i in $(seq 1 40); do
+            code=$(curl -s -o /tmp/b -w "%{http_code}" --max-time 20 "$A/health")
+            if [ "$code" = "200" ] && grep -q uptimeSec /tmp/b; then break; fi
+            sleep 3
           done
-          curl -sS --max-time 150 $W/admin/login -o /tmp/login.html -w "%{http_code}\n"
-          chunks=$(grep -oE '/_next/static/chunks/[^"]+\.js' /tmp/login.html | sort -u)
-          found=""; for c in $chunks; do curl -sS --max-time 60 "$W$c" | grep -oE 'https://[a-z0-9.-]*onrender\.com|hibernate-rate-limited|wake=' | sort -u | tr '\n' ' ' > /tmp/f; [ -s /tmp/f ] && found="$found $c: $(cat /tmp/f)"; done
-          echo "::notice title=2 deployed js::chunks=$(echo $chunks | wc -w) found=$found"
-          echo "::notice title=3 buildId::$(grep -oE '"buildId":"[^"]+"|/_next/static/[A-Za-z0-9_-]{15,}/' /tmp/login.html | head -2 | tr '\n' ' ')"
-          for u in $W/backend/health $A/health $W/backend/health; do
-            out=$(curl -sS -D /tmp/h -o /tmp/b -w "%{http_code} %{time_total}s" --max-time 150 "$u" 2>&1)
-            hdr=$(grep -iE "^(x-render|x-request-id)" /tmp/h | tr -d '\r' | tr '\n' ' ')
-            echo "::notice title=4 $u::$out | $hdr | $(head -c 120 /tmp/b | tr '\n\r%' '   ')"
+          echo "::notice title=1 wake::after $(( $(date +%s) - start ))s code=$code body=$(cat /tmp/b)"
+          # 2. same connection, repeated: API without DB vs with one DB query
+          r() { curl -sS -o /dev/null -w "$F\n" "$@" 2>&1 | awk '{print $4}' | tr '\n' ' '; }
+          echo "::notice title=2 api /health x8 (ttfb)::$(r $A/health $A/health $A/health $A/health $A/health $A/health $A/health $A/health)"
+          echo "::notice title=3 api /health/ready x8 (1 DB query)::$(r $A/health/ready $A/health/ready $A/health/ready $A/health/ready $A/health/ready $A/health/ready $A/health/ready $A/health/ready)"
+          echo "::notice title=4 api /health/metrics x6 (2 DB queries in a row)::$(r $A/health/metrics $A/health/metrics $A/health/metrics $A/health/metrics $A/health/metrics $A/health/metrics)"
+          echo "::notice title=5 web /manifest x6::$(r $W/manifest.webmanifest $W/manifest.webmanifest $W/manifest.webmanifest $W/manifest.webmanifest $W/manifest.webmanifest $W/manifest.webmanifest)"
+          echo "::notice title=6 web /backend/health x6 (proxy hop)::$(r $W/backend/health $W/backend/health $W/backend/health $W/backend/health $W/backend/health $W/backend/health)"
+          echo "::notice title=7 web /backend/health/ready x6::$(r $W/backend/health/ready $W/backend/health/ready $W/backend/health/ready $W/backend/health/ready $W/backend/health/ready $W/backend/health/ready)"
+          # 3. compression of JSON: straight from the API and through the web proxy
+          for u in $A/public/address/regions $W/backend/public/address/regions; do
+            curl -sS -D /tmp/h -o /tmp/b -H 'Accept-Encoding: gzip, deflate, br' -w "$F" "$u" > /tmp/w 2>&1
+            echo "::notice title=8 gzip $u::$(cat /tmp/w) | $(grep -iE '^(content-encoding|content-length|transfer-encoding|cache-control|vary)' /tmp/h | tr -d '\r' | tr '\n' ' ')"
           done
+          # 4. web page + JS: sizes and compression
+          curl -sS -D /tmp/h -H 'Accept-Encoding: gzip, br' -o /tmp/login.gz -w "$F" $W/admin/dashboard > /tmp/w
+          echo "::notice title=9 dashboard html::$(cat /tmp/w) | $(grep -iE '^(content-encoding|cache-control|x-nextjs-cache)' /tmp/h | tr -d '\r' | tr '\n' ' ')"
+          curl -sS $W/admin/dashboard -o /tmp/dash.html
+          total=0; list=""
+          for c in $(grep -oE '/_next/static/[^"]+\.(js|css)' /tmp/dash.html | sort -u); do
+            raw=$(curl -sS -o /dev/null -w "%{size_download}" "$W$c")
+            gz=$(curl -sS -H 'Accept-Encoding: gzip, br' -D /tmp/h2 -o /dev/null -w "%{size_download}" "$W$c")
+            enc=$(grep -i '^content-encoding' /tmp/h2 | tr -d '\r' | awk '{print $2}')
+            cc=$(grep -i '^cache-control' /tmp/h2 | tr -d '\r' | cut -d' ' -f2-)
+            list="$list $(basename $c)=${raw}/${gz}${enc}"
+            total=$((total+gz))
+          done
+          echo "::notice title=10 dashboard first-load files (raw/sent)::total sent=$total |$list | cache-control=$cc"
+          echo "::notice title=11 runner::$(curl -sS https://ipinfo.io/json | tr -d '\n' | head -c 200)"
