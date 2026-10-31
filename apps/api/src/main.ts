@@ -146,7 +146,7 @@ async function bootstrap() {
   app.enableCors({
     origin: corsOriginCheck(allowedOrigins),
     credentials: false,
-    exposedHeaders: ["X-Request-Id"], // lets the web app tell a real API answer from a sleeping-server error (wake-fetch.ts)
+    exposedHeaders: ["X-Request-Id", "Content-Disposition"], // lets the web app tell a real API answer from a sleeping-server error (wake-fetch.ts)
   });
   await app.listen(PORT);
   console.log(`[sam-store] API listening on http://localhost:${PORT}`);

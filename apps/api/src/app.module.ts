@@ -51,6 +51,7 @@ import { CreditService, CREDIT_SERVICE } from "./credit/credit.service.js";
 import { CreditController } from "./credit/credit.controller.js";
 import { ExpensesService, EXPENSES_SERVICE } from "./expenses/expenses.service.js";
 import { ExpensesController } from "./expenses/expenses.controller.js";
+import { DataExportController } from "./export/data-export.controller.js";
 import { PurchasesService, PURCHASES_SERVICE } from "./purchases/purchases.service.js";
 import { PurchasesController } from "./purchases/purchases.controller.js";
 import { SUPPLIERS_SERVICE, SuppliersService } from "./purchases/suppliers.service.js";
@@ -76,7 +77,7 @@ import {
 const CLAIM_SECRET = claimSecret(); // M11: no committed fallback (see security/secrets.ts)
 
 @Module({
-    controllers: [CheckoutController, PublicStoreController, CartController, AuthController, AdminController, PeopleController, TransferFlowController, ResackController, BentaController, UtangController, AgentOrderController, CountController, RiceReportsController, PayableController, PurchaseOrderController, OrderLookupController, CustomerAuthController, PosController, PaymentsController, PaymentsWebhookController, DeliveryZonesAdminController, DeliveryBookingsAdminController, MessengerConnectionAdminController, ChatbotAdminController, ChatAgentAdminController, CrmAdminController, ErpAdminController, BirAdminController, SecurityIncidentAdminController, CreditController, ExpensesController, PurchasesController, InventoryController, ReportsController, DeliveryController, HealthController, RegisterController, RolePermissionsController, AddressController],
+    controllers: [CheckoutController, PublicStoreController, CartController, AuthController, AdminController, PeopleController, TransferFlowController, ResackController, BentaController, UtangController, AgentOrderController, CountController, RiceReportsController, PayableController, PurchaseOrderController, OrderLookupController, CustomerAuthController, PosController, PaymentsController, PaymentsWebhookController, DeliveryZonesAdminController, DeliveryBookingsAdminController, MessengerConnectionAdminController, ChatbotAdminController, ChatAgentAdminController, CrmAdminController, ErpAdminController, BirAdminController, SecurityIncidentAdminController, CreditController, ExpensesController, DataExportController, PurchasesController, InventoryController, ReportsController, DeliveryController, HealthController, RegisterController, RolePermissionsController, AddressController],
   providers: [
     {
       provide: DELIVERY_SERVICE,
