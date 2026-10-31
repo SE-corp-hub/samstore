@@ -25,7 +25,7 @@ import { peso } from "../../lib/number-format";
 import ProductFinder from "./ProductFinder";
 import { noteUse } from "../../lib/product-find";
 import { printSlip, type Slip } from "../../lib/slip-print";
-import { cachedGet, offlineRef, useOffline } from "../../lib/offlineCache";
+import { cachedGet, offlineRef, savedThenFresh, useOffline } from "../../lib/offlineCache";
 import { QUEUE_EVENT, queuedSteps, sendStep } from "../../lib/offlineQueue";
 import { newSaleKey } from "../../lib/saleKey";
 
@@ -220,20 +220,24 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
   /** ₱— when store hides per-product prices (subtotal/total still shown). */
   const maybePrice = (minor: number) => (hidePrice ? "—" : toPesos(minor));
 
-  const loadPreorders = useCallback(async () => {
+  /** `first`: opening the screen shows the list saved on this tablet at once (later refreshes wait for the server, so a just-finished pre-order does not flash back). */
+  const loadPreorders = useCallback(async (first = false) => {
     setPreLoading(true);
     try {
       // All pre-orders: every waiting one shows whatever its date; Done filters by date below.
       // Offline in the store: the list last saved on this tablet.
-      const d = await cachedGet<{ preorders?: Preorder[] }>("/admin/pos/preorders");
+      const show = (d: { preorders?: Preorder[] }) => setPreorders(d.preorders ?? []);
+      const d = first
+        ? await savedThenFresh<{ preorders?: Preorder[] }>("/admin/pos/preorders", show)
+        : await cachedGet<{ preorders?: Preorder[] }>("/admin/pos/preorders");
       if (!d) throw new Error("Failed to load pre-orders");
-      setPreorders(d.preorders ?? []);
+      show(d);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Load pre-orders failed");
     } finally { setPreLoading(false); }
   }, []);
 
-  useEffect(() => { void loadPreorders(); }, [loadPreorders]);
+  useEffect(() => { void loadPreorders(true); }, [loadPreorders]);
   // When a pre-order saved offline reaches the server, show the list from the server again.
   useEffect(() => {
     let count = waitingHere().length + doneHere().length;
@@ -251,19 +255,20 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
   }, [loadPreorders]);
 
   const loadBuilder = useCallback(async () => {
+    // Each list fills in on its own, from the copy saved on this tablet first, then the server's.
     try {
-      const [p, c, s, cat] = await Promise.all([
-        cachedGet<{ products?: PosProduct[] }>("/admin/products"),
-        cachedGet<{ customers?: PosCustomer[] }>("/admin/customers"),
-        cachedGet<{ settings?: { hidePricePreOrder?: boolean }; name?: string }>("/admin/settings"),
-        cachedGet<{ products?: { id: string; floorMinor?: number; ownShelfCost?: boolean; loose?: boolean; gramsPerUnit?: number | null }[]; seesCost?: boolean }>("/admin/benta/catalog"),
+      await Promise.all([
+        savedThenFresh<{ products?: PosProduct[] }>("/admin/products", (p) => setBuildProducts(p?.products ?? [])),
+        savedThenFresh<{ customers?: PosCustomer[] }>("/admin/customers", (c) => setBuildCustomers(c?.customers ?? [])),
+        savedThenFresh<{ settings?: { hidePricePreOrder?: boolean }; name?: string }>("/admin/settings", (s) => {
+          setHidePrice(Boolean(s?.settings?.hidePricePreOrder));
+          setStoreName(s?.name ?? "");
+        }),
+        savedThenFresh<{ products?: { id: string; floorMinor?: number; ownShelfCost?: boolean; loose?: boolean; gramsPerUnit?: number | null }[]; seesCost?: boolean }>("/admin/benta/catalog", (cat) => {
+          setFloors(new Map((cat?.products ?? []).map((x) => [x.id, { floorMinor: x.floorMinor ?? 0, ownShelfCost: !!x.ownShelfCost, unit: x.loose ? "kilo" : x.gramsPerUnit ? "sack" : "piece" }])));
+          setSeesCost(cat?.seesCost === true);
+        }),
       ]);
-      setFloors(new Map((cat?.products ?? []).map((x) => [x.id, { floorMinor: x.floorMinor ?? 0, ownShelfCost: !!x.ownShelfCost, unit: x.loose ? "kilo" : x.gramsPerUnit ? "sack" : "piece" }])));
-      setSeesCost(cat?.seesCost === true);
-      setHidePrice(Boolean(s?.settings?.hidePricePreOrder));
-      setStoreName(s?.name ?? "");
-      setBuildProducts(p?.products ?? []);
-      setBuildCustomers(c?.customers ?? []);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Load failed");
     }

@@ -15,6 +15,7 @@ import ChatPanel from "./ChatPanel";
 import { toast } from "../../lib/toast";
 import { useMediaQuery, WIDE } from "../../lib/use-media-query";
 import { peso } from "../../lib/number-format";
+import { savedThenFresh } from "../../lib/offlineCache";
 
 const STATUS_BADGE: Record<string, string> = {
   RECEIVED: "text-bg-secondary",
@@ -178,20 +179,21 @@ export default function OrdersPanel() {
                           .then((r) => r.json())
                           .then((d) => d?.counts && setCounts(d.counts))
                           .catch(() => {});
-      if (canWrite) {
-        const p = await fetch(`${API_URL}/admin/products`, { headers: adminHeaders() }).then((r) => r.json());
-        const c = await fetch(`${API_URL}/admin/customers`, { headers: adminHeaders() }).then((r) => r.json());
-        setProducts((p.products ?? []).map((x: any) => ({ id: x.id, name: x.name, sku: x.sku })));
-        setCustomers((c.customers ?? []).map((x: any) => ({ id: x.id, name: x.name ?? x.email ?? x.phone ?? "Customer" })));
-      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Load failed");
     } finally {
       setLoading(false);
     }
-  }, [tab, range, customFrom, customTo, customer, canWrite, sourceFilter, paymentFilter, fulfillmentFilter]);
+  }, [tab, range, customFrom, customTo, sourceFilter, paymentFilter, fulfillmentFilter, customer]);
 
     useEffect(() => { load(); }, [load]);
+    // The new-order form's product and customer lists: once per visit, both at once, from the copy
+    // saved on this tablet first (they used to be fetched one after the other on every list refresh).
+    useEffect(() => {
+      if (!canWrite) return;
+      void savedThenFresh<{ products?: ProductOption[] }>("/admin/products", (p) => setProducts((p.products ?? []).map((x) => ({ id: x.id, name: x.name, sku: x.sku }))));
+      void savedThenFresh<{ customers?: { id: string; name: string | null; email?: string | null; phone?: string | null }[] }>("/admin/customers", (c) => setCustomers((c.customers ?? []).map((x) => ({ id: x.id, name: x.name ?? x.email ?? x.phone ?? "Customer" }))));
+    }, [canWrite]);
 
     // Auto-refresh (30s) — persisted per browser, like Overview.
     useEffect(() => {

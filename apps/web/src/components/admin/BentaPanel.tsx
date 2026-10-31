@@ -14,7 +14,7 @@ import { API_URL } from "../../config";
 import { adminHeaders, getAdminStoreId } from "../../lib/admin";
 import { toast } from "../../lib/toast";
 import { sendStep } from "../../lib/offlineQueue";
-import { cachedGet, offlineRef, useOffline } from "../../lib/offlineCache";
+import { cachedGet, offlineRef, savedCopy, savedThenFresh, useOffline } from "../../lib/offlineCache";
 
 /** Shown on a button that needs the internet while the tablet is offline. */
 export const NEEDS_NET = "Needs internet";
@@ -145,15 +145,24 @@ export default function BentaPanel() {
   const [seesCost, setSeesCost] = useState(false);
   const keptBelow = useRef(new Set<string>()); // below-cost prices someone chose to sell at anyway
 
-  const loadCatalog = useCallback(async (loc?: string) => {
+  const catalogAsk = useRef(0); // only the latest location asked for may fill the screen
+  /** The price list of a location: the copy saved on this tablet at once, then the server's. Returns the location shown. */
+  const loadCatalog = useCallback(async (loc?: string): Promise<string | null> => {
     const q = loc ? `?locationId=${encodeURIComponent(loc)}` : "";
+    const ask = ++catalogAsk.current;
+    let shown: string | null = null;
+    const show = (d: ApiBody) => {
+      if (ask !== catalogAsk.current || !d?.products) return;
+      setLocations((d.locations as Loc[]).filter((l) => (l as { type?: string }).type !== "BUFFER"));
+      setItems(d.products as Item[]);
+      setSeesCost(d.seesCost === true);
+      shown = (d.location as Loc).id;
+      setLocationId(shown);
+    };
     // Offline in the store: the last product list and prices saved on this tablet.
-    const d = await cachedGet<ApiBody>(`/admin/benta/catalog${q}`);
-    if (!d?.products) { setError(errText(d, "Could not load the products — connect to the internet once so the tablet can save them")); return; }
-    setLocations((d.locations as Loc[]).filter((l) => (l as { type?: string }).type !== "BUFFER"));
-    setItems(d.products as Item[]);
-    setSeesCost(d.seesCost === true);
-    setLocationId((d.location as Loc).id);
+    const d = await savedThenFresh<ApiBody>(`/admin/benta/catalog${q}`, show);
+    if (!d?.products && ask === catalogAsk.current) setError(errText(d, "Could not load the products — connect to the internet once so the tablet can save them"));
+    return shown;
   }, []);
 
   // Choosing a customer at the start of a sale puts their special prices on the product buttons.
@@ -169,16 +178,22 @@ export default function BentaPanel() {
 
   useEffect(() => {
     (async () => {
-      const [me, cs] = await Promise.all([
-        cachedGet<{ homeLocationId?: string | null }>("/admin/me/rice"),
-        cachedGet<{ customers?: Customer[] }>("/admin/customers"),
-      ]);
-      setHomeLocationId(me?.homeLocationId ?? null);
-      void cachedGet<{ name?: string }>("/admin/settings").then((d) => setStoreName(d?.name ?? ""));
-      setCustomers(((cs?.customers ?? []) as Customer[]));
-      // A kept cart belongs to the location it was started at.
+      // A kept cart belongs to the location it was started at; the person's home location comes first.
       const kept = savedCart();
-      await loadCatalog(me?.homeLocationId ?? (kept?.cart.length ? kept.locationId : undefined));
+      const where = (home: string | null | undefined) => home ?? (kept?.cart.length ? kept.locationId : undefined);
+      // Ask for the price list right away, for the home location this tablet saved last time,
+      // instead of waiting for "who am I" first (one server answer less before prices show).
+      const guess = where(savedCopy<{ homeLocationId?: string | null }>("/admin/me/rice")?.homeLocationId);
+      const catalog = loadCatalog(guess);
+      const firstAsk = catalogAsk.current;
+      void savedThenFresh<{ name?: string }>("/admin/settings", (d) => setStoreName(d?.name ?? ""));
+      void savedThenFresh<{ customers?: Customer[] }>("/admin/customers", (cs) => setCustomers((cs?.customers ?? []) as Customer[]));
+      const me = await cachedGet<{ homeLocationId?: string | null }>("/admin/me/rice");
+      setHomeLocationId(me?.homeLocationId ?? null);
+      const want = where(me?.homeLocationId);
+      const shown = await catalog;
+      // The saved guess was wrong (home location changed): show the right one, unless staff already picked a location.
+      if (catalogAsk.current === firstAsk && want !== guess && want !== shown) await loadCatalog(want);
     })().catch(() => setError("Could not load"));
   }, [loadCatalog]);
 

@@ -6,7 +6,7 @@
 //   offline queue and receipt. Credit, GCash, special prices and "take from another store" stay in Full sale.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { cachedGet, offlineRef, useOffline } from "../../lib/offlineCache";
+import { cachedGet, offlineRef, savedCopy, savedThenFresh, useOffline } from "../../lib/offlineCache";
 import { sendStep } from "../../lib/offlineQueue";
 import { newSaleKey } from "../../lib/saleKey";
 import { printSlip } from "../../lib/slip-print";
@@ -49,23 +49,40 @@ export default function WalkInPanel({ onFullSale }: { onFullSale: () => void }) 
   const offline = useOffline();
   const wide = useMediaQuery(WIDE);
 
-  const loadCatalog = useCallback(async (loc?: string) => {
-    const d = await cachedGet<ApiBody>(`/admin/benta/catalog${loc ? `?locationId=${encodeURIComponent(loc)}` : ""}`);
-    if (!d?.products) { setError("Could not load the products — connect to the internet once so the tablet can save them"); return; }
-    setLocations((d.locations as Loc[]).filter((l) => l.type !== "BUFFER"));
-    setItems(d.products as Item[]);
-    setLocationId((d.location as Loc).id);
+  const catalogAsk = useRef(0); // only the latest location asked for may fill the screen
+  /** The price list of a location: the copy saved on this tablet at once, then the server's. Returns the location shown. */
+  const loadCatalog = useCallback(async (loc?: string): Promise<string | null> => {
+    const ask = ++catalogAsk.current;
+    let shown: string | null = null;
+    const show = (d: ApiBody) => {
+      if (ask !== catalogAsk.current || !d?.products) return;
+      setLocations((d.locations as Loc[]).filter((l) => l.type !== "BUFFER"));
+      setItems(d.products as Item[]);
+      shown = (d.location as Loc).id;
+      setLocationId(shown);
+    };
+    const d = await savedThenFresh<ApiBody>(`/admin/benta/catalog${loc ? `?locationId=${encodeURIComponent(loc)}` : ""}`, show);
+    if (!d?.products && ask === catalogAsk.current) setError("Could not load the products — connect to the internet once so the tablet can save them");
+    return shown;
   }, []);
 
   useEffect(() => {
     setUsed(mostUsed("pos", BEST));
     (async () => {
-      const me = await cachedGet<{ homeLocationId?: string | null }>("/admin/me/rice");
-      setHomeLocationId(me?.homeLocationId ?? null);
-      void cachedGet<{ name?: string }>("/admin/settings").then((d) => setStoreName(d?.name ?? ""));
+      // Ask for the price list right away, for the home location this tablet saved last time,
+      // instead of waiting for "who am I" first (one server answer less before prices show).
+      const guess = savedCopy<{ homeLocationId?: string | null }>("/admin/me/rice")?.homeLocationId ?? undefined;
+      const catalog = loadCatalog(guess);
+      const firstAsk = catalogAsk.current;
+      void savedThenFresh<{ name?: string }>("/admin/settings", (d) => setStoreName(d?.name ?? ""));
       // Cash needs an open drawer when the owner asks for one: say so before the first sale, not after.
       void cachedGet<{ session?: unknown; required?: boolean }>("/admin/registers/current").then((r) => { if (r && !r.session && r.required !== false) setDrawerClosed(true); });
-      await loadCatalog(me?.homeLocationId ?? undefined);
+      const me = await cachedGet<{ homeLocationId?: string | null }>("/admin/me/rice");
+      setHomeLocationId(me?.homeLocationId ?? null);
+      const want = me?.homeLocationId ?? undefined;
+      const shown = await catalog;
+      // The saved guess was wrong (home location changed): show the right one, unless staff already picked a location.
+      if (catalogAsk.current === firstAsk && want !== guess && want !== shown) await loadCatalog(want);
     })().catch(() => setError("Could not load"));
   }, [loadCatalog]);
 
