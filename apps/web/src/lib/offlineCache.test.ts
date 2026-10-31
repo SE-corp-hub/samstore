@@ -1,7 +1,7 @@
 // Offline in the store — screens open from the last good answer when the server can't be reached.
 import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import { cachedGet, checkConnection, connectionState, INTERNET_PROBE, isOffline, offlineRef, saveCopy, savedCopy } from "./offlineCache";
+import { cachedGet, checkConnection, connectionState, INTERNET_PROBE, isOffline, offlineRef, saveCopy, savedCopy, savedThenFresh } from "./offlineCache";
 import { registeredStoreName } from "./slip-print";
 
 const mem = new Map<string, string>();
@@ -112,4 +112,32 @@ test("API asleep behind the proxy (Render 429 hibernate-rate-limited): the saved
   globalThis.fetch = answer(200, {}) as typeof fetch;
   await checkConnection();
   assert.equal(connectionState(), "online");
+});
+
+test("savedThenFresh: the saved copy at once, then the server's answer", async () => {
+  globalThis.fetch = answer(200, { products: ["old"] }) as typeof fetch;
+  await cachedGet("/admin/benta/catalog");
+  let release!: () => void;
+  const gate = new Promise<void>((r) => { release = r; });
+  globalThis.fetch = (async () => { await gate; return new Response(JSON.stringify({ products: ["new"] }), { status: 200, headers: { "x-request-id": "r2" } }); }) as typeof fetch;
+  const shown: unknown[] = [];
+  const done = savedThenFresh("/admin/benta/catalog", (d) => shown.push(d));
+  assert.deepEqual(shown, [{ products: ["old"] }], "on screen before the server answers");
+  release();
+  assert.deepEqual(await done, { products: ["new"] });
+  assert.deepEqual(shown, [{ products: ["old"] }, { products: ["new"] }]);
+  assert.deepEqual(savedCopy("/admin/benta/catalog"), { products: ["new"] }, "the new answer is saved for next time");
+});
+
+test("savedThenFresh: nothing saved yet waits for the server; offline shows the copy once", async () => {
+  globalThis.fetch = answer(200, { a: 1 }) as typeof fetch;
+  const shown: unknown[] = [];
+  assert.deepEqual(await savedThenFresh("/admin/customers", (d) => shown.push(d)), { a: 1 });
+  assert.deepEqual(shown, [{ a: 1 }]);
+  globalThis.fetch = (async () => { throw new TypeError("Failed to fetch"); }) as typeof fetch;
+  const again: unknown[] = [];
+  assert.deepEqual(await savedThenFresh("/admin/customers", (d) => again.push(d)), { a: 1 });
+  assert.deepEqual(again, [{ a: 1 }], "not shown twice");
+  globalThis.fetch = answer(403, { message: "no" }) as typeof fetch;
+  assert.equal(await savedThenFresh("/admin/customers", () => {}), null, "a clear no still comes back as null");
 });
