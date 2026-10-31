@@ -4,7 +4,11 @@
 // Naming: camelCase fields (Prisma), no @map; revisit with a dedicated mapping pass.
 
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  // One SQL query per read, nested relations included (LATERAL joins), instead of one
+  // query per relation level. Each query is a round trip to the database, and the beta's
+  // API and database sit in different regions (~0.18 s each), see PERF.md.
+  previewFeatures = ["relationJoins"]
 }
 
 datasource db {
@@ -1428,6 +1432,8 @@ model Order {
   @@index([storeId, sellingLocationId, createdAt])
   @@index([storeId, agentUserId, createdAt])
   @@index([storeId, source, status])
+  @@index([storeId, createdAt]) // date ranges over every status (Orders list, reports)
+  @@index([storeId, storeCustomerId, createdAt]) // one customer's sales (Credit, customer history)
 }
 
 model OrderItem {
@@ -1460,6 +1466,11 @@ model OrderItem {
   enteredAmountMinor Int? // by peso: what the customer asked for (= the line total)
   sourceLocationId   String? // served from another location (Kunin sa ibang tindahan)
   unitCostMinor      Int? // Rice Ops M9: cost frozen with the sale (per piece, or per kilo for loose rice)
+
+  // A sale's lines were found by reading every line of the store (no index at all), on each
+  // receipt, order, pre-order and the counter's most-sold count: slower with every sale.
+  @@index([storeId, orderId])
+  @@index([storeId, productId])
 }
 
 model OrderStatusHistory {
