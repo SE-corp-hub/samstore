@@ -26,9 +26,11 @@ export default function PosPanel() {
       <div className="btn-group w-100 mb-3" role="group" aria-label="Kind of sale">
         <button type="button" className={`btn btn-lg ${mode === "walkin" ? "btn-dark" : "btn-outline-dark"}`} aria-pressed={mode === "walkin"} onClick={() => pick("walkin")}>
           <i className="bi bi-lightning-charge me-1" aria-hidden="true"></i>Walk-in
+          <span className="seg-caption">Cash only · two taps</span>
         </button>
         <button type="button" className={`btn btn-lg ${mode === "full" ? "btn-dark" : "btn-outline-dark"}`} aria-pressed={mode === "full"} onClick={() => pick("full")}>
           <i className="bi bi-basket me-1" aria-hidden="true"></i>Full sale
+          <span className="seg-caption">Credit, GCash, special price</span>
         </button>
       </div>
       {mode === "walkin" ? <WalkInPanel onFullSale={() => pick("full")} /> : <BentaPanel />}

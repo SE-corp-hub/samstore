@@ -37,7 +37,7 @@ function Trend({ weeks }: { weeks: Week[] }) {
         <div key={w.endsAt} className="text-center" style={{ width: 54 }} title={`Week ending ${day(w.endsAt)}: ${w.right} of ${w.counted}`}>
           <div className="bg-success-subtle border border-success-subtle rounded-top" style={{ height: `${w.pct === null ? 2 : Math.max(2, Math.round((w.pct * 40) / 100))}px`, marginTop: "auto" }} />
           <div className="small">{w.pct === null ? "–" : `${w.pct}%`}</div>
-          <div className="text-muted" style={{ fontSize: 11 }}>{i === weeks.length - 1 ? "this week" : `${weeks.length - 1 - i}w ago`}</div>
+          <div className="text-muted" style={{ fontSize: 14 }}>{i === weeks.length - 1 ? "this week" : `${weeks.length - 1 - i}w ago`}</div>
         </div>
       ))}
     </div>

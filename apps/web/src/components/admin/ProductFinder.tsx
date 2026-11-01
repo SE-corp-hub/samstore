@@ -80,13 +80,13 @@ export default function ProductFinder<T extends { id: string; name: string }>({ 
         <>
           {oftenItems.length > 0 && items.length > 8 && (
             <>
-              <h3 className="h6 text-uppercase text-muted mb-2"><i className="bi bi-star-fill text-warning me-1" aria-hidden="true"></i>Sold most here</h3>
+              <h3 className="finder-heading"><i className="bi bi-star-fill" aria-hidden="true"></i>Sold most here</h3>
               {grid(oftenItems)}
             </>
           )}
           {groups.length > 1 ? groups.map((g) => (
             <section key={g} aria-label={g}>
-              <h3 className="h6 text-uppercase text-muted border-bottom pb-1 mb-2">{g}</h3>
+              <h3 className="finder-heading group">{g}</h3>
               {grid(items.filter((i) => groupOf(i.name) === g).sort(byName))}
             </section>
           )) : grid([...items].sort(byName))}

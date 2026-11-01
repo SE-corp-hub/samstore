@@ -45,12 +45,12 @@ export default function NumPad({
   return (
     <div>
       <div className="border rounded-3 px-3 py-2 mb-2 text-end bg-white" aria-live="polite" aria-label={label}
-        style={{ fontSize: 34, fontVariantNumeric: "tabular-nums", minHeight: 64 }}>
+        style={{ fontSize: "2rem", fontVariantNumeric: "tabular-nums", minHeight: 64 }}>
         {value || <span className="text-muted">0</span>}{unit ? <span className="fs-5 ms-2 text-muted">{unit}</span> : null}
       </div>
       <div className="d-grid gap-2" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
         {keys.map((k) => (
-          <button key={k} type="button" className="btn btn-light border" style={{ fontSize: 26, minHeight: 64, fontVariantNumeric: "tabular-nums" }}
+          <button key={k} type="button" className="btn btn-light border" style={{ fontSize: "1.5rem", minHeight: 64, fontVariantNumeric: "tabular-nums" }}
             aria-label={k === "⌫" ? "Delete last digit" : k === "C" ? "Clear all" : k} onClick={() => press(k)}>
             {k}
           </button>

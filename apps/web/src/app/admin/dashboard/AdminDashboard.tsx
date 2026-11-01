@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   getAdminToken, getAdminStoreId, setAdminStoreId, getAdminRole, clearAdminSession,
-  NAV_GROUPS, allowedTabs, defaultTabFor, isOwnerRole, handleUnauthorized, navItemFor,
+  NAV_GROUPS, allowedTabs, defaultTabFor, isOwnerRole, handleUnauthorized, navItemFor, navGroupFor, toneFor,
 } from "../../../lib/admin";
 import dynamic from "next/dynamic";
 import { API_URL } from "../../../config";
@@ -20,6 +20,7 @@ import { resumePendingReceipt } from "../../../lib/slip-print";
 import { useLang, LANG_WORDS } from "../../../lib/lang";
 import QueueBadge, { SyncBar } from "../../../components/admin/QueueBadge";
 import StaffHome from "../../../components/admin/StaffHome";
+import TextSizePicker from "../../../components/admin/TextSizePicker";
 
 /** Rice Ops M10: the store screens get the large, high-contrast look (globals.css .rice-ui). */
 const RICE_TABS = new Set(["pos", "preorders", "orders", "utang", "utangrice", "agentorders", "agent", "approvals", "moves", "returns", "resack", "pasok", "purchaseorders", "bilangin", "storereport", "payable", "ulat", "drafts", "kargadors", "settings"]);
@@ -348,8 +349,8 @@ export default function AdminDashboard() {
       </div>
       <nav className="flex-grow-1 overflow-auto py-2">
         {visibleGroups.map((g) => (
-          <div key={g.group} className="mb-2">
-            <div className="nav-group-label px-3 small text-uppercase fw-semibold">{g.label}</div>
+          <div key={g.group} className={`mb-2 tone-${g.tone}`}>
+            <div className="nav-group-label px-3">{g.label}</div>
             <ul className="nav flex-column">
               {g.items.map((item) => (
                 <li className="nav-item" key={item.id}>
@@ -367,6 +368,7 @@ export default function AdminDashboard() {
         ))}
       </nav>
       <div className="p-3 border-top">
+        <div className="mb-3"><TextSizePicker /></div>
         <div className="small fw-semibold">{email || "Admin"}</div>
         <div className="small mb-2">{role} · {active?.name}</div>
         <button className="btn btn-outline-secondary btn-sm w-100 mb-2" onClick={switchUser}>
@@ -409,10 +411,24 @@ export default function AdminDashboard() {
             <button className="btn btn-outline-secondary btn-sm d-lg-none touch-show me-2" onClick={() => setMobileNav(true)} aria-label="Menu">
               <i className="bi bi-list"></i>
             </button>
-            <span className="navbar-brand fw-semibold fs-6 mb-0 d-flex align-items-center gap-2">
-              {role === "DELIVERY" ? <i className="bi bi-truck"></i> : <i className={`bi ${navItemFor(NAV_ID[tab] ?? tab)?.icon ?? "bi-speedometer2"}`}></i>}
-              {role === "DELIVERY" ? "Courier" : tab === "home" ? "Home" : (() => { const n = navItemFor(NAV_ID[tab] ?? tab); return n ? navLabel(n.id, n.label) : "Dashboard"; })()}
-            </span>
+            {/* The screen's icon on its group colour, its name, and one line on what it is for. */}
+            {(() => {
+              const id = NAV_ID[tab] ?? tab;
+              const n = navItemFor(id);
+              const group = navGroupFor(id);
+              const name = role === "DELIVERY" ? "Courier" : tab === "home" ? "Home" : n ? navLabel(n.id, n.label) : "Dashboard";
+              const icon = role === "DELIVERY" ? "bi-truck" : tab === "home" ? "bi-grid-3x3-gap" : (n?.icon ?? "bi-speedometer2");
+              const hint = tab === "home" ? "Every screen, grouped by what it is for" : n?.hint;
+              return (
+                <div className={`screen-title ${group ? `tone-${group.tone}` : "tone-setup"}`}>
+                  <span className="screen-chip" aria-hidden="true"><i className={`bi ${icon}`}></i></span>
+                  <div className="min-w-0">
+                    <div className="screen-name">{name}</div>
+                    {hint && <div className="screen-hint">{hint}</div>}
+                  </div>
+                </div>
+              );
+            })()}
             <div className="ms-auto d-flex align-items-center gap-2">
               {(stores.length > 1 || (role === "PLATFORM_ADMIN" && stores.length > 0)) && (
                 <select
@@ -427,9 +443,9 @@ export default function AdminDashboard() {
                 </select>
               )}
               <QueueBadge />
-              <span className="badge text-bg-primary text-uppercase d-none d-sm-inline">{role}</span>
+              <span className="badge text-bg-primary role-badge text-uppercase d-none d-sm-inline">{role}</span>
               {active && (
-                <a className="btn btn-sm btn-outline-primary" href={`/${active.slug}`} target="_blank" rel="noreferrer" title="Open storefront">
+                <a className="btn btn-sm btn-outline-primary d-none d-sm-inline-block" href={`/${active.slug}`} target="_blank" rel="noreferrer" title="Open storefront" aria-label="Open storefront">
                   <i className="bi bi-box-arrow-up-right"></i>
                 </a>
               )}
@@ -460,7 +476,7 @@ export default function AdminDashboard() {
               <button
                 key={b.id}
                 type="button"
-                className={(BAR_ALIAS[tab] ?? tab) === b.id ? "active" : ""}
+                className={`tone-${toneFor(NAV_ID[b.id] ?? b.id)}${(BAR_ALIAS[tab] ?? tab) === b.id ? " active" : ""}`}
                 aria-current={(BAR_ALIAS[tab] ?? tab) === b.id ? "page" : undefined}
                 onClick={() => { userNavigated.current = true; setTab(b.id); setMobileNav(false); }}
               >

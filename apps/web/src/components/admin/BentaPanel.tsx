@@ -38,6 +38,7 @@ import { useMediaQuery, WIDE } from "../../lib/use-media-query";
 import { quickCash } from "../../lib/quick-cash";
 import Steps from "./Steps";
 import ProductFinder from "./ProductFinder";
+import PickTile from "./PickTile";
 import { noteUse } from "../../lib/product-find";
 
 interface Loc { id: string; name: string; code: string | null; type: string }
@@ -54,6 +55,7 @@ interface CartLine { productId: string; mode: Mode; value: string; sourceLocatio
 interface Held { id: string; label: string; at: number; locationId: string; cart: CartLine[] }
 type Pay = "cash" | "gcash" | "maya" | "bank" | "split" | "utang";
 const PAY_LABEL: Record<Pay, string> = { cash: "Cash", gcash: "GCash", maya: "Maya", bank: "Bank transfer", split: "Split", utang: "Credit" };
+const PAY_ICON: Record<Pay, string> = { cash: "bi-cash", gcash: "bi-phone", maya: "bi-phone", bank: "bi-bank", split: "bi-pie-chart", utang: "bi-journal-text" };
 interface SplitPart { method: "cash" | "gcash" | "maya" | "bank"; amount: string; reference: string }
 const needsRef = (m: Pay) => m === "gcash" || m === "maya" || m === "bank";
 type ApiBody = { message?: string; errors?: string[] } & Record<string, unknown>;
@@ -330,7 +332,7 @@ export default function BentaPanel() {
 
   if (step === "done" && last) {
     return (
-      <div className="mx-auto" style={{ fontSize: 18, maxWidth: 520 }}>
+      <div className="sell-screen tone-sell mx-auto" style={{ maxWidth: 520 }}>
         <Steps items={["Pick items", "Pay", "Done"]} current={2} />
         {last.status === "WAITING_OWNER" ? (
           <div className="alert alert-warning">
@@ -353,11 +355,11 @@ export default function BentaPanel() {
               <span>{peso(l.lineTotalMinor)}</span>
             </li>
           ))}
-          <li className="list-group-item d-flex justify-content-between fw-bold" style={{ fontSize: 28 }}><span>Total</span><span>{peso(last.totalMinor)}</span></li>
-          {last.changeMinor > 0 && <li className="list-group-item d-flex justify-content-between fw-bold" style={{ fontSize: 24 }}><span>Change</span><span>{peso(last.changeMinor)}</span></li>}
+          <li className="list-group-item d-flex justify-content-between fw-bold" style={{ fontSize: "1.75rem" }}><span>Total</span><span>{peso(last.totalMinor)}</span></li>
+          {last.changeMinor > 0 && <li className="list-group-item d-flex justify-content-between change-due text-success"><span>Change to give</span><span>{peso(last.changeMinor)}</span></li>}
         </ul>
         <div className="d-flex flex-wrap gap-2 mb-3">
-          <button type="button" className="btn btn-outline-dark btn-lg flex-fill" onClick={() => printSlip(receiptSlip(last))}><i className="bi bi-printer me-1"></i>Print receipt</button>
+          <button type="button" className="btn btn-outline-primary btn-lg flex-fill" onClick={() => printSlip(receiptSlip(last))}><i className="bi bi-printer me-1"></i>Print receipt</button>
         </div>
         {textInfo && last.status !== "DECLINED" && (
           <div className="card mb-3"><div className="card-body">
@@ -366,7 +368,7 @@ export default function BentaPanel() {
             {!textInfo.phone && (
               <input className="form-control form-control-lg mb-2" inputMode="tel" placeholder="Mobile number (09…)" value={textPhone} onChange={(e) => setTextPhone(e.target.value)} />
             )}
-            <button type="button" className="btn btn-primary btn-lg w-100" onClick={() => {
+            <button type="button" className="btn btn-outline-primary btn-lg w-100" onClick={() => {
               const text = buildText("credit_sale", {
                 storeName: storeName || "SAM STORE", customerName: textInfo.name, reference: last.orderNumber, totalMinor: last.totalMinor, balanceMinor: textInfo.balanceAfterMinor,
                 items: last.lines.map((l) => ({ name: l.name, qty: l.soldBy === "PIECE" || !l.grams ? `${l.quantity}×` : kg(l.grams) })),
@@ -411,25 +413,20 @@ export default function BentaPanel() {
         </div>
       )}
       <ProductFinder list="pos" items={items} clearSignal={cleared} colClass={wide ? "col-6 col-xl-3 col-lg-4" : "col-6 col-md-4"}
-        renderTile={(i) => (
-          <button type="button" className={`btn ${inSale(i.id) > 0 ? "btn-dark" : "btn-outline-dark"} w-100 h-100 text-center p-2 position-relative`} style={{ minHeight: 104 }}
-            aria-label={`${i.name}${inSale(i.id) > 0 ? `, ${inSale(i.id)} in this sale` : ""}`}
-            onClick={() => { noteUse("pos", i.id); startEdit({ productId: i.id, mode: i.loose ? "KILO" : "PIECE", value: i.loose ? "" : "1", sourceLocationId: null }, null); }}>
-            {inSale(i.id) > 0 && <span className="position-absolute top-0 end-0 badge rounded-pill text-bg-success m-1 fs-6">{inSale(i.id)}</span>}
-            <div className="fw-semibold">{i.name}{i.forReview && <span className="badge text-bg-warning ms-1">To review</span>}</div>
-            <div style={{ fontSize: 22, fontVariantNumeric: "tabular-nums" }}>{peso(i.priceMinor)}<span className="fs-6 opacity-75">{i.loose ? "/kg" : ""}</span></div>
-            {/* Only this store's count: other stores show when a line is taken from them. */}
-            {(() => {
-              const n = i.stock[locationId] ?? 0;
-              // A white badge stays readable whether the tile is light, dark (in the sale) or pressed.
-              return n <= 0
-                ? <div><span className="badge bg-white text-danger border border-danger fw-semibold">None left here</span></div>
-                : <div className="small" style={{ fontVariantNumeric: "tabular-nums" }}>{i.loose ? kg(n) : n} left</div>;
-            })()}
-          </button>
-        )} />
+        renderTile={(i) => {
+          const n = inSale(i.id);
+          const left = i.stock[locationId] ?? 0; // only this store's count: other stores show when a line is taken from them
+          return (
+            <PickTile name={i.name} price={peso(i.priceMinor)} priceNote={i.loose ? "/kg" : undefined}
+              countText={n > 0 ? `${n} in sale` : undefined}
+              stock={left <= 0 ? "None left here" : `${i.loose ? kg(left) : left} left`} stockOut={left <= 0}
+              extra={i.forReview ? <span className="badge text-bg-warning">To review</span> : undefined}
+              ariaLabel={`${i.name}${n > 0 ? `, ${n} in this sale` : ""}`}
+              onClick={() => { noteUse("pos", i.id); startEdit({ productId: i.id, mode: i.loose ? "KILO" : "PIECE", value: i.loose ? "" : "1", sourceLocationId: null }, null); }} />
+          );
+        }} />
       <div className="text-center mb-3">
-        <button type="button" className="btn btn-outline-secondary" disabled={offline} onClick={() => setNewItem(true)}>+ New item (not on the list yet){offline && <> · <i className="bi bi-lock"></i> {NEEDS_NET}</>}</button>
+        <button type="button" className="btn btn-outline-primary" disabled={offline} onClick={() => setNewItem(true)}>+ New item (not on the list yet){offline && <> · <i className="bi bi-lock"></i> {NEEDS_NET}</>}</button>
       </div>
     </>
   );
@@ -476,9 +473,12 @@ export default function BentaPanel() {
     const all = [...holds, h]; setHolds(all); saveHolds(all);
     keyRef.current = null; setCart([]); setError(null); toast("Sale put on hold");
   };
+  // Pieces count one each; a kilo or peso line counts once.
+  const cartCount = cart.reduce((n, l) => n + (l.mode === "PIECE" ? Number(l.value) || 0 : 1), 0);
   const cartCard = cart.length > 0 && (
-    <div className={`card border-success${wide ? "" : " position-sticky bottom-0 sticky-above-bar shadow"}`}>
+    <div className={`sale-card${wide ? "" : " position-sticky bottom-0 sticky-above-bar shadow"}`}>
       <div className="card-body">
+        <div className="sale-card-title"><i className="bi bi-basket2-fill" aria-hidden="true"></i>This sale · {cartCount} {cartCount === 1 ? "item" : "items"}</div>
         <ul className="list-unstyled mb-2" style={{ fontVariantNumeric: "tabular-nums", maxHeight: wide ? undefined : "32vh", overflowY: "auto" }}>
           {cart.map((l, idx) => {
             const it = byId.get(l.productId);
@@ -503,10 +503,11 @@ export default function BentaPanel() {
             );
           })}
         </ul>
-        <div className="text-center text-muted small mb-2">Tap a line to change it.</div>
+        <div className="text-center text-muted mb-1">Tap a line to change it.</div>
+        <div className="sale-total mb-2"><span className="label">Total</span><span className="amount">{peso(total)}</span></div>
         <div className="d-flex gap-2">
-          <button type="button" className="btn btn-outline-dark btn-lg" onClick={holdSale}>Hold</button>
-          <button type="button" className="btn btn-success btn-lg flex-fill py-3 fw-bold" style={{ fontSize: 22, fontVariantNumeric: "tabular-nums" }} onClick={() => void goPay()}>
+          <button type="button" className="btn btn-outline-dark btn-lg" onClick={holdSale}><i className="bi bi-pause-circle me-1" aria-hidden="true"></i>Hold</button>
+          <button type="button" className="btn btn-success btn-lg flex-fill py-3 fw-bold sale-pay" onClick={() => void goPay()}>
             Pay {peso(total)}
           </button>
         </div>
@@ -529,7 +530,7 @@ export default function BentaPanel() {
     const changed = editing.price !== undefined && editing.price !== it.priceMinor;
     const reasonGiven = !changed || reasonOk(editing.reason);
     return (
-      <div className="card border-success mx-auto" style={{ maxWidth: 520 }}>
+      <div className="sale-card mx-auto" style={{ maxWidth: 520 }}>
         <div className="card-body">
           <h2 className="h5 text-center mb-1">{it.name} · {peso(it.priceMinor)}{it.loose ? "/kg" : ""}</h2>
           <div className="text-center text-muted mb-2">{it.loose ? "Sell by kilos or by pesos?" : "How many?"}</div>
@@ -548,8 +549,8 @@ export default function BentaPanel() {
           </div>
           {!priceOpen && !fromOpen && (
             <div className="d-flex flex-wrap justify-content-center gap-2 mt-3">
-              <button type="button" className="btn btn-outline-secondary" onClick={() => setPriceOpen(true)}>Change price</button>
-              {it.tracked && locations.length > 1 && <button type="button" className="btn btn-outline-secondary" onClick={() => setFromOpen(true)}>Take from another store</button>}
+              <button type="button" className="btn btn-outline-primary" onClick={() => setPriceOpen(true)}><i className="bi bi-tag me-1" aria-hidden="true"></i>Change price</button>
+              {it.tracked && locations.length > 1 && <button type="button" className="btn btn-outline-primary" onClick={() => setFromOpen(true)}><i className="bi bi-shop me-1" aria-hidden="true"></i>Take from another store</button>}
             </div>
           )}
           {priceOpen && (
@@ -583,7 +584,7 @@ export default function BentaPanel() {
             </div>
           )}
           <div className="d-flex justify-content-between mt-3 pos-actions">
-            <button type="button" className="btn btn-outline-secondary btn-lg" onClick={() => { setEditing(null); setEditIdx(null); }}>Back</button>
+            <button type="button" className="btn btn-outline-dark btn-lg" onClick={() => { setEditing(null); setEditIdx(null); }}>Back</button>
             <button type="button" className="btn btn-success btn-lg px-5" disabled={c.totalMinor <= 0 || short || !reasonGiven || (editing.mode === "PIECE" && !Number.isInteger(c.units))}
               onClick={async () => { const line = editing, at = editIdx; if (!(await passesCost(line, at))) return; setCart(at === null ? [...cart, line] : cart.map((x, j) => (j === at ? line : x))); setEditing(null); setEditIdx(null); setCleared((n) => n + 1); }}>{editIdx === null ? "Add to sale" : "Save"}</button>
           </div>
@@ -594,7 +595,7 @@ export default function BentaPanel() {
 
   const sideBySide = wide && step === "pick" && !newItem;
   return (
-    <div style={{ fontSize: 18 }} className={sideBySide ? "row g-3 align-items-start" : undefined}>
+    <div className={`sell-screen tone-sell${sideBySide ? " row g-3 align-items-start" : ""}`}>
       <div className={sideBySide ? "col-lg-7 col-xl-8" : undefined}>
         <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
           <h1 className="h4 mb-0">POS</h1>
@@ -642,17 +643,17 @@ export default function BentaPanel() {
         {step === "pick" && newItem && <NewItemForm locationId={locationId} onCancel={() => setNewItem(false)} onDone={async () => { setNewItem(false); await loadCatalog(locationId); }} />}
 
         {step === "pay" && (
-          <div className="card border-success mx-auto" style={{ maxWidth: 520 }}>
+          <div className="sale-card mx-auto" style={{ maxWidth: 520 }}>
             <div className="card-body">
               <div className="text-center mb-3">
                 <div className="text-muted">Customer pays</div>
-                <div className="fw-bold" style={{ fontSize: 40, fontVariantNumeric: "tabular-nums" }}>{peso(total)}</div>
+                <div className="big-amount">{peso(total)}</div>
               </div>
               <div className="text-center fw-semibold mb-2">How are they paying?</div>
               <div className={`d-grid gap-2 ${allPay ? "mb-3" : "mb-2"}`} style={{ gridTemplateColumns: "repeat(3, 1fr)" }} role="group" aria-label="How are they paying?">
                 {(["cash", "gcash", "utang", ...(allPay ? ["maya", "bank", "split"] : [])] as Pay[]).map((p) => (
                   <button key={p} type="button" className={`btn btn-lg ${pay === p ? "btn-dark" : "btn-outline-dark"}`} aria-pressed={pay === p} onClick={() => setPay(p)}>
-                    {p === "cash" && <i className="bi bi-cash me-1" aria-hidden="true"></i>}{PAY_LABEL[p]}
+                    <i className={`bi ${PAY_ICON[p]} me-1`} aria-hidden="true"></i>{PAY_LABEL[p]}
                   </button>
                 ))}
               </div>
@@ -674,7 +675,7 @@ export default function BentaPanel() {
                     ))}
                   </div>
                   <NumPad value={tendered} onChange={setTendered} decimals={2} label="Cash received" unit="₱" />
-                  {tendered && <div className={`mt-2 text-center fw-bold ${change < 0 ? "text-danger" : "text-success"}`} style={{ fontSize: 30, fontVariantNumeric: "tabular-nums" }} aria-live="polite">{change < 0 ? `Short ${peso(-change)}` : `Change ${peso(change)}`}</div>}
+                  {tendered && <div className={`mt-2 text-center change-due ${change < 0 ? "text-danger" : "text-success"}`} aria-live="polite">{change < 0 ? `Short ${peso(-change)}` : `Change to give ${peso(change)}`}</div>}
                 </>
               )}
               {pay === "split" && (
@@ -698,8 +699,8 @@ export default function BentaPanel() {
                     </div>
                   ))}
                   <div className="d-flex gap-2 align-items-center">
-                    {parts.length < 4 && <button type="button" className="btn btn-outline-secondary btn-sm" onClick={() => setParts([...parts, { method: "cash", amount: "", reference: "" }])}>+ Add a part</button>}
-                    {parts.length > 2 && <button type="button" className="btn btn-outline-secondary btn-sm" onClick={() => setParts(parts.slice(0, -1))}>Remove last</button>}
+                    {parts.length < 4 && <button type="button" className="btn btn-outline-dark btn-sm" onClick={() => setParts([...parts, { method: "cash", amount: "", reference: "" }])}>+ Add a part</button>}
+                    {parts.length > 2 && <button type="button" className="btn btn-outline-dark btn-sm" onClick={() => setParts(parts.slice(0, -1))}>Remove last</button>}
                     {(() => { const left = total - parts.reduce((s, x) => s + toMinor(x.amount || "0"), 0); return <span className={`ms-auto fw-semibold ${left === 0 ? "text-success" : "text-danger"}`}>{left === 0 ? "Fully paid" : left > 0 ? `${peso(left)} left` : `${peso(-left)} too much`}</span>; })()}
                   </div>
                 </>
@@ -763,8 +764,8 @@ export default function BentaPanel() {
               )}
 
               <div className="d-flex gap-2 mt-3">
-                <button type="button" className="btn btn-outline-secondary btn-lg" disabled={busy} onClick={() => setStep("pick")}>Back</button>
-                <button type="button" className="btn btn-success btn-lg flex-fill py-3 fw-bold" style={{ fontSize: 22 }} disabled={!canSubmit} onClick={() => void submit()}>{busy ? "Please wait…" : "Finish sale"}</button>
+                <button type="button" className="btn btn-outline-dark btn-lg" disabled={busy} onClick={() => setStep("pick")}>Back</button>
+                <button type="button" className="btn btn-success btn-lg flex-fill py-3 fw-bold sale-pay" disabled={!canSubmit} onClick={() => void submit()}>{busy ? "Please wait…" : "Finish sale"}</button>
               </div>
               {pay === "cash" && !tendered && <div className="text-center text-muted mt-2">{drawerOpen === false && shiftRequired ? "Open the cash drawer first." : "Tap Exact or enter the cash received first."}</div>}
             </div>
@@ -805,7 +806,7 @@ export function OpenDrawer({ onOpened }: { onOpened: () => void }) {
       <div className="fw-semibold mb-2">The cash drawer is closed. Open it before taking cash.</div>
       {error && <div className="text-danger mb-2">{error}</div>}
       <NumPad value={float} onChange={setFloat} decimals={2} label="Cash in the drawer now (change fund)" unit="₱" />
-      <button type="button" className="btn btn-dark btn-lg w-100 mt-2" disabled={busy || offline} onClick={() => void open()}>{offline ? <><i className="bi bi-lock me-1"></i>{NEEDS_NET} to open the drawer — use GCash or Credit, or connect</> : busy ? "Please wait…" : "Open the cash drawer"}</button>
+      <button type="button" className="btn btn-success btn-lg w-100 mt-2" disabled={busy || offline} onClick={() => void open()}>{offline ? <><i className="bi bi-lock me-1"></i>{NEEDS_NET} to open the drawer — use GCash or Credit, or connect</> : busy ? "Please wait…" : "Open the cash drawer"}</button>
     </div>
   );
 }
@@ -832,7 +833,7 @@ function QuickCustomer({ onCancel, onAdded }: { onCancel: () => void; onAdded: (
       <input className="form-control form-control-lg mb-2" aria-label="Customer name" placeholder="Name" value={name} onChange={(e) => setName(e.target.value.slice(0, 80))} />
       <input className="form-control form-control-lg mb-2" aria-label="Mobile number" placeholder="09xx xxx xxxx" inputMode="tel" value={phone} onChange={(e) => setPhone(e.target.value.slice(0, 16))} />
       <div className="d-flex justify-content-between">
-        <button type="button" className="btn btn-outline-secondary" disabled={busy} onClick={onCancel}>Cancel</button>
+        <button type="button" className="btn btn-outline-dark" disabled={busy} onClick={onCancel}>Cancel</button>
         <button type="button" className="btn btn-success" disabled={busy || name.trim().length < 2 || phone.trim().length < 10} onClick={() => void save()}>{busy ? "Please wait…" : "Add customer"}</button>
       </div>
     </div>
@@ -918,7 +919,7 @@ export function NewItemForm({ locationId, onCancel, onDone, preorder = false }: 
         <SignaturePad onSignature={setSig} /></>)}
         {preorder && <p className="small text-muted mt-2 mb-0">Nothing is on hand yet. The new item goes straight into Products.</p>}
         <div className="d-flex justify-content-between mt-3">
-          <button type="button" className="btn btn-outline-secondary btn-lg" disabled={busy} onClick={onCancel}>Back</button>
+          <button type="button" className="btn btn-outline-dark btn-lg" disabled={busy} onClick={onCancel}>Back</button>
           <button type="button" className="btn btn-success btn-lg" disabled={!ready || busy} onClick={() => void save()}>{busy ? "Please wait…" : "Add"}</button>
         </div>
       </div>

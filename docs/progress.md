@@ -1256,3 +1256,21 @@ Commits: `32dce58` (loop 2).
 |------|-------|-----------------|------|------|
 | 2026-09-01 earlier | deepseek-v4-flash-0731 | ~2M / ~0.2M (est.) | ~$0.25 (est.) | Setup/analysis |
 | 2026-09-01 Module 1 loop 1 | deepseek-v4-flash-0731 | ~0.9M / ~0.1M (est.) | ~$0.08 (est.) | Scaffold + domain + tests |
+
+## 2026-10-31 — Easy-to-read pass (web UI, owner is 65)
+
+- `apps/web/src/app/easy-read.css` (loaded after `polish.css`): 18 px text on every `/admin` page by default, small print ≥ 16 px, helper text at 7.6:1, table headings in sentence case, 48 px touch targets, one meaning per colour (green go / red stop / amber careful / blue information / dark ink neutral / terracotta = you are here), badges and alerts in the same tinted-and-bordered look on every screen.
+- Text size setting (Normal 16 / Large 18 / Extra large 20): `lib/text-size.ts`, `components/admin/TextSizePicker.tsx`, applied before first paint by `app/admin/layout.tsx`; shown in the Menu drawer footer and at the bottom of Home. Saved per tablet (localStorage `sam.textSize`).
+- Screens regrouped by purpose in `lib/admin.ts` `NAV_GROUPS` (Sell, Money, Stock, Reports, People & settings, System) with a `tone` colour per group and a one-line `hint` per screen; Home (`StaffHome.tsx`) lists every allowed screen by group (no more "Other screens" fold); the top bar shows the screen icon on its group colour, the name and the hint; bottom-bar icons take the group colour.
+- Toggle groups (Inventory view/adjust mode, Move stock "from", Store report "All stores") use `btn-dark`/`btn-outline-dark` instead of green/blue; tiny fixed text raised (chart labels 12→14 px, "weeks ago" 11→14 px, barcode 14→16 px).
+- Design system: `design-system/sam-s-store-admin/MASTER.md` typography, colour, button and table rules updated to match.
+
+## 2026-11-01 — POS and Pre-order made easier to use (owner is 65)
+
+- One shared product button, `components/admin/PickTile.tsx`, on Walk-in, Full sale and Pre-order: name, price in big digits, what is left, and once tapped a green edge with "✓ 2 in sale" (was a black tile with a small number). Out of stock is an amber "None left here" badge (careful — you may still sell at the counter), not red.
+- The sale / order card has a green frame, a title ("This sale · 3 items"), a Total row in the largest digits on the screen, and − / + buttons 48 px square with big signs; the lines wrap cleanly in the narrow sideways column.
+- Buttons follow the one-meaning colours everywhere on these screens: green = the one next step (Cash exact, Pay, Finish sale, Complete sale, Save pre-order, Open the cash drawer), blue outline = a second choice (Print, Receipt, Change price, Take from another store, New item, Text customer), dark outline = Back / Cancel / Keep it / Close / toggles, red = Delete and Clear this sale (was a small link). Pay-method buttons carry an icon each; "Change to give ₱…" is one big green line.
+- Walk-in / Full sale switch explains itself ("Cash only · two taps" / "Credit, GCash, special price").
+- Pre-order list: the customers' cards come first, the "Totals by item" table after them (the Done tab keeps its date range at the top); dates read "1 Nov 2026"; a late pre-order gets a red "Late" badge; the total no longer wraps onto two lines; Waiting / Done have icons.
+- The fixed 18 px wrappers (`style={{ fontSize: 18 }}`) and px-sized prices became `.sell-screen` + rem sizes in `easy-read.css` §8, so the Text size setting (Extra large) now applies to POS and Pre-order too; NumPad digits scale as well.
+- Checked: tsc clean; axe-core 0 failures on 13 POS/Pre-order states; every new colour pair ≥ 5.4:1 (text ≥ 5.9:1); shots at 800×1200, 1280×720, 375 wide and Extra large.
