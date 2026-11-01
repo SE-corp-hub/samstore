@@ -9,7 +9,7 @@
 //   New item: a rice that isn't in the system yet, with what is on hand now.
 // One idempotency key per sale, kept until it succeeds: a double-tap is one sale.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { API_URL } from "../../config";
 import { adminHeaders, getAdminStoreId } from "../../lib/admin";
 import { toast } from "../../lib/toast";
@@ -34,7 +34,8 @@ import { printSlip } from "../../lib/slip-print";
 import { getPrinterSettings } from "../../lib/printer-settings";
 import { creditStatusWords } from "../../lib/credit-status";
 import { peso, kg } from "../../lib/number-format";
-import { useMediaQuery, WIDE } from "../../lib/use-media-query";
+import { FIT, useMediaQuery, WIDE } from "../../lib/use-media-query";
+import { useFitHeight } from "../../lib/use-fit-height";
 import { quickCash } from "../../lib/quick-cash";
 import Steps from "./Steps";
 import ProductFinder from "./ProductFinder";
@@ -100,7 +101,8 @@ function savedCart(): { locationId: string; cart: CartLine[]; key: string | null
   } catch { return null; }
 }
 
-export default function BentaPanel() {
+/** `switcher`: the Walk-in / Full sale buttons, placed at the top of the product column so the sale card can start at the very top. */
+export default function BentaPanel({ switcher }: { switcher?: ReactNode }) {
   const [locations, setLocations] = useState<Loc[]>([]);
   const [locationId, setLocationId] = useState("");
   const [homeLocationId, setHomeLocationId] = useState<string | null>(null);
@@ -229,6 +231,9 @@ export default function BentaPanel() {
   }, [step, last]);
 
   const wide = useMediaQuery(WIDE);
+  // Tablet or PC: the screen is exactly the space between the bars (no page scroll); only the product list scrolls.
+  const fit = useMediaQuery(FIT);
+  const fitRef = useFitHeight<HTMLDivElement>(fit && step !== "done");
   const startEdit = (l: CartLine, idx: number | null) => {
     setEditing(l); setEditIdx(idx);
     setPriceOpen(l.price !== undefined); setFromOpen(!!l.sourceLocationId);
@@ -400,35 +405,36 @@ export default function BentaPanel() {
     );
   }
 
-  // Tablet held sideways (or a PC): products on the left, the sale on the right, both always in view.
-  const pickList = (
-    <>
-      {customers.length > 0 && (
-        <div className="mb-2">
-          <select className="form-select" aria-label="Customer with special prices" disabled={cart.length > 0} value={priceCustomer} onChange={(e) => void pickPriceCustomer(e.target.value)}>
-            <option value="">Customer: walk-in (store prices)</option>
-            {customers.map((c) => <option key={c.id} value={c.id}>{c.name ?? c.phone ?? "—"}</option>)}
-          </select>
-          {priceCustomer && <div className="small text-muted mt-1">{specialCount > 0 ? `${specialCount} special ${specialCount === 1 ? "price" : "prices"} for this customer.` : "No special prices for this customer — store prices apply."}</div>}
+  // The customer picked at the counter (their special prices go on the product buttons): above the sale sideways, beside the steps upright.
+  const customerSelect = customers.length > 0 && (
+    <div className={wide ? "mb-2" : ""} style={wide ? undefined : { flex: "1 1 16rem", minWidth: 0 }}>
+      <select className="form-select" aria-label="Customer with special prices" disabled={cart.length > 0} value={priceCustomer} onChange={(e) => void pickPriceCustomer(e.target.value)}>
+        <option value="">Customer: walk-in (store prices)</option>
+        {customers.map((c) => <option key={c.id} value={c.id}>{c.name ?? c.phone ?? "—"}</option>)}
+      </select>
+      {priceCustomer && <div className="small text-muted mt-1">{specialCount > 0 ? `${specialCount} special ${specialCount === 1 ? "price" : "prices"} for this customer.` : "No special prices for this customer — store prices apply."}</div>}
+    </div>
+  );
+  // The product buttons: the search bar stays put, the buttons scroll in their own box, "+ New item" after the last one.
+  const finder = (
+    <ProductFinder list="pos" items={items} clearSignal={cleared} colClass="col-6 col-md-3" fit={fit}
+      footer={(
+        <div className="text-center mb-2">
+          <button type="button" className="btn btn-outline-primary" disabled={offline} onClick={() => setNewItem(true)}>+ New item (not on the list yet){offline && <> · <i className="bi bi-lock"></i> {NEEDS_NET}</>}</button>
         </div>
       )}
-      <ProductFinder list="pos" items={items} clearSignal={cleared} colClass={wide ? "col-6 col-xl-3 col-lg-4" : "col-6 col-md-4"}
-        renderTile={(i) => {
-          const n = inSale(i.id);
-          const left = i.stock[locationId] ?? 0; // only this store's count: other stores show when a line is taken from them
-          return (
-            <PickTile name={i.name} price={peso(i.priceMinor)} priceNote={i.loose ? "/kg" : undefined}
-              countText={n > 0 ? `${n} in sale` : undefined}
-              stock={left <= 0 ? "None left here" : `${i.loose ? kg(left) : left} left`} stockOut={left <= 0}
-              extra={i.forReview ? <span className="badge text-bg-warning">To review</span> : undefined}
-              ariaLabel={`${i.name}${n > 0 ? `, ${n} in this sale` : ""}`}
-              onClick={() => { noteUse("pos", i.id); startEdit({ productId: i.id, mode: i.loose ? "KILO" : "PIECE", value: i.loose ? "" : "1", sourceLocationId: null }, null); }} />
-          );
-        }} />
-      <div className="text-center mb-3">
-        <button type="button" className="btn btn-outline-primary" disabled={offline} onClick={() => setNewItem(true)}>+ New item (not on the list yet){offline && <> · <i className="bi bi-lock"></i> {NEEDS_NET}</>}</button>
-      </div>
-    </>
+      renderTile={(i) => {
+        const n = inSale(i.id);
+        const left = i.stock[locationId] ?? 0; // only this store's count: other stores show when a line is taken from them
+        return (
+          <PickTile name={i.name} price={peso(i.priceMinor)} priceNote={i.loose ? "/kg" : undefined}
+            countText={n > 0 ? `${n} in sale` : undefined}
+            stock={left <= 0 ? "None left here" : `${i.loose ? kg(left) : left} left`} stockOut={left <= 0}
+            extra={i.forReview ? <span className="badge text-bg-warning">To review</span> : undefined}
+            ariaLabel={`${i.name}${n > 0 ? `, ${n} in this sale` : ""}`}
+            onClick={() => { noteUse("pos", i.id); startEdit({ productId: i.id, mode: i.loose ? "KILO" : "PIECE", value: i.loose ? "" : "1", sourceLocationId: null }, null); }} />
+        );
+      }} />
   );
   /**
    * Below cost: ask before the line goes in (or before paying). Resolves true when the line may stay as it is.
@@ -476,10 +482,10 @@ export default function BentaPanel() {
   // Pieces count one each; a kilo or peso line counts once.
   const cartCount = cart.reduce((n, l) => n + (l.mode === "PIECE" ? Number(l.value) || 0 : 1), 0);
   const cartCard = cart.length > 0 && (
-    <div className={`sale-card${wide ? "" : " position-sticky bottom-0 sticky-above-bar shadow"}`}>
+    <div className={`sale-card fit-card${fit || wide ? "" : " position-sticky bottom-0 sticky-above-bar shadow"}${fit && !wide ? " fit-bottom" : ""}`}>
       <div className="card-body">
         <div className="sale-card-title"><i className="bi bi-basket2-fill" aria-hidden="true"></i>This sale · {cartCount} {cartCount === 1 ? "item" : "items"}</div>
-        <ul className="list-unstyled mb-2" style={{ fontVariantNumeric: "tabular-nums", maxHeight: wide ? undefined : "32vh", overflowY: "auto" }}>
+        <ul className="list-unstyled mb-2 sale-lines" style={{ fontVariantNumeric: "tabular-nums", maxHeight: fit || wide ? undefined : "32vh" }}>
           {cart.map((l, idx) => {
             const it = byId.get(l.productId);
             const c = computed[idx]!;
@@ -530,25 +536,24 @@ export default function BentaPanel() {
     const changed = editing.price !== undefined && editing.price !== it.priceMinor;
     const reasonGiven = !changed || reasonOk(editing.reason);
     return (
-      <div className="sale-card mx-auto" style={{ maxWidth: 520 }}>
+      <div className="sale-card fit-card mx-auto w-100" style={{ maxWidth: 520 }}>
         <div className="card-body">
-          <h2 className="h5 text-center mb-1">{it.name} · {peso(it.priceMinor)}{it.loose ? "/kg" : ""}</h2>
-          <div className="text-center text-muted mb-2">{it.loose ? "Sell by kilos or by pesos?" : "How many?"}</div>
+          <h2 className="h5 text-center mb-1">{it.loose ? `${it.name} · ${peso(it.priceMinor)}/kg` : `How many ${it.name}?`}</h2>
           {it.loose && (
-            <div className="btn-group w-100 mb-3" role="group" aria-label="Kilos or pesos?">
+            <div className="btn-group w-100 mb-2" role="group" aria-label="Sell by kilos or by pesos?">
               <button type="button" className={`btn btn-lg ${editing.mode === "KILO" ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setEditing({ ...editing, mode: "KILO", value: "" })}>Kilos</button>
               <button type="button" className={`btn btn-lg ${editing.mode === "PESO" ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setEditing({ ...editing, mode: "PESO", value: "" })}>Pesos</button>
             </div>
           )}
           <NumPad startFresh={editing.mode === "PIECE"} value={editing.value} onChange={(v) => setEditing({ ...editing, value: v })} decimals={editing.mode === "KILO" ? 3 : editing.mode === "PESO" ? 2 : 0}
             label={editing.mode === "PESO" ? "Amount in pesos" : editing.mode === "KILO" ? "How many kilos" : "How many"} unit={editing.mode === "PESO" ? "₱" : editing.mode === "KILO" ? "kg" : it.gramsPerUnit ? "sacks" : "pieces"} />
-          <div className="mt-2" style={{ fontVariantNumeric: "tabular-nums" }}>
+          <div className="mt-1" style={{ fontVariantNumeric: "tabular-nums" }}>
             {editing.mode === "PESO" && c.grams ? <div className="fs-5">= <strong>{kg(c.grams)}</strong> · pay <strong>{peso(c.totalMinor)}</strong></div> : null}
             {editing.mode === "KILO" && c.totalMinor > 0 ? <div className="fs-5">= <strong>{peso(c.totalMinor)}</strong></div> : null}
             {editing.mode === "PIECE" && c.totalMinor > 0 ? <div className="fs-5">= <strong>{peso(c.totalMinor)}</strong></div> : null}
           </div>
           {!priceOpen && !fromOpen && (
-            <div className="d-flex flex-wrap justify-content-center gap-2 mt-3">
+            <div className="d-flex flex-wrap justify-content-center gap-2 mt-2">
               <button type="button" className="btn btn-outline-primary" onClick={() => setPriceOpen(true)}><i className="bi bi-tag me-1" aria-hidden="true"></i>Change price</button>
               {it.tracked && locations.length > 1 && <button type="button" className="btn btn-outline-primary" onClick={() => setFromOpen(true)}><i className="bi bi-shop me-1" aria-hidden="true"></i>Take from another store</button>}
             </div>
@@ -583,7 +588,7 @@ export default function BentaPanel() {
               {from === locationId && <button type="button" className="btn btn-dark btn-sm ms-2" onClick={() => setChecking({ productId: it.id, name: it.name })}>Any left? Count</button>}
             </div>
           )}
-          <div className="d-flex justify-content-between mt-3 pos-actions">
+          <div className="d-flex justify-content-between mt-2 pos-actions">
             <button type="button" className="btn btn-outline-dark btn-lg" onClick={() => { setEditing(null); setEditIdx(null); }}>Back</button>
             <button type="button" className="btn btn-success btn-lg px-5" disabled={c.totalMinor <= 0 || short || !reasonGiven || (editing.mode === "PIECE" && !Number.isInteger(c.units))}
               onClick={async () => { const line = editing, at = editIdx; if (!(await passesCost(line, at))) return; setCart(at === null ? [...cart, line] : cart.map((x, j) => (j === at ? line : x))); setEditing(null); setEditIdx(null); setCleared((n) => n + 1); }}>{editIdx === null ? "Add to sale" : "Save"}</button>
@@ -593,90 +598,111 @@ export default function BentaPanel() {
     );
   })();
 
+  // Tablet held sideways (or a PC): products on the left, the sale on the right, both always in view.
   const sideBySide = wide && step === "pick" && !newItem;
+  const padSide = pay === "cash" || pay === "utang"; // the pay step has a second column: the number pad, or the signature
+  // Held sales: the button only shows when there is one to come back to.
+  const heldBtn = holds.some((h) => h.locationId === locationId) && (
+    <button type="button" className="btn btn-warning" onClick={() => setShowHeld(!showHeld)}>
+      <i className="bi bi-pause-circle me-1"></i>Held sales ({holds.filter((h) => h.locationId === locationId).length})
+    </button>
+  );
+  const heldCard = showHeld && (
+    <div className="card mb-2"><div className="card-body">
+      <h2 className="h6">Held sales at {here?.name}</h2>
+      {holds.filter((h) => h.locationId === locationId).length === 0 && <div className="text-muted">Nothing on hold.</div>}
+      <ul className="list-unstyled mb-0">
+        {holds.filter((h) => h.locationId === locationId).map((h) => (
+          <li key={h.id} className="d-flex justify-content-between align-items-center py-1 border-bottom">
+            <span>{h.label}<span className="small text-muted"> · {new Date(h.at).toLocaleTimeString("en-PH", { hour: "numeric", minute: "2-digit" })}</span></span>
+            <span className="text-nowrap">
+              <button type="button" className="btn btn-success btn-sm me-1" onClick={() => {
+                setCart([...cart, ...h.cart]);
+                const rest = holds.filter((x) => x.id !== h.id); setHolds(rest); saveHolds(rest); setShowHeld(false);
+              }}>Resume</button>
+              <button type="button" className="btn btn-outline-danger btn-sm" onClick={() => { const rest = holds.filter((x) => x.id !== h.id); setHolds(rest); saveHolds(rest); }}>Delete</button>
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div></div>
+  );
+  // The store chips are locked during a sale, so the pay step does without them.
+  const storeBar = step === "pick" && !newItem && (
+    <StoreBar inline size="md" label="Selling at" locations={locations} value={locationId} homeLocationId={homeLocationId} locked={cart.length > 0}
+      lockedNote="To switch store, hold or clear this sale first." onPick={(id) => { reset(); void loadCatalog(id); }} />
+  );
+  const errAlert = error && <div className="alert alert-danger py-2" role="alert">{error}</div>;
+  // Sideways, the steps sit above the sale; they step aside while the number pad needs the whole column.
+  const stepsRow = !(sideBySide && (editing || checking)) && (
+    <div className="d-flex flex-wrap align-items-center gap-2 mb-2">
+      <Steps className="mb-0 me-auto" items={["Pick items", "Pay", "Done"]} current={step === "pay" ? 1 : 0} />
+      {heldBtn}
+      {!sideBySide && step === "pick" && !newItem && !editing && !checking && customerSelect}
+    </div>
+  );
   return (
-    <div className={`sell-screen tone-sell${sideBySide ? " row g-3 align-items-start" : ""}`}>
-      <div className={sideBySide ? "col-lg-7 col-xl-8" : undefined}>
-        <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
-          <h1 className="h4 mb-0">POS</h1>
-          {/* Held sales: the button only shows when there is one to come back to. */}
-          {holds.some((h) => h.locationId === locationId) && (
-            <button type="button" className="btn btn-warning" onClick={() => setShowHeld(!showHeld)}>
-              <i className="bi bi-pause-circle me-1"></i>Held sales ({holds.filter((h) => h.locationId === locationId).length})
-            </button>
-          )}
+    <div ref={fitRef} className="sell-screen tone-sell sell-fit">
+      <h1 className="visually-hidden">POS</h1>
+      {sideBySide ? (
+        <div className="fit-row">
+          <div className="fit-col fit-main">
+            {switcher}
+            {storeBar}
+            {heldCard}
+            {errAlert}
+            {finder}
+          </div>
+          <div className="fit-col fit-side">
+            {stepsRow}
+            {!editing && !checking && customerSelect}
+            {quickCount || editCard || cartCard || (
+              <div className="card"><div className="card-body text-center text-muted py-4"><i className="bi bi-hand-index fs-1 d-block mb-2" aria-hidden="true"></i>Tap a product to start a sale.</div></div>
+            )}
+          </div>
         </div>
-        <Steps items={["Pick items", "Pay", "Done"]} current={step === "pay" ? 1 : 0} />
-        <StoreBar label="Selling at" locations={locations} value={locationId} homeLocationId={homeLocationId} locked={cart.length > 0}
-          lockedNote="To switch store, hold or clear this sale first." onPick={(id) => { reset(); void loadCatalog(id); }} />
-        {showHeld && (
-          <div className="card mb-3"><div className="card-body">
-            <h2 className="h6">Held sales at {here?.name}</h2>
-            {holds.filter((h) => h.locationId === locationId).length === 0 && <div className="text-muted">Nothing on hold.</div>}
-            <ul className="list-unstyled mb-0">
-              {holds.filter((h) => h.locationId === locationId).map((h) => (
-                <li key={h.id} className="d-flex justify-content-between align-items-center py-1 border-bottom">
-                  <span>{h.label}<span className="small text-muted"> · {new Date(h.at).toLocaleTimeString("en-PH", { hour: "numeric", minute: "2-digit" })}</span></span>
-                  <span className="text-nowrap">
-                    <button type="button" className="btn btn-success btn-sm me-1" onClick={() => {
-                      setCart([...cart, ...h.cart]);
-                      const rest = holds.filter((x) => x.id !== h.id); setHolds(rest); saveHolds(rest); setShowHeld(false);
-                    }}>Resume</button>
-                    <button type="button" className="btn btn-outline-danger btn-sm" onClick={() => { const rest = holds.filter((x) => x.id !== h.id); setHolds(rest); saveHolds(rest); }}>Delete</button>
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </div></div>
-        )}
-        {error && <div className="alert alert-danger py-2" role="alert">{error}</div>}
+      ) : (
+        <div className="fit-col">
+          {switcher}
+          {stepsRow}
+          {storeBar}
+          {heldCard}
+          {errAlert}
+          {step === "pick" && !newItem && !editing && !checking && <>{finder}{cartCard}</>}
+          {step === "pick" && !newItem && (editing || checking) && <div className="fit-scroll">{quickCount || editCard}</div>}
+          {step === "pick" && newItem && <div className="fit-scroll"><NewItemForm locationId={locationId} onCancel={() => setNewItem(false)} onDone={async () => { setNewItem(false); await loadCatalog(locationId); }} /></div>}
 
-        {sideBySide && pickList}
-        {step === "pick" && !newItem && !sideBySide && (
-          <>
-            {!editing && <>{pickList}{cartCard}</>}
-            {quickCount}
-            {!checking && editCard}
-          </>
-        )}
-
-        {step === "pick" && newItem && <NewItemForm locationId={locationId} onCancel={() => setNewItem(false)} onDone={async () => { setNewItem(false); await loadCatalog(locationId); }} />}
-
-        {step === "pay" && (
-          <div className="sale-card mx-auto" style={{ maxWidth: 520 }}>
+          {step === "pay" && (
+            <div className="fit-scroll">
+          <div className="sale-card fit-pay mx-auto w-100" style={{ maxWidth: padSide ? 920 : 560 }}>
             <div className="card-body">
-              <div className="text-center mb-3">
+             {/* Two columns on a tablet: what and how on the left, the number pad (or the signature) on the right. */}
+             <div className="row g-3">
+             <div className={padSide ? "col-md-6" : "col-12"}>
+              <div className="text-center mb-1">
                 <div className="text-muted">Customer pays</div>
                 <div className="big-amount">{peso(total)}</div>
               </div>
-              <div className="text-center fw-semibold mb-2">How are they paying?</div>
-              <div className={`d-grid gap-2 ${allPay ? "mb-3" : "mb-2"}`} style={{ gridTemplateColumns: "repeat(3, 1fr)" }} role="group" aria-label="How are they paying?">
+              <div className="d-flex align-items-center justify-content-between gap-2 mb-1">
+                <span className="fw-semibold">How are they paying?</span>
+                {!allPay && <button type="button" className="btn btn-link px-1 text-nowrap" onClick={() => setMorePay(true)}>Other ways</button>}
+              </div>
+              <div className="d-grid gap-2 mb-3" style={{ gridTemplateColumns: "repeat(3, 1fr)" }} role="group" aria-label="How are they paying?">
                 {(["cash", "gcash", "utang", ...(allPay ? ["maya", "bank", "split"] : [])] as Pay[]).map((p) => (
-                  <button key={p} type="button" className={`btn btn-lg ${pay === p ? "btn-dark" : "btn-outline-dark"}`} aria-pressed={pay === p} onClick={() => setPay(p)}>
+                  <button key={p} type="button" className={`btn btn-lg px-2 ${pay === p ? "btn-dark" : "btn-outline-dark"}`} aria-pressed={pay === p} onClick={() => setPay(p)}>
                     <i className={`bi ${PAY_ICON[p]} me-1`} aria-hidden="true"></i>{PAY_LABEL[p]}
                   </button>
                 ))}
               </div>
-              {!allPay && (
-                <div className="text-center mb-3"><button type="button" className="btn btn-link" onClick={() => setMorePay(true)}>Other ways to pay</button></div>
-              )}
 
-              {pay === "cash" && drawerOpen === false && shiftRequired && (
-                <OpenDrawer onOpened={() => { setDrawerOpen(true); setError(null); }} />
-              )}
-              {/* One pad at a time: the cash pad shows once the drawer is open. */}
               {pay === "cash" && !(drawerOpen === false && shiftRequired) && (
-                <>
-                  <div className="d-flex flex-wrap justify-content-center gap-2 mb-2" role="group" aria-label="Quick cash amounts">
-                    {quickCash(total).map((m) => (
-                      <button key={m} type="button" className={`btn btn-lg ${tendered && toMinor(tendered) === m ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setTendered(String(m / 100))}>
-                        {m === total ? "Exact" : peso(m)}
-                      </button>
-                    ))}
-                  </div>
-                  <NumPad value={tendered} onChange={setTendered} decimals={2} label="Cash received" unit="₱" />
-                  {tendered && <div className={`mt-2 text-center change-due ${change < 0 ? "text-danger" : "text-success"}`} aria-live="polite">{change < 0 ? `Short ${peso(-change)}` : `Change to give ${peso(change)}`}</div>}
-                </>
+                <div className="d-flex flex-wrap justify-content-center gap-2 mb-2" role="group" aria-label="Quick cash amounts">
+                  {quickCash(total).map((m) => (
+                    <button key={m} type="button" className={`btn btn-lg ${tendered && toMinor(tendered) === m ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setTendered(String(m / 100))}>
+                      {m === total ? "Exact" : peso(m)}
+                    </button>
+                  ))}
+                </div>
               )}
               {pay === "split" && (
                 <>
@@ -713,12 +739,14 @@ export default function BentaPanel() {
               )}
               {pay === "utang" && (
                 <>
-                  <label className="form-label" htmlFor="bt-cust">Customer</label>
-                  <select id="bt-cust" className="form-select form-select-lg mb-2" disabled={!!priceCustomer} value={customerId} onChange={(e) => { setCustomerId(e.target.value); setCustomerSig(null); }}>
-                    <option value="">Choose…</option>
-                    {customers.filter((c) => c.creditApproved).map((c) => <option key={c.id} value={c.id}>{c.name ?? c.phone ?? "—"} — owes {peso(c.creditBalanceMinor)} · {creditStatusWords(c.creditStatus).label}</option>)}
-                  </select>
-                  {!newCust && <button type="button" className="btn btn-outline-success mb-2" disabled={offline} onClick={() => setNewCust(true)}>+ New customer{offline && <> · <i className="bi bi-lock"></i> {NEEDS_NET}</>}</button>}
+                  <label className="form-label mb-1" htmlFor="bt-cust">Customer</label>
+                  <div className="d-flex gap-2 mb-2">
+                    <select id="bt-cust" className="form-select" style={{ minWidth: 0 }} disabled={!!priceCustomer} value={customerId} onChange={(e) => { setCustomerId(e.target.value); setCustomerSig(null); }}>
+                      <option value="">Choose…</option>
+                      {customers.filter((c) => c.creditApproved).map((c) => <option key={c.id} value={c.id}>{c.name ?? c.phone ?? "—"} — owes {peso(c.creditBalanceMinor)} · {creditStatusWords(c.creditStatus).label}</option>)}
+                    </select>
+                    {!newCust && <button type="button" className="btn btn-outline-success flex-shrink-0" disabled={offline} onClick={() => setNewCust(true)}>+ New customer{offline && <> · <i className="bi bi-lock"></i> {NEEDS_NET}</>}</button>}
+                  </div>
                   {newCust && <QuickCustomer onCancel={() => setNewCust(false)} onAdded={async (id) => {
                     const res = await fetch(`${API_URL}/admin/customers`, { headers: adminHeaders() });
                     if (res.ok) setCustomers(((await res.json()).customers ?? []) as Customer[]);
@@ -731,12 +759,34 @@ export default function BentaPanel() {
                       {overLimit && (
                         <div className="alert alert-danger py-2">Over the credit limit ({peso(customer.creditLimitMinor)}). The customer must pay some of the balance first — use the Credit screen — then can buy on credit again.</div>
                       )}
-                      <div className="fw-semibold">Signature of {customer.name ?? "the customer"}</div>
-                      <SignaturePad key={customerId} onSignature={setCustomerSig} />
                     </>
                   )}
                 </>
               )}
+             </div>
+             {padSide && (
+               <div className="col-md-6">
+                 {pay === "cash" && drawerOpen === false && shiftRequired && (
+                   <OpenDrawer onOpened={() => { setDrawerOpen(true); setError(null); }} />
+                 )}
+                 {/* One pad at a time: the cash pad shows once the drawer is open. */}
+                 {pay === "cash" && !(drawerOpen === false && shiftRequired) && (
+                   <>
+                     <NumPad value={tendered} onChange={setTendered} decimals={2} label="Cash received" unit="₱" />
+                     {tendered && <div className={`mt-2 text-center change-due ${change < 0 ? "text-danger" : "text-success"}`} aria-live="polite">{change < 0 ? `Short ${peso(-change)}` : `Change to give ${peso(change)}`}</div>}
+                   </>
+                 )}
+                 {pay === "utang" && (customer ? (
+                   <>
+                     <div className="fw-semibold">Signature of {customer.name ?? "the customer"}</div>
+                     <SignaturePad key={customerId} onSignature={setCustomerSig} />
+                   </>
+                 ) : (
+                   <div className="h-100 d-flex align-items-center justify-content-center text-center text-muted border rounded-3 p-3" style={{ minHeight: "7rem" }}>Choose the customer, then they sign here.</div>
+                 ))}
+               </div>
+             )}
+             </div>
 
               {(allPay || paper) && <div className="form-check form-switch mt-3">
                 <input className="form-check-input" type="checkbox" id="bt-paper" checked={paper} onChange={(e) => setPaper(e.target.checked)} />
@@ -763,19 +813,14 @@ export default function BentaPanel() {
                 </div>
               )}
 
-              <div className="d-flex gap-2 mt-3">
+              <div className="d-flex gap-2 mt-2 pos-actions">
                 <button type="button" className="btn btn-outline-dark btn-lg" disabled={busy} onClick={() => setStep("pick")}>Back</button>
                 <button type="button" className="btn btn-success btn-lg flex-fill py-3 fw-bold sale-pay" disabled={!canSubmit} onClick={() => void submit()}>{busy ? "Please wait…" : "Finish sale"}</button>
               </div>
-              {pay === "cash" && !tendered && <div className="text-center text-muted mt-2">{drawerOpen === false && shiftRequired ? "Open the cash drawer first." : "Tap Exact or enter the cash received first."}</div>}
+              {pay === "cash" && !tendered && <div className="text-center text-muted mt-1">{drawerOpen === false && shiftRequired ? "Open the cash drawer first." : "Tap Exact or enter the cash received first."}</div>}
             </div>
           </div>
-        )}
-      </div>
-      {sideBySide && (
-        <div className="col-lg-5 col-xl-4 pos-side">
-          {quickCount || editCard || cartCard || (
-            <div className="card"><div className="card-body text-center text-muted py-5"><i className="bi bi-hand-index fs-1 d-block mb-2" aria-hidden="true"></i>Tap a product to start a sale.</div></div>
+            </div>
           )}
         </div>
       )}

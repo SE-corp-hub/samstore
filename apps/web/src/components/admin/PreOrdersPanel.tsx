@@ -19,7 +19,8 @@ import PriceReason, { reasonOk } from "./PriceReason";
 import { askBelowCost, saveUnitCost } from "./BelowCostDialog";
 import { isBelowCost, okKey } from "../../lib/below-cost";
 import { buildText, openTextApp } from "../../lib/text-message";
-import { useMediaQuery, WIDE } from "../../lib/use-media-query";
+import { FIT, useMediaQuery, WIDE } from "../../lib/use-media-query";
+import { useFitHeight } from "../../lib/use-fit-height";
 import { quickCash } from "../../lib/quick-cash";
 import { peso } from "../../lib/number-format";
 import ProductFinder from "./ProductFinder";
@@ -218,6 +219,9 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
   const [buildBusy, setBuildBusy] = useState(false);
   const [hidePrice, setHidePrice] = useState(false); // StoreSettings.hidePricePreOrder
   const wide = useMediaQuery(WIDE);
+  // Tablet or PC: the screen is exactly the space between the bars (no page scroll); the list and the products scroll in their own boxes.
+  const fit = useMediaQuery(FIT);
+  const fitRef = useFitHeight<HTMLDivElement>(fit);
 
   /** ₱— when store hides per-product prices (subtotal/total still shown). */
   const maybePrice = (minor: number) => (hidePrice ? "—" : toPesos(minor));
@@ -694,63 +698,64 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
     : reasonMissing ? "Pick a reason for each changed price (part 3)." : null;
   const saveLabel = buildBusy ? "Saving…" : editingPre ? "Save changes" : "Save pre-order";
 
+  // Part 1 in two short rows (the customer; or a new name and mobile), so the products start high on the screen.
   const customerSection = (
-    <section className="card mb-3" aria-labelledby="po-who">
-      <div className="card-body">
-        <h2 id="po-who" className="h5 mb-3 d-flex align-items-center"><Num n={1} />Who is it for?</h2>
+    <section aria-labelledby="po-who">
+      <div className="d-flex flex-wrap align-items-center gap-2 mb-2">
+        <h2 id="po-who" className="h5 mb-0 d-flex align-items-center text-nowrap"><Num n={1} />Who is it for?</h2>
         {editingPre ? (
           <div className="fs-5 fw-semibold">{editingPre.customerName || "—"}</div>
         ) : (
-          <>
-            <select aria-label="Customer" className="form-select form-select-lg" value={buildCustomerId} onChange={(e) => { setBuildCustomerId(e.target.value); if (e.target.value) { setBuildNewName(""); setBuildNewPhone(""); } }}>
-              <option value="">Choose a customer…</option>
-              {buildCustomers.map((c) => <option key={c.id} value={c.id}>{c.name ?? c.email ?? c.phone ?? "Customer"}</option>)}
-            </select>
-            {!buildCustomerId && (
-              <>
-                <div className="text-center text-muted my-2">or a new customer</div>
-                <div className="row g-2">
-                  <div className="col-sm-7"><input className="form-control form-control-lg" aria-label="New customer's name" placeholder="Name" value={buildNewName} onChange={(e) => setBuildNewName(e.target.value)} /></div>
-                  <div className="col-sm-5"><input className="form-control form-control-lg" inputMode="tel" aria-label="New customer's mobile number" placeholder="Mobile (optional)" value={buildNewPhone} onChange={(e) => setBuildNewPhone(e.target.value)} /></div>
-                </div>
-              </>
-            )}
-          </>
+          <select aria-label="Customer" className="form-select" style={{ flex: "1 1 14rem", maxWidth: "26rem" }} value={buildCustomerId} onChange={(e) => { setBuildCustomerId(e.target.value); if (e.target.value) { setBuildNewName(""); setBuildNewPhone(""); } }}>
+            <option value="">Choose a customer…</option>
+            {buildCustomers.map((c) => <option key={c.id} value={c.id}>{c.name ?? c.email ?? c.phone ?? "Customer"}</option>)}
+          </select>
         )}
       </div>
-    </section>
-  );
-
-  const pickSection = (
-    <section className="mb-3" aria-labelledby="po-items">
-      <h2 id="po-items" className="h5 mb-3 d-flex align-items-center"><Num n={2} />Tap items to add</h2>
-      {newItemOpen ? (
-        <NewItemForm preorder onCancel={() => setNewItemOpen(false)} onDone={async () => { setNewItemOpen(false); await loadBuilder(); }} />
-      ) : (
-        <>
-          {buildProducts.length === 0 && <p className="text-muted text-center py-4">Loading products…</p>}
-          <ProductFinder list="preorder" items={buildProducts} colClass={wide ? "col-6 col-xl-4" : "col-6 col-md-4"}
-            renderTile={(p) => {
-              const n = inOrder(p.id);
-              return (
-                <PickTile name={p.name} price={maybePrice(p.priceMinor)} countText={n > 0 ? `${n} in order` : undefined}
-                  stock={p.availableQuantity <= 0 ? "None in stock yet" : `${p.availableQuantity} in stock`}
-                  ariaLabel={`Add ${p.name}${n > 0 ? `, ${n} in this order` : ""}`} onClick={() => { noteUse("preorder", p.id); addProduct(p); }} />
-              );
-            }} />
-          <div className="text-center">
-            <button type="button" className="btn btn-outline-primary" disabled={offline} onClick={() => setNewItemOpen(true)}>+ New item (not on the list yet){offline && " · Needs internet"}</button>
-          </div>
-        </>
+      {!editingPre && !buildCustomerId && (
+        <div className="d-flex flex-wrap align-items-center gap-2 mb-2" style={{ paddingLeft: "2.5rem" }}>
+          <span className="text-muted text-nowrap">or a new customer:</span>
+          <input className="form-control" style={{ flex: "2 1 10rem", maxWidth: "18rem" }} aria-label="New customer's name" placeholder="Name" value={buildNewName} onChange={(e) => setBuildNewName(e.target.value)} />
+          <input className="form-control" style={{ flex: "1 1 9rem", maxWidth: "14rem" }} inputMode="tel" aria-label="New customer's mobile number" placeholder="Mobile (optional)" value={buildNewPhone} onChange={(e) => setBuildNewPhone(e.target.value)} />
+        </div>
       )}
     </section>
   );
 
+  // Part 2: the heading sits in the product bar with the search box; the products scroll in their own box.
+  const itemsLead = <h2 id="po-items" className="h5 mb-0 d-flex align-items-center text-nowrap me-1"><Num n={2} />Tap items to add</h2>;
+  const pickSection = newItemOpen ? (
+    <div className="fit-scroll">
+      {itemsLead}
+      <div className="mt-2"><NewItemForm preorder onCancel={() => setNewItemOpen(false)} onDone={async () => { setNewItemOpen(false); await loadBuilder(); }} /></div>
+    </div>
+  ) : (
+    <>
+      {buildProducts.length === 0 && <p className="text-muted text-center py-2 mb-0">Loading products…</p>}
+      <ProductFinder list="preorder" items={buildProducts} colClass="col-6 col-md-3" fit={fit} lead={itemsLead}
+        footer={(
+          <div className="text-center mb-2">
+            <button type="button" className="btn btn-outline-primary" disabled={offline} onClick={() => setNewItemOpen(true)}>+ New item (not on the list yet){offline && " · Needs internet"}</button>
+          </div>
+        )}
+        renderTile={(p) => {
+          const n = inOrder(p.id);
+          return (
+            <PickTile name={p.name} price={maybePrice(p.priceMinor)} countText={n > 0 ? `${n} in order` : undefined}
+              stock={p.availableQuantity <= 0 ? "None in stock yet" : `${p.availableQuantity} in stock`}
+              ariaLabel={`Add ${p.name}${n > 0 ? `, ${n} in this order` : ""}`} onClick={() => { noteUse("preorder", p.id); addProduct(p); }} />
+          );
+        }} />
+    </>
+  );
+
+  // Part 3: the order. Its lines scroll; the total and Save stay in view.
   const orderSection = (
-    <section className="sale-card mb-3" aria-labelledby="po-check">
+    <section className={`sale-card fit-card${fit && !wide ? " fit-bottom" : ""} mb-2`} aria-labelledby="po-check">
       <div className="card-body">
         <h2 id="po-check" className="h5 mb-2 d-flex align-items-center"><Num n={3} />Check the order</h2>
-        {buildCart.length === 0 && <p className="text-muted text-center py-3 mb-0">Nothing yet. Tap items {wide ? "on the left" : "above"} (part 2).</p>}
+        {buildCart.length === 0 && <p className="text-muted text-center py-2 mb-0">Nothing yet. Tap items {wide ? "on the left" : "above"} (part 2).</p>}
+        <div className="sale-lines">
         {buildCart.map((l) => {
           const changed = l.price !== undefined && l.price !== l.product.priceMinor;
           return (
@@ -790,12 +795,13 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
             </div>
           );
         })}
+        </div>
         <div className="sale-total">
           <span className="label">Total · {itemsInOrder} item{itemsInOrder === 1 ? "" : "s"}</span><span className="amount">{maybePrice(buildSubtotal)}</span>
         </div>
-        {wide && (
+        {(wide || fit) && (
           <div className="pos-actions mt-2">
-            <button className="btn btn-success btn-lg w-100 py-3 fw-bold" disabled={!canSave} onClick={savePreorder}>
+            <button className="btn btn-success btn-lg w-100 py-2 fw-bold" disabled={!canSave} onClick={savePreorder}>
               <i className="bi bi-bag-check me-1"></i>{saveLabel}
             </button>
             {saveHint && <div className="text-center text-muted mt-1">{saveHint}</div>}
@@ -805,41 +811,51 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
     </section>
   );
 
+  // Sideways: who + products on the left, the order on the right. Upright: the order under the products. A phone keeps a sticky Save bar.
   const renderBuild = () => wide ? (
-    <div className="row g-3 align-items-start">
-      <div className="col-lg-7">{customerSection}{pickSection}</div>
-      <div className="col-lg-5 pos-side">{orderSection}</div>
+    <div className="fit-row">
+      <div className="fit-col fit-main">{customerSection}{pickSection}</div>
+      <div className="fit-col fit-side">{orderSection}</div>
     </div>
   ) : (
-    <div className="mx-auto" style={{ maxWidth: 720 }}>
+    <div className="fit-col">
       {customerSection}
       {pickSection}
       {orderSection}
-      <div className="position-sticky bottom-0 sticky-above-bar sale-card shadow p-2 mb-2" style={{ zIndex: 5 }}>
-        <div className="d-flex align-items-center gap-2">
-          <div className="text-nowrap" style={{ fontVariantNumeric: "tabular-nums" }}>
-            <div className="fw-bold fs-4">{maybePrice(buildSubtotal)}</div>
-            <div className="text-muted">{itemsInOrder} item{itemsInOrder === 1 ? "" : "s"}</div>
+      {!fit && (
+        <div className="position-sticky bottom-0 sticky-above-bar sale-card shadow p-2 mb-2" style={{ zIndex: 5 }}>
+          <div className="d-flex align-items-center gap-2">
+            <div className="text-nowrap" style={{ fontVariantNumeric: "tabular-nums" }}>
+              <div className="fw-bold fs-4">{maybePrice(buildSubtotal)}</div>
+              <div className="text-muted">{itemsInOrder} item{itemsInOrder === 1 ? "" : "s"}</div>
+            </div>
+            <button className="btn btn-success btn-lg flex-fill fw-bold" disabled={!canSave} onClick={savePreorder}>
+              <i className="bi bi-bag-check me-1"></i>{saveLabel}
+            </button>
           </div>
-          <button className="btn btn-success btn-lg flex-fill fw-bold" disabled={!canSave} onClick={savePreorder}>
-            <i className="bi bi-bag-check me-1"></i>{saveLabel}
-          </button>
+          {saveHint && <div className="text-center text-muted small mt-1">{saveHint}</div>}
         </div>
-        {saveHint && <div className="text-center text-muted small mt-1">{saveHint}</div>}
-      </div>
+      )}
     </div>
   );
 
   return (
-    <div className="sell-screen tone-sell">
-      <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
-        <h1 className="h4 mb-0">{subTab !== "build" ? "Pre-order" : editingPre ? `Change ${editingPre.orderNumber}` : "New pre-order"}</h1>
+    <div ref={fitRef} className="sell-screen tone-sell sell-fit">
+      {/* One row: the title, Waiting / Done, and the one green button. */}
+      <div className="d-flex flex-wrap align-items-center gap-2 mb-2">
+        <h1 className="h4 mb-0 me-1">{subTab !== "build" ? "Pre-order" : editingPre ? `Change ${editingPre.orderNumber}` : "New pre-order"}</h1>
+        {subTab !== "build" && (
+          <div className="btn-group" role="group" aria-label="Pre-order list">
+            <button type="button" className={`btn ${subTab === "list" ? "btn-dark" : "btn-outline-dark"}`} aria-pressed={subTab === "list"} onClick={() => setSubTab("list")}><i className="bi bi-hourglass-split me-1" aria-hidden="true"></i>Waiting ({drafts.length + here.length})</button>
+            <button type="button" className={`btn ${subTab === "finalize" ? "btn-dark" : "btn-outline-dark"}`} aria-pressed={subTab === "finalize"} onClick={() => setSubTab("finalize")}><i className="bi bi-check2-circle me-1" aria-hidden="true"></i>Done</button>
+          </div>
+        )}
         {subTab === "build" ? (
-          <button className="btn btn-outline-dark btn-lg" onClick={backToList}>
+          <button className="btn btn-outline-dark ms-auto" onClick={backToList}>
             <i className="bi bi-arrow-left me-1"></i>{editingPre ? "Cancel" : "Back to list"}
           </button>
         ) : (
-          <button className="btn btn-success btn-lg" onClick={newPreorder}><i className="bi bi-plus-lg me-1"></i>New pre-order</button>
+          <button className="btn btn-success ms-auto" onClick={newPreorder}><i className="bi bi-plus-lg me-1"></i>New pre-order</button>
         )}
       </div>
 
@@ -862,14 +878,7 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
       {error && <div className="alert alert-danger py-2" role="alert">{error}</div>}
       {receiptOrder && <ReceiptModal orderId={receiptOrder} onClose={() => setReceiptOrder(null)} />}
 
-      {subTab !== "build" && (
-        <div className="btn-group w-100 mb-3" role="group" aria-label="Pre-order list">
-          <button type="button" className={`btn btn-lg ${subTab === "list" ? "btn-dark" : "btn-outline-dark"}`} aria-pressed={subTab === "list"} onClick={() => setSubTab("list")}><i className="bi bi-hourglass-split me-1" aria-hidden="true"></i>Waiting ({drafts.length + here.length})</button>
-          <button type="button" className={`btn btn-lg ${subTab === "finalize" ? "btn-dark" : "btn-outline-dark"}`} aria-pressed={subTab === "finalize"} onClick={() => setSubTab("finalize")}><i className="bi bi-check2-circle me-1" aria-hidden="true"></i>Done</button>
-        </div>
-      )}
-
-      {subTab === "list" ? renderList(false) : subTab === "finalize" ? renderList(true) : renderBuild()}
+      {subTab === "build" ? renderBuild() : <div className="fit-scroll">{renderList(subTab === "finalize")}</div>}
 
       {/* Delete pre-order confirm */}
       {confirmVoid && (
@@ -930,7 +939,7 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
       {finalizeTarget && (
         <>
           <div className="modal fade show d-block" tabIndex={-1}>
-            <div className="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+            <div className="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-fit">
               <div className="modal-content sell-screen">
                 <div className="modal-header">
                   <h5 className="modal-title">Complete sale · {finalizeTarget.customerName || finalizeTarget.orderNumber}</h5>
@@ -938,49 +947,59 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
                 </div>
                 <div className="modal-body">
                   {finalizeError && <div className="alert alert-danger py-2">{finalizeError}</div>}
-                  <div className="text-center mb-3">
-                    <div className="text-muted">Customer pays</div>
-                    <div className="big-amount">{toPesos(finalizeTarget.totalMinor)}</div>
-                  </div>
-                  <div className="text-center fw-semibold mb-2">How are they paying?</div>
-                  <div className="d-grid gap-2 mb-3" style={{ gridTemplateColumns: "1fr 1fr" }} role="group" aria-label="How are they paying?">
-                    <button type="button" className={`btn btn-lg ${finalizePay === "cash" ? "btn-dark" : "btn-outline-dark"}`} aria-pressed={finalizePay === "cash"} onClick={() => setFinalizePay("cash")}><i className="bi bi-cash me-1"></i>Cash</button>
-                    <button type="button" className={`btn btn-lg ${finalizePay === "credit" ? "btn-dark" : "btn-outline-dark"}`} aria-pressed={finalizePay === "credit"} onClick={() => setFinalizePay("credit")}><i className="bi bi-journal-text me-1"></i>Credit (utang)</button>
-                  </div>
-                  {finalizePay === "cash" ? (
-                    <>
-                      <div className="d-flex flex-wrap justify-content-center gap-2 mb-2" role="group" aria-label="Quick cash amounts">
-                        {quickCash(finalizeTarget.totalMinor).map((m) => (
-                          <button key={m} type="button" className={`btn btn-lg ${finalizeCash === m ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setFinalizeTendered(String(m / 100))}>
-                            {m === finalizeTarget.totalMinor ? "Exact" : toPesos(m)}
-                          </button>
-                        ))}
+                  {/* Two columns on a tablet, so the whole pop-up fits sideways: what and how on the left, the cash or the signature on the right. */}
+                  <div className="row g-3">
+                    <div className="col-md-6">
+                      <div className="text-center mb-2">
+                        <div className="text-muted">Customer pays</div>
+                        <div className="big-amount">{toPesos(finalizeTarget.totalMinor)}</div>
                       </div>
-                      <label className="form-label w-100 text-center" htmlFor="fin-cash">or type the cash received</label>
-                      <PesoInput id="fin-cash" className="form-control form-control-lg text-center" value={finalizeTendered} onChange={setFinalizeTendered} placeholder="0.00" />
-                      {finalizeTendered && (
-                        <div className={`mt-2 text-center change-due ${finalizeCash < finalizeTarget.totalMinor ? "text-danger" : "text-success"}`} aria-live="polite">
-                          {finalizeCash < finalizeTarget.totalMinor ? `Short ${toPesos(finalizeTarget.totalMinor - finalizeCash)}` : `Change to give ${toPesos(finalizeCash - finalizeTarget.totalMinor)}`}
+                      <div className="text-center fw-semibold mb-2">How are they paying?</div>
+                      <div className="d-grid gap-2 mb-3" style={{ gridTemplateColumns: "1fr 1fr" }} role="group" aria-label="How are they paying?">
+                        <button type="button" className={`btn btn-lg px-2 ${finalizePay === "cash" ? "btn-dark" : "btn-outline-dark"}`} aria-pressed={finalizePay === "cash"} onClick={() => setFinalizePay("cash")}><i className="bi bi-cash me-1"></i>Cash</button>
+                        <button type="button" className={`btn btn-lg px-2 ${finalizePay === "credit" ? "btn-dark" : "btn-outline-dark"}`} aria-pressed={finalizePay === "credit"} onClick={() => setFinalizePay("credit")}><i className="bi bi-journal-text me-1"></i>Credit (utang)</button>
+                      </div>
+                      {finalizePay === "cash" ? (
+                        <div className="d-flex flex-wrap justify-content-center gap-2" role="group" aria-label="Quick cash amounts">
+                          {quickCash(finalizeTarget.totalMinor).map((m) => (
+                            <button key={m} type="button" className={`btn btn-lg ${finalizeCash === m ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setFinalizeTendered(String(m / 100))}>
+                              {m === finalizeTarget.totalMinor ? "Exact" : toPesos(m)}
+                            </button>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="row g-2">
+                          <div className="col-6">
+                            <label className="form-label" htmlFor="fin-start">Start date</label>
+                            <input id="fin-start" className="form-control" type="date" value={finalizeStart} onChange={(e) => setFinalizeStart(e.target.value)} />
+                          </div>
+                          <div className="col-6">
+                            <label className="form-label" htmlFor="fin-due">Pay by</label>
+                            <input id="fin-due" className="form-control" type="date" value={finalizeDue} onChange={(e) => setFinalizeDue(e.target.value)} />
+                          </div>
                         </div>
                       )}
-                    </>
-                  ) : (
-                    <>
-                      <div className="row g-2 mb-2">
-                        <div className="col-6">
-                          <label className="form-label" htmlFor="fin-start">Start date</label>
-                          <input id="fin-start" className="form-control" type="date" value={finalizeStart} onChange={(e) => setFinalizeStart(e.target.value)} />
-                        </div>
-                        <div className="col-6">
-                          <label className="form-label" htmlFor="fin-due">Pay by</label>
-                          <input id="fin-due" className="form-control" type="date" value={finalizeDue} onChange={(e) => setFinalizeDue(e.target.value)} />
-                        </div>
-                      </div>
-                      <div className="fw-semibold mb-1">Customer signs here</div>
-                      <SignaturePad onSignature={(d) => { setFinalizeSig(d); if (d) setFinalizeSigError(false); }} />
-                      {finalizeSigError && <div className="text-danger">Signature needed — please sign above.</div>}
-                    </>
-                  )}
+                    </div>
+                    <div className="col-md-6">
+                      {finalizePay === "cash" ? (
+                        <>
+                          <label className="form-label w-100 text-center" htmlFor="fin-cash">or type the cash received</label>
+                          <PesoInput id="fin-cash" className="form-control form-control-lg text-center" value={finalizeTendered} onChange={setFinalizeTendered} placeholder="0.00" />
+                          {finalizeTendered && (
+                            <div className={`mt-2 text-center change-due ${finalizeCash < finalizeTarget.totalMinor ? "text-danger" : "text-success"}`} aria-live="polite">
+                              {finalizeCash < finalizeTarget.totalMinor ? `Short ${toPesos(finalizeTarget.totalMinor - finalizeCash)}` : `Change to give ${toPesos(finalizeCash - finalizeTarget.totalMinor)}`}
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <>
+                          <div className="fw-semibold mb-1">Customer signs here</div>
+                          <SignaturePad onSignature={(d) => { setFinalizeSig(d); if (d) setFinalizeSigError(false); }} />
+                          {finalizeSigError && <div className="text-danger">Signature needed — please sign above.</div>}
+                        </>
+                      )}
+                    </div>
+                  </div>
                 </div>
                 <div className="modal-footer d-flex gap-2">
                   <button className="btn btn-outline-dark btn-lg" onClick={() => setFinalizeTarget(null)}>Back</button>

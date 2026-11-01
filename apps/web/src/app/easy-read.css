@@ -299,3 +299,65 @@ html[data-text-size] .btn:focus-visible { box-shadow: none; }
 .finder-heading { display: flex; align-items: center; gap: 0.4rem; margin: 0.25rem 0 0.5rem; font-size: 1.05rem; font-weight: 700; color: var(--sam-text); }
 .finder-heading.group { padding-bottom: 0.25rem; border-bottom: 2px solid #e1d6c6; }
 .finder-heading .bi-star-fill { color: #8a5a00; }
+
+/* ── 9. Fit the tablet (2026-11-01): POS and Pre-order fill exactly the space between the top bar and
+   the bottom bar (lib/use-fit-height.ts sets the height), so nothing needs scrolling to be seen or
+   tapped, upright (800 × 1200) or sideways (1280 × 720). Only the product list (.fit-scroll) and the
+   lines of a long sale (.sale-lines) scroll, each inside its own box; the store chips, the search,
+   the total and the green button stay where they are. A phone (< 600 px) keeps the flowing page. */
+.sell-fit { display: flex; flex-direction: column; min-height: 0; }
+.sell-fit > * { flex: 0 0 auto; }
+.fit-row { display: flex; flex: 1 1 auto; min-height: 0; gap: 1rem; align-items: stretch; }
+.fit-col { display: flex; flex-direction: column; min-height: 0; }
+.fit-col > * { flex: 0 0 auto; }
+.sell-fit > .fit-col { flex: 1 1 auto; }
+.fit-main { flex: 1 1 0; min-width: 0; }
+.fit-side { flex: 0 0 40%; max-width: 32rem; min-width: 0; }
+.fit-col > .fit-scroll { flex: 1 1 auto; min-height: 4rem; }
+.fit-scroll { overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; padding-right: 2px; }
+/* The sale card never grows past its column: its lines scroll, the total and the button stay. */
+.fit-col > .fit-card { display: flex; flex-direction: column; flex: 0 1 auto; min-height: 0; }
+.fit-col > .fit-bottom { flex: 0 0 auto; max-height: 60vh; max-height: 60dvh; }
+.sell-fit .fit-card > .card-body { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.sell-fit .fit-card > .card-body > * { flex: 0 0 auto; }
+.sell-fit .fit-card .sale-lines { flex: 0 1 auto; min-height: 3.5rem; overflow-y: auto; overscroll-behavior: contain; }
+/* Back / Add to sale / Save / Finish sale stay in view at the bottom when a card has to scroll (Extra large text):
+   inside a .fit-card its body scrolls; the pay card (.fit-pay) scrolls with the column's .fit-scroll box. */
+.sell-fit .fit-card .pos-actions, .sell-fit .fit-scroll > .fit-pay .pos-actions { position: sticky; bottom: 0; background: #fff; padding: 0.5rem 0 0; margin-bottom: -0.25rem; }
+/* A little more room: the page padding above and below the selling screens is smaller. */
+main:has(> * > .rice-ui > .sell-fit), main:has(> .rice-ui > .sell-fit) { padding-top: 0.75rem !important; }
+.rice-ui:has(> .sell-fit) { padding-bottom: 0 !important; }
+
+/* The Walk-in / Full sale switch: one line each on a tablet ("Walk-in · Cash only, two taps"). */
+@media (min-width: 768px) {
+  .sell-fit .seg-caption { display: inline; font-weight: 500; }
+  .sell-fit .seg-caption::before { content: " · "; }
+}
+
+/* The product bar: search box and variety buttons in one row (and a heading before them on Pre-order). */
+.finder-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; }
+.finder-bar .finder-search { position: relative; flex: 1 1 11rem; min-width: 0; }
+.finder-bar .finder-groups { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+
+/* Product buttons: four to a row on the tablet, 6 rem tall (the name, the price, what is left). */
+.sell-fit .pick-tile { min-height: 6rem; }
+
+/* The number pad: 64 px keys; 52 px when the screen is short (the tablet sideways), so the whole pad,
+   the amount and Back / Add to sale fit beside the product list. */
+.numpad-display { min-height: 64px; font-size: 2rem; font-variant-numeric: tabular-nums; }
+.numpad-keys { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.5rem; }
+.numpad-key { min-height: 64px; font-size: 1.5rem; font-variant-numeric: tabular-nums; }
+@media (max-height: 760px) {
+  .numpad-display { min-height: 48px; padding-top: 0.2rem; padding-bottom: 0.2rem; font-size: 1.75rem; }
+  .numpad-keys { gap: 0.3rem; }
+  .rice-ui .numpad-key, .numpad-key { min-height: 48px; font-size: 1.35rem; }
+  .sell-fit .sale-card > .card-body { padding: 0.6rem 0.75rem; }
+  .sell-fit .big-amount { font-size: 1.85rem; }
+  .sell-fit .change-due { font-size: 1.5rem; }
+  .sell-fit .steps { margin-bottom: 0.25rem; }
+  .sell-fit .fit-card .pos-actions { padding-top: 0.35rem; }
+}
+.sell-fit .steps { margin-bottom: 0.5rem; }
+.sell-fit > .fit-scroll { flex: 1 1 auto; min-height: 4rem; }
+/* The Complete sale pop-up: wide enough for its two columns on the tablet either way (Bootstrap's modal-lg only widens from 992 px). */
+.admin-shell .modal-dialog.modal-fit { max-width: min(56rem, calc(100vw - 2rem)); }
