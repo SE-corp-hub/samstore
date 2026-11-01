@@ -3,7 +3,8 @@
 import { useState } from "react";
 
 // Rice Ops M5 — the big on-screen number pad. Numbers never go through the phone
-// keyboard: 64 px keys, equal-width digits, one thumb. `decimals` allows one "." (kilos).
+// keyboard: 64 px keys (52 px on a short screen, the tablet held sideways — easy-read.css §9),
+// equal-width digits, one thumb. `decimals` allows one "." (kilos).
 
 export default function NumPad({
   value,
@@ -44,13 +45,12 @@ export default function NumPad({
   const keys = ["1", "2", "3", "4", "5", "6", "7", "8", "9", decimals > 0 ? "." : "C", "0", "⌫"];
   return (
     <div>
-      <div className="border rounded-3 px-3 py-2 mb-2 text-end bg-white" aria-live="polite" aria-label={label}
-        style={{ fontSize: "2rem", fontVariantNumeric: "tabular-nums", minHeight: 64 }}>
+      <div className="border rounded-3 px-3 py-2 mb-2 text-end bg-white numpad-display" aria-live="polite" aria-label={label}>
         {value || <span className="text-muted">0</span>}{unit ? <span className="fs-5 ms-2 text-muted">{unit}</span> : null}
       </div>
-      <div className="d-grid gap-2" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
+      <div className="numpad-keys">
         {keys.map((k) => (
-          <button key={k} type="button" className="btn btn-light border" style={{ fontSize: "1.5rem", minHeight: 64, fontVariantNumeric: "tabular-nums" }}
+          <button key={k} type="button" className="btn btn-light border numpad-key"
             aria-label={k === "⌫" ? "Delete last digit" : k === "C" ? "Clear all" : k} onClick={() => press(k)}>
             {k}
           </button>

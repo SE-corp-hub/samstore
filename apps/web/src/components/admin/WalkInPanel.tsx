@@ -5,7 +5,7 @@
 //   It is the same sale as the full POS (POST /admin/benta): same stock, cost, Store payable charge,
 //   offline queue and receipt. Credit, GCash, special prices and "take from another store" stay in Full sale.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { cachedGet, offlineRef, savedCopy, savedThenFresh, useOffline } from "../../lib/offlineCache";
 import { sendStep } from "../../lib/offlineQueue";
 import { newSaleKey } from "../../lib/saleKey";
@@ -14,7 +14,8 @@ import { getPrinterSettings } from "../../lib/printer-settings";
 import { peso, kg } from "../../lib/number-format";
 import { quickCash } from "../../lib/quick-cash";
 import { matchesSearch, mostUsed, noteUse } from "../../lib/product-find";
-import { useMediaQuery, WIDE } from "../../lib/use-media-query";
+import { FIT, useMediaQuery, WIDE } from "../../lib/use-media-query";
+import { useFitHeight } from "../../lib/use-fit-height";
 import { toast } from "../../lib/toast";
 import { bestSellers, lineTotal } from "../../lib/walk-in";
 import StoreBar from "./StoreBar";
@@ -32,7 +33,8 @@ const BEST = 10;
 /** Kilos offered for loose rice, in grams. */
 const KILO_CHOICES = [500, 1000, 2000, 3000, 5000, 10000];
 
-export default function WalkInPanel({ onFullSale }: { onFullSale: () => void }) {
+/** `switcher`: the Walk-in / Full sale buttons, placed at the top of the product column so the sale card can start at the very top. */
+export default function WalkInPanel({ switcher }: { switcher?: ReactNode }) {
   const [locations, setLocations] = useState<Loc[]>([]);
   const [locationId, setLocationId] = useState("");
   const [homeLocationId, setHomeLocationId] = useState<string | null>(null);
@@ -49,6 +51,9 @@ export default function WalkInPanel({ onFullSale }: { onFullSale: () => void }) 
   const keyRef = useRef<string | null>(null);
   const offline = useOffline();
   const wide = useMediaQuery(WIDE);
+  // Tablet or PC: the screen is exactly the space between the bars (no page scroll); only the product list scrolls.
+  const fit = useMediaQuery(FIT);
+  const fitRef = useFitHeight<HTMLDivElement>(fit);
 
   const catalogAsk = useRef(0); // only the latest location asked for may fill the screen
   /** The price list of a location: the copy saved on this tablet at once, then the server's. Returns the location shown. */
@@ -161,7 +166,7 @@ export default function WalkInPanel({ onFullSale }: { onFullSale: () => void }) 
     const n = inSale(i.id);
     const left = i.stock[locationId] ?? 0;
     return (
-      <div key={i.id} className={wide ? "col-6 col-xl-4" : "col-6 col-md-4"}>
+      <div key={i.id} className="col-6 col-md-3">
         <PickTile name={i.name} price={peso(i.priceMinor)} priceNote={i.loose ? "/kg" : undefined}
           countText={n > 0 ? `${i.loose ? kg(n) : n} in sale` : undefined}
           stock={left <= 0 ? "None left here" : `${i.loose ? kg(left) : left} left`} stockOut={left <= 0}
@@ -171,23 +176,31 @@ export default function WalkInPanel({ onFullSale }: { onFullSale: () => void }) 
     );
   };
 
-  const picker = (
-    <>
-      <StoreBar label="Selling at" locations={locations} value={locationId} homeLocationId={homeLocationId} locked={lines.length > 0}
-        lockedNote="Finish or clear this sale to switch store." onPick={(id) => { setLines([]); void loadCatalog(id); }} />
-      <h2 className="h5 mb-2">Best sellers</h2>
-      <div className="row g-2 mb-3">{best.map(tile)}</div>
-      <label htmlFor="wi-search" className="form-label fw-semibold mb-1">Other rice</label>
-      <input id="wi-search" className="form-control form-control-lg mb-2" type="search" placeholder="Type a name, e.g. dinorado" value={search} onChange={(e) => setSearch(e.target.value)} />
-      {found.length > 0 && <div className="row g-2 mb-3">{found.map(tile)}</div>}
-      {search.trim() && found.length === 0 && <p className="text-muted">No rice matches “{search}”.</p>}
-    </>
+  // The rows above the product buttons stay put; the buttons themselves scroll in their own box (.fit-scroll).
+  const storeBar = (
+    <StoreBar inline size="md" label="Selling at" locations={locations} value={locationId} homeLocationId={homeLocationId} locked={lines.length > 0}
+      lockedNote="Finish or clear this sale to switch store." onPick={(id) => { setLines([]); void loadCatalog(id); }} />
+  );
+  const searching = search.trim() !== "";
+  const headingRow = (
+    <div className="d-flex flex-wrap align-items-center gap-2 mb-2">
+      <h2 className="h5 mb-0 me-auto">{searching ? "Other rice" : "Best sellers"}</h2>
+      <label htmlFor="wi-search" className="mb-0 fw-semibold">Other rice</label>
+      <input id="wi-search" className="form-control" style={{ flex: "0 1 14rem", minWidth: "9rem" }} type="search" placeholder="Type a name" value={search} onChange={(e) => setSearch(e.target.value)} />
+    </div>
+  );
+  const grid = (
+    <div className="fit-scroll">
+      {!searching && <div className="row g-2 mb-2">{best.map(tile)}</div>}
+      {searching && found.length > 0 && <div className="row g-2 mb-2">{found.map(tile)}</div>}
+      {searching && found.length === 0 && <p className="text-muted">No rice matches “{search}”.</p>}
+    </div>
   );
 
   // Sacks and packs count one each; a loose-rice line counts once whatever the kilos.
   const itemCount = lines.reduce((s, l) => s + (byId.get(l.productId)?.loose ? 1 : l.qty), 0);
   const side = (
-    <div className={`sale-card ${wide ? "position-sticky" : "position-sticky bottom-0 sticky-above-bar shadow"}`} style={wide ? { top: 12 } : { zIndex: 5, maxHeight: "60vh", overflowY: "auto" }}>
+    <div className={`sale-card fit-card${fit || wide ? "" : " position-sticky bottom-0 sticky-above-bar shadow"}${fit && !wide ? " fit-bottom" : ""}`} style={fit || wide ? undefined : { zIndex: 5, maxHeight: "60vh", overflowY: "auto" }}>
       <div className="card-body">
         {loosePick ? (
           <>
@@ -218,7 +231,7 @@ export default function WalkInPanel({ onFullSale }: { onFullSale: () => void }) 
         ) : (
           <>
             <div className="sale-card-title"><i className="bi bi-basket2-fill" aria-hidden="true"></i>This sale · {itemCount} {itemCount === 1 ? "item" : "items"}</div>
-            <ul className="list-unstyled mb-0">
+            <ul className="list-unstyled mb-0 sale-lines">
               {lines.map((l) => {
                 const i = byId.get(l.productId);
                 if (!i) return null;
@@ -266,15 +279,19 @@ export default function WalkInPanel({ onFullSale }: { onFullSale: () => void }) 
     </div>
   );
 
+  // Sideways: products left, the sale right, both from the top. Upright: the sale under the products.
   return (
-    <div className="sell-screen tone-sell">
-      {offline && <div className="alert alert-secondary py-2">Offline — walk-in sales are saved on this tablet and upload later.</div>}
-      {error && lines.length === 0 && <div className="alert alert-danger" role="alert">{error}</div>}
-      <div className="row g-3">
-        <div className={wide ? "col-lg-7 col-xl-8" : "col-12"}>{picker}</div>
-        <div className={wide ? "col-lg-5 col-xl-4" : "col-12"}>{side}</div>
-      </div>
-      <p className="text-muted mt-3">Credit, GCash, special prices or rice from another store? <button type="button" className="btn btn-link p-0 align-baseline" onClick={onFullSale}>Use Full sale</button>.</p>
+    <div ref={fitRef} className="sell-screen tone-sell sell-fit">
+      {offline && <div className="alert alert-secondary py-2 mb-2">Offline — walk-in sales are saved on this tablet and upload later.</div>}
+      {error && lines.length === 0 && <div className="alert alert-danger py-2 mb-2" role="alert">{error}</div>}
+      {wide ? (
+        <div className="fit-row">
+          <div className="fit-col fit-main">{switcher}{storeBar}{headingRow}{grid}</div>
+          <div className="fit-col fit-side">{side}</div>
+        </div>
+      ) : (
+        <div className="fit-col">{switcher}{storeBar}{headingRow}{grid}{side}</div>
+      )}
     </div>
   );
 }
