@@ -37,10 +37,32 @@ jobs:
       - name: Build
         run: npm run build
 
+  # `secrets` cannot be read in a job-level `if`: GitHub rejects the whole file ("This run likely
+  # failed because of a workflow file issue"), so not even the no-DB gate above ever ran. A tiny
+  # job reads the secret inside a step and says whether it is set; the gate below skips when it
+  # is not — skipped, never faked green.
+  db-secret:
+    name: is DATABASE_URL configured?
+    runs-on: ubuntu-latest
+    outputs:
+      configured: ${{ steps.check.outputs.configured }}
+    steps:
+      - id: check
+        env:
+          DB: ${{ secrets.DATABASE_URL }}
+        run: |
+          if [ -n "$DB" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "DATABASE_URL secret not set: the DB test gate is skipped."
+          fi
+
   db-tests:
     name: sequential test gate (needs DATABASE_URL secret)
     runs-on: ubuntu-latest
-    if: ${{ secrets.DATABASE_URL != '' }}
+    needs: db-secret
+    if: needs.db-secret.outputs.configured == 'true'
     env:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       JWT_SECRET: ${{ secrets.JWT_SECRET || 'ci-only-jwt-secret-0123456789abcdef' }}
