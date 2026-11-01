@@ -30,11 +30,24 @@
 
 **Color rules:** text on cream/cards must hold 4.5:1 contrast (the text/muted values above do); never gray-on-gray; status colors carry a text label or icon, never color alone.
 
+**Easy-to-read pass (2026-10-31, `apps/web/src/app/easy-read.css`):** the owner is 65, so the admin console now aims at the comfortable 7:1 level for helper text (`--sam-muted` is `#5A4D42`, 7.6:1 on cream) and gives every colour ONE meaning on every screen:
+
+| Colour | Means | Used for |
+|--------|-------|----------|
+| Green `#1F6F3F` | go, done, paid, money in | `.btn-primary` and `.btn-success` (the main button of a screen), success badges/alerts, switches that are on |
+| Red `#A3201B` | stop, problem, owed, remove | `.btn-danger`, danger badges/alerts |
+| Amber `#8A5A00` (text `#6F4800` on `#FFF3D6`) | careful, waiting, check | warning badges/alerts, `.btn-warning` |
+| Blue `#0B4F8A` | information, print, view | links, `.btn-outline-primary`, `.btn-info`, info/primary badges |
+| Dark ink `#33261D` / `#4A4844` | neutral choice | `.btn-outline-dark`, `.btn-secondary`, secondary badges, toggles (`btn-dark` / `btn-outline-dark`) |
+| Terracotta `#C0421F` | you are here (brand) | active menu item, focus ring, role badge, headings — never a button fill |
+
+Screens are grouped by what they are for (`NAV_GROUPS` in `lib/admin.ts`: Sell green, Money amber, Stock blue, Reports purple `#563A98`, People & settings dark ink) and the group colour is repeated on Home tiles, the Menu, the bottom bar and the top-bar chip (`.tone-*` classes).
+
 ### Typography
 
 - **Body/UI:** system-ui stack (system-ui, -apple-system, "Segoe UI", Roboto) — already in use; no webfont dependency (admin works offline; the storefront stays consistent).
 - Numbers in tables, KPIs and reports: `font-variant-numeric: tabular-nums` (`.register-report` already does this; apply to `.admin-shell .table` and KPI values).
-- Base 16px; line-height 1.5; body text never below 12px; small text ≥ 12px.
+- Base **18px** on every `/admin` page (Text size setting: Normal 16 / Large 18 (default) / Extra large 20, saved per tablet as `data-text-size` on `<html>`, see `lib/text-size.ts`); line-height 1.5; small print (`small`, `.form-text`, badges) never below **16px**; table headings 1rem bold sentence case in `--sam-text`; form labels 1rem bold. Use rem, never px, for anything that should grow with the setting. Store screens (`.rice-ui`) never drop below their 18px.
 
 ### Spacing & Density
 
@@ -53,8 +66,9 @@ Dense dashboard density: cards pad `1rem 1.25rem`; table cells `0.5rem 0.75rem`;
 ## Component Specs
 
 ### Buttons
-- Primary: terracotta (`--sam-primary`), white text, hover darkens (`--sam-primary-dark`), radius `.5rem`, `cursor: pointer`.
-- Secondary/outline: warm-neutral borders (`--sam-border`-family), text `--sam-text`.
+- Primary (the ONE main action of a screen): green `#1F6F3F`, white text, hover `#185A33`, radius `.5rem`, `cursor: pointer`, bold label. (Was terracotta until 2026-10-31; terracotta now only marks "you are here".)
+- Secondary: blue outline (`.btn-outline-primary`, information actions such as Print, View, Edit) or dark outline (`.btn-outline-dark` / `.btn-outline-secondary` for Back, Close, Cancel). Toggle groups use `btn-dark` / `btn-outline-dark`, never two colours.
+- Touch (`(pointer: coarse)` or < 768px): every button, field, tab and list row ≥ 48px tall, labels 1rem.
 - One transition speed for all interactive states: `150ms ease-out` (background-color, border-color, color, box-shadow). No instant state changes.
 - Icon buttons: keep a `title` and an aria-label where the icon carries the meaning alone.
 
@@ -64,7 +78,7 @@ Dense dashboard density: cards pad `1rem 1.25rem`; table cells `0.5rem 0.75rem`;
 - KPI cards: label small muted, value bold `tabular-nums`.
 
 ### Tables (admin console)
-- `thead` th: small, uppercase, `letter-spacing .04em`, muted, background warm neutral.
+- `thead` th: 1rem, bold, sentence case, `--sam-text`, background warm neutral (the 12px uppercase muted heading was retired on 2026-10-31: capitals in small grey type are the slowest text to read).
 - Row borders `var(--sam-border)`; hover row background warm tint.
 - Never rely on color alone for status (badge + text).
 

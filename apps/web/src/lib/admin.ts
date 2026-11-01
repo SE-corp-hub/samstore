@@ -125,91 +125,117 @@ export function getAdminRole(): string {
 // ─────────────────────────────── Role-scoped navigation (U1/U2) ───────────────────────────────
 // Truth source: LIVE permission probes against the API per role (2026-09-04). Do not guess.
 
+/**
+ * What a screen is for, as a colour the whole app repeats (easy-to-read pass, 2026-10-31):
+ * sell = green, money = amber, stock = blue, report = purple, setup = dark ink. Shown on the Home
+ * tiles, the menu, the bottom bar and the top bar, always next to the screen's name and icon.
+ */
+export type NavTone = "sell" | "money" | "stock" | "report" | "setup";
+
 export interface NavItem {
   id: string;
   label: string;
   icon: string;
+  /** One plain line on what the owner does on this screen (top bar, under the name). */
+  hint?: string;
 }
 
 export interface NavGroup {
   group: string;
   label: string;
+  tone: NavTone;
+  icon: string;
   items: NavItem[];
 }
 
+// Screens grouped by what they are FOR (Sell, Money, Stock, Reports, People & settings), in the
+// order of a store day. The same groups, colours and hints show on Home, in the menu and in the
+// top bar, so the owner learns one map of the app. Which screens a role sees is still TABS_BY_ROLE.
 export const NAV_GROUPS: NavGroup[] = [
-  {
-    group: "overview",
-    label: "Overview",
-    items: [
-      { id: "overview", label: "Overview", icon: "bi-speedometer2" },
-    ],
-  },
   {
     group: "sell",
     label: "Sell",
+    tone: "sell",
+    icon: "bi-basket",
     items: [
-      { id: "pos", label: "POS", icon: "bi-basket" },
-      { id: "preorders", label: "Pre-order", icon: "bi-bag-check" },
+      { id: "pos", label: "POS", icon: "bi-basket", hint: "Sell rice at the counter" },
+      { id: "preorders", label: "Pre-order", icon: "bi-bag-check", hint: "Take an order for later" },
+      { id: "orders", label: "Orders", icon: "bi-receipt", hint: "Online and agent orders, next step" },
+      { id: "agentorders", label: "Agent orders", icon: "bi-person-lines-fill", hint: "Orders sent in by sales agents" },
+      { id: "agent", label: "New order (agent)", icon: "bi-phone", hint: "Write a new order for a customer" },
     ],
   },
   {
-    group: "rice",
-    label: "Rice",
+    group: "money",
+    label: "Money",
+    tone: "money",
+    icon: "bi-cash-coin",
     items: [
-      { id: "utangrice", label: "Credit", icon: "bi-journal-text" }, // Credit + Credit Ledger, merged
-      { id: "agentorders", label: "Agent orders", icon: "bi-person-lines-fill" },
-      { id: "agent", label: "New order (agent)", icon: "bi-phone" },
-      { id: "approvals", label: "For your approval", icon: "bi-inbox" },
-      { id: "moves", label: "Move stock", icon: "bi-arrow-left-right" },
-      { id: "returns", label: "Customer returns", icon: "bi-arrow-return-left" },
-      { id: "resack", label: "Resack", icon: "bi-arrow-repeat" },
-      { id: "pasok", label: "Stock in", icon: "bi-box-arrow-in-down" },
-      { id: "purchaseorders", label: "Supplier orders", icon: "bi-truck" },
-      { id: "bilangin", label: "Count", icon: "bi-clipboard-check" },
-      { id: "storereport", label: "Store report", icon: "bi-shop" },
-      { id: "payable", label: "Store payable", icon: "bi-cash-coin" },
-      { id: "ulat", label: "Reports & closing", icon: "bi-bar-chart-line" },
-      { id: "drafts", label: "To finish", icon: "bi-hourglass-split" },
-      { id: "kargadors", label: "Porters", icon: "bi-person-walking" },
+      { id: "utangrice", label: "Credit", icon: "bi-journal-text", hint: "Who owes the store; take payments" }, // Credit + Credit Ledger, merged
+      { id: "payable", label: "Store payable", icon: "bi-cash-coin", hint: "What Store 2 owes Store 1" },
+      { id: "approvals", label: "For your approval", icon: "bi-inbox", hint: "Requests waiting for your yes or no" },
+      { id: "expenses", label: "Expenses", icon: "bi-receipt-cutoff", hint: "Money the store paid out" },
+      { id: "purchases", label: "Purchases", icon: "bi-cart4", hint: "Stock bought and what was paid" },
+      { id: "purchaseorders", label: "Supplier orders", icon: "bi-truck", hint: "Orders sent to suppliers" },
     ],
   },
   {
-    group: "manage",
-    label: "Manage",
+    group: "stock",
+    label: "Stock",
+    tone: "stock",
+    icon: "bi-boxes",
     items: [
-      { id: "orders", label: "Orders", icon: "bi-receipt" },
-      { id: "products", label: "Products", icon: "bi-box-seam" },
-      { id: "inventory", label: "Inventory", icon: "bi-boxes" },
-      { id: "expenses", label: "Expenses", icon: "bi-receipt-cutoff" },
-      { id: "purchases", label: "Purchases", icon: "bi-cart4" },
-      { id: "team", label: "Team", icon: "bi-people" },
-      { id: "customers", label: "Customers", icon: "bi-people-fill" },
+      { id: "resack", label: "Resack", icon: "bi-arrow-repeat", hint: "Open a sack into smaller bags" },
+      { id: "moves", label: "Move stock", icon: "bi-arrow-left-right", hint: "Send rice from one store to another" },
+      { id: "returns", label: "Customer returns", icon: "bi-arrow-return-left", hint: "Rice a customer brought back" },
+      { id: "pasok", label: "Stock in", icon: "bi-box-arrow-in-down", hint: "Rice that arrived: check and stock it" },
+      { id: "bilangin", label: "Count", icon: "bi-clipboard-check", hint: "Count the shelf and fix the numbers" },
+      { id: "inventory", label: "Inventory", icon: "bi-boxes", hint: "How much rice is in each store" },
+      { id: "products", label: "Products", icon: "bi-box-seam", hint: "Kinds of rice, prices and costs" },
+      { id: "drafts", label: "To finish", icon: "bi-hourglass-split", hint: "Work started and not finished" },
+      { id: "kargadors", label: "Porters", icon: "bi-person-walking", hint: "Porters and what they carried" },
+      { id: "warehouses", label: "Locations", icon: "bi-geo-alt", hint: "The stores and warehouse you use" },
+    ],
+  },
+  {
+    group: "reports",
+    label: "Reports",
+    tone: "report",
+    icon: "bi-bar-chart-line",
+    items: [
+      { id: "overview", label: "Overview", icon: "bi-speedometer2", hint: "How the store is doing today" },
+      { id: "storereport", label: "Store report", icon: "bi-shop", hint: "One store's sales and stock" },
+      { id: "ulat", label: "Reports & closing", icon: "bi-bar-chart-line", hint: "Close the day and see reports" },
+      { id: "reports", label: "Reports", icon: "bi-file-bar-graph", hint: "Sales, credit and stock by date" },
+      { id: "analytics", label: "Analytics", icon: "bi-graph-up-arrow", hint: "Trends across the platform" },
+    ],
+  },
+  {
+    group: "setup",
+    label: "People & settings",
+    tone: "setup",
+    icon: "bi-gear",
+    items: [
+      { id: "customers", label: "Customers", icon: "bi-people-fill", hint: "Customers, credit limits, loyalty" },
+      { id: "team", label: "Team", icon: "bi-people", hint: "Staff accounts, roles and PINs" },
+      { id: "settings", label: "Settings", icon: "bi-gear", hint: "Store name, receipts, printer" },
+      { id: "countersettings", label: "Counter & printer", icon: "bi-sliders", hint: "Cash drawer and printer here" },
+      { id: "storelink", label: "Store Link", icon: "bi-link-45deg", hint: "Web link and QR code for customers" },
       // Vouchers, CRM and ERP & BIR are hidden: no role list includes them. Add the id to OWNER_TABS to show one again.
-      { id: "vouchers", label: "Vouchers", icon: "bi-ticket-perforated" },
-      { id: "crm", label: "CRM", icon: "bi-people-heart" },
-      { id: "erp", label: "ERP & BIR", icon: "bi-journal-check" },
-    ],
-  },
-  {
-    group: "store",
-    label: "Store",
-    items: [
-      { id: "analytics", label: "Analytics", icon: "bi-graph-up-arrow" },
-      { id: "reports", label: "Reports", icon: "bi-file-bar-graph" },
-      { id: "settings", label: "Settings", icon: "bi-gear" },
-      { id: "countersettings", label: "Counter & printer", icon: "bi-sliders" },
-      { id: "storelink", label: "Store Link", icon: "bi-link-45deg" },
+      { id: "vouchers", label: "Vouchers", icon: "bi-ticket-perforated", hint: "Discount vouchers for customers" },
+      { id: "crm", label: "CRM", icon: "bi-people-heart", hint: "Customer messages and campaigns" },
+      { id: "erp", label: "ERP & BIR", icon: "bi-journal-check", hint: "Accounting entries and BIR reports" },
     ],
   },
   {
     group: "system",
     label: "System",
+    tone: "setup",
+    icon: "bi-tools",
     items: [
-      { id: "useraccess", label: "User Access", icon: "bi-person-badge" },
-      { id: "warehouses", label: "Locations", icon: "bi-geo-alt" },
-      { id: "stores", label: "Stores", icon: "bi-shop-window" },
-      { id: "maintenance", label: "Maintenance", icon: "bi-tools" },
+      { id: "useraccess", label: "User Access", icon: "bi-person-badge", hint: "Who can sign in to the platform" },
+      { id: "stores", label: "Stores", icon: "bi-shop-window", hint: "All stores on the platform" },
+      { id: "maintenance", label: "Maintenance", icon: "bi-tools", hint: "Platform checks and repairs" },
     ],
   },
 ];
@@ -221,6 +247,16 @@ export function navItemFor(id: string): NavItem | undefined {
     if (hit) return hit;
   }
   return undefined;
+}
+
+/** The group a screen belongs to (its colour and group name), for the top bar, Home and the menu. */
+export function navGroupFor(id: string): NavGroup | undefined {
+  return NAV_GROUPS.find((g) => g.items.some((i) => i.id === id));
+}
+
+/** The colour meaning of a screen; "setup" (dark ink) when the screen is not in the menu. */
+export function toneFor(id: string): NavTone {
+  return navGroupFor(id)?.tone ?? "setup";
 }
 
 const OWNER_TABS = ["overview", "pos", "preorders", "orders", "utang", "products", "inventory", "expenses", "purchases", "team", "customers", "analytics", "reports", "settings", "storelink", "warehouses", "approvals", "moves", "returns", "resack", "drafts", "kargadors", "pasok", "purchaseorders", "utangrice", "agentorders", "bilangin", "storereport", "payable", "ulat"];

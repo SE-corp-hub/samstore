@@ -100,7 +100,7 @@ export default function MovePanel() {
         <div className="small text-muted mb-1">Taking from</div>
         <div className="d-flex flex-wrap gap-2">
           {places.filter((p) => p.id !== to).map((p) => (
-            <button key={p.id} type="button" className={`btn btn-lg ${p.id === from ? "btn-primary" : "btn-outline-primary"}`} onClick={() => setFrom(p.id)}>{p.name}</button>
+            <button key={p.id} type="button" className={`btn btn-lg ${p.id === from ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setFrom(p.id)}>{p.name}</button>
           ))}
         </div>
       </div>

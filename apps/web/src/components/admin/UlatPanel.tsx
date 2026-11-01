@@ -89,7 +89,7 @@ export default function UlatPanel({ role, onNavigate }: { role?: string; onNavig
   return (
     <div style={{ fontSize: 17 }}>
       <h1 className="h4">Reports</h1>
-      <ul className="nav nav-tabs mb-3 flex-nowrap overflow-auto">
+      <ul className="nav nav-tabs mb-3">
         {tabs.map(([k, label]) => <li key={k} className="nav-item"><button className={`nav-link text-nowrap ${tab === k ? "active" : ""}`} onClick={() => setTab(k)}>{label}</button></li>)}
       </ul>
       {tab === "live" && <StockLive />}

@@ -1256,3 +1256,11 @@ Commits: `32dce58` (loop 2).
 |------|-------|-----------------|------|------|
 | 2026-09-01 earlier | deepseek-v4-flash-0731 | ~2M / ~0.2M (est.) | ~$0.25 (est.) | Setup/analysis |
 | 2026-09-01 Module 1 loop 1 | deepseek-v4-flash-0731 | ~0.9M / ~0.1M (est.) | ~$0.08 (est.) | Scaffold + domain + tests |
+
+## 2026-10-31 — Easy-to-read pass (web UI, owner is 65)
+
+- `apps/web/src/app/easy-read.css` (loaded after `polish.css`): 18 px text on every `/admin` page by default, small print ≥ 16 px, helper text at 7.6:1, table headings in sentence case, 48 px touch targets, one meaning per colour (green go / red stop / amber careful / blue information / dark ink neutral / terracotta = you are here), badges and alerts in the same tinted-and-bordered look on every screen.
+- Text size setting (Normal 16 / Large 18 / Extra large 20): `lib/text-size.ts`, `components/admin/TextSizePicker.tsx`, applied before first paint by `app/admin/layout.tsx`; shown in the Menu drawer footer and at the bottom of Home. Saved per tablet (localStorage `sam.textSize`).
+- Screens regrouped by purpose in `lib/admin.ts` `NAV_GROUPS` (Sell, Money, Stock, Reports, People & settings, System) with a `tone` colour per group and a one-line `hint` per screen; Home (`StaffHome.tsx`) lists every allowed screen by group (no more "Other screens" fold); the top bar shows the screen icon on its group colour, the name and the hint; bottom-bar icons take the group colour.
+- Toggle groups (Inventory view/adjust mode, Move stock "from", Store report "All stores") use `btn-dark`/`btn-outline-dark` instead of green/blue; tiny fixed text raised (chart labels 12→14 px, "weeks ago" 11→14 px, barcode 14→16 px).
+- Design system: `design-system/sam-s-store-admin/MASTER.md` typography, colour, button and table rules updated to match.

@@ -1,0 +1,229 @@
+/* ───────────── Easy-to-read pass (2026-10-31) ─────────────
+   The owner is 65 and runs the store from a tablet. Loaded after polish.css, on every /admin page
+   (the <html data-text-size> attribute is set only there, so the storefront keeps its own look):
+   - 18 px text by default, with a Text size choice (Normal 16 / Large 18 / Extra large 20) in the
+     Menu; everything built in rem grows with it, small print never drops under 16 px,
+   - ink at the comfortable 7:1 level (WCAG AAA) for helper text, headings and labels,
+   - one meaning per colour: green = go, red = stop, amber = careful, blue = information,
+     dark ink = neutral, terracotta = you are here (never on a button),
+   - screens grouped and coloured by what they are for (Sell, Money, Stock, Reports, Setup),
+     the same way on Home, in the Menu, on the bottom bar and in the top bar. */
+
+/* ── 1. Text size, chosen on this tablet (lib/text-size.ts puts it on <html> before the first paint). */
+html[data-text-size="large"] { font-size: 18px; }
+html[data-text-size="xl"] { font-size: 20px; }
+
+/* The store screens never drop below the 18 px they had, and grow with the setting. */
+.rice-ui { font-size: max(18px, 1rem); }
+.rice-ui input, .rice-ui select, .rice-ui textarea { font-size: max(18px, 1rem); }
+.rice-ui .form-control-lg, .rice-ui .form-select-lg { font-size: max(22px, 1.25rem); }
+
+/* ── 2. Small print never under 16 px; headings, labels and table heads in full ink, sentence case. */
+html[data-text-size] .small, html[data-text-size] small, html[data-text-size] .form-text { font-size: max(16px, 0.9rem); }
+html[data-text-size] .form-label, html[data-text-size] .col-form-label { font-size: 1rem; font-weight: 600; color: var(--sam-text); }
+html[data-text-size] .form-check-label { color: var(--sam-text); }
+.admin-shell .badge { font-size: max(16px, 0.9rem); font-weight: 600; }
+.admin-shell .card-title { font-size: 1rem; }
+.admin-shell .table thead th {
+  font-size: 1rem; font-weight: 700; color: var(--sam-text);
+  text-transform: none; letter-spacing: 0; white-space: normal;
+}
+/* Section titles in capitals read slowest; keep them bold, in sentence case. */
+.admin-shell :is(h1, h2, h3, h4, h5, h6).text-uppercase { text-transform: none !important; letter-spacing: 0; }
+.admin-shell main h1 { font-size: 1.5rem; }
+.admin-shell .nav-link, .admin-shell .dropdown-item, .admin-shell .list-group-item { font-size: 1rem; }
+.admin-shell .btn { font-weight: 600; }
+
+/* ── 3. Darker ink: helper text 7.6:1 on the cream page (was 5.9:1), placeholders readable, fields outlined. */
+:root { --sam-muted: #5a4d42; --sam-sidebar-muted: #c9bcac; }
+.admin-shell .text-muted, .admin-shell .text-body-secondary, .admin-shell .text-secondary { color: var(--sam-muted) !important; }
+.admin-shell .text-opacity-75 { --bs-text-opacity: 1; }
+.admin-shell .text-info { color: #0b4f8a !important; }
+html[data-text-size] ::placeholder { color: #6b5d50 !important; opacity: 1; }
+html[data-text-size] .form-control, html[data-text-size] .form-select { color: var(--sam-text); border-color: #8c857c; }
+html[data-text-size] .form-control:disabled, html[data-text-size] .form-select:disabled { color: #4a4844; background-color: #efebe5; }
+.admin-sidebar .nav-link { color: #f4ede2; }
+
+/* ── 4. Touch: 48 px targets, 18 px text in the "small" variants, roomier table rows. */
+@media (max-width: 767.98px), (pointer: coarse) {
+  html[data-text-size] .btn, html[data-text-size] .btn-sm, html[data-text-size] .btn-group > .btn { min-height: 48px; }
+  html[data-text-size] .form-control, html[data-text-size] .form-control-sm,
+  html[data-text-size] .form-select, html[data-text-size] .form-select-sm,
+  html[data-text-size] .input-group-text { min-height: 48px; }
+  html[data-text-size] .btn-sm, html[data-text-size] .form-control-sm,
+  html[data-text-size] .form-select-sm, html[data-text-size] .input-group-text { font-size: 1rem; }
+  .admin-shell .table-sm > :not(caption) > * > * { padding: 0.5rem; }
+  .admin-shell .list-group-item-action, .admin-shell .dropdown-item { min-height: 48px; }
+  .admin-shell .nav-tabs .nav-link, .admin-shell .nav-pills .nav-link { min-height: 48px; }
+  .admin-shell .form-check-input { width: 1.5em; height: 1.5em; }
+  .admin-shell .form-switch { padding-left: 3.5em; }
+  .admin-shell .form-switch .form-check-input { width: 3em; margin-left: -3.5em; }
+  html[data-text-size] .btn-close { min-width: 48px; min-height: 48px; }
+  .admin-shell .page-link { min-width: 48px; min-height: 48px; display: flex; align-items: center; justify-content: center; }
+}
+
+/* ── 5. One meaning per colour. */
+/* Green = go: the main button of every screen, login included (replaces the terracotta fill). */
+html[data-text-size] .btn-primary {
+  background-color: #1f6f3f; border-color: #1f6f3f; color: #fff;
+  --bs-btn-bg: #1f6f3f; --bs-btn-border-color: #1f6f3f;
+  --bs-btn-hover-bg: #185a33; --bs-btn-hover-border-color: #185a33;
+  --bs-btn-active-bg: #185a33; --bs-btn-active-border-color: #185a33;
+  --bs-btn-disabled-bg: #1f6f3f; --bs-btn-disabled-border-color: #1f6f3f;
+  --bs-btn-focus-shadow-rgb: 31, 111, 63;
+}
+html[data-text-size] .btn-primary:hover, html[data-text-size] .btn-primary:focus,
+html[data-text-size] .btn-primary:active, html[data-text-size] .btn-primary.active { background-color: #185a33; border-color: #185a33; }
+html[data-text-size] .btn-primary:disabled, html[data-text-size] .btn-primary.disabled { background-color: #1f6f3f; border-color: #1f6f3f; }
+/* Red = stop, in the deeper red the store screens use (7.6:1). */
+.admin-shell .btn-danger {
+  --bs-btn-bg: #a3201b; --bs-btn-border-color: #a3201b;
+  --bs-btn-hover-bg: #861a16; --bs-btn-hover-border-color: #861a16;
+  --bs-btn-active-bg: #861a16; --bs-btn-active-border-color: #861a16;
+  --bs-btn-disabled-bg: #a3201b; --bs-btn-disabled-border-color: #a3201b;
+}
+/* Amber = careful. */
+.admin-shell .btn-warning {
+  --bs-btn-bg: #8a5a00; --bs-btn-border-color: #8a5a00; --bs-btn-color: #fff;
+  --bs-btn-hover-bg: #6f4800; --bs-btn-hover-border-color: #6f4800; --bs-btn-hover-color: #fff;
+  --bs-btn-active-bg: #6f4800; --bs-btn-active-border-color: #6f4800; --bs-btn-active-color: #fff;
+  --bs-btn-disabled-bg: #8a5a00; --bs-btn-disabled-border-color: #8a5a00; --bs-btn-disabled-color: #fff;
+}
+/* Blue = information: Print, View, Details and other second choices, links, info buttons. */
+.admin-shell .btn-outline-primary, .admin-shell .btn-outline-info {
+  --bs-btn-color: #0b4f8a; --bs-btn-border-color: #0b4f8a;
+  --bs-btn-hover-bg: #0b4f8a; --bs-btn-hover-border-color: #0b4f8a; --bs-btn-hover-color: #fff;
+  --bs-btn-active-bg: #083a66; --bs-btn-active-border-color: #083a66; --bs-btn-active-color: #fff;
+  --bs-btn-disabled-color: #0b4f8a; --bs-btn-disabled-border-color: #0b4f8a;
+  --bs-btn-focus-shadow-rgb: 11, 79, 138;
+}
+.admin-shell .btn-info {
+  --bs-btn-bg: #0b4f8a; --bs-btn-border-color: #0b4f8a; --bs-btn-color: #fff;
+  --bs-btn-hover-bg: #083a66; --bs-btn-hover-border-color: #083a66; --bs-btn-hover-color: #fff;
+  --bs-btn-active-bg: #083a66; --bs-btn-active-border-color: #083a66; --bs-btn-active-color: #fff;
+  --bs-btn-disabled-bg: #0b4f8a; --bs-btn-disabled-border-color: #0b4f8a; --bs-btn-disabled-color: #fff;
+}
+.admin-shell .btn-link { --bs-btn-color: #0b4f8a; --bs-btn-hover-color: #083a66; text-decoration-thickness: 2px; }
+/* Dark ink = neutral. */
+.admin-shell .btn-secondary {
+  --bs-btn-bg: #4a4844; --bs-btn-border-color: #4a4844;
+  --bs-btn-hover-bg: #33261d; --bs-btn-hover-border-color: #33261d;
+  --bs-btn-active-bg: #33261d; --bs-btn-active-border-color: #33261d;
+  --bs-btn-disabled-bg: #4a4844; --bs-btn-disabled-border-color: #4a4844;
+}
+.admin-shell .btn-light {
+  --bs-btn-bg: #fff; --bs-btn-border-color: #8c857c; --bs-btn-color: var(--sam-text);
+  --bs-btn-hover-bg: #f4efe7; --bs-btn-hover-border-color: #4a4844; --bs-btn-hover-color: var(--sam-text);
+  --bs-btn-active-bg: #e9e2d8; --bs-btn-active-border-color: #4a4844; --bs-btn-active-color: var(--sam-text);
+}
+/* A button that cannot be pressed is grey, not a paler green: one look says "not now". */
+.admin-shell .btn:disabled, .admin-shell .btn.disabled {
+  opacity: 1; background-color: #e6e1d9; border-color: #cfc9c0; color: #6b5d50;
+}
+.admin-shell .btn-link:disabled, .admin-shell .btn-link.disabled { background-color: transparent; border-color: transparent; }
+/* On = green (switches and checked boxes), the open list row = dark ink, progress = green. */
+.admin-shell .form-check-input:checked { background-color: #1f6f3f; border-color: #1f6f3f; }
+.admin-shell .list-group-item.active { background-color: #33261d; border-color: #33261d; color: #fff; }
+.admin-shell .progress-bar { background-color: #1f6f3f; }
+
+/* Badges: the same tinted, bordered, dark-text look on every screen (the store screens had it already). */
+.admin-shell .badge.text-bg-success { background: #e4f3ea !important; color: #185a33 !important; border: 1px solid #1f6f3f; }
+.admin-shell .badge.text-bg-danger { background: #fde8e7 !important; color: #861a16 !important; border: 1px solid #a3201b; }
+.admin-shell .badge.text-bg-warning { background: #fff3d6 !important; color: #6f4800 !important; border: 1px solid #8a5a00; }
+.admin-shell .badge.text-bg-info, .admin-shell .badge.text-bg-primary { background: #e3f0fb !important; color: #0b4f8a !important; border: 1px solid #0b4f8a; }
+.admin-shell .badge.text-bg-secondary { background: #eeebe6 !important; color: #4a4844 !important; border: 1px solid #8c857c; }
+.admin-shell .badge.text-bg-light { background: #fff !important; color: var(--sam-text) !important; border: 1px solid #c9c4bc; }
+.admin-shell .badge.text-bg-dark { background: #33261d !important; color: #fff !important; border: 1px solid #33261d; }
+/* The role badge in the top bar is a brand label, not a status. */
+.admin-shell .badge.role-badge { background: var(--sam-primary) !important; color: #fff !important; border: 1px solid var(--sam-primary); }
+
+/* Alerts: a 6 px bar on the left in the meaning colour, dark text on a light tint. */
+.admin-shell .alert { border-left: 6px solid var(--bs-alert-border-color); font-size: 1rem; }
+.admin-shell .alert-success { --bs-alert-bg: #e4f3ea; --bs-alert-border-color: #1f6f3f; --bs-alert-color: #143f24; --bs-alert-link-color: #143f24; }
+.admin-shell .alert-danger { --bs-alert-bg: #fde8e7; --bs-alert-border-color: #a3201b; --bs-alert-color: #5a1210; --bs-alert-link-color: #5a1210; }
+.admin-shell .alert-warning { --bs-alert-bg: #fff3d6; --bs-alert-border-color: #8a5a00; --bs-alert-color: #4a3000; --bs-alert-link-color: #4a3000; }
+.admin-shell .alert-info, .admin-shell .alert-primary { --bs-alert-bg: #e3f0fb; --bs-alert-border-color: #0b4f8a; --bs-alert-color: #0a2f52; --bs-alert-link-color: #0a2f52; }
+.admin-shell .alert-secondary, .admin-shell .alert-light { --bs-alert-bg: #f4efe7; --bs-alert-border-color: #8c857c; --bs-alert-color: var(--sam-text); --bs-alert-link-color: var(--sam-text); }
+
+/* ── 6. Screens grouped and coloured by what they are for (lib/admin.ts NAV_GROUPS). */
+.tone-sell { --tone: #1f6f3f; --tone-bg: #e4f3ea; }
+.tone-money { --tone: #8a5a00; --tone-bg: #fff3d6; }
+.tone-stock { --tone: #0b4f8a; --tone-bg: #e3f0fb; }
+.tone-report { --tone: #563a98; --tone-bg: #ece6f7; }
+.tone-setup { --tone: #4a4844; --tone-bg: #eeebe6; }
+
+/* Top bar: the screen's icon on its group colour, the name, and one line on what the screen is for.
+   The title block gives way first; the pills on the right keep their width. */
+.screen-title { display: flex; align-items: center; gap: 10px; flex: 1 1 0; min-width: 0; margin-right: 0.5rem; }
+.admin-topbar .ms-auto { flex: 0 0 auto; }
+.screen-chip {
+  flex: 0 0 auto; width: 2.5rem; height: 2.5rem; border-radius: 0.6rem;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--tone-bg, #eeebe6); color: var(--tone, #4a4844); font-size: 1.35rem;
+}
+.screen-name { font-weight: 700; font-size: 1.1rem; line-height: 1.2; color: var(--sam-text); }
+.screen-hint { font-size: max(16px, 0.9rem); line-height: 1.25; color: var(--sam-muted); font-weight: 400; }
+/* Phones: no room for the chip and the hint; the name wraps rather than clips, the pills may shrink. */
+@media (max-width: 575.98px) {
+  .screen-hint, .screen-chip { display: none; }
+  .screen-title { min-width: 5rem; }
+  .screen-name { font-size: 1rem; overflow-wrap: anywhere; }
+  .admin-topbar .ms-auto { flex: 0 1 auto; min-width: 0; }
+}
+
+/* Menu: the group name and the icons in the group colour (light tints on the dark drawer); the open screen stays terracotta. */
+.admin-sidebar .nav-group-label {
+  display: flex; align-items: center; gap: 8px; padding-top: 6px; padding-bottom: 4px;
+  font-size: max(16px, 0.9rem); font-weight: 700; letter-spacing: 0; text-transform: none;
+  color: var(--tone-bg, var(--sam-sidebar-muted));
+}
+.admin-sidebar .nav-group-label::before { content: ""; flex: 0 0 auto; width: 10px; height: 10px; border-radius: 3px; background: var(--tone-bg, var(--sam-sidebar-muted)); }
+.admin-sidebar .nav-link { font-size: 1rem; }
+.admin-sidebar .nav-link i { flex: 0 0 auto; width: 1.5rem; text-align: center; font-size: 1.15rem; color: var(--tone-bg, inherit); }
+.admin-sidebar .nav-link.active i { color: #fff; }
+
+/* Bottom bar: each job's icon in its group colour; the open one is dark with white. */
+.staff-bar button i { color: var(--tone, #1f1d1a); }
+.staff-bar button.active i { color: #fff; }
+
+/* Home: one heading per group in the group colour; tiles with a coloured edge and icon. */
+.home-group { margin-bottom: 1.5rem; }
+.home-group-title { display: flex; align-items: center; gap: 10px; margin: 0 0 0.75rem; font-size: 1.15rem; font-weight: 700; color: var(--tone); }
+.home-group-icon {
+  flex: 0 0 auto; width: 2.25rem; height: 2.25rem; border-radius: 0.5rem;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--tone-bg); color: var(--tone); font-size: 1.25rem;
+}
+.staff-tile { border-left: 8px solid var(--tone, #1f1d1a); }
+.staff-tile i { color: var(--tone, #1f1d1a); }
+.staff-tile:hover, .staff-tile:active { background: var(--tone, #1f1d1a); border-color: var(--tone, #1f1d1a); color: #fff; }
+.staff-tile:hover i, .staff-tile:active i { color: #fff; }
+
+/* Text size picker (Menu footer and the bottom of Home): three choices, the chosen one filled. */
+.text-size-picker { display: flex; flex-direction: column; gap: 6px; }
+.text-size-label { font-size: max(16px, 0.9rem); font-weight: 600; }
+.text-size-options { display: flex; gap: 6px; }
+.text-size-option {
+  flex: 1 1 0; min-width: 0; min-height: 60px; padding: 4px 2px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  border: 2px solid currentColor; border-radius: 10px; background: transparent; color: inherit;
+  font-size: max(16px, 0.85rem); font-weight: 600; line-height: 1.1; text-align: center;
+}
+.text-size-option.active { background: var(--sam-primary); border-color: var(--sam-primary); color: #fff; }
+.text-size-option:focus-visible { outline: 3px solid #0b4f8a; outline-offset: 2px; }
+.text-size-sample { font-weight: 700; line-height: 1; }
+.text-size-sample.size-normal { font-size: 16px; }
+.text-size-sample.size-large { font-size: 20px; }
+.text-size-sample.size-xl { font-size: 24px; }
+.admin-sidebar .text-size-picker { color: #f4ede2; }
+.admin-shell .card .text-size-option { color: var(--sam-text); }
+.admin-shell .card .text-size-option.active { color: #fff; }
+
+/* Toasts (saved / not saved) in the same green and red, 18 px, outside the shell so scoped to the page. */
+html[data-text-size] .toast { font-size: 1rem; }
+html[data-text-size] .toast.text-bg-success { background-color: #1f6f3f !important; color: #fff !important; }
+html[data-text-size] .toast.text-bg-danger { background-color: #a3201b !important; color: #fff !important; }
+
+/* ── 7. The tapped or focused control shows a 3 px ring. */
+html[data-text-size] :focus-visible { outline: 3px solid var(--sam-primary); outline-offset: 2px; }
+html[data-text-size] .btn:focus-visible { box-shadow: none; }

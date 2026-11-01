@@ -422,7 +422,7 @@ export default function ProductsPanel() {
                     </td>
                   <td className="text-muted small col-wide">
                     {p.sku}
-                    {p.barcode && <div className="text-muted text-opacity-75" style={{ fontSize: "0.8em" }} title="Barcode">{p.barcode}</div>}
+                    {p.barcode && <div className="text-muted text-opacity-75" style={{ fontSize: "0.9em" }} title="Barcode">{p.barcode}</div>}
                   </td>
                   <td className="text-end">{toPesos(p.priceMinor)}</td>
                   {hasCost && <td className="text-end text-muted col-wide">{toPesos(p.costMinor)}</td>}
