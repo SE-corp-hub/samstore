@@ -19,6 +19,7 @@ import { toast } from "../../lib/toast";
 import { bestSellers, lineTotal } from "../../lib/walk-in";
 import StoreBar from "./StoreBar";
 import { OpenDrawer } from "./BentaPanel";
+import PickTile from "./PickTile";
 
 interface Loc { id: string; name: string; code: string | null; type: string }
 interface Item { id: string; name: string; loose: boolean; gramsPerUnit: number | null; priceMinor: number; stock: Record<string, number> }
@@ -161,16 +162,11 @@ export default function WalkInPanel({ onFullSale }: { onFullSale: () => void }) 
     const left = i.stock[locationId] ?? 0;
     return (
       <div key={i.id} className={wide ? "col-6 col-xl-4" : "col-6 col-md-4"}>
-        <button type="button" className={`btn ${n > 0 ? "btn-dark" : "btn-outline-dark"} w-100 h-100 text-center p-2 position-relative`} style={{ minHeight: 112 }}
-          aria-label={`${i.name}, ${peso(i.priceMinor)}${i.loose ? " a kilo" : ""}${n > 0 ? `, ${i.loose ? kg(n) : n} in this sale` : ""}`}
-          aria-pressed={n > 0} onClick={() => tap(i)}>
-          {n > 0 && <span className="position-absolute top-0 end-0 badge rounded-pill text-bg-success m-1 fs-6">{i.loose ? kg(n) : n}</span>}
-          <div className="fw-semibold">{i.name}</div>
-          <div style={{ fontSize: 24, fontVariantNumeric: "tabular-nums" }}>{peso(i.priceMinor)}<span className="fs-6 opacity-75">{i.loose ? "/kg" : ""}</span></div>
-          {left <= 0
-            ? <div><span className="badge bg-white text-danger border border-danger fw-semibold">None left here</span></div>
-            : <div className="small" style={{ fontVariantNumeric: "tabular-nums" }}>{i.loose ? kg(left) : left} left</div>}
-        </button>
+        <PickTile name={i.name} price={peso(i.priceMinor)} priceNote={i.loose ? "/kg" : undefined}
+          countText={n > 0 ? `${i.loose ? kg(n) : n} in sale` : undefined}
+          stock={left <= 0 ? "None left here" : `${i.loose ? kg(left) : left} left`} stockOut={left <= 0}
+          ariaLabel={`${i.name}, ${peso(i.priceMinor)}${i.loose ? " a kilo" : ""}${n > 0 ? `, ${i.loose ? kg(n) : n} in this sale` : ""}`}
+          onClick={() => tap(i)} />
       </div>
     );
   };
@@ -188,12 +184,15 @@ export default function WalkInPanel({ onFullSale }: { onFullSale: () => void }) 
     </>
   );
 
+  // Sacks and packs count one each; a loose-rice line counts once whatever the kilos.
+  const itemCount = lines.reduce((s, l) => s + (byId.get(l.productId)?.loose ? 1 : l.qty), 0);
   const side = (
-    <div className={`card border-dark ${wide ? "position-sticky" : "position-sticky bottom-0 sticky-above-bar shadow"}`} style={wide ? { top: 12 } : { zIndex: 5, maxHeight: "60vh", overflowY: "auto" }}>
+    <div className={`sale-card ${wide ? "position-sticky" : "position-sticky bottom-0 sticky-above-bar shadow"}`} style={wide ? { top: 12 } : { zIndex: 5, maxHeight: "60vh", overflowY: "auto" }}>
       <div className="card-body">
         {loosePick ? (
           <>
-            <div className="fw-semibold mb-2">{loosePick.name} · {peso(loosePick.priceMinor)}/kg — how many kilos?</div>
+            <div className="sale-card-title"><i className="bi bi-basket2-fill" aria-hidden="true"></i>{loosePick.name} · {peso(loosePick.priceMinor)}/kg</div>
+            <div className="fw-semibold mb-2">How many kilos?</div>
             <div className="d-flex flex-wrap gap-2 mb-2" role="group" aria-label="Kilos">
               {KILO_CHOICES.map((g) => (
                 <button key={g} type="button" className="btn btn-outline-dark btn-lg flex-fill" style={{ minWidth: 96 }} onClick={() => add(loosePick, g)}>
@@ -201,48 +200,53 @@ export default function WalkInPanel({ onFullSale }: { onFullSale: () => void }) 
                 </button>
               ))}
             </div>
-            <button type="button" className="btn btn-link" onClick={() => setLoosePick(null)}>Cancel</button>
+            <button type="button" className="btn btn-outline-dark" onClick={() => setLoosePick(null)}>Cancel</button>
           </>
         ) : lines.length === 0 ? (
           sold ? (
             <div className="alert alert-success mb-0" role="status">
-              <div className="h5 mb-1">Sold {peso(sold.totalMinor)}{sold.changeMinor > 0 && <> · Change {peso(sold.changeMinor)}</>}</div>
-              <div className="small">{sold.ref}{sold.offline && " · saved on this tablet, uploads when Wi-Fi is back"}</div>
-              {sold.belowCost.length > 0 && <div className="small text-danger-emphasis mt-1">Sold below Store 1&apos;s cost: {sold.belowCost.join(", ")}.</div>}
-              <button type="button" className="btn btn-outline-dark mt-2" onClick={() => printSlip(slipOf(sold))}><i className="bi bi-printer me-1" aria-hidden="true"></i>Print receipt</button>
-              <div className="small text-muted mt-2">Tap the next rice to start a new sale.</div>
+              <div className="fw-bold fs-5">Sold {peso(sold.totalMinor)}</div>
+              {sold.changeMinor > 0 && <div className="change-due">Change to give: {peso(sold.changeMinor)}</div>}
+              <div className="mt-1">{sold.ref}{sold.offline && " · saved on this tablet, uploads when Wi-Fi is back"}</div>
+              {sold.belowCost.length > 0 && <div className="text-danger fw-semibold mt-1">Sold below Store 1&apos;s cost: {sold.belowCost.join(", ")}.</div>}
+              <button type="button" className="btn btn-outline-primary mt-2" onClick={() => printSlip(slipOf(sold))}><i className="bi bi-printer me-1" aria-hidden="true"></i>Print receipt</button>
+              <div className="mt-2">Tap the next rice to start a new sale.</div>
             </div>
           ) : (
             <div className="text-center text-muted py-3"><i className="bi bi-hand-index fs-2 d-block mb-1" aria-hidden="true"></i>Tap a rice to start. Each tap adds one.</div>
           )
         ) : (
           <>
-            <ul className="list-unstyled mb-2" style={{ fontVariantNumeric: "tabular-nums" }}>
+            <div className="sale-card-title"><i className="bi bi-basket2-fill" aria-hidden="true"></i>This sale · {itemCount} {itemCount === 1 ? "item" : "items"}</div>
+            <ul className="list-unstyled mb-0">
               {lines.map((l) => {
                 const i = byId.get(l.productId);
                 if (!i) return null;
                 const step = i.loose ? 1000 : 1;
                 return (
-                  <li key={l.productId} className="d-flex align-items-center gap-2 py-1 border-bottom">
-                    <span className="flex-grow-1">{i.name}</span>
-                    <button type="button" className="btn btn-outline-dark" style={{ minWidth: 48, minHeight: 48 }} aria-label={`One ${i.loose ? "kilo" : ""} less ${i.name}`} onClick={() => change(l.productId, -Math.min(step, l.qty))}>−</button>
-                    <span className="fw-semibold text-center" style={{ minWidth: 64 }}>{i.loose ? kg(l.qty) : l.qty}</span>
-                    <button type="button" className="btn btn-outline-dark" style={{ minWidth: 48, minHeight: 48 }} aria-label={`One ${i.loose ? "kilo" : ""} more ${i.name}`} onClick={() => change(l.productId, step)}>+</button>
-                    <span className="text-end" style={{ minWidth: 96 }}>{peso(lineTotal(i, l.qty))}</span>
+                  <li key={l.productId} className="sale-line">
+                    <span className="name">{i.name}</span>
+                    <span className="qty" role="group" aria-label={`How many ${i.name}`}>
+                      <button type="button" className="btn btn-outline-dark qty-btn" aria-label={`One ${i.loose ? "kilo" : ""} less ${i.name}`} onClick={() => change(l.productId, -Math.min(step, l.qty))}>−</button>
+                      <span className="qty-num">{i.loose ? kg(l.qty) : l.qty}</span>
+                      <button type="button" className="btn btn-outline-dark qty-btn" aria-label={`One ${i.loose ? "kilo" : ""} more ${i.name}`} onClick={() => change(l.productId, step)}>+</button>
+                    </span>
+                    <span className="amount">{peso(lineTotal(i, l.qty))}</span>
                   </li>
                 );
               })}
             </ul>
+            <div className="sale-total"><span className="label">Total</span><span className="amount">{peso(total)}</span></div>
             {drawerClosed ? (
               <OpenDrawer onOpened={() => { setDrawerClosed(false); setError(null); }} />
             ) : (
               <>
-                <button type="button" className="btn btn-success btn-lg w-100 py-3 fw-bold" style={{ fontSize: 26 }} disabled={busy} onClick={() => void pay(total)}>
-                  {busy ? "Saving…" : <>Cash exact · {peso(total)}</>}
+                <button type="button" className="btn btn-success btn-lg w-100 py-3 fw-bold sale-pay mt-2" disabled={busy} onClick={() => void pay(total)}>
+                  {busy ? "Saving…" : <><i className="bi bi-cash-coin me-2" aria-hidden="true"></i>Cash exact · {peso(total)}</>}
                 </button>
                 {quickCash(total).filter((x) => x > total).length > 0 && (
                   <>
-                    <div className="small text-muted mt-2 mb-1">Customer gave more? Tap what they gave:</div>
+                    <div className="mt-2 mb-1">Customer gave more? Tap what they gave:</div>
                     <div className="d-flex flex-wrap gap-2">
                       {quickCash(total).filter((x) => x > total).map((x) => (
                         <button key={x} type="button" className="btn btn-outline-success btn-lg flex-fill" disabled={busy} onClick={() => void pay(x)}>
@@ -255,7 +259,7 @@ export default function WalkInPanel({ onFullSale }: { onFullSale: () => void }) 
               </>
             )}
             {error && <div className="alert alert-danger mt-2 mb-0" role="alert">{error}</div>}
-            <button type="button" className="btn btn-link mt-1" disabled={busy} onClick={() => { setLines([]); setError(null); keyRef.current = null; }}>Clear this sale</button>
+            <button type="button" className="btn btn-outline-danger w-100 mt-3" disabled={busy} onClick={() => { setLines([]); setError(null); keyRef.current = null; }}><i className="bi bi-x-lg me-1" aria-hidden="true"></i>Clear this sale</button>
           </>
         )}
       </div>
@@ -263,14 +267,14 @@ export default function WalkInPanel({ onFullSale }: { onFullSale: () => void }) 
   );
 
   return (
-    <div style={{ fontSize: 18 }}>
+    <div className="sell-screen tone-sell">
       {offline && <div className="alert alert-secondary py-2">Offline — walk-in sales are saved on this tablet and upload later.</div>}
       {error && lines.length === 0 && <div className="alert alert-danger" role="alert">{error}</div>}
       <div className="row g-3">
         <div className={wide ? "col-lg-7 col-xl-8" : "col-12"}>{picker}</div>
         <div className={wide ? "col-lg-5 col-xl-4" : "col-12"}>{side}</div>
       </div>
-      <p className="small text-muted mt-3">Credit, GCash, special prices or rice from another store? <button type="button" className="btn btn-link p-0 align-baseline" onClick={onFullSale}>Use Full sale</button>.</p>
+      <p className="text-muted mt-3">Credit, GCash, special prices or rice from another store? <button type="button" className="btn btn-link p-0 align-baseline" onClick={onFullSale}>Use Full sale</button>.</p>
     </div>
   );
 }

@@ -23,6 +23,7 @@ import { useMediaQuery, WIDE } from "../../lib/use-media-query";
 import { quickCash } from "../../lib/quick-cash";
 import { peso } from "../../lib/number-format";
 import ProductFinder from "./ProductFinder";
+import PickTile from "./PickTile";
 import { noteUse } from "../../lib/product-find";
 import { printSlip, type Slip } from "../../lib/slip-print";
 import { cachedGet, offlineRef, savedThenFresh, useOffline } from "../../lib/offlineCache";
@@ -57,7 +58,8 @@ const localToday = () => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 };
-const fmtDate = (iso: string) => iso.slice(0, 10);
+/** "1 Nov 2026" rather than 2026-11-01: a date the owner reads at a glance. */
+const fmtDate = (iso: string) => new Date(`${iso.slice(0, 10)}T00:00:00`).toLocaleDateString("en-PH", { day: "numeric", month: "short", year: "numeric" });
 // The sleeping beta server (or a slow one) makes the web's /backend proxy answer a plain
 // "Internal Server Error" page after 30 s. Reading that as JSON showed "Unexpected token".
 const readJson = (res: Response) => res.json().catch(() => null);
@@ -155,7 +157,7 @@ function SignaturePad({ onSignature }: { onSignature: (dataUrl: string | null) =
         onTouchMove={(e) => { if (supportsPointer) return; if (e.cancelable) e.preventDefault(); const t = e.touches[0]; if (t) moveStroke(t.clientX, t.clientY); }}
         onTouchEnd={() => { if (supportsPointer) return; endStroke(); }}
       />
-      <button type="button" className="btn btn-sm btn-outline-secondary mt-1" onClick={clearPad}>
+      <button type="button" className="btn btn-sm btn-outline-dark mt-1" onClick={clearPad}>
         <i className="bi bi-eraser me-1"></i>Clear
       </button>
     </div>
@@ -165,7 +167,7 @@ function SignaturePad({ onSignature }: { onSignature: (dataUrl: string | null) =
 
 /** A numbered circle that starts each part of the pre-order screen (1 who, 2 items, 3 check). */
 const Num = ({ n }: { n: number }) => (
-  <span aria-hidden="true" className="rounded-circle bg-dark text-white d-inline-flex align-items-center justify-content-center me-2" style={{ width: 32, height: 32, fontSize: 18 }}>{n}</span>
+  <span aria-hidden="true" className="step-num">{n}</span>
 );
 
 export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: string) => void }) {
@@ -544,20 +546,26 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
     return Object.values(map).sort((a, b) => (b.holdQty + b.soldQty) - (a.holdQty + a.soldQty));
   };
 
-  const summaryCard = () => {
+  /** The dates the Done list and the "Sold" column follow. */
+  const dateRow = (
+    <div className="d-flex flex-wrap gap-2 align-items-center justify-content-center mb-3">
+      <span className="fw-semibold">Sold from</span>
+      <input aria-label="Sold from date" className="form-control" style={{ width: 170 }} type="date" value={preFrom} onChange={(e) => setPreFrom(e.target.value)} />
+      <span className="fw-semibold">to</span>
+      <input aria-label="Sold to date" className="form-control" style={{ width: 170 }} type="date" value={preTo} onChange={(e) => setPreTo(e.target.value)} />
+    </div>
+  );
+
+  /** Totals by item, shown after the pre-orders themselves (the customers come first). */
+  const summaryCard = (withDates: boolean) => {
     const rows = holdSoldRows();
     const hold = rows.reduce((s, r) => s + r.holdQty, 0);
     const sold = rows.reduce((s, r) => s + r.soldQty, 0);
     return (
-      <div className="card mb-3">
+      <div className="card mt-3">
         <div className="card-body">
-          <h2 className="h5 text-center mb-1"><i className="bi bi-box-seam me-2" aria-hidden="true"></i>Items on hold and sold</h2>
-          <div className="d-flex flex-wrap gap-2 align-items-center justify-content-center mb-2">
-            <span className="text-muted">Sold from</span>
-            <input aria-label="Sold from date" className="form-control" style={{ width: 170 }} type="date" value={preFrom} onChange={(e) => setPreFrom(e.target.value)} />
-            <span className="text-muted">to</span>
-            <input aria-label="Sold to date" className="form-control" style={{ width: 170 }} type="date" value={preTo} onChange={(e) => setPreTo(e.target.value)} />
-          </div>
+          <h2 className="h5 text-center mb-2"><i className="bi bi-box-seam me-2" aria-hidden="true"></i>Totals by item: on hold and sold</h2>
+          {withDates && dateRow}
           {rows.length === 0 ? (
             <p className="text-muted text-center mb-0">Nothing on hold, and nothing sold on these dates.</p>
           ) : (
@@ -569,7 +577,7 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
                 {rows.map((r) => (
                   <tr key={r.productName}>
                     <td>{r.productName}</td>
-                    <td className={`text-center fw-semibold ${r.holdQty > 0 ? "text-warning-emphasis" : "text-muted"}`}>{r.holdQty}</td>
+                    <td className={`text-center fw-semibold ${r.holdQty > 0 ? "text-warning" : "text-muted"}`}>{r.holdQty}</td>
                     <td className={`text-center fw-semibold ${r.soldQty > 0 ? "text-success" : "text-muted"}`}>{r.soldQty}</td>
                   </tr>
                 ))}
@@ -579,7 +587,7 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
               </tfoot>
             </table>
           )}
-          <div className="small text-muted text-center">On hold = every waiting pre-order. Sold = completed between the dates above.</div>
+          <div className="text-muted text-center">On hold = every waiting pre-order. Sold = completed between the dates{withDates ? " above" : " at the top"}.</div>
         </div>
       </div>
     );
@@ -611,39 +619,37 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
     <div className="col" key={p.id}>
       <div className={`card h-100 ${pastDue ? "border-danger" : ""}`}>
         <div className="card-body d-flex flex-column">
-          <div className="d-flex justify-content-between align-items-start gap-2 mb-1">
-            <div>
-              <div className="fw-bold fs-5">{p.customerName || "—"}</div>
-              <div className="small text-muted">{p.orderNumber} · {fmtDate(p.createdAt)}</div>
-            </div>
-            <div className="fw-bold fs-5 text-end" style={{ fontVariantNumeric: "tabular-nums" }}>{maybePrice(p.totalMinor)}</div>
+          <div className="d-flex flex-wrap justify-content-between align-items-baseline gap-2 mb-1">
+            <div className="fw-bold fs-5" style={{ minWidth: 0, overflowWrap: "anywhere" }}>{p.customerName || "—"}</div>
+            <div className="fw-bold fs-4 text-nowrap" style={{ fontVariantNumeric: "tabular-nums" }}>{maybePrice(p.totalMinor)}</div>
           </div>
-          {p.dueAt && <div className={`small mb-1 ${pastDue ? "text-danger fw-semibold" : "text-muted"}`}>Due {fmtDate(p.dueAt)}{pastDue ? " (late)" : ""}</div>}
+          <div className="text-muted mb-1">{p.orderNumber} · {fmtDate(p.createdAt)}</div>
+          {p.dueAt && <div className={`mb-1 ${pastDue ? "text-danger fw-bold" : "text-muted"}`}>{pastDue && <span className="badge text-bg-danger me-2">Late</span>}Due {fmtDate(p.dueAt)}</div>}
           <div className="mb-3 flex-grow-1">{itemLines(p, 4)}</div>
           {local && p.status === "COMPLETED" && (
             <>
-              <div className="small text-warning-emphasis mb-2"><i className="bi bi-wifi-off me-1"></i>Completed on this tablet ({p.paidBy === "cash" ? "paid in cash" : "on credit"}). It uploads when the internet is back.</div>
-              <button className="btn btn-outline-dark w-100" onClick={() => printSlip(soldSlip(p))}><i className="bi bi-printer me-1"></i>Print receipt</button>
+              <div className="text-warning mb-2"><i className="bi bi-wifi-off me-1" aria-hidden="true"></i>Completed on this tablet ({p.paidBy === "cash" ? "paid in cash" : "on credit"}). It uploads when the internet is back.</div>
+              <button className="btn btn-outline-primary w-100" onClick={() => printSlip(soldSlip(p))}><i className="bi bi-printer me-1" aria-hidden="true"></i>Print receipt</button>
             </>
           )}
           {local && p.status !== "COMPLETED" && (
             <>
-              <div className="small text-warning-emphasis mb-2"><i className="bi bi-wifi-off me-1"></i>Saved on this tablet — it is sent when the internet is back. Complete, change or delete it after that.</div>
-              <button className="btn btn-outline-dark w-100" onClick={() => printSlip(preorderSlip(p))}><i className="bi bi-printer me-1"></i>Print</button>
+              <div className="text-warning mb-2"><i className="bi bi-wifi-off me-1" aria-hidden="true"></i>Saved on this tablet — it is sent when the internet is back. Complete, change or delete it after that.</div>
+              <button className="btn btn-outline-primary w-100" onClick={() => printSlip(preorderSlip(p))}><i className="bi bi-printer me-1" aria-hidden="true"></i>Print</button>
             </>
           )}
           {!local && p.status === "ON_HOLD" && (
             <>
-              <button className="btn btn-success btn-lg w-100 mb-2" onClick={() => openFinalize(p)}><i className="bi bi-check2-circle me-1"></i>Complete sale</button>
+              <button className="btn btn-success btn-lg w-100 mb-2" onClick={() => openFinalize(p)}><i className="bi bi-check2-circle me-1" aria-hidden="true"></i>Complete sale</button>
               <div className="d-flex gap-2">
-                <button className="btn btn-outline-dark flex-fill" onClick={() => printSlip(preorderSlip(p))}><i className="bi bi-printer me-1"></i>Print</button>
-                <button className="btn btn-outline-dark flex-fill" disabled={offline} onClick={() => void openPreEdit(p)}><i className="bi bi-pencil me-1"></i>Change</button>
-                <button className="btn btn-outline-danger flex-fill" disabled={offline} onClick={() => { setConfirmVoid({ id: p.id, orderNumber: p.orderNumber }); setVoidReason(""); }}><i className="bi bi-trash me-1"></i>Delete</button>
+                <button className="btn btn-outline-primary flex-fill" onClick={() => printSlip(preorderSlip(p))}><i className="bi bi-printer me-1" aria-hidden="true"></i>Print</button>
+                <button className="btn btn-outline-dark flex-fill" disabled={offline} onClick={() => void openPreEdit(p)}><i className="bi bi-pencil me-1" aria-hidden="true"></i>Change</button>
+                <button className="btn btn-outline-danger flex-fill" disabled={offline} onClick={() => { setConfirmVoid({ id: p.id, orderNumber: p.orderNumber }); setVoidReason(""); }}><i className="bi bi-trash me-1" aria-hidden="true"></i>Delete</button>
               </div>
             </>
           )}
           {!local && p.status === "COMPLETED" && (
-            <button className="btn btn-outline-dark w-100" disabled={offline} onClick={() => setReceiptOrder(p.id)}><i className="bi bi-receipt me-1"></i>Receipt</button>
+            <button className="btn btn-outline-primary w-100" disabled={offline} onClick={() => setReceiptOrder(p.id)}><i className="bi bi-receipt me-1" aria-hidden="true"></i>Receipt</button>
           )}
         </div>
       </div>
@@ -656,7 +662,7 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
     const local = done ? doneLocal : here;
     return (
       <>
-        {summaryCard()}
+        {done && dateRow}
         {local.length > 0 && (
           <div className="row row-cols-1 row-cols-md-2 row-cols-xl-3 g-3 mb-3">
             {local.map((p) => preCard(p, false, true))}
@@ -673,6 +679,7 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
             {rows.map((p) => preCard(p, p.status === "ON_HOLD" && !!p.dueAt && p.dueAt.slice(0, 10) < todayStr))}
           </div>
         )}
+        {summaryCard(!done)}
       </>
     );
   };
@@ -726,17 +733,13 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
             renderTile={(p) => {
               const n = inOrder(p.id);
               return (
-                <button type="button" className={`btn ${n > 0 ? "btn-dark" : "btn-outline-dark"} w-100 h-100 p-2 text-center position-relative`} style={{ minHeight: 104 }}
-                  aria-label={`Add ${p.name}${n > 0 ? `, ${n} in this order` : ""}`} onClick={() => { noteUse("preorder", p.id); addProduct(p); }}>
-                  {n > 0 && <span className="position-absolute top-0 end-0 badge rounded-pill text-bg-success m-1 fs-6">{n}</span>}
-                  <div className="fw-semibold">{p.name}</div>
-                  <div style={{ fontSize: 22, fontVariantNumeric: "tabular-nums" }}>{maybePrice(p.priceMinor)}</div>
-                  <div className="small">{p.availableQuantity <= 0 ? "None in stock yet" : `${p.availableQuantity} in stock`}</div>
-                </button>
+                <PickTile name={p.name} price={maybePrice(p.priceMinor)} countText={n > 0 ? `${n} in order` : undefined}
+                  stock={p.availableQuantity <= 0 ? "None in stock yet" : `${p.availableQuantity} in stock`}
+                  ariaLabel={`Add ${p.name}${n > 0 ? `, ${n} in this order` : ""}`} onClick={() => { noteUse("preorder", p.id); addProduct(p); }} />
               );
             }} />
           <div className="text-center">
-            <button type="button" className="btn btn-outline-secondary" disabled={offline} onClick={() => setNewItemOpen(true)}>+ New item (not on the list yet){offline && " · Needs internet"}</button>
+            <button type="button" className="btn btn-outline-primary" disabled={offline} onClick={() => setNewItemOpen(true)}>+ New item (not on the list yet){offline && " · Needs internet"}</button>
           </div>
         </>
       )}
@@ -744,7 +747,7 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
   );
 
   const orderSection = (
-    <section className="card border-success mb-3" aria-labelledby="po-check">
+    <section className="sale-card mb-3" aria-labelledby="po-check">
       <div className="card-body">
         <h2 id="po-check" className="h5 mb-2 d-flex align-items-center"><Num n={3} />Check the order</h2>
         {buildCart.length === 0 && <p className="text-muted text-center py-3 mb-0">Nothing yet. Tap items {wide ? "on the left" : "above"} (part 2).</p>}
@@ -758,12 +761,12 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
               </div>
               <div className="d-flex flex-wrap justify-content-between align-items-center gap-2 mt-2">
                 <div className="d-flex align-items-center gap-1" role="group" aria-label={`How many ${l.product.name}`}>
-                  <button type="button" className={`btn ${l.quantity === 1 ? "btn-outline-danger" : "btn-outline-dark"}`} style={{ width: 48, height: 48 }}
+                  <button type="button" className={`btn qty-btn ${l.quantity === 1 ? "btn-outline-danger" : "btn-outline-dark"}`}
                     aria-label={l.quantity === 1 ? `Remove ${l.product.name}` : `One less ${l.product.name}`} onClick={() => setQty(l, l.quantity - 1)}>
                     {l.quantity === 1 ? <i className="bi bi-trash" aria-hidden="true"></i> : "−"}
                   </button>
-                  <span className="fw-bold text-center fs-5" style={{ minWidth: 40, fontVariantNumeric: "tabular-nums" }} aria-live="polite">{l.quantity}</span>
-                  <button type="button" className="btn btn-outline-dark" style={{ width: 48, height: 48 }} aria-label={`One more ${l.product.name}`} onClick={() => setQty(l, l.quantity + 1)}>+</button>
+                  <span className="qty-num" aria-live="polite">{l.quantity}</span>
+                  <button type="button" className="btn btn-outline-dark qty-btn" aria-label={`One more ${l.product.name}`} onClick={() => setQty(l, l.quantity + 1)}>+</button>
                 </div>
                 {/* The price is always open here: change it right on the line. */}
                 <label className="d-flex align-items-center gap-2 mb-0">
@@ -787,15 +790,15 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
             </div>
           );
         })}
-        <div className="d-flex justify-content-between align-items-baseline mt-3" style={{ fontVariantNumeric: "tabular-nums" }}>
-          <span className="fs-5">Total · {itemsInOrder} item{itemsInOrder === 1 ? "" : "s"}</span><span className="fw-bold" style={{ fontSize: 28 }}>{maybePrice(buildSubtotal)}</span>
+        <div className="sale-total">
+          <span className="label">Total · {itemsInOrder} item{itemsInOrder === 1 ? "" : "s"}</span><span className="amount">{maybePrice(buildSubtotal)}</span>
         </div>
         {wide && (
           <div className="pos-actions mt-2">
             <button className="btn btn-success btn-lg w-100 py-3 fw-bold" disabled={!canSave} onClick={savePreorder}>
               <i className="bi bi-bag-check me-1"></i>{saveLabel}
             </button>
-            {saveHint && <div className="text-center text-muted small mt-1">{saveHint}</div>}
+            {saveHint && <div className="text-center text-muted mt-1">{saveHint}</div>}
           </div>
         )}
       </div>
@@ -812,11 +815,11 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
       {customerSection}
       {pickSection}
       {orderSection}
-      <div className="position-sticky bottom-0 sticky-above-bar bg-white border border-success rounded shadow p-2 mb-2" style={{ zIndex: 5 }}>
+      <div className="position-sticky bottom-0 sticky-above-bar sale-card shadow p-2 mb-2" style={{ zIndex: 5 }}>
         <div className="d-flex align-items-center gap-2">
           <div className="text-nowrap" style={{ fontVariantNumeric: "tabular-nums" }}>
-            <div className="fw-bold fs-5">{maybePrice(buildSubtotal)}</div>
-            <div className="text-muted small">{itemsInOrder} item{itemsInOrder === 1 ? "" : "s"}</div>
+            <div className="fw-bold fs-4">{maybePrice(buildSubtotal)}</div>
+            <div className="text-muted">{itemsInOrder} item{itemsInOrder === 1 ? "" : "s"}</div>
           </div>
           <button className="btn btn-success btn-lg flex-fill fw-bold" disabled={!canSave} onClick={savePreorder}>
             <i className="bi bi-bag-check me-1"></i>{saveLabel}
@@ -828,7 +831,7 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
   );
 
   return (
-    <div style={{ fontSize: 18 }}>
+    <div className="sell-screen tone-sell">
       <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
         <h1 className="h4 mb-0">{subTab !== "build" ? "Pre-order" : editingPre ? `Change ${editingPre.orderNumber}` : "New pre-order"}</h1>
         {subTab === "build" ? (
@@ -842,16 +845,16 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
 
       {localReceipt && doneLocal.length > 0 && subTab !== "build" && (
         <div className="alert alert-warning d-flex flex-wrap align-items-center justify-content-center gap-2">
-          <span><i className="bi bi-wifi-off me-1"></i>Sale completed on this tablet. It uploads when the internet is back.</span>
-          <button className="btn btn-outline-dark" onClick={() => printSlip(localReceipt)}><i className="bi bi-printer me-1"></i>Print receipt</button>
-          <button className="btn btn-outline-secondary" onClick={() => setLocalReceipt(null)}>Close</button>
+          <span><i className="bi bi-wifi-off me-1" aria-hidden="true"></i>Sale completed on this tablet. It uploads when the internet is back.</span>
+          <button className="btn btn-outline-primary" onClick={() => printSlip(localReceipt)}><i className="bi bi-printer me-1" aria-hidden="true"></i>Print receipt</button>
+          <button className="btn btn-outline-dark" onClick={() => setLocalReceipt(null)}>Close</button>
         </div>
       )}
       {lastFinalizedOrderId && subTab !== "build" && (
         <div className="alert alert-success d-flex flex-wrap align-items-center justify-content-center gap-2">
           <span>Sale completed.</span>
-          <button className="btn btn-outline-dark" onClick={() => { setReceiptOrder(lastFinalizedOrderId); setLastFinalizedOrderId(null); }}>
-            <i className="bi bi-printer me-1"></i>Print receipt
+          <button className="btn btn-outline-primary" onClick={() => { setReceiptOrder(lastFinalizedOrderId); setLastFinalizedOrderId(null); }}>
+            <i className="bi bi-printer me-1" aria-hidden="true"></i>Print receipt
           </button>
         </div>
       )}
@@ -861,8 +864,8 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
 
       {subTab !== "build" && (
         <div className="btn-group w-100 mb-3" role="group" aria-label="Pre-order list">
-          <button type="button" className={`btn btn-lg ${subTab === "list" ? "btn-dark" : "btn-outline-dark"}`} aria-pressed={subTab === "list"} onClick={() => setSubTab("list")}>Waiting ({drafts.length + here.length})</button>
-          <button type="button" className={`btn btn-lg ${subTab === "finalize" ? "btn-dark" : "btn-outline-dark"}`} aria-pressed={subTab === "finalize"} onClick={() => setSubTab("finalize")}>Done</button>
+          <button type="button" className={`btn btn-lg ${subTab === "list" ? "btn-dark" : "btn-outline-dark"}`} aria-pressed={subTab === "list"} onClick={() => setSubTab("list")}><i className="bi bi-hourglass-split me-1" aria-hidden="true"></i>Waiting ({drafts.length + here.length})</button>
+          <button type="button" className={`btn btn-lg ${subTab === "finalize" ? "btn-dark" : "btn-outline-dark"}`} aria-pressed={subTab === "finalize"} onClick={() => setSubTab("finalize")}><i className="bi bi-check2-circle me-1" aria-hidden="true"></i>Done</button>
         </div>
       )}
 
@@ -883,7 +886,7 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
                   <textarea className="form-control" rows={2} aria-label="Reason (optional)" placeholder="Reason (optional)" value={voidReason} onChange={(e) => setVoidReason(e.target.value)}></textarea>
                 </div>
                 <div className="modal-footer">
-                  <button className="btn btn-outline-secondary btn-lg" onClick={() => setConfirmVoid(null)}>Keep it</button>
+                  <button className="btn btn-outline-dark btn-lg" onClick={() => setConfirmVoid(null)}>Keep it</button>
                   <button className="btn btn-danger btn-lg" onClick={doVoidPre}>Delete</button>
                 </div>
               </div>
@@ -915,7 +918,7 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
                     if (!finalizedInfo.phone && finalizedInfo.storeCustomerId) void fetch(`${API_URL}/admin/customers/${finalizedInfo.storeCustomerId}`, { method: "PATCH", headers: { "Content-Type": "application/json", ...adminHeaders() }, body: JSON.stringify({ phone }) }).catch(() => {});
                   }}><i className="bi bi-chat-dots me-1"></i>Text the customer this transaction</button>
                 </div>
-                <div className="modal-footer"><button className="btn btn-outline-secondary btn-lg" onClick={() => setFinalizedInfo(null)}>Close</button></div>
+                <div className="modal-footer"><button className="btn btn-outline-dark btn-lg" onClick={() => setFinalizedInfo(null)}>Close</button></div>
               </div>
             </div>
           </div>
@@ -928,7 +931,7 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
         <>
           <div className="modal fade show d-block" tabIndex={-1}>
             <div className="modal-dialog modal-dialog-centered modal-dialog-scrollable">
-              <div className="modal-content" style={{ fontSize: 18 }}>
+              <div className="modal-content sell-screen">
                 <div className="modal-header">
                   <h5 className="modal-title">Complete sale · {finalizeTarget.customerName || finalizeTarget.orderNumber}</h5>
                   <button type="button" className="btn-close" aria-label="Close" onClick={() => setFinalizeTarget(null)}></button>
@@ -937,7 +940,7 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
                   {finalizeError && <div className="alert alert-danger py-2">{finalizeError}</div>}
                   <div className="text-center mb-3">
                     <div className="text-muted">Customer pays</div>
-                    <div className="fw-bold" style={{ fontSize: 36, fontVariantNumeric: "tabular-nums" }}>{toPesos(finalizeTarget.totalMinor)}</div>
+                    <div className="big-amount">{toPesos(finalizeTarget.totalMinor)}</div>
                   </div>
                   <div className="text-center fw-semibold mb-2">How are they paying?</div>
                   <div className="d-grid gap-2 mb-3" style={{ gridTemplateColumns: "1fr 1fr" }} role="group" aria-label="How are they paying?">
@@ -956,8 +959,8 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
                       <label className="form-label w-100 text-center" htmlFor="fin-cash">or type the cash received</label>
                       <PesoInput id="fin-cash" className="form-control form-control-lg text-center" value={finalizeTendered} onChange={setFinalizeTendered} placeholder="0.00" />
                       {finalizeTendered && (
-                        <div className={`mt-2 text-center fw-bold ${finalizeCash < finalizeTarget.totalMinor ? "text-danger" : "text-success"}`} style={{ fontSize: 28, fontVariantNumeric: "tabular-nums" }} aria-live="polite">
-                          {finalizeCash < finalizeTarget.totalMinor ? `Short ${toPesos(finalizeTarget.totalMinor - finalizeCash)}` : `Change ${toPesos(finalizeCash - finalizeTarget.totalMinor)}`}
+                        <div className={`mt-2 text-center change-due ${finalizeCash < finalizeTarget.totalMinor ? "text-danger" : "text-success"}`} aria-live="polite">
+                          {finalizeCash < finalizeTarget.totalMinor ? `Short ${toPesos(finalizeTarget.totalMinor - finalizeCash)}` : `Change to give ${toPesos(finalizeCash - finalizeTarget.totalMinor)}`}
                         </div>
                       )}
                     </>
@@ -980,13 +983,13 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
                   )}
                 </div>
                 <div className="modal-footer d-flex gap-2">
-                  <button className="btn btn-outline-secondary btn-lg" onClick={() => setFinalizeTarget(null)}>Back</button>
-                  <button className="btn btn-success btn-lg flex-fill fw-bold" disabled={!canFinalize} onClick={doFinalize}>
+                  <button className="btn btn-outline-dark btn-lg" onClick={() => setFinalizeTarget(null)}>Back</button>
+                  <button className="btn btn-success btn-lg flex-fill fw-bold sale-pay" disabled={!canFinalize} onClick={doFinalize}>
                     {finalizeBusy ? "Please wait…" : "Finish sale"}
                   </button>
                 </div>
                 {!canFinalize && !finalizeBusy && (
-                  <div className="text-center text-muted small pb-2">{finalizePay === "cash" ? "Tap Exact or enter the cash received first." : "The customer signs first."}</div>
+                  <div className="text-center text-muted pb-2">{finalizePay === "cash" ? "Tap Exact or enter the cash received first." : "The customer signs first."}</div>
                 )}
               </div>
             </div>

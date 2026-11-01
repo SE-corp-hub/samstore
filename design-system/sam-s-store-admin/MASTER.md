@@ -91,6 +91,13 @@ Dense dashboard density: cards pad `1rem 1.25rem`; table cells `0.5rem 0.75rem`;
 - Radius `var(--sam-radius)`, border `var(--sam-border)`, header bottom-border warm neutral.
 - Backdrop `rgba(43,33,24,.5)`.
 
+### Selling screens (POS Walk-in, Full sale, Pre-order) — `easy-read.css` §8
+- Product buttons are one component, `components/admin/PickTile.tsx` (`.pick-tile`): white, 2px dark border, name 1rem, price 1.5rem bold `tabular-nums`, stock line ≥ 16px. **In the sale = green**: `#E4F3EA` face, `#1F6F3F` border and a `✓ 2 in sale` pill (never a black tile). Out of stock = amber `.pick-stock.out` badge ("None left here"): careful, not stop — the counter may still sell.
+- The sale / order lives in a `.sale-card` (2px green frame) with a `.sale-card-title` ("This sale · 3 items"), lines in `.sale-line` (name · − qty + · amount, wrapping to two rows in narrow columns), and a `.sale-total` row whose amount (2rem, 800) is the largest number on the screen. "Customer pays" uses `.big-amount` (2.25rem); change due uses `.change-due` (1.75rem, green; "Short …" red).
+- − / + are `.qty-btn` (3rem square, 1.5rem sign) around a `.qty-num`.
+- Button meanings on these screens: green = the one next step (Cash exact, Pay, Finish sale, Complete sale, Save pre-order, Open the cash drawer); blue outline = second choices (Print, Receipt, Change price, Take from another store, New item, Text customer); dark outline = Back, Cancel, Keep it, Close and toggles (Cash / GCash / Credit, Waiting / Done); red = Delete, Clear this sale. Each pay method carries an icon.
+- Sizes are rem inside `.sell-screen` (`max(18px, 1rem)`), so the Text size setting applies; never `style={{ fontSize: 18 }}` or px prices on a selling screen.
+
 ### Sidebar (admin shell)
 - Background `var(--sam-sidebar)`, light cream text, muted group labels (uppercase, letter-spacing).
 - Nav items: pill radius `.5rem`, hover `rgba(255,255,255,.06)`, **active = terracotta pill** (`--sam-primary`) with white text — not Bootstrap's default blue.

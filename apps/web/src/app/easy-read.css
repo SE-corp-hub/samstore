@@ -227,3 +227,75 @@ html[data-text-size] .toast.text-bg-danger { background-color: #a3201b !importan
 /* ── 7. The tapped or focused control shows a 3 px ring. */
 html[data-text-size] :focus-visible { outline: 3px solid var(--sam-primary); outline-offset: 2px; }
 html[data-text-size] .btn:focus-visible { box-shadow: none; }
+
+/* ── 8. Selling screens: POS (Walk-in, Full sale) and Pre-order (2026-11-01).
+   What is in the sale is green, the total is the biggest number on the screen, every size is in rem
+   (the Text size setting works here too), and the buttons keep the one-meaning colours:
+   green = the one next step, blue outline = a second choice (Print, Change price, New item),
+   dark outline = Back / Cancel / a toggle, red = stop (Delete, Clear this sale), amber = careful. */
+.sell-screen { font-size: max(18px, 1rem); }
+
+/* The product buttons (components/admin/PickTile.tsx). */
+.pick-tile {
+  width: 100%; height: 100%; min-height: 7rem; padding: 0.5rem 0.5rem 0.6rem;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.15rem;
+  text-align: center; line-height: 1.2; font-weight: 600; color: var(--sam-text);
+  background: #fff; border: 2px solid #4a4844; border-radius: 0.75rem;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+.pick-tile:hover { background: #f4efe7; }
+.pick-tile:active { background: #e9e2d8; }
+.pick-tile.in-sale { background: #e4f3ea; border-color: #1f6f3f; box-shadow: inset 0 0 0 1px #1f6f3f; }
+.pick-count {
+  display: inline-flex; align-items: center; gap: 0.3rem; margin-bottom: 0.2rem; padding: 0.1rem 0.6rem;
+  border-radius: 1rem; background: #1f6f3f; color: #fff; font-size: max(16px, 0.9rem); font-weight: 700;
+}
+.pick-name { font-size: 1rem; overflow-wrap: anywhere; }
+.pick-name .badge { margin-left: 0.3rem; vertical-align: middle; }
+.pick-price { font-size: 1.5rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.pick-price-note { margin-left: 2px; font-size: 0.9rem; font-weight: 600; color: var(--sam-muted); }
+.pick-stock { font-size: max(16px, 0.9rem); font-weight: 500; color: var(--sam-muted); font-variant-numeric: tabular-nums; }
+.pick-stock.out {
+  display: inline-block; margin-top: 0.15rem; padding: 0.05rem 0.5rem; border-radius: 0.4rem;
+  background: #fff3d6; color: #6f4800; border: 1px solid #8a5a00; font-weight: 700;
+}
+.pick-tile.in-sale .pick-stock.out { background: #fff; }
+.pick-tile:focus-visible { outline: 3px solid var(--sam-primary); outline-offset: 2px; }
+
+/* The sale (or the order) on the right / at the bottom: a green frame, a title, the total last and largest. */
+.sale-card { background: #fff; border: 2px solid #1f6f3f; border-radius: 0.75rem; }
+.sale-card > .card-body { padding: 1rem; }
+.sale-card-title { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; font-size: 1rem; font-weight: 700; color: #1f6f3f; }
+.sale-card-title i { font-size: 1.25rem; }
+.sale-line { display: flex; flex-wrap: wrap; align-items: center; column-gap: 0.5rem; row-gap: 0.35rem; padding: 0.4rem 0; border-bottom: 1px solid #e1d6c6; font-variant-numeric: tabular-nums; }
+/* The name keeps at least 9 rem; when the card is narrower, the − + and the amount drop to a second row, on the right. */
+.sale-line .name { flex: 1 1 9rem; min-width: 0; overflow-wrap: anywhere; }
+.sale-line .qty { flex: 0 0 auto; display: flex; align-items: center; gap: 0.4rem; margin-left: auto; }
+.sale-line .amount { flex: 0 0 auto; min-width: 5.5rem; margin-left: auto; text-align: right; font-weight: 600; }
+.sale-total { display: flex; justify-content: space-between; align-items: baseline; gap: 0.5rem; margin-top: 0.5rem; padding-top: 0.5rem; border-top: 2px solid #1f6f3f; font-variant-numeric: tabular-nums; }
+.sale-total .label { font-size: 1.1rem; font-weight: 700; }
+.sale-total .amount { font-size: 2rem; font-weight: 800; line-height: 1.1; }
+.sale-pay { font-size: 1.4rem; }
+
+/* − and + : square, big digits, a wide number between them. */
+.qty-btn { min-width: 3rem; min-height: 3rem; padding: 0; font-size: 1.5rem; font-weight: 700; line-height: 1; }
+.qty-num { min-width: 3.5rem; text-align: center; font-size: 1.25rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+
+/* The one number the person reads out ("Customer pays", change to give back). */
+.big-amount { font-size: 2.25rem; font-weight: 800; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.change-due { font-size: 1.75rem; font-weight: 800; line-height: 1.15; font-variant-numeric: tabular-nums; }
+
+/* The numbered parts of the pre-order screen (1 who · 2 items · 3 check), in the Sell green. */
+.step-num {
+  flex: 0 0 auto; width: 2rem; height: 2rem; margin-right: 0.5rem; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: #1f6f3f; color: #fff; font-size: 1.05rem; font-weight: 700;
+}
+
+/* Two-line choice buttons (Walk-in / Full sale): the name, then what it is for. */
+.seg-caption { display: block; font-size: max(16px, 0.85rem); font-weight: 500; line-height: 1.2; opacity: 0.92; }
+
+/* Product list headings ("Sold most here", one per variety) in full ink, sentence case. */
+.finder-heading { display: flex; align-items: center; gap: 0.4rem; margin: 0.25rem 0 0.5rem; font-size: 1.05rem; font-weight: 700; color: var(--sam-text); }
+.finder-heading.group { padding-bottom: 0.25rem; border-bottom: 2px solid #e1d6c6; }
+.finder-heading .bi-star-fill { color: #8a5a00; }
