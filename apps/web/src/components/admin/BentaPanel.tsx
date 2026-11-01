@@ -1,8 +1,10 @@
 "use client";
 
 // Rice Ops M5 — Benta: the counter sale on the staff member's own phone.
-//   1. Tap the rice. A sack sells by piece; loose rice asks "Kilos or pesos?" and opens the pad.
-//      ₱100 at ₱52/kg shows 1.923 kg before it goes in the cart.
+//   1. Tap the rice: each tap puts one more in the sale (one sack, or one kilo of loose rice) — no
+//      "how many?" step. The sale card has − / + on every line; "Price" opens the line to change the
+//      price (a reason is asked), type an exact amount, or — for loose rice — sell by pesos
+//      (₱100 at ₱52/kg shows 1.923 kg) or take the line from another store.
 //   2. Each tile shows stock at every location; "Take from …" serves a line from another one.
 //   3. Payment: Cash (pad → change), GCash (reference) or Credit (customer + their signature).
 //   4. From a paper slip: encode a paper slip — its number, the real time, a photo, staff signs.
@@ -238,9 +240,12 @@ export default function BentaPanel({ switcher }: { switcher?: ReactNode }) {
     setEditing(l); setEditIdx(idx);
     setPriceOpen(l.price !== undefined); setFromOpen(!!l.sourceLocationId);
   };
-  /** How much of a product is already in this sale: pieces, or one per kilo/peso line. */
-  const inSale = (productId: string) => cart.filter((l) => l.productId === productId).reduce((n, l) => n + (l.mode === "PIECE" ? Number(l.value) || 0 : 1), 0);
   const byId = useMemo(() => new Map(items.map((i) => [i.id, i])), [items]);
+  /** How much of a product is already in this sale: pieces for sacks, grams for loose rice (all its lines together). */
+  const inSale = (productId: string) => cart.filter((l) => l.productId === productId).reduce((n, l) => {
+    const it = byId.get(l.productId);
+    return n + (it?.loose ? lineOf(it, l).grams ?? 0 : Number(l.value) || 0);
+  }, 0);
   const here = locations.find((l) => l.id === locationId);
   const code = (id: string) => { const l = locations.find((x) => x.id === id); return l?.code ?? l?.name ?? "?"; };
   const computed = cart.map((l) => lineOf(byId.get(l.productId), l));
@@ -425,14 +430,15 @@ export default function BentaPanel({ switcher }: { switcher?: ReactNode }) {
       )}
       renderTile={(i) => {
         const n = inSale(i.id);
+        const inText = i.loose ? kg(n) : `${n}`;
         const left = i.stock[locationId] ?? 0; // only this store's count: other stores show when a line is taken from them
         return (
           <PickTile name={i.name} price={peso(i.priceMinor)} priceNote={i.loose ? "/kg" : undefined}
-            countText={n > 0 ? `${n} in sale` : undefined}
+            countText={n > 0 ? `${inText} in sale` : undefined}
             stock={left <= 0 ? "None left here" : `${i.loose ? kg(left) : left} left`} stockOut={left <= 0}
             extra={i.forReview ? <span className="badge text-bg-warning">To review</span> : undefined}
-            ariaLabel={`${i.name}${n > 0 ? `, ${n} in this sale` : ""}`}
-            onClick={() => { noteUse("pos", i.id); startEdit({ productId: i.id, mode: i.loose ? "KILO" : "PIECE", value: i.loose ? "" : "1", sourceLocationId: null }, null); }} />
+            ariaLabel={`Add ${i.loose ? "one kilo of " : ""}${i.name}${n > 0 ? `, ${inText} in this sale` : ""}`}
+            onClick={() => void addOne(i)} />
         );
       }} />
   );
@@ -468,6 +474,34 @@ export default function BentaPanel({ switcher }: { switcher?: ReactNode }) {
       setItems((prev) => prev.map((x) => (x.id === it.id ? { ...x, floorMinor: saved } : x)));
     }
   };
+  /** The line a tap on a product tile adds to: the last line of that product sold by the piece (or by the kilo). */
+  const tapLineIdx = (it: Item) => {
+    for (let i = cart.length - 1; i >= 0; i--) {
+      const l = cart[i]!;
+      if (l.productId === it.id && l.mode === (it.loose ? "KILO" : "PIECE")) return i;
+    }
+    return -1;
+  };
+  /** One tap on a product: one more sack (or one more kilo of loose rice) in the sale. The first tap checks the price against the cost. */
+  const addOne = async (it: Item) => {
+    noteUse("pos", it.id);
+    setError(null);
+    const at = tapLineIdx(it);
+    if (at >= 0) { bump(at, 1); return; }
+    const line: CartLine = { productId: it.id, mode: it.loose ? "KILO" : "PIECE", value: "1", sourceLocationId: null };
+    if (!(await passesCost(line, null))) return;
+    setCart((c) => [...c, line]);
+    setCleared((n) => n + 1);
+  };
+  /** − / + on a sale line: one sack, or one kilo. At zero the line goes out. */
+  const bump = (idx: number, delta: number) => {
+    setCart((c) => c.flatMap((l, j) => {
+      if (j !== idx || l.mode === "PESO") return [l];
+      const next = l.mode === "KILO" ? Math.round((Number(l.value) || 0) * 1000 + delta * 1000) / 1000 : (Number(l.value) || 0) + delta;
+      if (next <= 0) return [];
+      return [{ ...l, value: l.mode === "KILO" ? String(next) : String(Math.round(next)) }];
+    }));
+  };
   const goPay = async () => {
     for (let i = 0; i < cart.length; i++) if (!(await passesCost(cart[i]!, i))) return;
     if (!pay) setPay("cash");
@@ -489,27 +523,46 @@ export default function BentaPanel({ switcher }: { switcher?: ReactNode }) {
           {cart.map((l, idx) => {
             const it = byId.get(l.productId);
             const c = computed[idx]!;
+            const name = it?.name ?? "Item";
+            const unitWord = l.mode === "KILO" ? "kilo" : it?.gramsPerUnit ? "sack" : "piece";
+            // A kilo line counts in whole kilos; a line sold by pesos has no −/+ (change it with "Kg · price").
+            const qtyText = l.mode === "PIECE" ? l.value : kg(c.grams ?? 0);
+            const canMinus = l.mode !== "PESO" && (l.mode === "PIECE" ? Number(l.value) > 1 : (c.grams ?? 0) > 1000);
             return (
-              <li key={idx} className="d-flex align-items-stretch gap-2 py-1 border-bottom">
-                {/* The whole line is the button: tap it to change the amount or price. */}
-                <button type="button" className="btn btn-light flex-grow-1 text-start d-flex justify-content-between align-items-center gap-2" aria-label={`Change ${it?.name ?? "line"}`} onClick={() => startEdit(l, idx)}>
-                  <span>
-                    {l.mode === "PIECE" ? `${l.value} × ` : `${kg(c.grams ?? 0)} `}{it?.name}
-                    {l.mode === "PESO" && <span className="text-muted"> (₱{l.value})</span>}
-                    {l.sourceLocationId && <span className="badge text-bg-info ms-1">from {code(l.sourceLocationId)}</span>}
-                    {l.price !== undefined && <span className="badge text-bg-warning ms-1">new price</span>}
-                    {it && isBelowCost(l.price ?? it.priceMinor, it.floorMinor) && <span className="badge text-bg-danger ms-1">below cost</span>}
-                  </span>
-                  <span className="fw-semibold text-nowrap">{peso(c.totalMinor)}</span>
+              <li key={idx} className="sale-line">
+                <span className="name">
+                  {name}
+                  {l.mode === "PESO" && <span className="text-muted"> (₱{l.value})</span>}
+                  {l.sourceLocationId && <span className="badge text-bg-info ms-1">from {code(l.sourceLocationId)}</span>}
+                  {l.price !== undefined && <span className="badge text-bg-warning ms-1">new price</span>}
+                  {it && isBelowCost(l.price ?? it.priceMinor, it.floorMinor) && <span className="badge text-bg-danger ms-1">below cost</span>}
+                </span>
+                {/* Beside the name, so sideways (narrow card) the row wraps as: name + Price, then − n + and the amount. */}
+                <button type="button" className="btn btn-outline-primary line-edit" aria-label={`${it?.loose ? "Kilos or price" : "Price"} of ${name}`} onClick={() => startEdit(l, idx)}>
+                  <i className="bi bi-tag me-1" aria-hidden="true"></i>{it?.loose ? "Kg · price" : "Price"}
                 </button>
-                <button type="button" className="btn btn-outline-danger" style={{ minWidth: 48 }} aria-label={`Remove ${it?.name ?? "line"}`} onClick={() => setCart(cart.filter((_, j) => j !== idx))}>
-                  <i className="bi bi-trash" aria-hidden="true"></i>
-                </button>
+                <span className="qty-amount">
+                <span className="qty" role="group" aria-label={`How many ${name}`}>
+                  {l.mode !== "PESO" ? (
+                    <button type="button" className={`btn qty-btn ${canMinus ? "btn-outline-dark" : "btn-outline-danger"}`}
+                      aria-label={canMinus ? `One ${unitWord} less ${name}` : `Remove ${name}`}
+                      onClick={() => (canMinus ? bump(idx, -1) : setCart(cart.filter((_, j) => j !== idx)))}>
+                      {canMinus ? "−" : <i className="bi bi-trash" aria-hidden="true"></i>}
+                    </button>
+                  ) : (
+                    <button type="button" className="btn btn-outline-danger qty-btn" aria-label={`Remove ${name}`} onClick={() => setCart(cart.filter((_, j) => j !== idx))}>
+                      <i className="bi bi-trash" aria-hidden="true"></i>
+                    </button>
+                  )}
+                  <span className="qty-num" aria-live="polite">{qtyText}</span>
+                  {l.mode !== "PESO" && <button type="button" className="btn btn-outline-dark qty-btn" aria-label={`One ${unitWord} more ${name}`} onClick={() => bump(idx, 1)}>+</button>}
+                </span>
+                <span className="amount">{peso(c.totalMinor)}</span>
+                </span>
               </li>
             );
           })}
         </ul>
-        <div className="text-center text-muted mb-1">Tap a line to change it.</div>
         <div className="sale-total mb-2"><span className="label">Total</span><span className="amount">{peso(total)}</span></div>
         <div className="d-flex gap-2">
           <button type="button" className="btn btn-outline-dark btn-lg" onClick={holdSale}><i className="bi bi-pause-circle me-1" aria-hidden="true"></i>Hold</button>
@@ -538,7 +591,7 @@ export default function BentaPanel({ switcher }: { switcher?: ReactNode }) {
     return (
       <div className="sale-card fit-card mx-auto w-100" style={{ maxWidth: 520 }}>
         <div className="card-body">
-          <h2 className="h5 text-center mb-1">{it.loose ? `${it.name} · ${peso(it.priceMinor)}/kg` : `How many ${it.name}?`}</h2>
+          <h2 className="h5 text-center mb-1">{it.loose ? `${it.name} · ${peso(it.priceMinor)}/kg` : `Change ${it.name}`}</h2>
           {/* Loose rice: the Kilos / Pesos switch shares the row with the amount, so the card stays short enough sideways. */}
           <NumPad startFresh={editing.mode === "PIECE"} value={editing.value} onChange={(v) => setEditing({ ...editing, value: v })} decimals={editing.mode === "KILO" ? 3 : editing.mode === "PESO" ? 2 : 0}
             label={editing.mode === "PESO" ? "Amount in pesos" : editing.mode === "KILO" ? "How many kilos" : "How many"} unit={editing.mode === "PESO" ? "₱" : editing.mode === "KILO" ? "kg" : it.gramsPerUnit ? "sacks" : "pieces"}
@@ -597,6 +650,7 @@ export default function BentaPanel({ switcher }: { switcher?: ReactNode }) {
             <button type="button" className="btn btn-outline-dark btn-lg" onClick={() => { setEditing(null); setEditIdx(null); }}>Back</button>
             <button type="button" className="btn btn-success btn-lg px-5" disabled={c.totalMinor <= 0 || short || !reasonGiven || (editing.mode === "PIECE" && !Number.isInteger(c.units))}
               onClick={async () => { const line = editing, at = editIdx; if (!(await passesCost(line, at))) return; setCart(at === null ? [...cart, line] : cart.map((x, j) => (j === at ? line : x))); setEditing(null); setEditIdx(null); setCleared((n) => n + 1); }}>{editIdx === null ? "Add to sale" : "Save"}</button>
+            {/* editIdx is null only when the below-cost popup's "Fix selling price" opened this card for a product not in the sale yet. */}
           </div>
         </div>
       </div>

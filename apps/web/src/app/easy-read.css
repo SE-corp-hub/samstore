@@ -272,6 +272,10 @@ html[data-text-size] .btn:focus-visible { box-shadow: none; }
 .sale-line .name { flex: 1 1 9rem; min-width: 0; overflow-wrap: anywhere; }
 .sale-line .qty { flex: 0 0 auto; display: flex; align-items: center; gap: 0.4rem; margin-left: auto; }
 .sale-line .amount { flex: 0 0 auto; min-width: 5.5rem; margin-left: auto; text-align: right; font-weight: 600; }
+/* Full sale: "Price" (or "Kg · price") opens the line to change its price or type an exact amount; the same height as − and +. */
+.sale-line .line-edit { flex: 0 0 auto; min-height: 3rem; margin-left: auto; white-space: nowrap; }
+/* − n + and the amount stay together: in a narrow card they drop to a second row as one piece. */
+.sale-line .qty-amount { flex: 0 0 auto; display: flex; align-items: center; column-gap: 0.5rem; margin-left: auto; }
 .sale-total { display: flex; justify-content: space-between; align-items: baseline; gap: 0.5rem; margin-top: 0.5rem; padding-top: 0.5rem; border-top: 2px solid #1f6f3f; font-variant-numeric: tabular-nums; }
 .sale-total .label { font-size: 1.1rem; font-weight: 700; }
 .sale-total .amount { font-size: 2rem; font-weight: 800; line-height: 1.1; }
