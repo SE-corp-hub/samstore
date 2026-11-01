@@ -317,7 +317,9 @@ html[data-text-size] .btn:focus-visible { box-shadow: none; }
 .fit-scroll { overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; padding-right: 2px; }
 /* The sale card never grows past its column: its lines scroll, the total and the button stay. */
 .fit-col > .fit-card { display: flex; flex-direction: column; flex: 0 1 auto; min-height: 0; }
-.fit-col > .fit-bottom { flex: 0 0 auto; max-height: 60vh; max-height: 60dvh; }
+/* Upright: the sale card takes at most 60 % of the fitted screen (a share of the screen's own height, not of the
+   window, so an on-screen keyboard that shrinks the window cannot squeeze it). */
+.fit-col > .fit-bottom { flex: 0 0 auto; max-height: 60%; }
 .sell-fit .fit-card > .card-body { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .sell-fit .fit-card > .card-body > * { flex: 0 0 auto; }
 .sell-fit .fit-card .sale-lines { flex: 0 1 auto; min-height: 3.5rem; overflow-y: auto; overscroll-behavior: contain; }
@@ -342,20 +344,27 @@ main:has(> * > .rice-ui > .sell-fit), main:has(> .rice-ui > .sell-fit) { padding
 /* Product buttons: four to a row on the tablet, 6 rem tall (the name, the price, what is left). */
 .sell-fit .pick-tile { min-height: 6rem; }
 
-/* The number pad: 64 px keys; 52 px when the screen is short (the tablet sideways), so the whole pad,
-   the amount and Back / Add to sale fit beside the product list. */
-.numpad-display { min-height: 64px; font-size: 2rem; font-variant-numeric: tabular-nums; }
+/* The number pad: 64 px keys; 48 px when the screen is short (the tablet sideways), so the whole pad,
+   the amount and Back / Add to sale fit beside the product list. The keys are exactly their minimum
+   height: a tight line box, so the digit's line does not push them taller. */
+.numpad-display { min-height: 64px; padding-top: 0.4rem; padding-bottom: 0.4rem; font-size: 2rem; line-height: 1.2; font-variant-numeric: tabular-nums; }
 .numpad-keys { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.5rem; }
-.numpad-key { min-height: 64px; font-size: 1.5rem; font-variant-numeric: tabular-nums; }
+.rice-ui .numpad-key, html[data-text-size] .numpad-key, .numpad-key { min-height: 64px; padding-top: 0.25rem; padding-bottom: 0.25rem; font-size: 1.5rem; line-height: 1.2; font-variant-numeric: tabular-nums; }
+/* The Kilos / Pesos switch beside the amount: as tall as the amount box, never under 44 px. */
+.mode-toggle .btn { min-height: 44px; padding-left: 0.9rem; padding-right: 0.9rem; font-weight: 600; }
+/* Drop-downs and typing boxes on the selling screens are at least finger-sized (44 px). */
+.sell-fit .form-select, .sell-fit .form-control { min-height: 44px; }
 @media (max-height: 760px) {
   .numpad-display { min-height: 48px; padding-top: 0.2rem; padding-bottom: 0.2rem; font-size: 1.75rem; }
   .numpad-keys { gap: 0.3rem; }
-  .rice-ui .numpad-key, .numpad-key { min-height: 48px; font-size: 1.35rem; }
-  .sell-fit .sale-card > .card-body { padding: 0.6rem 0.75rem; }
+  .rice-ui .numpad-key, html[data-text-size] .numpad-key, .numpad-key { min-height: 48px; font-size: 1.35rem; }
+  .sell-fit .sale-card > .card-body { padding: 0.5rem 0.75rem; }
   .sell-fit .big-amount { font-size: 1.85rem; }
   .sell-fit .change-due { font-size: 1.5rem; }
   .sell-fit .steps { margin-bottom: 0.25rem; }
-  .sell-fit .fit-card .pos-actions { padding-top: 0.35rem; }
+  /* The "How many?" card with Change price open, for a kilo item too: tighter heading and button row. */
+  .sell-fit .fit-card h2 { margin-bottom: 0.15rem !important; }
+  .sell-fit .fit-card .pos-actions { margin-top: 0.35rem !important; padding-top: 0.35rem; }
 }
 .sell-fit .steps { margin-bottom: 0.5rem; }
 .sell-fit > .fit-scroll { flex: 1 1 auto; min-height: 4rem; }

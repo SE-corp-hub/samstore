@@ -18,7 +18,19 @@ export function useFitHeight<T extends HTMLElement>(enabled: boolean) {
     const el = ref.current;
     if (!el) return;
     if (!enabled) { el.style.height = ""; return; }
+    let fittedW = 0, fittedH = 0; // the window size the height was last fitted to
+    // A box is being typed in (or a drop-down is open): the on-screen keyboard may be up.
+    const typing = () => {
+      const a = document.activeElement;
+      return a instanceof HTMLInputElement || a instanceof HTMLTextAreaElement || a instanceof HTMLSelectElement || (a instanceof HTMLElement && a.isContentEditable);
+    };
     const apply = () => {
+      // On some browsers the on-screen keyboard shrinks the window while a price, a name or a drop-down is
+      // being filled in. Re-fitting then would squeeze the whole screen for a moment and let it jump back
+      // after; so the height stays as it was (the browser scrolls the box into view) and the full height
+      // comes back when the keyboard goes. A turn of the tablet changes the width and always re-fits.
+      if (el.style.height && typing() && window.innerWidth === fittedW && window.innerHeight < fittedH) return;
+      fittedW = window.innerWidth; fittedH = window.innerHeight;
       el.style.height = "";
       const top = el.getBoundingClientRect().top + window.scrollY;
       let below = 0;
