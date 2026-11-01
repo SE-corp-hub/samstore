@@ -1,7 +1,8 @@
 "use client";
 
 // Walk-in: the quick cash sale for customers who are not on the list.
-//   Tap the rice (each tap adds one; loose rice asks how many kilos), then "Cash exact". Two or three taps.
+//   Tap the rice (each tap adds one sack, or one kilo of loose rice), then "Cash exact". Two or three taps.
+//   − / + on the sale line change the amount; half kilos, pesos and other prices are in Full sale.
 //   It is the same sale as the full POS (POST /admin/benta): same stock, cost, Store payable charge,
 //   offline queue and receipt. Credit, GCash, special prices and "take from another store" stay in Full sale.
 
@@ -30,8 +31,6 @@ interface Sold { ref: string; offline: boolean; totalMinor: number; changeMinor:
 type ApiBody = { message?: string; errors?: string[] } & Record<string, unknown>;
 
 const BEST = 10;
-/** Kilos offered for loose rice, in grams. */
-const KILO_CHOICES = [500, 1000, 2000, 3000, 5000, 10000];
 
 /** `switcher`: the Walk-in / Full sale buttons, placed at the top of the product column so the sale card can start at the very top. */
 export default function WalkInPanel({ switcher }: { switcher?: ReactNode }) {
@@ -41,7 +40,6 @@ export default function WalkInPanel({ switcher }: { switcher?: ReactNode }) {
   const [items, setItems] = useState<Item[]>([]);
   const [storeName, setStoreName] = useState("");
   const [lines, setLines] = useState<Line[]>([]);
-  const [loosePick, setLoosePick] = useState<Item | null>(null);
   const [search, setSearch] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -100,7 +98,7 @@ export default function WalkInPanel({ switcher }: { switcher?: ReactNode }) {
 
   const add = (item: Item, qty: number) => {
     noteUse("pos", item.id);
-    setSold(null); setError(null); setLoosePick(null);
+    setSold(null); setError(null);
     setLines((prev) => {
       const at = prev.findIndex((l) => l.productId === item.id);
       if (at < 0) return [...prev, { productId: item.id, qty }];
@@ -108,7 +106,8 @@ export default function WalkInPanel({ switcher }: { switcher?: ReactNode }) {
     });
   };
   const change = (productId: string, delta: number) => setLines((prev) => prev.map((l) => (l.productId === productId ? { ...l, qty: l.qty + delta } : l)).filter((l) => l.qty > 0));
-  const tap = (item: Item) => { if (item.loose) { setLoosePick(item); setSold(null); } else add(item, 1); };
+  /** One tap = one sack, or one kilo (1000 g) of loose rice. */
+  const tap = (item: Item) => add(item, item.loose ? 1000 : 1);
 
   const slipOf = (s: Sold) => ({
     storeName: storeName || "SAM STORE", title: "SALES RECEIPT", reference: s.ref, when: new Date().toLocaleString("en-PH"),
@@ -170,7 +169,7 @@ export default function WalkInPanel({ switcher }: { switcher?: ReactNode }) {
         <PickTile name={i.name} price={peso(i.priceMinor)} priceNote={i.loose ? "/kg" : undefined}
           countText={n > 0 ? `${i.loose ? kg(n) : n} in sale` : undefined}
           stock={left <= 0 ? "None left here" : `${i.loose ? kg(left) : left} left`} stockOut={left <= 0}
-          ariaLabel={`${i.name}, ${peso(i.priceMinor)}${i.loose ? " a kilo" : ""}${n > 0 ? `, ${i.loose ? kg(n) : n} in this sale` : ""}`}
+          ariaLabel={`Add ${i.loose ? "one kilo of " : ""}${i.name}, ${peso(i.priceMinor)}${i.loose ? " a kilo" : ""}${n > 0 ? `, ${i.loose ? kg(n) : n} in this sale` : ""}`}
           onClick={() => tap(i)} />
       </div>
     );
@@ -202,20 +201,7 @@ export default function WalkInPanel({ switcher }: { switcher?: ReactNode }) {
   const side = (
     <div className={`sale-card fit-card${fit || wide ? "" : " position-sticky bottom-0 sticky-above-bar shadow"}${fit && !wide ? " fit-bottom" : ""}`} style={fit || wide ? undefined : { zIndex: 5, maxHeight: "60vh", overflowY: "auto" }}>
       <div className="card-body">
-        {loosePick ? (
-          <>
-            <div className="sale-card-title"><i className="bi bi-basket2-fill" aria-hidden="true"></i>{loosePick.name} · {peso(loosePick.priceMinor)}/kg</div>
-            <div className="fw-semibold mb-2">How many kilos?</div>
-            <div className="d-flex flex-wrap gap-2 mb-2" role="group" aria-label="Kilos">
-              {KILO_CHOICES.map((g) => (
-                <button key={g} type="button" className="btn btn-outline-dark btn-lg flex-fill" style={{ minWidth: 96 }} onClick={() => add(loosePick, g)}>
-                  {kg(g)}<span className="d-block small">{peso(lineTotal(loosePick, g))}</span>
-                </button>
-              ))}
-            </div>
-            <button type="button" className="btn btn-outline-dark" onClick={() => setLoosePick(null)}>Cancel</button>
-          </>
-        ) : lines.length === 0 ? (
+        {lines.length === 0 ? (
           sold ? (
             <div className="alert alert-success mb-0" role="status">
               <div className="fw-bold fs-5">Sold {peso(sold.totalMinor)}</div>
