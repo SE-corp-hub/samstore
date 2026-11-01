@@ -539,14 +539,15 @@ export default function BentaPanel({ switcher }: { switcher?: ReactNode }) {
       <div className="sale-card fit-card mx-auto w-100" style={{ maxWidth: 520 }}>
         <div className="card-body">
           <h2 className="h5 text-center mb-1">{it.loose ? `${it.name} · ${peso(it.priceMinor)}/kg` : `How many ${it.name}?`}</h2>
-          {it.loose && (
-            <div className="btn-group w-100 mb-2" role="group" aria-label="Sell by kilos or by pesos?">
-              <button type="button" className={`btn btn-lg ${editing.mode === "KILO" ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setEditing({ ...editing, mode: "KILO", value: "" })}>Kilos</button>
-              <button type="button" className={`btn btn-lg ${editing.mode === "PESO" ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setEditing({ ...editing, mode: "PESO", value: "" })}>Pesos</button>
-            </div>
-          )}
+          {/* Loose rice: the Kilos / Pesos switch shares the row with the amount, so the card stays short enough sideways. */}
           <NumPad startFresh={editing.mode === "PIECE"} value={editing.value} onChange={(v) => setEditing({ ...editing, value: v })} decimals={editing.mode === "KILO" ? 3 : editing.mode === "PESO" ? 2 : 0}
-            label={editing.mode === "PESO" ? "Amount in pesos" : editing.mode === "KILO" ? "How many kilos" : "How many"} unit={editing.mode === "PESO" ? "₱" : editing.mode === "KILO" ? "kg" : it.gramsPerUnit ? "sacks" : "pieces"} />
+            label={editing.mode === "PESO" ? "Amount in pesos" : editing.mode === "KILO" ? "How many kilos" : "How many"} unit={editing.mode === "PESO" ? "₱" : editing.mode === "KILO" ? "kg" : it.gramsPerUnit ? "sacks" : "pieces"}
+            lead={it.loose ? (
+              <div className="btn-group mode-toggle flex-shrink-0" role="group" aria-label="Sell by kilos or by pesos?">
+                <button type="button" className={`btn ${editing.mode === "KILO" ? "btn-dark" : "btn-outline-dark"}`} aria-pressed={editing.mode === "KILO"} onClick={() => setEditing({ ...editing, mode: "KILO", value: "" })}>Kilos</button>
+                <button type="button" className={`btn ${editing.mode === "PESO" ? "btn-dark" : "btn-outline-dark"}`} aria-pressed={editing.mode === "PESO"} onClick={() => setEditing({ ...editing, mode: "PESO", value: "" })}>Pesos</button>
+              </div>
+            ) : undefined} />
           <div className="mt-1" style={{ fontVariantNumeric: "tabular-nums" }}>
             {editing.mode === "PESO" && c.grams ? <div className="fs-5">= <strong>{kg(c.grams)}</strong> · pay <strong>{peso(c.totalMinor)}</strong></div> : null}
             {editing.mode === "KILO" && c.totalMinor > 0 ? <div className="fs-5">= <strong>{peso(c.totalMinor)}</strong></div> : null}
@@ -558,19 +559,23 @@ export default function BentaPanel({ switcher }: { switcher?: ReactNode }) {
               {it.tracked && locations.length > 1 && <button type="button" className="btn btn-outline-primary" onClick={() => setFromOpen(true)}><i className="bi bi-shop me-1" aria-hidden="true"></i>Take from another store</button>}
             </div>
           )}
+          {/* The new price and the reason side by side: one row, so the pad, the total and Add to sale still fit sideways. */}
           {priceOpen && (
-          <div className="mt-3">
-            <label className="form-label mb-1" htmlFor="bt-price">New price {it.loose ? "per kilo" : "each"} <span className="text-muted small">(usual price {peso(it.priceMinor)})</span></label>
-            <PesoInput id="bt-price" className="form-control form-control-lg" value={editing.price !== undefined ? String(editing.price / 100) : ""} placeholder={(it.priceMinor / 100).toFixed(2)}
-              onChange={(v) => { const m = v === "" ? undefined : toMinor(v); setEditing({ ...editing, price: m === undefined || m === it.priceMinor ? undefined : m, reason: m === undefined || m === it.priceMinor ? undefined : editing.reason }); }} />
-            {changed && (
-              <PriceReason className="form-select mt-2" value={editing.reason ?? ""} onChange={(v) => setEditing({ ...editing, reason: v })} />
-            )}
+          <div className="row g-2 mt-1 align-items-end">
+            <div className="col-7">
+              <label className="form-label mb-1" htmlFor="bt-price">New price <span className="text-muted">(usual {peso(it.priceMinor)})</span></label>
+              <PesoInput id="bt-price" className="form-control form-control-lg" value={editing.price !== undefined ? String(editing.price / 100) : ""} placeholder={(it.priceMinor / 100).toFixed(2)}
+                onChange={(v) => { const m = v === "" ? undefined : toMinor(v); setEditing({ ...editing, price: m === undefined || m === it.priceMinor ? undefined : m, reason: m === undefined || m === it.priceMinor ? undefined : editing.reason }); }} />
+            </div>
+            <div className="col-5">
+              <label className="form-label mb-1" htmlFor="bt-reason">Why?</label>
+              <PriceReason id="bt-reason" short className="form-select form-select-lg" value={editing.reason ?? ""} onChange={(v) => setEditing({ ...editing, reason: v })} />
+            </div>
           </div>
           )}
           {it.tracked && (fromOpen || short) && (
-            <div className="mt-3">
-              <LocationPicker id="bt-from" label="Taken from (where the item comes from)" locations={locations} value={from}
+            <div className="mt-2">
+              <LocationPicker id="bt-from" size="md" label="Taken from (where the item comes from)" locations={locations} value={from}
                 labelFor={(l) => `${l.name}${l.id === locationId ? " (here)" : ""} — ${it.loose ? kg(it.stock[l.id] ?? 0) : `${it.stock[l.id] ?? 0}`}`}
                 onAdded={(loc) => setLocations([...locations, { id: loc.id, name: loc.name, code: null, type: "STORE" }])}
                 onChange={(id) => setEditing({ ...editing, sourceLocationId: id === locationId ? null : id })} />
@@ -600,7 +605,7 @@ export default function BentaPanel({ switcher }: { switcher?: ReactNode }) {
 
   // Tablet held sideways (or a PC): products on the left, the sale on the right, both always in view.
   const sideBySide = wide && step === "pick" && !newItem;
-  const padSide = pay === "cash" || pay === "utang"; // the pay step has a second column: the number pad, or the signature
+  const padSide = pay === "cash" || pay === "utang" || pay === "split"; // the pay step has a second column: the number pad, the signature, or the parts of a split
   // Held sales: the button only shows when there is one to come back to.
   const heldBtn = holds.some((h) => h.locationId === locationId) && (
     <button type="button" className="btn btn-warning" onClick={() => setShowHeld(!showHeld)}>
@@ -704,33 +709,6 @@ export default function BentaPanel({ switcher }: { switcher?: ReactNode }) {
                   ))}
                 </div>
               )}
-              {pay === "split" && (
-                <>
-                  <div className="small text-muted mb-2">Part of the sale in each way. The parts must add up to {peso(total)}.</div>
-                  {parts.map((x, i) => (
-                    <div key={i} className="row g-2 mb-2 align-items-end">
-                      <div className="col-5">
-                        <select className="form-select form-select-lg" aria-label="Way to pay" value={x.method} onChange={(e) => setParts(parts.map((y, j) => (j === i ? { ...y, method: e.target.value as SplitPart["method"] } : y)))}>
-                          <option value="cash">Cash</option><option value="gcash">GCash</option><option value="maya">Maya</option><option value="bank">Bank transfer</option>
-                        </select>
-                      </div>
-                      <div className="col-7">
-                        <input className="form-control form-control-lg" inputMode="decimal" placeholder="₱ amount" aria-label="Amount" value={x.amount} onChange={(e) => setParts(parts.map((y, j) => (j === i ? { ...y, amount: e.target.value.replace(/[^\d.]/g, "").slice(0, 10) } : y)))} />
-                      </div>
-                      {x.method !== "cash" && (
-                        <div className="col-12">
-                          <input className="form-control" inputMode="numeric" placeholder={`${x.method === "gcash" ? "GCash" : x.method === "maya" ? "Maya" : "Bank"} reference no.`} aria-label="Reference number" value={x.reference} onChange={(e) => setParts(parts.map((y, j) => (j === i ? { ...y, reference: e.target.value.replace(/\s/g, "").slice(0, 40) } : y)))} />
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                  <div className="d-flex gap-2 align-items-center">
-                    {parts.length < 4 && <button type="button" className="btn btn-outline-dark btn-sm" onClick={() => setParts([...parts, { method: "cash", amount: "", reference: "" }])}>+ Add a part</button>}
-                    {parts.length > 2 && <button type="button" className="btn btn-outline-dark btn-sm" onClick={() => setParts(parts.slice(0, -1))}>Remove last</button>}
-                    {(() => { const left = total - parts.reduce((s, x) => s + toMinor(x.amount || "0"), 0); return <span className={`ms-auto fw-semibold ${left === 0 ? "text-success" : "text-danger"}`}>{left === 0 ? "Fully paid" : left > 0 ? `${peso(left)} left` : `${peso(-left)} too much`}</span>; })()}
-                  </div>
-                </>
-              )}
               {needsRef(pay as Pay) && (
                 <>
                   <label className="form-label" htmlFor="bt-ref">{pay === "maya" ? "Maya" : pay === "bank" ? "Bank transfer" : "GCash"} reference no.</label>
@@ -747,15 +725,9 @@ export default function BentaPanel({ switcher }: { switcher?: ReactNode }) {
                     </select>
                     {!newCust && <button type="button" className="btn btn-outline-success flex-shrink-0" disabled={offline} onClick={() => setNewCust(true)}>+ New customer{offline && <> · <i className="bi bi-lock"></i> {NEEDS_NET}</>}</button>}
                   </div>
-                  {newCust && <QuickCustomer onCancel={() => setNewCust(false)} onAdded={async (id) => {
-                    const res = await fetch(`${API_URL}/admin/customers`, { headers: adminHeaders() });
-                    if (res.ok) setCustomers(((await res.json()).customers ?? []) as Customer[]);
-                    setCustomerId(id); setCustomerSig(null); setNewCust(false);
-                  }} />}
                   {customer && (
                     <>
-                      <p className="mb-2">This sale on credit: <strong>{peso(total)}</strong>. Total owed after: <strong>{peso(customer.creditBalanceMinor + total)}</strong>.</p>
-                      {customer.creditUnlimited && <p className="small text-muted mb-2">No credit limit.</p>}
+                      <p className="mb-2">Owes after this sale: <strong>{peso(customer.creditBalanceMinor + total)}</strong>{customer.creditUnlimited && <span className="text-muted"> · no credit limit</span>}</p>
                       {overLimit && (
                         <div className="alert alert-danger py-2">Over the credit limit ({peso(customer.creditLimitMinor)}). The customer must pay some of the balance first — use the Credit screen — then can buy on credit again.</div>
                       )}
@@ -776,7 +748,42 @@ export default function BentaPanel({ switcher }: { switcher?: ReactNode }) {
                      {tendered && <div className={`mt-2 text-center change-due ${change < 0 ? "text-danger" : "text-success"}`} aria-live="polite">{change < 0 ? `Short ${peso(-change)}` : `Change to give ${peso(change)}`}</div>}
                    </>
                  )}
-                 {pay === "utang" && (customer ? (
+                 {/* A split: the parts go on the right, beside the amount and the ways to pay. */}
+                 {pay === "split" && (
+                   <>
+                     <div className="small text-muted mb-2">Part of the sale in each way. The parts must add up to {peso(total)}.</div>
+                     {parts.map((x, i) => (
+                       <div key={i} className="row g-2 mb-2 align-items-end">
+                         <div className="col-5">
+                           <select className="form-select" aria-label="Way to pay" value={x.method} onChange={(e) => setParts(parts.map((y, j) => (j === i ? { ...y, method: e.target.value as SplitPart["method"] } : y)))}>
+                             <option value="cash">Cash</option><option value="gcash">GCash</option><option value="maya">Maya</option><option value="bank">Bank transfer</option>
+                           </select>
+                         </div>
+                         <div className="col-7">
+                           <input className="form-control" inputMode="decimal" placeholder="₱ amount" aria-label="Amount" value={x.amount} onChange={(e) => setParts(parts.map((y, j) => (j === i ? { ...y, amount: e.target.value.replace(/[^\d.]/g, "").slice(0, 10) } : y)))} />
+                         </div>
+                         {x.method !== "cash" && (
+                           <div className="col-12">
+                             <input className="form-control" inputMode="numeric" placeholder={`${x.method === "gcash" ? "GCash" : x.method === "maya" ? "Maya" : "Bank"} reference no.`} aria-label="Reference number" value={x.reference} onChange={(e) => setParts(parts.map((y, j) => (j === i ? { ...y, reference: e.target.value.replace(/\s/g, "").slice(0, 40) } : y)))} />
+                           </div>
+                         )}
+                       </div>
+                     ))}
+                     <div className="d-flex gap-2 align-items-center">
+                       {parts.length < 4 && <button type="button" className="btn btn-outline-dark btn-sm" onClick={() => setParts([...parts, { method: "cash", amount: "", reference: "" }])}>+ Add a part</button>}
+                       {parts.length > 2 && <button type="button" className="btn btn-outline-dark btn-sm" onClick={() => setParts(parts.slice(0, -1))}>Remove last</button>}
+                       {(() => { const left = total - parts.reduce((s, x) => s + toMinor(x.amount || "0"), 0); return <span className={`ms-auto fw-semibold ${left === 0 ? "text-success" : "text-danger"}`}>{left === 0 ? "Fully paid" : left > 0 ? `${peso(left)} left` : `${peso(-left)} too much`}</span>; })()}
+                     </div>
+                   </>
+                 )}
+                 {/* The new-customer form takes the signature's place on the right, where there is room for it. */}
+                 {pay === "utang" && (newCust ? (
+                   <QuickCustomer onCancel={() => setNewCust(false)} onAdded={async (id) => {
+                     const res = await fetch(`${API_URL}/admin/customers`, { headers: adminHeaders() });
+                     if (res.ok) setCustomers(((await res.json()).customers ?? []) as Customer[]);
+                     setCustomerId(id); setCustomerSig(null); setNewCust(false);
+                   }} />
+                 ) : customer ? (
                    <>
                      <div className="fw-semibold">Signature of {customer.name ?? "the customer"}</div>
                      <SignaturePad key={customerId} onSignature={setCustomerSig} />

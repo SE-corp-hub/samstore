@@ -5,10 +5,10 @@ export const PRICE_REASONS = ["Discount", "Unit price", "Special price (regular 
 
 export const reasonOk = (r: string | undefined | null) => (PRICE_REASONS as readonly string[]).includes(r ?? "");
 
-export default function PriceReason({ value, onChange, invalid = false, className = "form-select", id }: { value: string; onChange: (v: string) => void; invalid?: boolean; className?: string; id?: string }) {
+export default function PriceReason({ value, onChange, invalid = false, className = "form-select", id, short = false }: { value: string; onChange: (v: string) => void; invalid?: boolean; className?: string; id?: string; /** A narrow box with its own label beside it: the empty choice just says "Choose…". */ short?: boolean }) {
   return (
     <select id={id} className={`${className}${invalid ? " is-invalid" : ""}`} aria-label="Why the price changed" value={value} onChange={(e) => onChange(e.target.value)}>
-      <option value="">Why the price changed…</option>
+      <option value="">{short ? "Choose…" : "Why the price changed…"}</option>
       {PRICE_REASONS.map((r) => <option key={r} value={r}>{r}</option>)}
     </select>
   );
