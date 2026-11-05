@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { matchesSearch, groupOf, groupsFor } from "./product-find";
+import { matchesSearch, groupOf, groupsFor, sizeOf, sizesFor } from "./product-find";
 
 test("a typed word matches the start of any word in the name", () => {
   assert.ok(matchesSearch("Dinorado 25 kg", "din 25"));
@@ -39,4 +39,12 @@ test("a name with a common kind of rice goes under that kind", () => {
   assert.equal(g.get("Mango 5kg"), "Mango");
   assert.equal(g.get("Riz Dinorado 25kg"), "Dinorado");
   assert.equal(g.get("Alsa 25kg"), "Other");
+});
+
+test("the pack size is read from the name, and two or more sizes get buttons", () => {
+  assert.equal(sizeOf("Riz Dinorado 25kg"), "25kg");
+  assert.equal(sizeOf("Sinandomeng 5 kg"), "5kg");
+  assert.equal(sizeOf("Sinandomeng (tingi)"), null);
+  assert.deepEqual(sizesFor(["Mango 5kg", "Mango 25kg", "Alsa 25 kg", "Sinandomeng (tingi)"]), ["25kg", "5kg"]);
+  assert.deepEqual(sizesFor(["Alsa 25kg", "Riz 25kg"]), [], "one size only: no buttons");
 });

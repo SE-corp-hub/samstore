@@ -344,6 +344,8 @@ main:has(> * > .rice-ui > .sell-fit), main:has(> .rice-ui > .sell-fit) { padding
 .finder-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; }
 .finder-bar .finder-search { position: relative; flex: 1 1 11rem; min-width: 0; }
 .finder-bar .finder-groups { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+/* 25kg / 5kg buttons sit right after the search box, on its line. */
+.finder-bar .finder-sizes { display: flex; gap: 0.4rem; flex: 0 0 auto; }
 /* On the fitted tablet screen the variety buttons stay on ONE line (a second line would take the
    product list's room). Tighter buttons fit 8 kinds sideways; with more (or Extra large text) the
    line slides sideways instead of wrapping. */
