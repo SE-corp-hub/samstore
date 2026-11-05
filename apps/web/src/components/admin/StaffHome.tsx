@@ -8,6 +8,7 @@
 
 import { allowedTabs, NAV_GROUPS } from "../../lib/admin";
 import TextSizePicker from "./TextSizePicker";
+import CountReminder from "./CountReminder";
 
 interface Props {
   role: string;
@@ -25,6 +26,7 @@ export default function StaffHome({ role, onNavigate, labelFor }: Props) {
   return (
     <div className="rice-ui">
       <h1 className="h4 mb-3">What do you need to do?</h1>
+      {allowed.has("bilangin") && <CountReminder onNavigate={onNavigate} />}
       {groups.map((g) => (
         <section key={g.group} className={`home-group tone-${g.tone}`} aria-labelledby={`home-group-${g.group}`}>
           <h2 id={`home-group-${g.group}`} className="home-group-title">

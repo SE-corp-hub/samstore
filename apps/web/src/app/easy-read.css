@@ -74,7 +74,8 @@ html[data-text-size] .btn-primary {
 }
 html[data-text-size] .btn-primary:hover, html[data-text-size] .btn-primary:focus,
 html[data-text-size] .btn-primary:active, html[data-text-size] .btn-primary.active { background-color: #185a33; border-color: #185a33; }
-html[data-text-size] .btn-primary:disabled, html[data-text-size] .btn-primary.disabled { background-color: #1f6f3f; border-color: #1f6f3f; }
+/* Disabled stays grey like every other button (this rule used to keep it green, with grey text on green). */
+html[data-text-size] .btn-primary:disabled, html[data-text-size] .btn-primary.disabled { background-color: #e6e1d9; border-color: #cfc9c0; color: #6b5d50; }
 /* Red = stop, in the deeper red the store screens use (7.6:1). */
 .admin-shell .btn-danger {
   --bs-btn-bg: #a3201b; --bs-btn-border-color: #a3201b;
@@ -379,3 +380,48 @@ main:has(> * > .rice-ui > .sell-fit), main:has(> .rice-ui > .sell-fit) { padding
 .sell-fit > .fit-scroll { flex: 1 1 auto; min-height: 4rem; }
 /* The Complete sale pop-up: wide enough for its two columns on the tablet either way (Bootstrap's modal-lg only widens from 992 px). */
 .admin-shell .modal-dialog.modal-fit { max-width: min(56rem, calc(100vw - 2rem)); }
+
+/* §10 Count and "Close the store" (Stock = blue group; the one main button stays green). */
+/* The steps of closing: Count · Check · Walk-ins · Cash · Done. Done steps get a tick, the current one is filled. */
+.close-steps { display: flex; flex-wrap: wrap; gap: 0.35rem 0.5rem; list-style: none; padding: 0; margin: 0 0 0.75rem; }
+.close-steps li { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.25rem 0.7rem 0.25rem 0.3rem; border-radius: 2rem; border: 1px solid #c9c4bc; background: #fff; color: var(--sam-muted); font-weight: 600; font-size: 1rem; }
+.close-steps li .n { width: 1.75rem; height: 1.75rem; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: #eeebe6; color: #4a4844; font-size: 0.95rem; }
+.close-steps li.done { color: #0b4f8a; border-color: #9fc3e6; }
+.close-steps li.done .n { background: #e3f0fb; color: #0b4f8a; }
+.close-steps li[aria-current="step"] { color: #fff; background: #0b4f8a; border-color: #0b4f8a; }
+.close-steps li[aria-current="step"] .n { background: #fff; color: #0b4f8a; }
+/* The big "Close the store" card at the top of Count. */
+.close-card { border: 2px solid #1f6f3f; border-radius: 0.75rem; background: #f1f8f3; padding: 1rem; margin-bottom: 1rem; }
+.close-card h2 { font-size: 1.3rem; font-weight: 800; margin: 0 0 0.25rem; }
+/* One line of the count sheet: the name, then − [number] + (sacks) or [kilos] kg. */
+.count-line { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem 0.75rem; padding: 0.5rem 0.75rem; }
+.count-line .name { flex: 1 1 12rem; min-width: 0; overflow-wrap: anywhere; font-weight: 600; }
+.count-line.counted { background: #f1f8f3; }
+.count-line .stepper { display: flex; align-items: center; gap: 0.4rem; margin-left: auto; }
+.count-line .stepper .form-control { width: 5rem; min-height: 3rem; text-align: center; font-size: 1.35rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.count-line .stepper .unit { min-width: 3.25rem; color: var(--sam-muted); font-weight: 600; }
+.count-line .kilo .form-control { width: 7rem; }
+/* The bar under the count list: how far along, and the next step; it stays above the bottom bar. */
+.count-bar { position: sticky; bottom: 0; z-index: 5; background: #fff; border-top: 2px solid #c9c4bc; padding: 0.6rem 0.75rem; margin: 0.75rem -0.75rem 0; display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; box-shadow: 0 -4px 10px rgba(0,0,0,0.06); }
+.count-bar .progress-text { flex: 1 1 10rem; font-weight: 600; }
+.count-bar .progress { height: 0.6rem; margin-top: 0.25rem; }
+/* The cash check: the number to find, and the difference. */
+.cash-row { display: flex; justify-content: space-between; gap: 0.75rem; padding: 0.4rem 0; border-bottom: 1px solid #e1d6c6; font-variant-numeric: tabular-nums; }
+.cash-row.total { border-bottom: 0; border-top: 2px solid #1f1d1a; font-weight: 800; font-size: 1.25rem; padding-top: 0.5rem; }
+.cash-input { max-width: 16rem; min-height: 3.5rem; font-size: 1.75rem !important; font-weight: 800; text-align: right; font-variant-numeric: tabular-nums; }
+.cash-result { border-radius: 0.5rem; padding: 0.6rem 0.9rem; font-weight: 700; font-size: 1.2rem; }
+.cash-result.ok { background: #e4f3ea; color: #1f6f3f; border: 1px solid #1f6f3f; }
+.cash-result.short { background: #fbe9e7; color: #a3201b; border: 1px solid #a3201b; }
+.cash-result.over { background: #fff3d6; color: #6f4800; border: 1px solid #8a5a00; }
+/* The Home reminder: a store not counted for a while. */
+.count-reminder { border: 1px solid #8a5a00; background: #fff3d6; color: #6f4800; border-radius: 0.75rem; padding: 0.75rem 1rem; margin-bottom: 1rem; }
+.count-reminder .row-store { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem; padding: 0.35rem 0; }
+.count-reminder .row-store + .row-store { border-top: 1px solid #e8d3a6; }
+.count-reminder strong { color: #1f1d1a; }
+/* The count sheet: one column on the tablet upright; two columns sideways, so twice as many items show at once. */
+.count-sheet { max-width: 760px; }
+@media (min-width: 1100px) {
+  .count-sheet { max-width: 1240px; }
+  .count-sheet .list-group { display: grid; grid-template-columns: 1fr 1fr; column-gap: 0.75rem; row-gap: 0.4rem; }
+  .count-sheet .list-group > .list-group-item { border-width: 1px !important; border-radius: 0.5rem !important; }
+}
