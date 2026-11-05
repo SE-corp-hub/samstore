@@ -1,6 +1,8 @@
 // "Missing = sold to walk-ins": a store that does not ring up its walk-in customers finds the rice
-// they bought as a shortage in the closing count. The owner or manager records those shortages as
-// one walk-in cash sale at the store's price, so the store's sales and profit are right.
+// they bought as a shortage in the closing count. Whoever closes the store (staff at their own store,
+// or the owner/manager) records those shortages as one walk-in cash sale at the store's price, so
+// the store's sales and profit are right. Only shortages marked "Sold but not rung up" (or with no
+// reason, as in the quick top-5 count) count: spilled, wet or given-away rice is never a sale.
 //
 //   The shelf is not touched twice: the count's shortage is put back (COUNT_ADJUST +) and the sale
 //   takes it again (CONSUME), all in the sale's transaction. At a consignment store the count's
@@ -14,6 +16,9 @@ import { nextDocNumber } from "../people/people.service.js";
 
 type Db = Prisma.TransactionClient;
 
+/** The shortage reasons that mean "a customer took it and paid cash". */
+export const WALK_IN_REASONS = ["UNRINGED"] as const;
+
 export interface WalkInLine {
   lineId: string; productId: string; name: string; loose: boolean;
   /** Stock units missing (loose rice: grams). */
@@ -25,7 +30,7 @@ export async function walkInLines(db: Db, storeId: string, countId: string): Pro
   const count = await db.stockCount.findFirst({ where: { id: countId, storeId, status: "APPROVED" }, select: { locationId: true } });
   if (!count) return [];
   const lines = await db.stockCountLine.findMany({
-    where: { countId, postedQty: { lt: 0 }, walkInOrderId: null },
+    where: { countId, postedQty: { lt: 0 }, walkInOrderId: null, OR: [{ reason: null }, { reason: { in: [...WALK_IN_REASONS] } }] },
     include: { product: { select: { id: true, name: true, priceMinor: true, stockBaseUnit: true, stockBaseQuantity: true, isActive: true } } },
   });
   const prices = new Map((await db.locationPrice.findMany({ where: { storeId, warehouseId: count.locationId, productId: { in: lines.map((l) => l.productId) } }, select: { productId: true, priceMinor: true } })).map((p) => [p.productId, p.priceMinor]));
@@ -51,7 +56,7 @@ export async function shortsBecomeSale(
 ): Promise<void> {
   const count = await tx.stockCount.findFirstOrThrow({ where: { id: input.countId, storeId: input.storeId, status: "APPROVED" }, select: { id: true, docNumber: true, locationId: true } });
   const claimed = await tx.stockCountLine.updateMany({
-    where: { id: { in: input.lineIds }, countId: count.id, postedQty: { lt: 0 }, walkInOrderId: null },
+    where: { id: { in: input.lineIds }, countId: count.id, postedQty: { lt: 0 }, walkInOrderId: null, OR: [{ reason: null }, { reason: { in: [...WALK_IN_REASONS] } }] },
     data: { walkInOrderId: input.orderId },
   });
   if (claimed.count !== input.lineIds.length) throw new WalkInTaken();
