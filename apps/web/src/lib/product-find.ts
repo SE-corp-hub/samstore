@@ -17,9 +17,16 @@ export function matchesSearch(name: string, query: string): boolean {
   return words(q).every((t) => nameWords.some((w) => w.startsWith(t)));
 }
 
-/** The variety a product belongs to: its name without the size ("Brown Rice 25 kg" and
-    "Brown Rice (tingi)" → "Brown Rice"). */
+/** Kinds of rice that many brands share. A product whose name has one of these words goes under
+    that kind, so "Riz Dinorado 25kg", "Crystal Dinorado 5kg" and "White Aroma dinorado" are all
+    under Dinorado. The first word found in this order wins ("White Aroma dinorado" → Dinorado). */
+const KINDS = ["Dinorado", "Jasmine", "Sinandomeng", "Malagkit", "Japonica", "Aroma", "Blue"];
+
+/** The group a product belongs to: its kind of rice when the name has one (see KINDS), otherwise its
+    name without the size ("Brown Rice 25 kg" and "Brown Rice (tingi)" → "Brown Rice"). */
 export function groupOf(name: string): string {
+  const kind = KINDS.find((k) => new RegExp(`\\b${k}\\b`, "i").test(name));
+  if (kind) return kind;
   const v = name.replace(/\(.*?\)/g, " ").replace(/\b\d+(\.\d+)?\s*(kg|kilos?|g|grams?|l|ml|pcs?|sacks?)\b/gi, " ").replace(/\s+/g, " ").trim();
   return v ? v.replace(/\b\w/g, (c) => c.toUpperCase()) : "Other";
 }
