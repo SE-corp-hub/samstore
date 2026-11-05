@@ -31,6 +31,20 @@ export function groupOf(name: string): string {
   return v ? v.replace(/\b\w/g, (c) => c.toUpperCase()) : "Other";
 }
 
+/** The pack size in a product's name, written the same way every time ("25kg", "5 kg" → "25kg"),
+    or null when the name has none (loose rice, "(tingi)", other goods). */
+export function sizeOf(name: string): string | null {
+  const m = /\b(\d+(?:\.\d+)?)\s*kg\b/i.exec(name);
+  return m ? `${Number(m[1])}kg` : null;
+}
+
+/** The sizes worth a button: at least two different ones, biggest first, at most four. */
+export function sizesFor(names: string[]): string[] {
+  const set = [...new Set(names.map(sizeOf).filter((x): x is string => !!x))];
+  set.sort((a, b) => parseFloat(b) - parseFloat(a));
+  return set.length > 1 ? set.slice(0, 4) : [];
+}
+
 /** Varieties with only one product go together under "Other", so the filter buttons stay few. */
 export function groupsFor(names: string[]): Map<string, string> {
   const count = new Map<string, number>();

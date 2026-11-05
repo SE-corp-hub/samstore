@@ -6,7 +6,7 @@
 // their own box under the bar, so the bar, the sale and the buttons never leave the screen.
 
 import { useEffect, useState, type ReactNode } from "react";
-import { groupsFor, matchesSearch, mostUsed } from "../../lib/product-find";
+import { groupsFor, matchesSearch, mostUsed, sizeOf, sizesFor } from "../../lib/product-find";
 import { useMediaQuery } from "../../lib/use-media-query";
 
 export default function ProductFinder<T extends { id: string; name: string }>({ items, list, renderTile, colClass = "col-6 col-md-4 col-lg-3", clearSignal = 0, lead, footer, fit = false }: {
@@ -26,6 +26,7 @@ export default function ProductFinder<T extends { id: string; name: string }>({ 
 }) {
   const [q, setQ] = useState("");
   const [group, setGroup] = useState("");
+  const [size, setSize] = useState("");
   const [often, setOften] = useState<string[]>([]);
   useEffect(() => { setOften(mostUsed(list, 8)); }, [list, items.length]);
   useEffect(() => { setQ(""); }, [clearSignal]);
@@ -36,8 +37,11 @@ export default function ProductFinder<T extends { id: string; name: string }>({ 
   const groupOf = (name: string) => groupOfName.get(name) ?? "Other";
   const groups = [...new Set(groupOfName.values())].sort((a, b) => (a === "Other" ? 1 : b === "Other" ? -1 : a.localeCompare(b)));
   const byName = (a: T, b: T) => a.name.localeCompare(b.name, undefined, { numeric: true });
-  const found = items.filter((i) => matchesSearch(i.name, q) && (!group || groupOf(i.name) === group)).sort(byName);
-  const filtering = q.trim() !== "" || group !== "";
+  // Size buttons (25kg / 5kg …) work together with the kind buttons and the search box.
+  const sizes = sizesFor(items.map((i) => i.name));
+  const sizeOn = sizes.includes(size) ? size : "";
+  const found = items.filter((i) => matchesSearch(i.name, q) && (!group || groupOf(i.name) === group) && (!sizeOn || sizeOf(i.name) === sizeOn)).sort(byName);
+  const filtering = q.trim() !== "" || group !== "" || sizeOn !== "";
   const oftenItems = often.map((id) => items.find((i) => i.id === id)).filter((i): i is T => !!i);
   const grid = (rows: T[]) => (
     <div className="row g-2 mb-2">
@@ -58,6 +62,13 @@ export default function ProductFinder<T extends { id: string; name: string }>({ 
           </button>
         )}
       </div>
+      {sizes.length > 0 && (
+        <div className="finder-sizes" role="group" aria-label="Show one size">
+          {sizes.map((z) => (
+            <button key={z} type="button" className={`btn text-nowrap ${sizeOn === z ? "btn-dark" : "btn-outline-dark"}`} aria-pressed={sizeOn === z} onClick={() => setSize(sizeOn === z ? "" : z)}>{z}</button>
+          ))}
+        </div>
+      )}
       {groups.length > 1 && !roomy && (
         <select className="form-select" style={{ flex: "1 1 10rem" }} aria-label="Show one variety" value={group} onChange={(e) => { setGroup(e.target.value); setQ(""); }}>
           <option value="">Show: all varieties</option>
@@ -81,9 +92,9 @@ export default function ProductFinder<T extends { id: string; name: string }>({ 
       {filtering ? (
         found.length > 0 ? grid(found) : (
           <div className="text-center py-4">
-            <div className="mb-2">No item matches{q.trim() ? ` "${q.trim()}"` : ""}{group ? ` in ${group}` : ""}.</div>
+            <div className="mb-2">No item matches{q.trim() ? ` "${q.trim()}"` : ""}{group ? ` in ${group}` : ""}{sizeOn ? ` (${sizeOn})` : ""}.</div>
             <div className="text-muted small mb-3">Try the first letters only, like &quot;din&quot; for Dinorado.</div>
-            <button type="button" className="btn btn-outline-dark btn-lg" onClick={() => { setQ(""); setGroup(""); }}>Show all items</button>
+            <button type="button" className="btn btn-outline-dark btn-lg" onClick={() => { setQ(""); setGroup(""); setSize(""); }}>Show all items</button>
           </div>
         )
       ) : (
