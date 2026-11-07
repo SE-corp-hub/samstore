@@ -227,7 +227,7 @@ export default function TeamPanel() {
             <thead>
               <tr>
                 <th>Person</th>
-                <th>Mobile / email</th>
+                <th className="col-wide">Mobile / email</th>
                 <th>Role</th>
                 <th>Location</th>
                 <th>PIN</th>
@@ -239,12 +239,13 @@ export default function TeamPanel() {
                 <tr key={m.userId}>
                   <td>
                     <div className="fw-semibold">{m.name ?? "—"}</div>
+                    {(m.phone || m.email) && <div className="small d-lg-none text-nowrap">{m.phone ?? m.email}</div>}
                     <div className="small text-muted">
                       {m.addedBy ? `Added by ${m.addedBy}` : "Joined"}{m.joinedAt ? ` · ${day(m.joinedAt)}` : ""}
                       {m.lastReset && <><br />{m.lastReset.kind === "PIN" ? "PIN set" : "Password reset"}{m.lastReset.by ? ` by ${m.lastReset.by}` : ""} · {day(m.lastReset.at)}</>}
                     </div>
                   </td>
-                  <td className="small">{m.phone ?? ""}{m.phone && m.email ? <br /> : null}{m.email ?? ""}</td>
+                  <td className="small col-wide">{m.phone ?? ""}{m.phone && m.email ? <br /> : null}{m.email ?? ""}</td>
                   <td>
                     <select
                       className="form-select form-select-sm" style={{ width: 140 }} aria-label={`Role of ${m.name ?? m.userId}`}
@@ -276,7 +277,7 @@ export default function TeamPanel() {
                   <td className="text-end">
                     {canManage && (
                       <div className="d-flex flex-wrap gap-1 justify-content-end">
-                        <button className="btn btn-sm btn-outline-success" onClick={() => { setPinFor(m.userId); setPinValue(""); }}>
+                        <button className="btn btn-sm btn-outline-success text-nowrap" onClick={() => { setPinFor(m.userId); setPinValue(""); }}>
                           <i className="bi bi-123 me-1"></i>{m.hasPin ? "Change PIN" : "Set PIN"}
                         </button>
                         {m.pinLocked && (
@@ -287,7 +288,7 @@ export default function TeamPanel() {
                         {m.role !== "OWNER" && (
                           <>
                             <button
-                              className="btn btn-sm btn-outline-secondary"
+                              className="btn btn-sm btn-outline-secondary text-nowrap"
                               onClick={async () => {
                                 const res = await fetch(`${API_URL}/admin/team/${m.userId}/reset-password`, {
                                   method: "POST", headers: { "Content-Type": "application/json", ...adminHeaders() },
@@ -300,7 +301,7 @@ export default function TeamPanel() {
                             >
                               <i className="bi bi-key me-1"></i>Reset password
                             </button>
-                            <button className="btn btn-sm btn-outline-danger" onClick={() => deactivate(m.userId)} aria-label={`Remove ${m.name ?? "member"}`}>
+                            <button className="btn btn-sm btn-outline-danger" onClick={() => deactivate(m.userId)} title="Remove from team" aria-label={`Remove ${m.name ?? "member"}`}>
                               <i className="bi bi-person-x"></i>
                             </button>
                           </>

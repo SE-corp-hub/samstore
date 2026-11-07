@@ -38,7 +38,7 @@ export default function CustomerBarcode({
         height: height ?? 32,
         width: 2,
         displayValue: true,
-        fontSize: 14,
+        fontSize: 16,
         margin: 4,
         lineColor: "#000000",
         background: "#ffffff",

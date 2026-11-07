@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import "bootstrap/dist/css/bootstrap.min.css";
 import "bootstrap-icons/font/bootstrap-icons.css";
 import "./globals.css";
+import "./polish.css";
+import "./easy-read.css";
 import PwaRegister from "../components/PwaRegister";
 
 export const metadata: Metadata = {

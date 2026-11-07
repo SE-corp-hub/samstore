@@ -364,3 +364,29 @@ body {
 /* Upright and phones: day chips + Filters on one line, search full width under them. Sideways: all on one line. */
 .ord-search { flex: 1 1 100%; order: 3; }
 @media (min-width: 992px) { .ord-search { flex: 1 1 160px; order: 0; } }
+
+/* Settings: a list of groups (each row says what is set now), then the chosen group. Sideways they sit side by side. */
+.settings-menu { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+.settings-row {
+  display: flex; align-items: center; gap: 12px; width: 100%; min-height: 72px; padding: 10px 14px;
+  background: #fff; border: 1px solid #c9c4bc; border-radius: 10px; text-align: left; color: inherit;
+}
+.settings-row.is-open { border: 2px solid #1f1d1a; padding: 9px 13px; background: #f4f1ec; }
+.settings-row .min-w-0 { min-width: 0; }
+.settings-row-icon { font-size: 1.6rem; width: 2rem; text-align: center; flex-shrink: 0; }
+.settings-row:focus-visible { outline: 3px solid #0B4F8A; outline-offset: 2px; }
+/* One on/off setting per row: words left, a switch a finger can hit right. */
+.settings-switch {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  min-height: 64px; padding: 10px 14px !important; margin: 0 0 8px; border: 1px solid #dedad3; border-radius: 10px; background: #fff;
+}
+.settings-switch .form-check-label { flex: 1 1 auto; cursor: pointer; }
+.settings-switch .form-check-input { float: none; margin: 0; flex-shrink: 0; width: 3.25rem; height: 1.75rem; cursor: pointer; }
+/* The Save bar of a group stays at the bottom of the screen while the group scrolls. */
+.settings-savebar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px; z-index: 5;
+  background: #fff; border-top: 1px solid #c9c4bc; padding: 12px 0; margin-top: 8px;
+}
+/* Printer card inside Settings: switches as big as the other groups'. */
+.settings-screen .card .form-switch { padding-left: 4rem; min-height: 2.25rem; display: flex; align-items: center; }
+.settings-screen .card .form-switch .form-check-input { width: 3.25rem; height: 1.75rem; margin: 0 0.75rem 0 -4rem; flex-shrink: 0; }

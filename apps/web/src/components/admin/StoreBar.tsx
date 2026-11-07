@@ -5,7 +5,7 @@
 
 export interface StoreOption { id: string; name: string; code?: string | null; type?: string }
 
-export default function StoreBar({ label = "Working at", locations: all, value, homeLocationId, onPick, locked = false, lockedNote, includeBuffer = false }: {
+export default function StoreBar({ label = "Working at", locations: all, value, homeLocationId, onPick, locked = false, lockedNote, includeBuffer = false, inline = false, size = "lg" }: {
   label?: string;
   locations: StoreOption[];
   value: string;
@@ -16,9 +16,36 @@ export default function StoreBar({ label = "Working at", locations: all, value, 
   lockedNote?: string;
   /** The Buffer store covers shortages; it is not a place to sell, so it is hidden unless asked for. */
   includeBuffer?: boolean;
+  /** One row — the label, then the chips — for the selling screens, where every line of height counts. */
+  inline?: boolean;
+  /** `md` chips are 48 px tall (the touch minimum); `lg` are the roomier default. */
+  size?: "lg" | "md";
 }) {
   const locations = includeBuffer ? all : all.filter((l) => l.type !== "BUFFER");
   const here = all.find((l) => l.id === value);
+  const btn = size === "lg" ? "btn btn-lg" : "btn";
+  const chips = locations.map((l) => (
+    <button key={l.id} type="button" disabled={locked && l.id !== value}
+      className={`${btn} ${l.id === value ? "btn-dark" : "btn-outline-dark"}`}
+      onClick={() => { if (l.id !== value) onPick(l.id); }}>
+      {l.code ? `${l.code} · ` : ""}{l.name}
+    </button>
+  ));
+  if (inline) {
+    return (
+      <div className="d-flex flex-wrap align-items-center gap-2 mb-2">
+        <span className="fw-semibold me-1">{label}</span>
+        {homeLocationId ? (
+          <><span className="badge text-bg-dark fs-6">{here?.name ?? "…"}</span><span className="small text-muted">your store, set by the owner</span></>
+        ) : (
+          <>
+            <span className="d-flex flex-wrap gap-2" role="group" aria-label={label}>{chips}</span>
+            {locked && lockedNote && <span className="small text-muted">{lockedNote}</span>}
+          </>
+        )}
+      </div>
+    );
+  }
   return (
     <div className="mb-3">
       <div className="small text-muted mb-1">{label}</div>
@@ -26,15 +53,7 @@ export default function StoreBar({ label = "Working at", locations: all, value, 
         <div><span className="badge text-bg-dark fs-6">{here?.name ?? "…"}</span> <span className="small text-muted ms-1">your store, set by the owner</span></div>
       ) : (
         <>
-          <div className="d-flex flex-wrap gap-2" role="group" aria-label="Store">
-            {locations.map((l) => (
-              <button key={l.id} type="button" disabled={locked && l.id !== value}
-                className={`btn btn-lg ${l.id === value ? "btn-dark" : "btn-outline-dark"}`}
-                onClick={() => { if (l.id !== value) onPick(l.id); }}>
-                {l.code ? `${l.code} · ` : ""}{l.name}
-              </button>
-            ))}
-          </div>
+          <div className="d-flex flex-wrap gap-2" role="group" aria-label="Store">{chips}</div>
           {locked && lockedNote && <div className="small text-muted mt-1">{lockedNote}</div>}
         </>
       )}

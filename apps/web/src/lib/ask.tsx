@@ -30,7 +30,7 @@ interface TextOptions extends Options {
 
 const words = () => ({ ok: "Yes, continue", cancel: "No", send: "OK", typeHere: "Type here" });
 
-function open<T>(render: (done: (v: T) => void) => React.ReactNode): Promise<T> {
+export function openDialog<T>(render: (done: (v: T) => void) => React.ReactNode): Promise<T> {
   return new Promise<T>((resolve) => {
     const host = document.createElement("div");
     document.body.appendChild(host);
@@ -107,12 +107,12 @@ function Dialog({ message, options, input, onDone }: {
 /** Yes/no question drawn in the page. Resolves true only on the main button. */
 export function askConfirm(message: string, options: Options = {}): Promise<boolean> {
   if (typeof window === "undefined") return Promise.resolve(false);
-  return open<string | null>((done) => <Dialog message={message} options={options} input={false} onDone={done} />)
+  return openDialog<string | null>((done) => <Dialog message={message} options={options} input={false} onDone={done} />)
     .then((v) => v !== null);
 }
 
 /** Asks for a short text (a reason, a note). Resolves the trimmed text, or null if cancelled. */
 export function askText(message: string, options: TextOptions = {}): Promise<string | null> {
   if (typeof window === "undefined") return Promise.resolve(null);
-  return open<string | null>((done) => <Dialog message={message} options={options} input onDone={done} />);
+  return openDialog<string | null>((done) => <Dialog message={message} options={options} input onDone={done} />);
 }

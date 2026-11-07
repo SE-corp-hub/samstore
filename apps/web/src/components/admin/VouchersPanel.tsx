@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { API_URL } from "../../config";
 import { adminHeaders } from "../../lib/admin";
+import { peso } from "../../lib/number-format";
 
 interface Voucher {
   id: string;
@@ -22,7 +23,7 @@ interface Voucher {
   redemptionCount: number;
 }
 
-const toPesos = (m: number) => `₱${(m / 100).toFixed(2)}`;
+const toPesos = (m: number) => peso(m);
 
 export default function VouchersPanel() {
   const [vouchers, setVouchers] = useState<Voucher[]>([]);

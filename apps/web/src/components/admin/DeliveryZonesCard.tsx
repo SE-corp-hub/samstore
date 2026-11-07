@@ -7,6 +7,7 @@
 import { useEffect, useState } from "react";
 import { API_URL } from "../../config";
 import { adminHeaders } from "../../lib/admin";
+import { peso } from "../../lib/number-format";
 
 interface ZoneRow {
   id: string;
@@ -18,7 +19,7 @@ interface ZoneRow {
   isActive: boolean;
 }
 
-const toPesos = (m: number) => `₱${(m / 100).toFixed(2)}`;
+const toPesos = (m: number) => peso(m);
 
 export default function DeliveryZonesCard() {
   const [zones, setZones] = useState<ZoneRow[] | null>(null);

@@ -4,7 +4,11 @@
 // Naming: camelCase fields (Prisma), no @map; revisit with a dedicated mapping pass.
 
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  // One SQL query per read, nested relations included (LATERAL joins), instead of one
+  // query per relation level. Each query is a round trip to the database, and the beta's
+  // API and database sit in different regions (~0.18 s each), see PERF.md.
+  previewFeatures = ["relationJoins"]
 }
 
 datasource db {
@@ -309,6 +313,9 @@ model StoreSettings {
   orderNumberPrefix         String?
   // P10a: 0 = disabled; otherwise old Messenger conversation/message data is purgeable.
   privacyRetentionDays      Int            @default(0)
+  // PIN lock (2026-11-07): screens that ask for the owner's lock PIN, per sign-in kind. NULL = no lock.
+  // { salt, hash, iterations, owner: string[], staff: string[], updatedAt }; checked on the tablet so it works offline.
+  featureLock               Json?
   createdAt                 DateTime       @default(now())
   updatedAt                 DateTime       @updatedAt
 }
@@ -380,6 +387,9 @@ model Product {
   // P3d: merchandising — featured flag + free-form display tags (store-scoped via the row).
   featured              Boolean   @default(false)
   tags                  String[]  @default([])
+  // The product's picture on POS / Pre-order / Products (ProductPhoto.id). A new picture gets a new key,
+  // so its address never changes content and the tablet may keep it for good (works offline).
+  photoKey              String?
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
 
@@ -417,6 +427,19 @@ model ProductImage {
   product   Product @relation(fields: [storeId, productId], references: [storeId, id]) // M3: tenant-consistent
   url       String
   sortOrder Int     @default(0)
+}
+
+// The product's own picture, kept small (the tablet shrinks it before upload). Separate from Product so
+// product lists never read the bytes; served at GET /public/product-photo/:id (the id is random).
+model ProductPhoto {
+  id        String   @id
+  storeId   String
+  productId String
+  mime      String
+  data      Bytes
+  createdAt DateTime @default(now())
+
+  @@index([storeId, productId])
 }
 
 // ─────────────────────────────── Variants (P2a) ───────────────────────────────
@@ -1428,6 +1451,8 @@ model Order {
   @@index([storeId, sellingLocationId, createdAt])
   @@index([storeId, agentUserId, createdAt])
   @@index([storeId, source, status])
+  @@index([storeId, createdAt]) // date ranges over every status (Orders list, reports)
+  @@index([storeId, storeCustomerId, createdAt]) // one customer's sales (Credit, customer history)
 }
 
 model OrderItem {
@@ -1460,6 +1485,11 @@ model OrderItem {
   enteredAmountMinor Int? // by peso: what the customer asked for (= the line total)
   sourceLocationId   String? // served from another location (Kunin sa ibang tindahan)
   unitCostMinor      Int? // Rice Ops M9: cost frozen with the sale (per piece, or per kilo for loose rice)
+
+  // A sale's lines were found by reading every line of the store (no index at all), on each
+  // receipt, order, pre-order and the counter's most-sold count: slower with every sale.
+  @@index([storeId, orderId])
+  @@index([storeId, productId])
 }
 
 model OrderStatusHistory {
@@ -2125,6 +2155,7 @@ model StockCountLine {
   reason             String? // why it is short/over: a code from domain/count-reasons.ts (a label only; it posts nothing by itself)
   note               String?
   firstCountedQty    Int? // the number first typed, kept when the line was counted again
+  walkInOrderId      String? // the walk-in sale this shortage was recorded as ("missing = sold to walk-ins"), so it is sold once
 
   @@unique([countId, productId])
   @@index([storeId, productId, countedAt])
@@ -2227,13 +2258,15 @@ model StorePayableEntry {
   storeId          String
   docNumber        String // SP-000001
   locationId       String // the store that owes
-  kind             String // CHARGE | PAYMENT | REVERSAL
-  amountMinor      Int // signed: + owes more, − paid / reduced
+  kind             String // CHARGE | PAYMENT | REVERSAL | PROFIT_SHARE (− : the main store owes this store its margin) | SHARE_BACK (+ : rice went back, the share is taken back)
+  amountMinor      Int // signed: + owes more, − paid / reduced (below 0 in total: the main store owes this store)
   productId        String?
   quantity         Int? // stock units (loose rice: grams)
   unitCostMinor    Int? // cost at the time (loose rice: per kilo)
   sourceLocationId String? // the store the rice was taken from
   orderId          String? // the sale this charge came from (so a void or a return can reduce it)
+  transferId       String? // the move a profit share came from
+  writeOffId       String?  @unique // damage at a consignment store the owner charged to it (so it is charged once)
   sourceLineId     String?  @unique // the count line this charge came from (so it is charged once)
   reversesId       String?  @unique // the entry this one undoes
   note             String?

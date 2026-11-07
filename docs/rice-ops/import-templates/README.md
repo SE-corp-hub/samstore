@@ -22,6 +22,7 @@ You do not have to fill all four. Start with products.
 | `cost` | What you pay for one (per sack, per kilo or per piece). Staff never see it. Needed for profit and for what Store 2 owes. |
 | `price` | The normal selling price for one (per sack, per kilo or per piece). |
 | `price_S1`, `price_S2`, `price_S3`, `price_WH` | Only where a place sells at a different price. Leave blank to use `price`. |
+| `category` | The group the product is shown under in Products and Inventory (optional). Example `Dinorado`. The same name puts products in the same group. Leave blank to keep the group the product already has. |
 
 The same rice in a different pack is a different row: for example `Sinandomeng 25 kg` (SACK, 25), `Sinandomeng 5 kg` (SACK, 5) and `Sinandomeng (kilo)` (KILO). The check does not set how many are on the shelf. That comes from the opening count on go-live day.
 

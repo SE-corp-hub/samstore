@@ -11,6 +11,8 @@ import { prisma } from "../persistence/prisma-repositories.js";
 import { adjustStock, InsufficientStockError, reserveForTrip, transferStock, unreserveForTrip } from "../domain/movements.js";
 import { autoApproves } from "../domain/transfer-flow.js";
 import type { ApiError } from "@sam-store/contracts";
+import { consignmentMain } from "../payable/charges.js";
+import { costModeOf, effectiveCost } from "../domain/shelf-cost.js";
 import { captureSignatures, locationRefusal, nextDocNumber, requireSignatures, signatureErrorResult, type Actor, type SignatureInput } from "../people/people.service.js";
 
 export type WarehouseResult<T> = { ok: true; value: T } | { ok: false; error: ApiError };
@@ -396,19 +398,28 @@ export class WarehouseService {
   // ─────────────────────────────── Location prices ───────────────────────────────
 
   /** Every active product with its main price and this location's own price (if any). */
-  async listPrices(storeId: string, warehouseId: string): Promise<WarehouseResult<{ productId: string; name: string; sku: string; mainPriceMinor: number; locationPriceMinor: number | null; effectivePriceMinor: number }[]>> {
+  async listPrices(storeId: string, warehouseId: string): Promise<WarehouseResult<{ productId: string; name: string; sku: string; loose: boolean; mainPriceMinor: number; locationPriceMinor: number | null; effectivePriceMinor: number; costMinor: number; ownShelfCost: boolean }[]>> {
     const warehouse = await prisma.warehouse.findFirst({ where: { id: warehouseId, storeId }, select: { id: true } });
     if (!warehouse) return { ok: false, error: { type: "not_found", message: "Location not found" } };
-    const [products, prices] = await Promise.all([
-      prisma.product.findMany({ where: { storeId, isActive: true }, select: { id: true, name: true, sku: true, priceMinor: true }, orderBy: { name: "asc" } }),
+    // The cost a sale at this location is measured against (a consignment store: the main store's).
+    const costLoc = (await consignmentMain(prisma, storeId, warehouseId)) ?? warehouseId;
+    const [products, prices, costMode, shelves] = await Promise.all([
+      prisma.product.findMany({ where: { storeId, isActive: true }, select: { id: true, name: true, sku: true, priceMinor: true, costMinor: true, soldByWeight: true, stockBaseUnit: true, stockBaseQuantity: true }, orderBy: { name: "asc" } }),
       prisma.locationPrice.findMany({ where: { storeId, warehouseId }, select: { productId: true, priceMinor: true } }),
+      costModeOf(prisma, storeId),
+      prisma.stockLevel.findMany({ where: { storeId, warehouseId: costLoc }, select: { productId: true, costMinor: true } }),
     ]);
     const byProduct = new Map(prices.map((p) => [p.productId, p.priceMinor]));
+    const shelfCost = new Map(shelves.map((l) => [l.productId, l.costMinor]));
     return {
       ok: true,
       value: products.map((p) => {
         const own = byProduct.get(p.id) ?? null;
-        return { productId: p.id, name: p.name, sku: p.sku, mainPriceMinor: p.priceMinor, locationPriceMinor: own, effectivePriceMinor: own ?? p.priceMinor };
+        return {
+          productId: p.id, name: p.name, sku: p.sku, loose: p.stockBaseUnit === "g" && p.stockBaseQuantity === 1, mainPriceMinor: p.priceMinor, locationPriceMinor: own, effectivePriceMinor: own ?? p.priceMinor,
+          costMinor: effectiveCost(costMode, shelfCost.get(p.id), p.costMinor ?? 0),
+          ownShelfCost: costMode === "PER_LOCATION" && typeof shelfCost.get(p.id) === "number",
+        };
       }),
     };
   }

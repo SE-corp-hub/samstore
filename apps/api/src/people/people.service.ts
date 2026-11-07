@@ -6,7 +6,7 @@ import bcrypt from "bcryptjs";
 import { Prisma, type SignerKind } from "@prisma/client";
 import type { ApiError } from "@sam-store/contracts";
 import { prisma } from "../persistence/prisma-repositories.js";
-import { bustMemberships } from "../auth/membership-cache.js";
+import { bustMemberships, getMemberships } from "../auth/membership-cache.js";
 import { bustTokenVersion } from "../auth/token-version.js";
 import {
   ALL_LOCATION_ROLES, APPROVAL_KINDS, DEFAULT_APPROVERS, DRAFT_FLOWS, MAX_DRAFT_BYTES, canActAtLocation, canDecide,
@@ -73,6 +73,9 @@ export async function nextDocNumber(tx: Tx, storeId: string, prefix: DocPrefix):
 /** The membership facts that decide where a person may act. */
 export async function loadActor(storeId: string, userId: string, role: string): Promise<Actor> {
   if (role === "PLATFORM_ADMIN") return { userId, role, homeLocationId: null };
+  // The guard has just read this person's active memberships (cached 10 s, busted on every membership write).
+  const cached = (await getMemberships(userId)).find((x) => x.storeId === storeId);
+  if (cached) return { userId, role: cached.role, homeLocationId: cached.homeLocationId };
   const m = await prisma.userStore.findUnique({ where: { userId_storeId: { userId, storeId } }, select: { homeLocationId: true, role: true } });
   return { userId, role: m?.role ?? role, homeLocationId: m?.homeLocationId ?? null };
 }

@@ -15,6 +15,7 @@ import { askConfirm } from "../../lib/ask";
 import { toast } from "../../lib/toast";
 import { printSlip } from "../../lib/slip-print";
 import { PesoInput, KiloInput, WholeInput } from "../NumberBoxes";
+import { checkNewCosts } from "./BelowCostDialog";
 import { costMove, draftFromReorder, moveText, type CostMove } from "../../lib/po-view";
 import { peso, kg } from "../../lib/number-format";
 
@@ -31,7 +32,7 @@ interface Balance { id: string; name: string; contactPerson: string | null; phon
 interface Entry { id: string; kind: "DELIVERY" | "PAYMENT" | "UNDO"; at: string; ref: string; poNumber: string | null; note: string | null; amountMinor: number; runningMinor: number; canUndo: boolean }
 interface Statement { supplier: { id: string; name: string }; owedMinor: number; entries: Entry[] }
 interface Loc { id: string; name: string; isActive: boolean; type?: string }
-interface Product { id: string; name: string; costMinor?: number; stockBaseUnit: string | null; stockBaseQuantity: number | null; isActive?: boolean }
+interface Product { id: string; name: string; costMinor?: number; priceMinor?: number; stockBaseUnit: string | null; stockBaseQuantity: number | null; isActive?: boolean }
 interface Row { productId: string; qty: string; cost: string }
 type Body = { message?: string; errors?: string[] };
 
@@ -132,10 +133,16 @@ export default function PurchaseOrdersPanel() {
   const canCreate = supplierOk && !!form.locationId && rows.length > 0 && rows.every((r) => r.productId && unitsOf(r) > 0 && costOf(r) > 0) && new Set(rows.map((r) => r.productId)).size === rows.length && !busy;
 
   const createOrder = async () => {
+    // An agreed cost above the selling price: fix the price, the cost, or order anyway.
+    const checked = await checkNewCosts(rows.map((r) => { const p = byId.get(r.productId); return { productId: r.productId, name: p?.name ?? "", priceMinor: p?.priceMinor ?? 0, costMinor: costOf(r), unit: p && isLoose(p) ? "kilo" : "piece" }; }), { proceed: "Order anyway", canChangePrice: true });
+    if (!checked) return;
+    const rowsNow = rows.map((r, i) => (checked[i]!.costMinor === costOf(r) ? r : { ...r, cost: (checked[i]!.costMinor / 100).toFixed(2) }));
+    setRows(rowsNow);
+    setProducts((ps) => ps.map((x) => { const l = checked.find((y) => y.productId === x.id); return l && l.priceMinor !== x.priceMinor ? { ...x, priceMinor: l.priceMinor } : x; }));
     const ok = await act("/admin/purchase-orders", {
       supplierId: form.supplierId || undefined, supplierName: form.supplierId ? undefined : form.supplierName.trim(),
       locationId: form.locationId, expectedAt: form.expectedAt || undefined, note: form.note.trim() || undefined,
-      lines: rows.map((r) => ({ productId: r.productId, quantity: unitsOf(r), unitCostMinor: costOf(r) })),
+      lines: rowsNow.map((r) => ({ productId: r.productId, quantity: unitsOf(r), unitCostMinor: costOf(r) })),
     }, "Order saved");
     if (!ok) return;
     setCreating(false);

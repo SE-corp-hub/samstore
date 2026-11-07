@@ -18,6 +18,9 @@ import {
   UseGuards,
 } from "@nestjs/common";
 import { redactCost, seesCost } from "../domain/cost-redact.js";
+import { cleanScreenIds, lockPinMatches, newLockSecret, readFeatureLock } from "../domain/feature-lock.js";
+import { verifyPassword } from "../auth/auth.domain.js";
+import { Prisma } from "@prisma/client";
 import type { ApiError } from "@sam-store/contracts";
 import { JwtAuthGuard, type AuthPrincipal } from "../auth/auth.guard.js";
 import { requireUser, resolveTenant, TENANT_ROLES } from "../auth/tenant-context.js";
@@ -426,7 +429,9 @@ export class AdminController {
                         id: true, orderNumber: true, status: true, totalMinor: true, currencyCode: true,
                         customerName: true, customerPhone: true, createdAt: true, paymentStatus: true, source: true,
                         deliveryType: true, deliveryAddressLine1: true, fulfillmentType: true,
-                                                paymentMethod: true, signatureData: true, signatureAt: true,
+                                                // signatureData (a picture, often 10+ KB) only comes with one order (GET orders/:id):
+                                                // up to 200 of them made every list load slow and filled the tablet's saved copies.
+                                                paymentMethod: true, signatureAt: true,
                       },
           });
           await cacheSet(cacheKeyStr, list, 5_000);
@@ -600,6 +605,32 @@ export class AdminController {
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
     // Staff see price changes, never cost changes.
     return seesCost(role) ? result.value : { rows: result.value.rows.filter((r) => r.field !== "COST") };
+  }
+
+  /** PUT /admin/products/:id/photo — body { dataUrl }: the product's picture (shrunk on the tablet first). */
+  @Put("products/:id/photo")
+  async setProductPhoto(@Req() req: Request & { user?: AuthPrincipal }, @Param("id") id: string, @Body() body: { dataUrl?: string }, @Headers("x-store-id") headerStoreId?: string) {
+    const user = req.user;
+    requireUser(user);
+    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
+    const result = await this.productsAdmin.setPhoto(storeId, id, body?.dataUrl);
+    if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
+    await cacheBust(cacheKey("products", storeId));
+    await cacheBust(cacheKey("inventory", storeId));
+    return result.value;
+  }
+
+  /** DELETE /admin/products/:id/photo — take the picture off. */
+  @Delete("products/:id/photo")
+  async removeProductPhoto(@Req() req: Request & { user?: AuthPrincipal }, @Param("id") id: string, @Headers("x-store-id") headerStoreId?: string) {
+    const user = req.user;
+    requireUser(user);
+    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
+    const result = await this.productsAdmin.removePhoto(storeId, id);
+    if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
+    await cacheBust(cacheKey("products", storeId));
+    await cacheBust(cacheKey("inventory", storeId));
+    return result.value;
   }
 
   /** DELETE /admin/products/:id — soft delete. */
@@ -796,6 +827,61 @@ export class AdminController {
         if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
         await cacheBust(cacheKey("settings", storeId));
         return { ...result.value, storeId };
+  }
+
+  /**
+   * GET /admin/feature-lock — the PIN lock: which screens ask for the lock PIN, for the owner and
+   * for staff, plus the salted hash the tablet checks the PIN against (so it works offline).
+   */
+  @Get("feature-lock")
+  async getFeatureLock(@Req() req: Request & { user?: AuthPrincipal }, @Headers("x-store-id") headerStoreId?: string) {
+    const user = req.user;
+    requireUser(user);
+    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.VIEW);
+    const row = await prisma.storeSettings.findUnique({ where: { storeId }, select: { featureLock: true } });
+    const lock = readFeatureLock(row?.featureLock);
+    return lock ? { storeId, on: true, ...lock } : { storeId, on: false, owner: [], staff: [] };
+  }
+
+  /**
+   * PUT /admin/feature-lock — owner only. Set the lock PIN and the two screen lists, or turn the
+   * lock off. Once a lock exists, every change needs the current lock PIN or the owner's password
+   * (for a forgotten PIN).
+   */
+  @Put("feature-lock")
+  async putFeatureLock(
+    @Req() req: Request & { user?: AuthPrincipal },
+    @Body() body: { current?: unknown; newPin?: unknown; owner?: unknown; staff?: unknown; off?: unknown },
+    @Headers("x-store-id") headerStoreId?: string,
+  ) {
+    const user = req.user;
+    requireUser(user);
+    const { storeId, role } = await resolveTenant(user, headerStoreId, TENANT_ROLES.MANAGE);
+    if (role !== "OWNER" && role !== "PLATFORM_ADMIN") throw new HttpException({ type: "forbidden", message: "Only the owner can change the PIN lock" }, HttpStatus.FORBIDDEN);
+    const row = await prisma.storeSettings.findUnique({ where: { storeId }, select: { featureLock: true } });
+    const existing = readFeatureLock(row?.featureLock);
+    const current = typeof body?.current === "string" ? body.current : "";
+    if (existing && !lockPinMatches(existing, current)) {
+      const me = await prisma.user.findUnique({ where: { id: user!.sub }, select: { passwordHash: true } });
+      const pwOk = !!current && !!me?.passwordHash && (await verifyPassword(current, me.passwordHash));
+      if (!pwOk) throw new HttpException({ type: "unauthorized", message: "The current lock PIN (or your password) is not right" }, HttpStatus.FORBIDDEN);
+    }
+    if (body?.off === true) {
+      await prisma.storeSettings.upsert({ where: { storeId }, update: { featureLock: Prisma.DbNull }, create: { storeId, featureLock: Prisma.DbNull } });
+      return { storeId, on: false, owner: [], staff: [] };
+    }
+    const newPin = typeof body?.newPin === "string" ? body.newPin : "";
+    if (newPin && !/^\d{4}$/.test(newPin)) throw new HttpException({ type: "validation", errors: ["The lock PIN must be 4 digits"] }, HttpStatus.BAD_REQUEST);
+    if (!existing && !newPin) throw new HttpException({ type: "validation", errors: ["Choose a 4-digit lock PIN first"] }, HttpStatus.BAD_REQUEST);
+    const secret = newPin ? newLockSecret(newPin) : { salt: existing!.salt, hash: existing!.hash, iterations: existing!.iterations };
+    const lock = {
+      ...secret,
+      owner: cleanScreenIds(body?.owner) ?? existing?.owner ?? [],
+      staff: cleanScreenIds(body?.staff) ?? existing?.staff ?? [],
+      updatedAt: new Date().toISOString(),
+    };
+    await prisma.storeSettings.upsert({ where: { storeId }, update: { featureLock: lock }, create: { storeId, featureLock: lock } });
+    return { storeId, on: true, ...lock };
   }
 
   /** GET /admin/privacy/retention — dry-run preview. */
@@ -1291,10 +1377,10 @@ export class AdminController {
   ) {
     const user = req.user;
     requireUser(user);
-    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
+    const { storeId, role } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
     const result = await this.warehouses.listPrices(storeId, id);
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
-    return { prices: result.value, storeId };
+    return { prices: seesCost(role) ? result.value : redactCost(result.value), storeId };
   }
 
   /** PUT /admin/warehouses/:id/prices/:productId — set (or null to clear) a location's own price. */

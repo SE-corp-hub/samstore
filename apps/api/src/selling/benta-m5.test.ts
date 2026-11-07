@@ -564,3 +564,51 @@ test("reorder suggestions: fast sellers running low are listed with an amount; a
   assert.equal(back?.supplierName, "Mang Tonyo");
   assert.equal(back?.lastCostMinor, 101_000);
 });
+
+test("Below cost: the counter list carries each item's unit cost so the tablet can warn, also offline", async () => {
+  const fx = await fixture();
+  const cat = await svc.catalog(fx.storeId, fx.staff1, undefined);
+  assert.equal(cat.ok, true);
+  if (!cat.ok) return;
+  assert.equal(cat.value.seesCost, false, "staff: the screen words the warning without the peso cost");
+  const sack = cat.value.products.find((p) => p.id === fx.sin25.id);
+  assert.deepEqual([sack?.floorMinor, sack?.ownShelfCost], [110_000, false], "shared cost: the product cost");
+  const own = await svc.catalog(fx.storeId, fx.owner, fx.s1);
+  assert.equal(own.ok && own.value.seesCost, true);
+
+  // Each shelf its own cost: Store 1's shelf cost counts, and changing the product cost would not move it.
+  await prisma.storeSettings.update({ where: { storeId: fx.storeId }, data: { costMode: "PER_LOCATION" } });
+  await prisma.stockLevel.updateMany({ where: { storeId: fx.storeId, productId: fx.sin25.id, warehouseId: fx.s1 }, data: { costMinor: 135_000 } });
+  const per = await svc.catalog(fx.storeId, fx.staff1, undefined);
+  const shelf = per.ok ? per.value.products.find((p) => p.id === fx.sin25.id) : undefined;
+  assert.deepEqual([shelf?.floorMinor, shelf?.ownShelfCost], [135_000, true]);
+  assert.ok(shelf && shelf.priceMinor < shelf.floorMinor, "₱1,300 is below the ₱1,350 shelf cost");
+});
+
+test("Counter list: picks the location, its prices and a consignment store's cost from one read", async () => {
+  const fx = await fixture();
+  await prisma.storeSettings.update({ where: { storeId: fx.storeId }, data: { costMode: "PER_LOCATION" } });
+  await prisma.stockLevel.updateMany({ where: { storeId: fx.storeId, productId: fx.sin25.id, warehouseId: fx.s1 }, data: { costMinor: 135_000 } });
+  await prisma.stockLevel.updateMany({ where: { storeId: fx.storeId, productId: fx.sin25.id, warehouseId: fx.s2 }, data: { costMinor: 120_000 } });
+
+  const own = await svc.catalog(fx.storeId, fx.owner, undefined);
+  assert.equal(own.ok && own.value.location.id, fx.s1, "no home location: the store's default");
+  assert.equal(own.ok && own.value.products.find((p) => p.id === fx.loose.id)?.priceMinor, 5_200, "Store 1 has no own price: the main price");
+  assert.deepEqual(own.ok && own.value.locations.map((l) => l.id), [fx.s1, fx.s2, fx.wh], "default first, then by name");
+
+  const s2 = await svc.catalog(fx.storeId, fx.staff2, undefined);
+  assert.equal(s2.ok && s2.value.products.find((p) => p.id === fx.loose.id)?.priceMinor, 5_400, "Store 2's own price");
+  assert.equal(s2.ok && s2.value.products.find((p) => p.id === fx.sin25.id)?.floorMinor, 120_000, "Store 2's own shelf cost");
+  await prisma.warehouse.update({ where: { id: fx.s2 }, data: { consignment: true } });
+  const consign = await svc.catalog(fx.storeId, fx.staff2, undefined);
+  const sack = consign.ok ? consign.value.products.find((p) => p.id === fx.sin25.id) : undefined;
+  assert.deepEqual([sack?.floorMinor, sack?.ownShelfCost], [135_000, true], "a consignment store sells Store 1's rice: Store 1's shelf cost");
+
+  const notMine = await svc.catalog(fx.storeId, fx.staff1, fx.s2);
+  assert.equal(notMine.ok, false, "staff only at their own location");
+  await prisma.warehouse.update({ where: { id: fx.wh }, data: { isActive: false } });
+  const off = await svc.catalog(fx.storeId, fx.owner, fx.wh);
+  assert.equal(off.ok, false, "a switched-off location sells nothing");
+  const after = await svc.catalog(fx.storeId, fx.owner, undefined);
+  assert.equal(after.ok && after.value.locations.some((l) => l.id === fx.wh), false, "and is not offered");
+});

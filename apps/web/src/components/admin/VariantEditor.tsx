@@ -6,6 +6,8 @@
 import { useEffect, useState } from "react";
 import { API_URL } from "../../config";
 import { adminHeaders } from "../../lib/admin";
+import { isBelowCost } from "../../lib/below-cost";
+import { askBelowCost } from "./BelowCostDialog";
 
 export interface AdminVariant { id: string; name: string; sku: string; priceMinor: number; costMinor: number; stockBaseQuantity: number | null; quantityOnHand: number; availableQuantity: number; isActive: boolean }
 export interface AdminAddonOption { id: string; name: string; priceMinor: number; isActive: boolean }
@@ -36,7 +38,8 @@ export default function VariantEditor({ product, onClose, onChanged }: VariantEd
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    // Esc inside a popup on top (below cost, confirm) closes only that popup.
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape" && !document.querySelector('[role="alertdialog"]')) onClose(); };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
@@ -51,13 +54,32 @@ export default function VariantEditor({ product, onClose, onChanged }: VariantEd
   const fail = (res: Response, d: { errors?: string[]; message?: string }) =>
     `(${res.status}) ${d?.errors?.join(", ") ?? d?.message ?? "failed"}`;
 
+  /** Below cost: ask first. The price and cost to save, or null when the person went back. */
+  const checked = async (name: string, priceMinor: number, costMinor: number) => {
+    if (!isBelowCost(priceMinor, costMinor)) return { priceMinor, costMinor };
+    const pick = await askBelowCost({ name, priceMinor, costMinor, showCost: true, canChangeCost: true, proceed: "Save anyway" });
+    if (!pick) return null;
+    if (pick.kind === "price") return { priceMinor: pick.priceMinor, costMinor };
+    if (pick.kind === "cost") return { priceMinor, costMinor: pick.costMinor };
+    return { priceMinor, costMinor };
+  };
+  /** A price or cost box on a saved variant was left: check it against the other number, then save both. */
+  const saveVarMoney = async (v: AdminVariant, el: HTMLInputElement, field: "priceMinor" | "costMinor") => {
+    const typed = Math.round(parseFloat(el.value || "0") * 100);
+    if (typed === v[field]) return;
+    const c = await checked(`${product.name} ${v.name}`, field === "priceMinor" ? typed : v.priceMinor, field === "costMinor" ? typed : v.costMinor);
+    if (!c) { el.value = (v[field] / 100).toFixed(2); return; }
+    await saveVar(v.id, c);
+  };
+
   const addVariant = async () => {
+    const money = await checked(`${product.name} ${vForm.name.trim()}`, Math.round(parseFloat(vForm.price || "0") * 100), Math.round(parseFloat(vForm.cost || "0") * 100));
+    if (!money) return;
     setBusy(true); setErr(null);
     try {
       const res = await api(`/admin/products/${product.id}/variants`, "POST", {
         name: vForm.name.trim(), sku: vForm.sku.trim(),
-        priceMinor: Math.round(parseFloat(vForm.price || "0") * 100),
-        costMinor: Math.round(parseFloat(vForm.cost || "0") * 100),
+        ...money,
         ...(vForm.stockBaseQuantity ? { stockBaseQuantity: parseInt(vForm.stockBaseQuantity, 10) } : {}),
         quantityOnHand: vForm.stock ? parseInt(vForm.stock, 10) : 0,
       });
@@ -110,7 +132,6 @@ export default function VariantEditor({ product, onClose, onChanged }: VariantEd
     close();
   };
 
-  const setPrice = async (id: string, priceMinor: number) => saveVar(id, { priceMinor });
   const setStock = async (id: string, quantityOnHand: number) => saveVar(id, { quantityOnHand });
   // P3e: rename variant + active toggle.
   const renameVar = async (id: string, name: string) => saveVar(id, { name });
@@ -170,9 +191,9 @@ export default function VariantEditor({ product, onClose, onChanged }: VariantEd
                     onBlur={(e) => { const n = e.target.value.trim(); if (n && n !== v.name) renameVar(v.id, n); }} />
                   <span className="text-muted flex-fill text-truncate">{v.sku}</span>
                   <input type="number" className="form-control form-control-sm" style={{ width: 84 }} min={0} step={0.01}
-                    defaultValue={(v.priceMinor / 100).toFixed(2)} title="price (pesos)" onBlur={(e) => setPrice(v.id, Math.round(parseFloat(e.target.value || "0") * 100))} />
+                    defaultValue={(v.priceMinor / 100).toFixed(2)} title="price (pesos)" onBlur={(e) => void saveVarMoney(v, e.currentTarget, "priceMinor")} />
                   <input type="number" className="form-control form-control-sm" style={{ width: 84 }} min={0} step={0.01}
-                    defaultValue={(v.costMinor / 100).toFixed(2)} title="unit acquisition cost (pesos)" onBlur={(e) => saveVar(v.id, { costMinor: Math.round(parseFloat(e.target.value || "0") * 100) })} />
+                    defaultValue={(v.costMinor / 100).toFixed(2)} title="unit acquisition cost (pesos)" onBlur={(e) => void saveVarMoney(v, e.currentTarget, "costMinor")} />
                   <input type="number" className="form-control form-control-sm" style={{ width: 76 }} min={0}
                     defaultValue={v.quantityOnHand} title="on hand" onBlur={(e) => setStock(v.id, parseInt(e.target.value, 10) || 0)} />
                   {product.stockBaseUnit && <input type="number" className="form-control form-control-sm" style={{ width: 84 }} min={1} step={1}

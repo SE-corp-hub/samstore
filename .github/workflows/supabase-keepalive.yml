@@ -22,10 +22,31 @@ on:
   workflow_dispatch:
 
 jobs:
+  # Same rule as ci.yml: `secrets` is not allowed in a job-level `if`, and the invalid file made
+  # every push show a red run. The check job reads the secret in a step; the query job skips
+  # when it is not set.
+  db-secret:
+    name: is DATABASE_URL configured?
+    runs-on: ubuntu-latest
+    outputs:
+      configured: ${{ steps.check.outputs.configured }}
+    steps:
+      - id: check
+        env:
+          DB: ${{ secrets.DATABASE_URL }}
+        run: |
+          if [ -n "$DB" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "DATABASE_URL secret not set: nothing to keep alive."
+          fi
+
   keepalive:
     name: one real query against the managed database
     runs-on: ubuntu-latest
-    if: ${{ secrets.DATABASE_URL != '' }}
+    needs: db-secret
+    if: needs.db-secret.outputs.configured == 'true'
     env:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
     steps:

@@ -1,10 +1,13 @@
 "use client";
 
+import ProductPhoto from "./ProductPhoto";
 import { useCallback, useEffect, useState } from "react";
 import { API_URL } from "../../config";
 import { adminHeaders } from "../../lib/admin";
+import { peso } from "../../lib/number-format";
 
 interface InvItem {
+  photoKey?: string | null;
   id: string; name: string; sku: string; category: string | null;
   quantityOnHand: number; quantityReserved: number; availableQuantity: number;
   reorderThreshold: number; costMinor: number; valueMinor: number; status: "in" | "low" | "out";
@@ -27,7 +30,7 @@ interface ConversionOption {
   available: number;
 }
 
-const toPesos = (m: number) => `₱${(m / 100).toFixed(2)}`;
+const toPesos = (m: number) => peso(m);
 const formatBaseQty = (qty: number, unit: string) => {
   if ((unit === "g" || unit === "ml") && qty % 1000 === 0) return `${qty / 1000} ${unit === "g" ? "kg" : "L"}`;
   return `${qty} ${unit}`;
@@ -283,31 +286,31 @@ export default function InventoryPanel() {
       {error && <div className="alert alert-danger py-2 small">{error}</div>}
 
       <div className="row g-2 mb-2">
-        <div className="col-md-3">
-          <input className="form-control form-control-sm" placeholder="Search name or SKU…" value={search} onChange={(e) => setSearch(e.target.value)} />
+        <div className="col-12 col-lg-3">
+          <input className="form-control form-control-sm" aria-label="Search products" placeholder="Search name or SKU…" value={search} onChange={(e) => setSearch(e.target.value)} />
         </div>
-        <div className="col-md-2">
-          <select className="form-select form-select-sm" value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
+        <div className="col-6 col-lg-2">
+          <select className="form-select form-select-sm" aria-label="Category" value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
             <option value="">All categories</option>
             {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
         </div>
-        <div className="col-md-2">
-          <select className="form-select form-select-sm" value={warehouseId} onChange={(e) => setWarehouseId(e.target.value)}>
+        <div className="col-6 col-lg-3">
+          <select className="form-select form-select-sm" aria-label="Location" value={warehouseId} onChange={(e) => setWarehouseId(e.target.value)}>
             <option value="">All warehouses</option>
             {warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}{w.isDefault ? " (default)" : ""}</option>)}
           </select>
         </div>
-        <div className="col-md-2">
-          <select className="form-select form-select-sm" value={status} onChange={(e) => setStatus(e.target.value)}>
+        <div className="col-6 col-lg-2">
+          <select className="form-select form-select-sm" aria-label="Stock level" value={status} onChange={(e) => setStatus(e.target.value)}>
             <option value="">All stock</option>
             <option value="in">In stock</option>
             <option value="low">Low</option>
             <option value="out">Out</option>
           </select>
         </div>
-        <div className="col-md-3">
-          <select className="form-select form-select-sm" value={sort} onChange={(e) => setSort(e.target.value as "name" | "qty" | "value")}>
+        <div className="col-6 col-lg-2">
+          <select className="form-select form-select-sm" aria-label="Sort" value={sort} onChange={(e) => setSort(e.target.value as "name" | "qty" | "value")}>
             <option value="name">Sort: name</option>
             <option value="qty">Sort: quantity</option>
             <option value="value">Sort: value</option>
@@ -324,10 +327,10 @@ export default function InventoryPanel() {
             <i className="bi bi-arrow-left-right me-1"></i>Convert stock
           </button>
           <div className="btn-group btn-group-sm" role="group" aria-label="Inventory view">
-            <button type="button" className={`btn ${view === "stock" ? "btn-primary" : "btn-outline-primary"}`} onClick={() => setView("stock")}>
+            <button type="button" className={`btn ${view === "stock" ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setView("stock")}>
               <i className="bi bi-boxes me-1"></i>Stock
             </button>
-            <button type="button" className={`btn ${view === "history" ? "btn-primary" : "btn-outline-primary"}`} onClick={() => setView("history")}>
+            <button type="button" className={`btn ${view === "history" ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setView("history")}>
               <i className="bi bi-clock-history me-1"></i>Stock flow
             </button>
           </div>
@@ -339,7 +342,7 @@ export default function InventoryPanel() {
         <div>
           <div className="row g-2 mb-2">
             <div className="col-md-4">
-              <select className="form-select form-select-sm" value={historyProduct} onChange={(e) => setHistoryProduct(e.target.value)}>
+              <select className="form-select form-select-sm" aria-label="Product" value={historyProduct} onChange={(e) => setHistoryProduct(e.target.value)}>
                 <option value="">All products</option>
                 {items.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
               </select>
@@ -391,26 +394,26 @@ export default function InventoryPanel() {
           <table className="table table-hover align-middle">
             <thead>
               <tr>
-                <th>Product</th><th>SKU</th><th>Category</th>
-                <th className="text-end">On hand</th><th className="text-end">Reserved</th>
-                <th className="text-end">Available</th>{hasCost && <th className="text-end">Unit cost</th>}
+                <th>Product</th><th className="col-wide">SKU</th><th className="col-wide">Category</th>
+                <th className="text-end">On hand</th><th className="text-end col-wide">Reserved</th>
+                <th className="text-end">Available</th>{hasCost && <th className="text-end col-wide">Unit cost</th>}
                 {hasCost && <th className="text-end">Value</th>}<th>Status</th><th></th>
               </tr>
             </thead>
             <tbody>
               {items.map((r) => (
                 <tr key={r.id}>
-                  <td className="fw-semibold">{r.name}</td>
-                  <td className="small text-muted">{r.sku}</td>
-                  <td className="small text-muted">{r.category ?? "—"}</td>
+                  <td className="fw-semibold"><div className="d-flex align-items-center gap-2"><ProductPhoto photoKey={r.photoKey} size="thumb" /><div>{r.name}<div className="small text-muted fw-normal d-lg-none">{r.sku}{r.quantityReserved > 0 ? ` · ${r.quantityReserved} reserved` : ""}</div></div></div></td>
+                  <td className="small text-muted col-wide">{r.sku}</td>
+                  <td className="small text-muted col-wide">{r.category ?? "—"}</td>
                   <td className="text-end">{r.quantityOnHand}</td>
-                  <td className="text-end text-muted">{r.quantityReserved}</td>
+                  <td className="text-end text-muted col-wide">{r.quantityReserved}</td>
                   <td className="text-end fw-semibold">{r.availableQuantity}</td>
-                  {hasCost && <td className="text-end">{toPesos(r.costMinor)}</td>}
+                  {hasCost && <td className="text-end col-wide">{toPesos(r.costMinor)}</td>}
                   {hasCost && <td className="text-end">{toPesos(r.valueMinor)}</td>}
                   <td><span className={`badge ${STATUS_BADGE[r.status]}`}>{r.status}{r.reorderThreshold > 0 ? ` ≤${r.reorderThreshold}` : ""}</span></td>
                   <td className="text-end">
-                    <button type="button" className="btn btn-sm btn-outline-primary"
+                    <button type="button" className="btn btn-sm btn-outline-primary text-nowrap" aria-label={`Adjust ${r.name}`}
                       onClick={() => { setAdjust(r); setAdjustMode("delta"); setAdjustQty(""); setAdjustReason(""); setAdjustAllowNegative(false); setAdjustError(null); }}>
                       <i className="bi bi-sliders me-1"></i>Adjust
                     </button>
@@ -437,10 +440,10 @@ export default function InventoryPanel() {
                     Current stock: <strong>{adjust.quantityOnHand}</strong> on hand · {adjust.quantityReserved} reserved · {adjust.availableQuantity} available
                   </p>
                   <div className="btn-group btn-group-sm w-100 mb-2" role="group" aria-label="Adjustment mode">
-                    <button type="button" className={`btn ${adjustMode === "delta" ? "btn-primary" : "btn-outline-primary"}`} onClick={() => setAdjustMode("delta")}>
+                    <button type="button" className={`btn ${adjustMode === "delta" ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setAdjustMode("delta")}>
                       Add / remove
                     </button>
-                    <button type="button" className={`btn ${adjustMode === "setTo" ? "btn-primary" : "btn-outline-primary"}`} onClick={() => setAdjustMode("setTo")}>
+                    <button type="button" className={`btn ${adjustMode === "setTo" ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setAdjustMode("setTo")}>
                       Counted total
                     </button>
                   </div>

@@ -20,9 +20,15 @@ async function call(method: "GET" | "POST", path: string, body?: unknown) {
   return { ok: res.ok, data: (await res.json().catch(() => null)) as ApiBody | null };
 }
 
-export default function CountHome({ locationId, owner, onOpen, onChanged, onError, onClosing, children }: {
+export default function CountHome({ locationId, owner, onOpen, onChanged, onError, onClosing, children, storeName, onCloseStore, closingOpen }: {
   locationId: string;
   owner: boolean;
+  /** The store being counted, for the "Close the store" card. */
+  storeName: string;
+  /** Start (or continue) "Close the store": count everything, walk-in sales, cash. */
+  onCloseStore: () => void;
+  /** An unfinished "Close the store" count here. */
+  closingOpen: { lines: number } | null;
   /** Open a count that was just started. */
   onOpen: (id: string) => void | Promise<void>;
   /** Something was counted or started: reload the list of counts. */
@@ -74,6 +80,13 @@ export default function CountHome({ locationId, owner, onOpen, onChanged, onErro
   }
   return (
     <>
+      <section className="close-card" aria-labelledby="close-title" style={{ maxWidth: 640 }}>
+        <h2 id="close-title"><i className="bi bi-shop me-2" aria-hidden="true"></i>Close the store{storeName ? ` · ${storeName}` : ""}</h2>
+        <p className="mb-2">{closingOpen ? "You started closing. Continue where you left off." : "At the end of the day: count all the rice, record what was sold to walk-ins, then count the cash."}</p>
+        <button type="button" className="btn btn-primary btn-lg w-100" onClick={onCloseStore}>
+          {closingOpen ? "Continue closing" : "Close the store"} <i className="bi bi-arrow-right ms-1" aria-hidden="true"></i>
+        </button>
+      </section>
       <div className="mb-3" style={{ maxWidth: 560 }}>
         <label className="form-label fw-semibold" htmlFor="count-search">Count one item</label>
         <input
@@ -94,8 +107,8 @@ export default function CountHome({ locationId, owner, onOpen, onChanged, onErro
         {items && q.trim() && results.length === 0 && <p className="text-muted mt-2">No item matches “{q.trim()}”.</p>}
       </div>
       <div className="d-flex flex-wrap gap-2 mb-3">
-        <button type="button" className="btn btn-success btn-lg" disabled={!items} onClick={() => setSetup(true)}>Count a list</button>
-        <button type="button" className="btn btn-outline-success btn-lg" onClick={() => setSuggest(true)}>Today&apos;s suggested list</button>
+        <button type="button" className="btn btn-outline-dark btn-lg" disabled={!items} onClick={() => setSetup(true)}>Count a list</button>
+        <button type="button" className="btn btn-outline-dark btn-lg" onClick={() => setSuggest(true)}>Today&apos;s suggested list</button>
         <button type="button" className="btn btn-outline-dark btn-lg" onClick={onClosing} title="A quick count of the 5 items that sold most in the last day. Optional.">Quick count: 5 best sellers</button>
       </div>
       {children}

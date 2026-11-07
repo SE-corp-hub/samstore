@@ -14,7 +14,8 @@ import PaymentReview from "./PaymentReview";
 import ChatPanel from "./ChatPanel";
 import { toast } from "../../lib/toast";
 import { useMediaQuery, WIDE } from "../../lib/use-media-query";
-import { cachedGet, useOffline } from "../../lib/offlineCache";
+import { peso } from "../../lib/number-format";
+import { cachedGet, savedThenFresh, useOffline } from "../../lib/offlineCache";
 
 const STATUS_BADGE: Record<string, string> = {
   RECEIVED: "text-bg-secondary",
@@ -52,7 +53,7 @@ interface OrderAction { key: string; label: string; icon: string; tone: "main" |
 interface EditLine { productId: string; productName: string; quantity: number; unitPriceMinor: number }
 interface ProductOption { id: string; name: string; sku: string }
 
-const toPesos = (m: number) => `₱${(m / 100).toFixed(2)}`;
+const toPesos = (m: number) => peso(m);
 const dayRange = (d: Date) => ({ from: new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0).toISOString(), to: new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59).toISOString() });
 
 export default function OrdersPanel() {
@@ -178,20 +179,21 @@ export default function OrdersPanel() {
                         cachedGet<{ counts?: typeof counts }>(`/admin/orders/counts?${cq.toString()}`)
                           .then((d) => d?.counts && setCounts(d.counts))
                           .catch(() => {});
-      if (canWrite) {
-        const p = await cachedGet<{ products?: any[] }>("/admin/products");
-        const c = await cachedGet<{ customers?: any[] }>("/admin/customers");
-        setProducts((p?.products ?? []).map((x: any) => ({ id: x.id, name: x.name, sku: x.sku })));
-        setCustomers((c?.customers ?? []).map((x: any) => ({ id: x.id, name: x.name ?? x.email ?? x.phone ?? "Customer" })));
-      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Load failed");
     } finally {
       setLoading(false);
     }
-  }, [tab, range, customFrom, customTo, customer, canWrite, sourceFilter, paymentFilter, fulfillmentFilter]);
+  }, [tab, range, customFrom, customTo, sourceFilter, paymentFilter, fulfillmentFilter, customer]);
 
     useEffect(() => { load(); }, [load]);
+    // The new-order form's product and customer lists: once per visit, both at once, from the copy
+    // saved on this tablet first (they used to be fetched one after the other on every list refresh).
+    useEffect(() => {
+      if (!canWrite) return;
+      void savedThenFresh<{ products?: ProductOption[] }>("/admin/products", (p) => setProducts((p.products ?? []).map((x) => ({ id: x.id, name: x.name, sku: x.sku }))));
+      void savedThenFresh<{ customers?: { id: string; name: string | null; email?: string | null; phone?: string | null }[] }>("/admin/customers", (c) => setCustomers((c.customers ?? []).map((x) => ({ id: x.id, name: x.name ?? x.email ?? x.phone ?? "Customer" }))));
+    }, [canWrite]);
 
     // Auto-refresh (30s) — persisted per browser, like Overview.
     useEffect(() => {
@@ -1034,8 +1036,8 @@ export default function OrdersPanel() {
                   </div>
                   {payMethod === "cash" ? (
                     <>
-                      <label className="form-label small">Amount tendered</label>
-                      <input className="form-control" type="number" min="0" step="0.01" placeholder={`Due ${toPesos(payHold.totalMinor)}`} value={tendered} onChange={(e) => setTendered(e.target.value)} />
+                      <label htmlFor="orders-amount-tendered" className="form-label small">Amount tendered</label>
+                      <input id="orders-amount-tendered" className="form-control" type="number" min="0" step="0.01" placeholder={`Due ${toPesos(payHold.totalMinor)}`} value={tendered} onChange={(e) => setTendered(e.target.value)} />
                       {(() => { const t = Math.round(parseFloat(tendered || "0") * 100); const ch = t - payHold.totalMinor; return ch >= 0 && t > 0 ? <div className="small text-success mt-1">Change: {toPesos(ch)}</div> : null; })()}
                     </>
                   ) : (
@@ -1046,12 +1048,12 @@ export default function OrdersPanel() {
                       </select>
                       <div className="row g-2">
                                               <div className="col-6">
-                                                <label className="form-label small">Start</label>
-                                                <input className="form-control form-control-sm" type="date" value={startAt ? startAt.slice(0, 10) : ""} onChange={(e) => setStartAt(e.target.value ? new Date(e.target.value).toISOString() : "")} />
+                                                <label htmlFor="orders-start" className="form-label small">Start</label>
+                                                <input id="orders-start" className="form-control form-control-sm" type="date" value={startAt ? startAt.slice(0, 10) : ""} onChange={(e) => setStartAt(e.target.value ? new Date(e.target.value).toISOString() : "")} />
                                               </div>
                                               <div className="col-6">
-                                                <label className="form-label small">Due</label>
-                                                <input className="form-control form-control-sm" type="date" value={dueAt ? dueAt.slice(0, 10) : ""} onChange={(e) => setDueAt(e.target.value ? new Date(e.target.value).toISOString() : "")} />
+                                                <label htmlFor="orders-due" className="form-label small">Due</label>
+                                                <input id="orders-due" className="form-control form-control-sm" type="date" value={dueAt ? dueAt.slice(0, 10) : ""} onChange={(e) => setDueAt(e.target.value ? new Date(e.target.value).toISOString() : "")} />
                                               </div>
                                             </div>
                                             <div className="mb-1">

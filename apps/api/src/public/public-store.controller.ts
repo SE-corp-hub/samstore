@@ -1,4 +1,6 @@
-import { Controller, Get, Post, Body, Param, Query, HttpException, HttpStatus, Inject } from "@nestjs/common";
+import { Controller, Get, Post, Body, Param, Query, HttpException, HttpStatus, Inject, Res } from "@nestjs/common";
+import type { Response } from "express";
+import { ProductAdminService } from "../admin/product-admin.service.js";
 import { PublicStoreService } from "./public-store.service.js";
 import { MessengerBridgeService } from "../messenger/bridge.service.js";
 
@@ -10,6 +12,25 @@ export class PublicStoreController {
   constructor(@Inject(PublicStoreService) private readonly stores: PublicStoreService) {}
   // P3g: Website→Messenger bridge — always suppress-send with portal status.
   private readonly bridge = new MessengerBridgeService();
+  private readonly products = new ProductAdminService();
+
+  /**
+   * GET /public/product-photo/:key — a product's picture for the POS / Pre-order / Products buttons.
+   * The key is random and changes with every new picture, so the answer never changes: browsers and
+   * the tablet's offline copy may keep it for a year.
+   */
+  @Get("product-photo/:key")
+  async productPhoto(@Param("key") key: string, @Res() res: Response) {
+    const photo = await this.products.photo(key);
+    if (!photo) {
+      res.status(404).json({ type: "not_found", message: "Picture not found" });
+      return;
+    }
+    res.setHeader("Content-Type", photo.mime);
+    res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+    res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+    res.send(photo.data);
+  }
 
   /** GET /public/stores/:slug?token= — public store profile + active products. */
   @Get("stores/:slug")
