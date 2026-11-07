@@ -11,7 +11,7 @@
 //   New item: a rice that isn't in the system yet, with what is on hand now.
 // One idempotency key per sale, kept until it succeeds: a double-tap is one sale.
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { API_URL } from "../../config";
 import { adminHeaders, getAdminStoreId } from "../../lib/admin";
 import { toast } from "../../lib/toast";
@@ -46,7 +46,7 @@ import { noteUse } from "../../lib/product-find";
 
 interface Loc { id: string; name: string; code: string | null; type: string }
 interface Item {
-  id: string; name: string; loose: boolean; gramsPerUnit: number | null; priceMinor: number; forReview: boolean;
+  id: string; name: string; photoKey?: string | null; loose: boolean; gramsPerUnit: number | null; priceMinor: number; forReview: boolean;
   stock: Record<string, number>; tracked: boolean;
   /** Unit cost here (per piece, or per kilo): selling under it loses money. Staff get it only to compare. */
   floorMinor?: number; ownShelfCost?: boolean;
@@ -103,8 +103,7 @@ function savedCart(): { locationId: string; cart: CartLine[]; key: string | null
   } catch { return null; }
 }
 
-/** `switcher`: the Walk-in / Full sale buttons, placed at the top of the product column so the sale card can start at the very top. */
-export default function BentaPanel({ switcher }: { switcher?: ReactNode }) {
+export default function BentaPanel() {
   const [locations, setLocations] = useState<Loc[]>([]);
   const [locationId, setLocationId] = useState("");
   const [homeLocationId, setHomeLocationId] = useState<string | null>(null);
@@ -435,7 +434,7 @@ export default function BentaPanel({ switcher }: { switcher?: ReactNode }) {
         const inText = i.loose ? kg(n) : `${n}`;
         const left = i.stock[locationId] ?? 0; // only this store's count: other stores show when a line is taken from them
         return (
-          <PickTile name={i.name} price={peso(i.priceMinor)} priceNote={i.loose ? "/kg" : undefined}
+          <PickTile name={i.name} photoKey={i.photoKey} price={peso(i.priceMinor)} priceNote={i.loose ? "/kg" : undefined}
             countText={n > 0 ? `${inText} in sale` : undefined}
             stock={left <= 0 ? "None left here" : `${i.loose ? kg(left) : left} left`} stockOut={left <= 0}
             extra={i.forReview ? <span className="badge text-bg-warning">To review</span> : undefined}
@@ -695,7 +694,6 @@ export default function BentaPanel({ switcher }: { switcher?: ReactNode }) {
       {sideBySide ? (
         <div className="fit-row">
           <div className="fit-col fit-main">
-            {switcher}
             {storeBar}
             {heldCard}
             {errAlert}
@@ -711,7 +709,6 @@ export default function BentaPanel({ switcher }: { switcher?: ReactNode }) {
         </div>
       ) : (
         <div className="fit-col">
-          {switcher}
           {stepsRow}
           {storeBar}
           {heldCard}
