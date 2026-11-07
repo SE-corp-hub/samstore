@@ -13,7 +13,8 @@ import { saveCopy, savedCopy, useOffline } from "../../../lib/offlineCache";
 
 /** Screens that work with no internet; every other screen still opens, but read-only (its buttons are off). */
 // Settings opens offline too: Printer is kept on this tablet, the other groups lock their own buttons.
-const OFFLINE_READY = new Set(["home", "pos", "preorders", "settings"]);
+// Orders opens offline from the saved copy; its changing buttons lock themselves.
+const OFFLINE_READY = new Set(["home", "pos", "preorders", "settings", "orders"]);
 
 const STORES_PATH = "/admin/stores/mine";
 import { resumePendingReceipt } from "../../../lib/slip-print";
