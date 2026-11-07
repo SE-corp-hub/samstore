@@ -313,6 +313,9 @@ model StoreSettings {
   orderNumberPrefix         String?
   // P10a: 0 = disabled; otherwise old Messenger conversation/message data is purgeable.
   privacyRetentionDays      Int            @default(0)
+  // PIN lock (2026-11-07): screens that ask for the owner's lock PIN, per sign-in kind. NULL = no lock.
+  // { salt, hash, iterations, owner: string[], staff: string[], updatedAt }; checked on the tablet so it works offline.
+  featureLock               Json?
   createdAt                 DateTime       @default(now())
   updatedAt                 DateTime       @updatedAt
 }

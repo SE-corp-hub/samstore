@@ -21,6 +21,8 @@ import { useLang, LANG_WORDS } from "../../../lib/lang";
 import QueueBadge, { SyncBar } from "../../../components/admin/QueueBadge";
 import StaffHome from "../../../components/admin/StaffHome";
 import TextSizePicker from "../../../components/admin/TextSizePicker";
+import LockScreen from "../../../components/admin/LockScreen";
+import { isScreenLocked, lockAgain, lockListFor, useFeatureLock } from "../../../lib/feature-lock";
 
 /** Rice Ops M10: the store screens get the large, high-contrast look (globals.css .rice-ui). */
 const RICE_TABS = new Set(["pos", "preorders", "orders", "utang", "utangrice", "agentorders", "agent", "approvals", "moves", "returns", "resack", "pasok", "purchaseorders", "bilangin", "storereport", "payable", "ulat", "drafts", "kargadors", "settings"]);
@@ -118,6 +120,8 @@ export default function AdminDashboard() {
   const [waking, setWaking] = useState(false); // the sleeping beta server is starting up
   const offline = useOffline();
   const locked = offline && !OFFLINE_READY.has(tab);
+  // PIN lock: screens the owner locked show the PIN pad instead, until the right PIN (works offline).
+  const pinLock = useFeatureLock(activeStore);
   const userNavigated = useRef(false);
 
   const loadStores = useCallback(async () => {
@@ -220,12 +224,14 @@ export default function AdminDashboard() {
   };
 
   const logout = () => {
+    lockAgain();
     clearAdminSession();
     router.push("/admin/login");
   };
 
   // Rice Ops M2: hand the phone to the next person — they log in with their own PIN.
   const switchUser = () => {
+    lockAgain();
     clearAdminSession();
     router.push("/admin/login?pin=1");
   };
@@ -293,9 +299,16 @@ export default function AdminDashboard() {
     .map((g) => ({ ...g, items: g.items.filter((i) => allowed.includes(i.id)) }))
     .filter((g) => g.items.length > 0);
 
+  const pinLocked = (id: string) => isScreenLocked(pinLock.lock, role, id);
+  const showPinPad = tab !== "home" && pinLocked(tab) && !pinLock.open;
+  const anyPinLock = !!pinLock.lock?.on && (pinLock.lock[lockListFor(role)]?.length ?? 0) > 0;
+  const lockIcon = (id: string) => (pinLocked(id)
+    ? <i className={`bi ${pinLock.open ? "bi-unlock" : "bi-lock-fill"} ms-auto nav-lock`} role="img" aria-label={pinLock.open ? "Locked screen, open now" : "Needs the lock PIN"}></i>
+    : null);
+
   const renderTab = () => {
     switch (tab) {
-      case "home": return <StaffHome role={role} onNavigate={(id) => { userNavigated.current = true; setTab(id); }} labelFor={navLabel} />;
+      case "home": return <StaffHome role={role} onNavigate={(id) => { userNavigated.current = true; setTab(id); }} labelFor={navLabel} isLocked={pinLock.open ? undefined : pinLocked} />;
       case "overview": return <OverviewPanel onNavigate={setTab} storeSlug={active?.slug} storeName={active?.name} />;
       // One POS: the rice-ready counter screen.
       case "pos": return <PosPanel />;
@@ -309,7 +322,7 @@ export default function AdminDashboard() {
       case "reports": return <ReportsPanel />;
       case "orders": return <OrdersPanel />;
       case "products": return <ProductsPanel />;
-      case "settings": return <SettingsPanel />;
+      case "settings": return <SettingsPanel role={role} />;
       case "countersettings": return <CounterSettingsPanel />;
       case "vouchers": return <VouchersPanel />;
       case "team": return <TeamPanel />;
@@ -361,6 +374,7 @@ export default function AdminDashboard() {
                   >
                     <i className={`bi ${item.icon}`}></i>
                     <span>{navLabel(item.id, item.label)}</span>
+                    {lockIcon(item.id)}
                   </button>
                 </li>
               ))}
@@ -443,6 +457,11 @@ export default function AdminDashboard() {
                   ))}
                 </select>
               )}
+              {anyPinLock && pinLock.open && (
+                <button type="button" className="btn btn-sm btn-outline-dark lock-now" onClick={lockAgain} title="Lock the locked screens again">
+                  <i className="bi bi-lock-fill me-1" aria-hidden="true"></i>Lock
+                </button>
+              )}
               <QueueBadge />
               <span className="badge text-bg-primary role-badge text-uppercase d-none d-sm-inline">{role}</span>
               {active && (
@@ -459,6 +478,14 @@ export default function AdminDashboard() {
         <SyncBar />
 
         <main className={`container-fluid py-4 flex-grow-1${BAR_ROLES.includes(role) ? " has-staff-bar" : ""}`} style={{ background: "#faf7f2" }}>
+          {showPinPad && pinLock.lock ? (
+            <LockScreen
+              lock={pinLock.lock}
+              screenName={(() => { const n = navItemFor(NAV_ID[tab] ?? tab); return n ? navLabel(n.id, n.label) : "This screen"; })()}
+              ownerSignedIn={isOwnerRole(role)}
+              onBack={() => { userNavigated.current = true; setTab(BAR_ROLES.includes(role) ? "home" : defaultTabFor(role)); }}
+            />
+          ) : <>
           {locked && (
             <div className="alert alert-secondary d-flex align-items-center gap-2" role="status">
               <i className="bi bi-lock fs-4"></i>
@@ -469,6 +496,7 @@ export default function AdminDashboard() {
           <fieldset disabled={locked} className="border-0 p-0 m-0" style={{ minWidth: 0 }}>
             {RICE_TABS.has(tab) ? <div className="rice-ui p-2 rounded">{renderTab()}</div> : renderTab()}
           </fieldset>
+          </>}
         </main>
 
         {BAR_ROLES.includes(role) && (
@@ -482,7 +510,7 @@ export default function AdminDashboard() {
                 onClick={() => { userNavigated.current = true; setTab(b.id); setMobileNav(false); }}
               >
                 <i className={`bi ${b.icon}`}></i>
-                <span>{b.label}</span>
+                <span>{b.label}{pinLocked(b.id) && !pinLock.open && <i className="bi bi-lock-fill ms-1 bar-lock" role="img" aria-label="Needs the lock PIN"></i>}</span>
               </button>
             ))}
             <button

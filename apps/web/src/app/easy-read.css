@@ -446,3 +446,43 @@ main:has(> * > .rice-ui > .sell-fit), main:has(> .rice-ui > .sell-fit) { padding
 @media (max-height: 760px) {
   .sell-fit .pick-photo { height: 3.5rem; }
 }
+
+/* PIN lock (components/admin/LockScreen.tsx, PinLockSettings.tsx): a locked screen shows one card
+   with four dots and the big number pad; amber = careful, the lock is a "wait" not a "stop". */
+.lock-screen { display: flex; justify-content: center; padding: 1rem 0; }
+.lock-card { width: 100%; max-width: 26rem; background: #fff; border: 1px solid #ddd5c8; border-radius: 1rem; padding: 1.25rem; text-align: center; box-shadow: 0 2px 8px rgba(0,0,0,.06); }
+.lock-icon { width: 4rem; height: 4rem; margin: 0 auto 0.75rem; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  background: #fff3d6; color: #6f4800; font-size: 2rem; border: 2px solid #8a5a00; }
+.lock-help { color: #3d3934; }
+.lock-dots { display: flex; justify-content: center; gap: 1rem; margin: 0.5rem 0; }
+.lock-dot { width: 1.4rem; height: 1.4rem; border-radius: 50%; border: 3px solid #1f1d1a; background: #fff; }
+.lock-dot.is-filled { background: #1f1d1a; }
+.lock-message { min-height: 1.6em; margin-bottom: 0.5rem; }
+.lock-keys .numpad-key:disabled { background: #e6e1d9; color: #6b5d50; opacity: 1; }
+.lock-back-side { display: none; }
+/* Sideways (wider than tall): words on the left, the pad on the right, so it fits with no page scroll. */
+@media (orientation: landscape) and (min-width: 700px) {
+  .lock-screen { padding: 0; }
+  .lock-card { max-width: 52rem; display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; align-items: center; padding: 1rem 1.25rem; }
+  .lock-icon { width: 3rem; height: 3rem; font-size: 1.5rem; margin-bottom: 0.4rem; }
+  .lock-back-side { display: block; }
+  .lock-back-up { display: none; }
+}
+/* Locks shown next to a screen's name: menu, Home tiles, bottom bar. */
+.admin-sidebar .nav-link .nav-lock { width: auto; font-size: 1rem; color: #ffd98a; }
+.staff-tile .tile-lock { position: absolute; top: 0.5rem; right: 0.6rem; font-size: 1.1rem; color: #6f4800; }
+.staff-tile:hover .tile-lock, .staff-tile:active .tile-lock { color: #fff; }
+.staff-bar .bar-lock { font-size: 0.8em; color: #6f4800 !important; }
+.staff-bar button.active .bar-lock { color: #ffd98a !important; }
+.lock-now { min-height: 44px; }
+/* Settings → PIN lock: big PIN boxes and the screen picker. */
+.pin-box { max-width: 10rem; letter-spacing: 0.5em; }
+.lock-pick-group { border: 0; padding: 0; }
+.lock-pick-group legend { float: none; width: auto; margin-bottom: 0.5rem; }
+.lock-pick-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr)); gap: 0.5rem; }
+.lock-pick { display: flex; align-items: center; gap: 0.6rem; min-height: 52px; padding: 0.5rem 0.75rem; border: 2px solid #cfc6b8; border-radius: 0.6rem; background: #fff; cursor: pointer; }
+.lock-pick .form-check-input { width: 1.5rem; height: 1.5rem; margin: 0; flex: 0 0 auto; }
+.lock-pick > .bi:first-of-type { color: var(--tone, #4a4844); font-size: 1.2rem; }
+.lock-pick.is-on { border-color: #8a5a00; background: #fff3d6; }
+.lock-pick.is-on .bi-lock-fill { color: #6f4800; }
+.lock-pick:focus-within { outline: 3px solid var(--sam-primary); outline-offset: 2px; }
