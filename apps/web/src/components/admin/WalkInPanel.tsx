@@ -24,7 +24,7 @@ import { OpenDrawer } from "./BentaPanel";
 import PickTile from "./PickTile";
 
 interface Loc { id: string; name: string; code: string | null; type: string }
-interface Item { id: string; name: string; loose: boolean; gramsPerUnit: number | null; priceMinor: number; stock: Record<string, number> }
+interface Item { id: string; name: string; photoKey?: string | null; loose: boolean; gramsPerUnit: number | null; priceMinor: number; stock: Record<string, number> }
 /** Sacks/packs: `qty` pieces. Loose rice: `qty` grams. */
 interface Line { productId: string; qty: number }
 interface Sold { ref: string; offline: boolean; totalMinor: number; changeMinor: number; lines: { name: string; qty: string; totalMinor: number }[]; belowCost: string[] }
@@ -166,7 +166,7 @@ export default function WalkInPanel({ switcher }: { switcher?: ReactNode }) {
     const left = i.stock[locationId] ?? 0;
     return (
       <div key={i.id} className="col-6 col-md-3">
-        <PickTile name={i.name} price={peso(i.priceMinor)} priceNote={i.loose ? "/kg" : undefined}
+        <PickTile name={i.name} photoKey={i.photoKey} price={peso(i.priceMinor)} priceNote={i.loose ? "/kg" : undefined}
           countText={n > 0 ? `${i.loose ? kg(n) : n} in sale` : undefined}
           stock={left <= 0 ? "None left here" : `${i.loose ? kg(left) : left} left`} stockOut={left <= 0}
           ariaLabel={`Add ${i.loose ? "one kilo of " : ""}${i.name}, ${peso(i.priceMinor)}${i.loose ? " a kilo" : ""}${n > 0 ? `, ${i.loose ? kg(n) : n} in this sale` : ""}`}

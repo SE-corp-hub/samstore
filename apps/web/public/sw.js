@@ -3,7 +3,11 @@
 //   with a weak or no signal.
 // * API calls are NEVER cached or replayed here: signed steps go through the app's own
 //   queue (with an Idempotency-Key), so the server decides, once, what happened.
+// * The one exception: product pictures (/public/product-photo/<key>). Each key is a new
+//   picture that never changes, so it is kept for good and the POS buttons show it offline.
 const CACHE = "tindahan-v2";
+// Product pictures live apart from the screens, so a new app version never throws them away.
+const PHOTOS = "tindahan-photos-v1";
 const SHELL = ["/admin/dashboard", "/admin/login", "/manifest.webmanifest", "/icon-192.png", "/icon-512.png"];
 // A sleeping beta server takes 30 s or more to answer the first page. Past this wait the
 // saved copy of the screen opens instead, and the fresh copy is still saved for next time.
@@ -15,7 +19,7 @@ self.addEventListener("install", (event) => {
 
 self.addEventListener("activate", (event) => {
   event.waitUntil(
-    caches.keys().then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim()),
+    caches.keys().then((keys) => Promise.all(keys.filter((k) => k !== CACHE && k !== PHOTOS).map((k) => caches.delete(k)))).then(() => self.clients.claim()),
   );
 });
 
@@ -23,6 +27,14 @@ self.addEventListener("fetch", (event) => {
   const req = event.request;
   if (req.method !== "GET") return;
   const url = new URL(req.url);
+  if (url.pathname.includes("/public/product-photo/")) {
+    event.respondWith(caches.open(PHOTOS).then((c) => c.match(req).then((hit) => hit || fetch(req).then((res) => {
+      // A cross-origin picture is "opaque" (status 0): keep it too; a 404 or error is never kept.
+      if (res.ok || res.type === "opaque") c.put(req, res.clone());
+      return res;
+    }))));
+    return;
+  }
   // Only this app's own files; the API (another origin or /admin API paths) is never touched.
   if (url.origin !== self.location.origin) {
     if (url.hostname === "fonts.gstatic.com" || url.hostname === "fonts.googleapis.com") {

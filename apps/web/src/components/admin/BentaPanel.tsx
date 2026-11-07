@@ -46,7 +46,7 @@ import { noteUse } from "../../lib/product-find";
 
 interface Loc { id: string; name: string; code: string | null; type: string }
 interface Item {
-  id: string; name: string; loose: boolean; gramsPerUnit: number | null; priceMinor: number; forReview: boolean;
+  id: string; name: string; photoKey?: string | null; loose: boolean; gramsPerUnit: number | null; priceMinor: number; forReview: boolean;
   stock: Record<string, number>; tracked: boolean;
   /** Unit cost here (per piece, or per kilo): selling under it loses money. Staff get it only to compare. */
   floorMinor?: number; ownShelfCost?: boolean;
@@ -435,7 +435,7 @@ export default function BentaPanel({ switcher }: { switcher?: ReactNode }) {
         const inText = i.loose ? kg(n) : `${n}`;
         const left = i.stock[locationId] ?? 0; // only this store's count: other stores show when a line is taken from them
         return (
-          <PickTile name={i.name} price={peso(i.priceMinor)} priceNote={i.loose ? "/kg" : undefined}
+          <PickTile name={i.name} photoKey={i.photoKey} price={peso(i.priceMinor)} priceNote={i.loose ? "/kg" : undefined}
             countText={n > 0 ? `${inText} in sale` : undefined}
             stock={left <= 0 ? "None left here" : `${i.loose ? kg(left) : left} left`} stockOut={left <= 0}
             extra={i.forReview ? <span className="badge text-bg-warning">To review</span> : undefined}

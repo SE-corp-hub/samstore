@@ -1,11 +1,13 @@
 "use client";
 
+import ProductPhoto from "./ProductPhoto";
 import { useCallback, useEffect, useState } from "react";
 import { API_URL } from "../../config";
 import { adminHeaders } from "../../lib/admin";
 import { peso } from "../../lib/number-format";
 
 interface InvItem {
+  photoKey?: string | null;
   id: string; name: string; sku: string; category: string | null;
   quantityOnHand: number; quantityReserved: number; availableQuantity: number;
   reorderThreshold: number; costMinor: number; valueMinor: number; status: "in" | "low" | "out";
@@ -401,7 +403,7 @@ export default function InventoryPanel() {
             <tbody>
               {items.map((r) => (
                 <tr key={r.id}>
-                  <td className="fw-semibold">{r.name}<div className="small text-muted fw-normal d-lg-none">{r.sku}{r.quantityReserved > 0 ? ` · ${r.quantityReserved} reserved` : ""}</div></td>
+                  <td className="fw-semibold"><div className="d-flex align-items-center gap-2"><ProductPhoto photoKey={r.photoKey} size="thumb" /><div>{r.name}<div className="small text-muted fw-normal d-lg-none">{r.sku}{r.quantityReserved > 0 ? ` · ${r.quantityReserved} reserved` : ""}</div></div></div></td>
                   <td className="small text-muted col-wide">{r.sku}</td>
                   <td className="small text-muted col-wide">{r.category ?? "—"}</td>
                   <td className="text-end">{r.quantityOnHand}</td>

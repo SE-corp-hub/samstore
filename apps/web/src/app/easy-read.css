@@ -262,6 +262,19 @@ html[data-text-size] .btn:focus-visible { box-shadow: none; }
 }
 .pick-tile.in-sale .pick-stock.out { background: #fff; }
 .pick-tile:focus-visible { outline: 3px solid var(--sam-primary); outline-offset: 2px; }
+/* A product picture across the top of the button: a fixed 4.5 rem strip (space kept while it loads),
+   the whole picture shown on white (a rice sack is taller than wide, so "contain", not cropped).
+   The "✓ 2 in sale" pill sits on the picture's corner, so the button is no taller in the sale. */
+.pick-tile.has-photo { position: relative; justify-content: flex-start; padding-top: 0.35rem; }
+.pick-photo { display: block; width: 100%; height: 4.5rem; margin-bottom: 0.15rem; border-radius: 0.5rem; background: #fff; overflow: hidden; flex: 0 0 auto; }
+.pick-photo img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.pick-tile.has-photo .pick-count { position: absolute; top: 0.3rem; right: 0.3rem; margin: 0; box-shadow: 0 0 0 2px #fff; }
+.pick-tile.in-sale .pick-photo { background: #fff; }
+/* The small picture in lists (Products, Inventory): a 3 rem square, a bag icon when there is none. */
+.product-thumb { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; overflow: hidden;
+  background: #f4efe7; border: 1px solid #d9d1c5; border-radius: 0.5rem; color: var(--sam-muted); vertical-align: middle; }
+.product-thumb-thumb { width: 3rem; height: 3rem; font-size: 1.3rem; }
+.product-thumb img { width: 100%; height: 100%; object-fit: contain; background: #fff; }
 
 /* The sale (or the order) on the right / at the bottom: a green frame, a title, the total last and largest. */
 .sale-card { background: #fff; border: 2px solid #1f6f3f; border-radius: 0.75rem; }
@@ -335,7 +348,7 @@ html[data-text-size] .btn:focus-visible { box-shadow: none; }
 main:has(> * > .rice-ui > .sell-fit), main:has(> .rice-ui > .sell-fit) { padding-top: 0.75rem !important; }
 .rice-ui:has(> .sell-fit) { padding-bottom: 0 !important; }
 
-/* The Walk-in / Full sale switch: one line each on a tablet ("Walk-in · Cash only, two taps"). */
+/* The Walk-in / Full sale switch: one line each on a tablet ("Full sale · Credit, GCash, special price"). */
 @media (min-width: 768px) {
   .sell-fit .seg-caption { display: inline; font-weight: 500; }
   .sell-fit .seg-caption::before { content: " · "; }
@@ -426,4 +439,19 @@ main:has(> * > .rice-ui > .sell-fit), main:has(> .rice-ui > .sell-fit) { padding
   .count-sheet { max-width: 1240px; }
   .count-sheet .list-group { display: grid; grid-template-columns: 1fr 1fr; column-gap: 0.75rem; row-gap: 0.4rem; }
   .count-sheet .list-group > .list-group-item { border-width: 1px !important; border-radius: 0.5rem !important; }
+}
+
+/* The product form's Picture field (components/admin/PhotoPicker.tsx): a 7.5 rem preview beside
+   big Take photo / Choose picture buttons. */
+.photo-picker legend { font-size: 1rem; font-weight: 600; float: none; width: auto; }
+.photo-preview { width: 7.5rem; height: 7.5rem; display: flex; align-items: center; justify-content: center; flex: 0 0 auto;
+  border: 2px dashed #b9ae9f; border-radius: 0.75rem; background: #fff; overflow: hidden; }
+.photo-preview img { width: 100%; height: 100%; object-fit: contain; }
+.photo-picker .btn { min-height: 44px; text-align: start; }
+/* In the Products list the small picture is a button that opens the product (to add or change it). */
+.product-thumb-btn { padding: 0; border: 0; background: none; border-radius: 0.5rem; min-width: 44px; min-height: 44px; }
+.product-thumb-btn:focus-visible { outline: 3px solid var(--sam-primary); outline-offset: 2px; }
+/* The tablet sideways (short screen): a lower picture strip, so more buttons fit beside the sale. */
+@media (max-height: 760px) {
+  .sell-fit .pick-photo { height: 3.5rem; }
 }

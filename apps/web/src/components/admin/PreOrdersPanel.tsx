@@ -46,7 +46,7 @@ interface Preorder {
   paidBy?: "cash" | "credit"; changeMinor?: number; completedAt?: string;
 }
 interface PosProduct {
-  id: string; name: string; sku: string; priceMinor: number;
+  id: string; name: string; sku: string; priceMinor: number; photoKey?: string | null;
   availableQuantity: number; category: { name: string } | null;
 }
 interface PosCustomer { id: string; name: string | null; email: string | null; phone: string | null; }
@@ -741,7 +741,7 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
         renderTile={(p) => {
           const n = inOrder(p.id);
           return (
-            <PickTile name={p.name} price={maybePrice(p.priceMinor)} countText={n > 0 ? `${n} in order` : undefined}
+            <PickTile name={p.name} photoKey={p.photoKey} price={maybePrice(p.priceMinor)} countText={n > 0 ? `${n} in order` : undefined}
               stock={p.availableQuantity <= 0 ? "None in stock yet" : `${p.availableQuantity} in stock`}
               ariaLabel={`Add ${p.name}${n > 0 ? `, ${n} in this order` : ""}`} onClick={() => { noteUse("preorder", p.id); addProduct(p); }} />
           );

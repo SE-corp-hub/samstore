@@ -384,6 +384,9 @@ model Product {
   // P3d: merchandising — featured flag + free-form display tags (store-scoped via the row).
   featured              Boolean   @default(false)
   tags                  String[]  @default([])
+  // The product's picture on POS / Pre-order / Products (ProductPhoto.id). A new picture gets a new key,
+  // so its address never changes content and the tablet may keep it for good (works offline).
+  photoKey              String?
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
 
@@ -421,6 +424,19 @@ model ProductImage {
   product   Product @relation(fields: [storeId, productId], references: [storeId, id]) // M3: tenant-consistent
   url       String
   sortOrder Int     @default(0)
+}
+
+// The product's own picture, kept small (the tablet shrinks it before upload). Separate from Product so
+// product lists never read the bytes; served at GET /public/product-photo/:id (the id is random).
+model ProductPhoto {
+  id        String   @id
+  storeId   String
+  productId String
+  mime      String
+  data      Bytes
+  createdAt DateTime @default(now())
+
+  @@index([storeId, productId])
 }
 
 // ─────────────────────────────── Variants (P2a) ───────────────────────────────

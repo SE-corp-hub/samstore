@@ -9,6 +9,8 @@ import { API_URL } from "../../config";
 import { adminHeaders } from "../../lib/admin";
 import LabelSheet from "./LabelSheet";
 import VariantEditor from "./VariantEditor";
+import PhotoPicker, { type PhotoChange } from "./PhotoPicker";
+import ProductPhoto from "./ProductPhoto";
 import { peso } from "../../lib/number-format";
 
 export interface AdminProduct {
@@ -29,6 +31,8 @@ export interface AdminProduct {
   taxExempt: boolean;
   featured: boolean;
   tags: string[];
+  /** The product's picture (see lib/product-photo.ts), or null. */
+  photoKey?: string | null;
   related: { id: string; name: string; priceMinor: number; isActive: boolean }[];
   upsell: { id: string; name: string; priceMinor: number; isActive: boolean }[];
   category: { id: string; name: string; slug: string } | null;
@@ -165,6 +169,8 @@ export default function ProductsPanel() {
   const [optionsFor, setOptionsFor] = useState<AdminProduct | null>(null);
   // Products whose selling price is under the unit cost (owner/manager only: staff get no cost).
   const [onlyBelow, setOnlyBelow] = useState(false);
+  // The Picture field: what happens to the product's picture on Save.
+  const [photo, setPhoto] = useState<PhotoChange>({ kind: "keep" });
   const belowCount = products.filter((p) => isBelowCost(p.priceMinor, p.costMinor)).length;
 
   const load = useCallback(async () => {
@@ -201,6 +207,7 @@ export default function ProductsPanel() {
 
   const openCreate = () => {
     setForm(EMPTY_FORM);
+    setPhoto({ kind: "keep" });
     setCreatingCategory(false);
     setModal({ open: true, editing: null });
   };
@@ -232,6 +239,7 @@ export default function ProductsPanel() {
       reorderThreshold: (p.reorderThreshold || 0).toString(),
     });
     setCreatingCategory(false);
+    setPhoto({ kind: "keep" });
     setModal({ open: true, editing: p });
   };
 
@@ -288,6 +296,20 @@ export default function ProductsPanel() {
       if (!res.ok) {
         setError(data?.errors?.join(", ") ?? data?.message ?? "Save failed");
         return;
+      }
+      // The picture goes up after the product is saved (a new product needs its id first).
+      const productId: string | undefined = modal.editing?.id ?? data?.id;
+      if (productId && photo.kind !== "keep") {
+        const pr = await fetch(`${API_URL}/admin/products/${productId}/photo`, photo.kind === "new"
+          ? { method: "PUT", headers: { "Content-Type": "application/json", ...adminHeaders() }, body: JSON.stringify({ dataUrl: photo.dataUrl }) }
+          : { method: "DELETE", headers: adminHeaders() });
+        if (!pr.ok) {
+          const pd = await pr.json().catch(() => null);
+          setModal({ open: false, editing: null });
+          await load();
+          setError(`The product was saved, but the picture was not: ${pd?.errors?.join(", ") ?? pd?.message ?? "try again"}`);
+          return;
+        }
       }
       setModal({ open: false, editing: null });
       await load();
@@ -411,6 +433,9 @@ export default function ProductsPanel() {
                     />
                   </td>
                   <td className="fw-semibold">
+                    <div className="d-flex align-items-start gap-2">
+                    <button type="button" className="product-thumb-btn" aria-label={`Picture of ${p.name}: tap to change`} onClick={() => openEdit(p)}><ProductPhoto photoKey={p.photoKey} size="thumb" /></button>
+                    <div className="min-w-0">
                       {p.name}
                       {p.unit && <span className="badge text-bg-light border ms-1">{p.unit}</span>}
                       {p.stockBaseUnit && p.stockBaseQuantity && <span className="badge text-bg-light border ms-1">{formatStockSize(p.stockBaseQuantity, p.stockBaseUnit)}</span>}
@@ -419,6 +444,8 @@ export default function ProductsPanel() {
                       {p.trackStock === false && <span className="badge text-bg-warning ms-1" title="Sells at any time — stock is not counted">Not tracked</span>}
                       {isBelowCost(p.priceMinor, p.costMinor) && <span className="badge text-bg-danger ms-1">Below cost</span>}
                       <div className="small text-muted fw-normal d-lg-none">{p.sku}</div>
+                    </div>
+                    </div>
                     </td>
                   <td className="text-muted small col-wide">
                     {p.sku}
@@ -468,6 +495,7 @@ export default function ProductsPanel() {
                     <button type="button" className="btn-close" onClick={() => setModal({ open: false, editing: null })}></button>
                   </div>
                   <div className="modal-body">
+                    <PhotoPicker photoKey={modal.editing?.photoKey} value={photo} onChange={setPhoto} disabled={saving} />
                     <div className="mb-2">
                       <label htmlFor="products-name" className="form-label small">Name *</label>
                       <input id="products-name" className="form-control" required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />

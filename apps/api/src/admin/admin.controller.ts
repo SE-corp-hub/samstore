@@ -604,6 +604,32 @@ export class AdminController {
     return seesCost(role) ? result.value : { rows: result.value.rows.filter((r) => r.field !== "COST") };
   }
 
+  /** PUT /admin/products/:id/photo — body { dataUrl }: the product's picture (shrunk on the tablet first). */
+  @Put("products/:id/photo")
+  async setProductPhoto(@Req() req: Request & { user?: AuthPrincipal }, @Param("id") id: string, @Body() body: { dataUrl?: string }, @Headers("x-store-id") headerStoreId?: string) {
+    const user = req.user;
+    requireUser(user);
+    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
+    const result = await this.productsAdmin.setPhoto(storeId, id, body?.dataUrl);
+    if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
+    await cacheBust(cacheKey("products", storeId));
+    await cacheBust(cacheKey("inventory", storeId));
+    return result.value;
+  }
+
+  /** DELETE /admin/products/:id/photo — take the picture off. */
+  @Delete("products/:id/photo")
+  async removeProductPhoto(@Req() req: Request & { user?: AuthPrincipal }, @Param("id") id: string, @Headers("x-store-id") headerStoreId?: string) {
+    const user = req.user;
+    requireUser(user);
+    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
+    const result = await this.productsAdmin.removePhoto(storeId, id);
+    if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
+    await cacheBust(cacheKey("products", storeId));
+    await cacheBust(cacheKey("inventory", storeId));
+    return result.value;
+  }
+
   /** DELETE /admin/products/:id — soft delete. */
   @Delete("products/:id")
   async removeProduct(@Req() req: Request & { user?: AuthPrincipal }, @Param("id") id: string, @Headers("x-store-id") headerStoreId?: string) {
