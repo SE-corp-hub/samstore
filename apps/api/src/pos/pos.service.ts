@@ -665,10 +665,30 @@ export class PosService {
     })));
   }
 
+  /** A pre-order this counter already completed, as finalize answered it. */
+  private async replayFinalize(storeId: string, id: string): Promise<PreOrderFinalizeResponse | null> {
+    const o = await prisma.order.findFirst({
+      where: { storeId, id, source: "PRE_ORDER", status: "COMPLETED" },
+      include: { payments: { select: { changeMinor: true } }, statusHistory: { where: { actorType: "pos_finalize" }, select: { id: true }, take: 1 } },
+    });
+    if (!o || o.statusHistory.length === 0) return null;
+    const entry = await prisma.creditEntry.findFirst({ where: { orderId: id }, orderBy: { createdAt: "desc" }, select: { id: true } });
+    const cash = o.paymentMethod === "cash";
+    return {
+      orderId: o.id, orderNumber: o.orderNumber, status: "COMPLETED", totalMinor: o.totalMinor, currencyCode: o.currencyCode,
+      creditEntryId: entry?.id ?? "", signatureAt: (o.signatureAt ?? o.updatedAt).toISOString(),
+      ...(cash ? { paymentMethod: "cash" as const, changeMinor: o.payments.reduce((s, p) => s + (p.changeMinor ?? 0), 0) } : {}),
+    };
+  }
+
   /** v4: finalize a pre-order — utang only, signature REQUIRED → COMPLETED + CreditEntry. */
   async finalizePreorder(storeId: string, actorId: string, id: string, input: PreOrderFinalizeRequest): Promise<PosResult<PreOrderFinalizeResponse>> {
     const order = await prisma.order.findFirst({ where: { storeId, id, source: "PRE_ORDER", status: "ON_HOLD" } });
-    if (!order) return { ok: false, error: { type: "not_found", message: "Pre-order not found" } };
+    if (!order) {
+      // A completion saved offline may be sent again after it already went through: answer the same.
+      const done = input.idempotencyKey ? await this.replayFinalize(storeId, id) : null;
+      return done ? { ok: true, value: done } : { ok: false, error: { type: "not_found", message: "Pre-order not found" } };
+    }
     const method = input.paymentMethod === "cash" ? "cash" : "credit";
     const hasSig = typeof input.signatureData === "string" && input.signatureData.trim().length > 0;
     if (method === "credit" && !hasSig) {
@@ -697,7 +717,8 @@ export class PosService {
       const plan = prepared.value;
       try {
         await prisma.$transaction(async (tx) => {
-          await tx.order.update({ where: { id }, data: { status: "COMPLETED", paymentStatus: "COLLECTED", paymentMethod: "cash", signatureData, signatureAt: signatureData ? signatureAt : null, registerSessionId: session.value } });
+          const moved = await tx.order.updateMany({ where: { id, status: "ON_HOLD" }, data: { status: "COMPLETED", paymentStatus: "COLLECTED", paymentMethod: "cash", signatureData, signatureAt: signatureData ? signatureAt : null, registerSessionId: session.value } });
+          if (moved.count !== 1) throw new Error("This pre-order was already completed");
           await writeTenders(tx, { storeId, orderId: id, actorId, plan, note: "Pre-order paid in cash", registerSessionId: session.value });
           await tx.orderStatusHistory.create({ data: { orderId: id, storeId, fromStatus: "ON_HOLD", toStatus: "COMPLETED", actorType: "pos_finalize", actorId } });
         }, txOptions());
@@ -717,10 +738,11 @@ export class PosService {
         // Mapped below into a clean conflict — an uncaught throw here surfaced as a
         // 500 "Internal server error" that told staff nothing about the real reason.
         if (!cr.ok) throw new Error("message" in cr.error ? cr.error.message : "Credit declined");
-        await tx.order.update({
-          where: { id },
+        const moved = await tx.order.updateMany({
+          where: { id, status: "ON_HOLD" },
           data: { status: "COMPLETED", paymentStatus: "PENDING", signatureData, signatureAt },
         });
+        if (moved.count !== 1) throw new Error("This pre-order was already completed");
         const entry = await tx.creditEntry.findFirst({ where: { orderId: id }, orderBy: { createdAt: "desc" } });
         creditEntryId = entry?.id ?? "";
         await tx.orderStatusHistory.create({

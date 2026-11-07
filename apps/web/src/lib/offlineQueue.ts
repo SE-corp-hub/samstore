@@ -10,7 +10,7 @@ import { adminHeaders } from "./admin";
 import { newSaleKey } from "./saleKey";
 import { keepInQueue } from "./retryable";
 import { notFromApi } from "./wake-fetch";
-import { isOffline, markOnline } from "./offlineCache";
+import { isOffline, markOnline, OFFLINE_EVENT, watchConnection } from "./offlineCache";
 
 const QUEUE = "rice-offline-queue-v1";
 const FAILED = "rice-offline-failed-v1";
@@ -132,6 +132,10 @@ export function startQueue(): void {
   if (started || typeof window === "undefined") return;
   started = true;
   window.addEventListener("online", () => void flushQueue());
+  // The real connection check came back (GBox may never fire "online"): send what is waiting.
+  let wasOffline = isOffline();
+  window.addEventListener(OFFLINE_EVENT, () => { const now = isOffline(); if (wasOffline && !now && queuedSteps().length) void flushQueue(); wasOffline = now; });
+  watchConnection();
   setInterval(() => { if (queuedSteps().length) void flushQueue(); }, 20_000);
   void flushQueue();
 }

@@ -10,7 +10,7 @@
 // step's signatures — all in ONE transaction, so a step either happens completely or
 // not at all. Short on a trip goes to the owner's "Para sa iyo".
 
-import { consignmentMain, reduceForReturn } from "../payable/charges.js";
+import { bookProfitShare, consignmentMain, reduceForReturn, takeBackShare } from "../payable/charges.js";
 import type { ApiError } from "@sam-store/contracts";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../persistence/prisma-repositories.js";
@@ -25,6 +25,7 @@ import {
   type Actor, type SignatureInput,
 } from "../people/people.service.js";
 import { txOptions } from "../persistence/tx-options.js";
+import { seesCost } from "../domain/cost-redact.js";
 
 export type FlowResult<T> = { ok: true; value: T } | { ok: false; error: ApiError };
 type Tx = Prisma.TransactionClient;
@@ -227,6 +228,10 @@ export class TransferFlowService {
           storeId, productId: t.productId, warehouseId: t.toWarehouseId, actorId: actor.userId,
           documentType: "TRANSFER", documentId: id, note: t.docNumber ?? null,
         }, received, "RECEIVE_IN");
+        // Store 1 takes rice from Store 2: Store 1 owes Store 2 its profit on what arrived (none on rice lost on the road).
+        const shareRef = { storeId, fromId: t.fromWarehouseId, toId: t.toWarehouseId, productId: t.productId, quantity: received, actorId: actor.userId, ref: t.docNumber ?? "move", transferId: id };
+        await bookProfitShare(tx, shareRef);
+        await takeBackShare(tx, shareRef);
         if (short > 0) {
           approvalId = (await requestApproval(tx, {
             storeId, kind: "TRANSIT_SHORT", documentType: "TRANSFER", documentId: id, locationId: t.toWarehouseId,
@@ -419,7 +424,7 @@ export class TransferFlowService {
   async moveNow(
     storeId: string, actor: Actor,
     input: { fromLocationId?: string; toLocationId?: string; productId?: string; quantity?: unknown; note?: string },
-  ): Promise<FlowResult<{ id: string; docNumber: string }>> {
+  ): Promise<FlowResult<{ id: string; docNumber: string; profitShareMinor?: number }>> {
     const qty = input.quantity;
     if (typeof qty !== "number" || !Number.isInteger(qty) || qty < 1) return invalid("Enter how many to move (1 or more)");
     if (!input.fromLocationId || !input.toLocationId) return invalid("Choose where it comes from and where it goes");
@@ -433,7 +438,7 @@ export class TransferFlowService {
     const product = input.productId ? await prisma.product.findFirst({ where: { id: input.productId, storeId }, select: { id: true, name: true } }) : null;
     if (!product) return invalid("Unknown product");
     return this.step(async () => {
-      let out = { id: "", docNumber: "" };
+      let out: { id: string; docNumber: string; profitShareMinor?: number } = { id: "", docNumber: "" };
       await prisma.$transaction(async (tx) => {
         const docNumber = await nextDocNumber(tx, storeId, "TR");
         const now = new Date();
@@ -448,8 +453,11 @@ export class TransferFlowService {
         await recordCostIn(tx, { storeId, productId: product.id, warehouseId: to.id }, qty, await shelfCostFor(tx, storeId, product.id, from.id));
         if (from.type !== "BUFFER") await coverShortage(tx, storeId, { productId: product.id, warehouseId: from.id, needed: qty, actorId: actor.userId, documentType: "TRANSFER", documentId: t.id, reason: `move ${docNumber}` });
         await transferStock(tx, { storeId, productId: product.id, fromWarehouseId: from.id, toWarehouseId: to.id, quantity: qty, actorId: actor.userId, documentType: "TRANSFER", documentId: t.id, note: docNumber, sourceMayGoNegative: from.type === "BUFFER" });
+        const shareRef = { storeId, fromId: from.id, toId: to.id, productId: product.id, quantity: qty, actorId: actor.userId, ref: docNumber, transferId: t.id };
+        // + Store 1 owes the store its profit, − the share came back. Only for those who see cost (the margin shows it).
+        const share = (await bookProfitShare(tx, shareRef)) - (await takeBackShare(tx, shareRef));
         await tx.auditLog.create({ data: { storeId, actorType: "USER", actorId: actor.userId, action: "transfer.move", entityType: "StockTransfer", entityId: t.id, after: { quantity: qty, from: from.name, to: to.name } } });
-        out = { id: t.id, docNumber };
+        out = { id: t.id, docNumber, ...(share && seesCost(actor.role) ? { profitShareMinor: share } : {}) };
       }, txOptions());
       return out;
     }, product.name, from.name);
@@ -461,7 +469,13 @@ export class TransferFlowService {
       where: { storeId, kind: "RESTOCK", status: "COMPLETED", ...(locationId ? { OR: [{ fromWarehouseId: locationId }, { toWarehouseId: locationId }] } : {}) },
       orderBy: { createdAt: "desc" }, take: 30, include: tripInclude,
     });
-    return rows.map((t) => ({ id: t.id, docNumber: t.docNumber, productName: t.product.name, quantity: t.quantity, from: t.fromWarehouse.name, to: t.toWarehouse.name, note: t.reason, at: t.completedAt ?? t.createdAt }));
+    // The profit share each move booked (+ owed to the store, − taken back), for those who see cost.
+    const shares = new Map<string, number>();
+    if (seesCost(actor.role) && rows.length) {
+      const entries = await prisma.storePayableEntry.findMany({ where: { storeId, transferId: { in: rows.map((t) => t.id) }, kind: { in: ["PROFIT_SHARE", "SHARE_BACK"] } }, select: { transferId: true, amountMinor: true } });
+      for (const e of entries) if (e.transferId) shares.set(e.transferId, (shares.get(e.transferId) ?? 0) - e.amountMinor);
+    }
+    return rows.map((t) => ({ id: t.id, docNumber: t.docNumber, productName: t.product.name, quantity: t.quantity, from: t.fromWarehouse.name, to: t.toWarehouse.name, note: t.reason, at: t.completedAt ?? t.createdAt, profitShareMinor: shares.get(t.id) ?? null }));
   }
 
   /** Recent customer returns (newest first). */

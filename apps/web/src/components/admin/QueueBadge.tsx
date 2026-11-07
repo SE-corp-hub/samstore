@@ -2,7 +2,8 @@
 
 // Rice Ops M10 + offline store mode — what is waiting on this tablet, shown on the screen
 // (no pop-ups):
-//   * QueueBadge (top bar): always shows Online or Offline.
+//   * QueueBadge (top bar): always shows Online or Offline, from a real check every few seconds
+//     (lib/offlineCache.ts watchConnection), not only what the browser says.
 //   * SyncBar (under the top bar): "3 records saved on this tablet" with an "Upload now" button,
 //     the result of the last upload, and anything the server refused (with the reason),
 //     so nothing silently disappears. Waiting records still upload by themselves too.
@@ -10,28 +11,30 @@
 import { useEffect, useState } from "react";
 import { clearFailed, failedSteps, flushQueue, QUEUE_EVENT, queuedSteps, startQueue, type FailedStep, type QueuedStep } from "../../lib/offlineQueue";
 import { useLang } from "../../lib/lang";
-import { isOffline, OFFLINE_EVENT } from "../../lib/offlineCache";
+import { connectionState, isOffline, OFFLINE_EVENT } from "../../lib/offlineCache";
 
 function useSync() {
   const [waiting, setWaiting] = useState<QueuedStep[]>([]);
   const [failed, setFailed] = useState<FailedStep[]>([]);
   const [offline, setOffline] = useState(false);
+  const [state, setState] = useState<ReturnType<typeof connectionState>>("online");
   useEffect(() => {
-    const refresh = () => { setWaiting(queuedSteps()); setFailed(failedSteps()); setOffline(isOffline()); };
+    const refresh = () => { setWaiting(queuedSteps()); setFailed(failedSteps()); setOffline(isOffline()); setState(connectionState()); };
     const events = [QUEUE_EVENT, OFFLINE_EVENT, "storage", "online", "offline"];
     refresh();
     startQueue();
     for (const e of events) window.addEventListener(e, refresh);
     return () => { for (const e of events) window.removeEventListener(e, refresh); };
   }, []);
-  return { waiting, failed, offline };
+  return { waiting, failed, offline, state };
 }
 
-/** Top bar: Online / Offline, always visible. */
+/** Top bar: Online / Offline / Connecting to server, always visible. */
 export default function QueueBadge() {
   const { t } = useLang();
-  const { offline } = useSync();
-  return offline ? (
+  const { state } = useSync();
+  if (state === "waking") return <span className="badge rounded-pill text-bg-warning px-3 py-2" role="status"><span className="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>{t("sync.waking")}</span>;
+  return state === "offline" ? (
     <span className="badge rounded-pill text-bg-danger fs-6 px-3 py-2" role="status"><i className="bi bi-wifi-off me-1"></i>{t("sync.offline")}</span>
   ) : (
     <span className="badge rounded-pill text-bg-success px-3 py-2" role="status"><i className="bi bi-wifi me-1"></i>{t("sync.online")}</span>
@@ -68,7 +71,7 @@ export function SyncBar() {
             <div className="small">{offline ? t("sync.whenWifi") : t("sync.auto")}</div>
           </div>
           <button type="button" className="btn btn-link btn-sm" onClick={() => setDetails(!details)}>{details ? t("sync.hide") : t("sync.show")}</button>
-          <button type="button" className="btn btn-dark btn-lg" disabled={busy || (typeof navigator !== "undefined" && navigator.onLine === false)} onClick={() => void upload()}>
+          <button type="button" className="btn btn-dark btn-lg" disabled={busy} onClick={() => void upload()}>
             {busy ? <><span className="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>{t("sync.uploading")}</> : <><i className="bi bi-cloud-arrow-up me-1"></i>{t("sync.upload")}</>}
           </button>
           {details && (

@@ -386,6 +386,8 @@ export interface PreOrderFinalizeRequest {
   signatureData?: string;
   startAt?: string;
   dueAt?: string;
+  /** Sent by a completion saved offline: a retry of a pre-order already completed returns that result. */
+  idempotencyKey?: string;
 }
 
 export interface PreOrderFinalizeResponse {

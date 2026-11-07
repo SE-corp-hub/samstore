@@ -5,6 +5,7 @@ import { prisma } from "../persistence/prisma-repositories.js";
 import { recordMovement } from "../domain/movements.js";
 import { priceChanges } from "../domain/price-history.js";
 import { validateProductInput, slugify, type ProductInput } from "../domain/product-validation.js";
+import { newPhotoKey, parsePhoto, isPhotoKey } from "../domain/product-photo.js";
 import type { ApiError } from "@sam-store/contracts";
 
 export type AdminResult<T> = { ok: true; value: T } | { ok: false; error: ApiError };
@@ -71,6 +72,7 @@ export class ProductAdminService {
       taxExempt: p.taxExempt,
       featured: p.featured,
       tags: p.tags,
+      photoKey: p.photoKey,
       related: link("related"),
       upsell: link("upsell"),
       category: p.category,
@@ -359,6 +361,42 @@ export class ProductAdminService {
     if (!product) return { ok: false, error: { type: "not_found", message: "Product not found" } };
     await prisma.product.update({ where: { id: productId }, data: { isActive: false } });
     return { ok: true, value: { id: productId } };
+  }
+
+  /**
+   * Put a picture on a product (replaces the old one). `dataUrl` is the shrunk picture from the tablet.
+   * A new key each time, so the tablet's saved copy of the old address is never shown for the new picture.
+   */
+  async setPhoto(storeId: string, productId: string, dataUrl: unknown): Promise<AdminResult<{ id: string; photoKey: string }>> {
+    const photo = parsePhoto(dataUrl);
+    if (!photo.ok) return { ok: false, error: { type: "validation", errors: [photo.error] } };
+    const product = await prisma.product.findFirst({ where: { id: productId, storeId }, select: { id: true } });
+    if (!product) return { ok: false, error: { type: "not_found", message: "Product not found" } };
+    const key = newPhotoKey();
+    await prisma.$transaction([
+      prisma.productPhoto.deleteMany({ where: { storeId, productId } }),
+      prisma.productPhoto.create({ data: { id: key, storeId, productId, mime: photo.mime, data: photo.data } }),
+      prisma.product.update({ where: { id: productId }, data: { photoKey: key } }),
+    ]);
+    return { ok: true, value: { id: productId, photoKey: key } };
+  }
+
+  /** Take the picture off a product: its tiles go back to the plain button. */
+  async removePhoto(storeId: string, productId: string): Promise<AdminResult<{ id: string }>> {
+    const product = await prisma.product.findFirst({ where: { id: productId, storeId }, select: { id: true } });
+    if (!product) return { ok: false, error: { type: "not_found", message: "Product not found" } };
+    await prisma.$transaction([
+      prisma.productPhoto.deleteMany({ where: { storeId, productId } }),
+      prisma.product.update({ where: { id: productId }, data: { photoKey: null } }),
+    ]);
+    return { ok: true, value: { id: productId } };
+  }
+
+  /** The picture behind a key (public: the key is random and only reaches people who see the product). */
+  async photo(key: string): Promise<{ mime: string; data: Buffer } | null> {
+    if (!isPhotoKey(key)) return null;
+    const p = await prisma.productPhoto.findUnique({ where: { id: key }, select: { mime: true, data: true } });
+    return p ? { mime: p.mime, data: Buffer.from(p.data) } : null;
   }
 
   /** Category helpers (by slug, within store). */

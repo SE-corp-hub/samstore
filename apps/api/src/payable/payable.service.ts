@@ -12,7 +12,8 @@ import { shelfCostFor } from "../domain/shelf-cost.js";
 import { isLooseP } from "../domain/counting.js";
 import { nextDocNumber, type Actor } from "../people/people.service.js";
 import { txOptions } from "../persistence/tx-options.js";
-import { chargeAmount } from "./charges.js";
+import { chargeAmount, consignmentMain } from "./charges.js";
+import { WRITE_OFF_LABEL } from "../domain/counting.js";
 import { varietyOf } from "../domain/resack.js";
 
 export type PayableResult<T> = { ok: true; value: T } | { ok: false; error: ApiError };
@@ -64,7 +65,8 @@ export class PayableService {
       const balances = stores.map((s) => {
         const mine = sums.filter((x) => x.locationId === s.id);
         const sum = (k: string) => mine.filter((x) => x.kind === k).reduce((a, x) => a + (x._sum.amountMinor ?? 0), 0);
-        return { id: s.id, name: s.name, code: s.code, isMain: s.isDefault, chargesMinor: sum("CHARGE"), paymentsMinor: -sum("PAYMENT"), reversedMinor: sum("REVERSAL"), owesMinor: mine.reduce((a, x) => a + (x._sum.amountMinor ?? 0), 0),
+        // sharesMinor: what the main store owes this store for rice it took (profit shares net of take-backs; undone shares are in reversedMinor).
+        return { id: s.id, name: s.name, code: s.code, isMain: s.isDefault, chargesMinor: sum("CHARGE"), paymentsMinor: -sum("PAYMENT"), reversedMinor: sum("REVERSAL"), sharesMinor: -(sum("PROFIT_SHARE") + sum("SHARE_BACK")), owesMinor: mine.reduce((a, x) => a + (x._sum.amountMinor ?? 0), 0),
           consignment: consign.get(s.id) === true, lastPaymentAt: lastPay.get(s.id) ?? null, lastCountAt: lastCount.get(s.id) ?? null,
           weeklyDue: false, countDue: false };
       });
@@ -74,10 +76,10 @@ export class PayableService {
         b.weeklyDue = b.owesMinor > 0 && !!since && since.getTime() < week;
         b.countDue = !b.lastCountAt || b.lastCountAt.getTime() < week;
       }
-      // Shortages found by approved counts that nobody has been charged for yet.
+      // Shortages found by approved counts that nobody has been charged for yet (and were not sold to walk-ins).
       const used = new Set((await prisma.storePayableEntry.findMany({ where: { storeId, sourceLineId: { not: null } }, select: { sourceLineId: true } })).map((x) => x.sourceLineId!));
       const lines = await prisma.stockCountLine.findMany({
-        where: { storeId, postedQty: { lt: 0 }, count: { status: "APPROVED" } }, orderBy: { countedAt: "desc" }, take: 200,
+        where: { storeId, postedQty: { lt: 0 }, walkInOrderId: null, count: { status: "APPROVED" } }, orderBy: { countedAt: "desc" }, take: 200,
         select: { id: true, productId: true, postedQty: true, countedAt: true, product: { select: productSelect }, count: { select: { docNumber: true, locationId: true, location: { select: { name: true } } } } },
       });
       const toAssign = [];
@@ -91,19 +93,35 @@ export class PayableService {
           productId: l.productId, name: l.product.name, loose, quantity: qty, unitCostMinor: unit, amountMinor: chargeAmount(loose, qty, unit),
         });
       }
+      // Damage at a consignment store (last 30 days): Store 1's loss unless the owner charges it to that store.
+      const consignIds = stores.filter((s) => consign.get(s.id)).map((s) => s.id);
+      const wos = consignIds.length ? await prisma.stockWriteOff.findMany({
+        where: { storeId, locationId: { in: consignIds }, createdAt: { gte: new Date(Date.now() - 30 * 86_400_000) } }, orderBy: { createdAt: "desc" }, take: 50,
+        include: { product: { select: productSelect }, location: { select: { name: true } } },
+      }) : [];
+      const chargedWo = new Map((await prisma.storePayableEntry.findMany({ where: { storeId, writeOffId: { in: wos.map((w) => w.id) } }, select: { writeOffId: true, docNumber: true } })).map((e) => [e.writeOffId ?? "", e.docNumber]));
+      const damage = [];
+      for (const w of wos) {
+        const main = await consignmentMain(prisma, storeId, w.locationId);
+        const unit = main ? await shelfCostFor(prisma, storeId, w.productId, main) : 0;
+        damage.push({
+          writeOffId: w.id, docNumber: w.docNumber, at: w.createdAt, atId: w.locationId, store: w.location.name, name: w.product.name, loose: isLooseP(w.product), quantity: w.quantity,
+          reasonLabel: WRITE_OFF_LABEL[w.reason], note: w.note, amountMinor: chargeAmount(isLooseP(w.product), w.quantity, unit), chargedAs: chargedWo.get(w.id) ?? null,
+        });
+      }
       const rows = await prisma.storePayableEntry.findMany({ where: { storeId }, orderBy: { createdAt: "desc" }, take: 100 });
       const names = new Map(stores.map((s) => [s.id, s.name]));
       const prods = new Map((await prisma.product.findMany({ where: { storeId, id: { in: [...new Set(rows.map((r) => r.productId).filter((x): x is string => !!x))] } }, select: productSelect })).map((p) => [p.id, p]));
       const users = new Map((await prisma.user.findMany({ where: { id: { in: [...new Set(rows.map((r) => r.createdById))] } }, select: { id: true, name: true } })).map((u) => [u.id, u.name]));
       const reversed = new Set(rows.map((r) => r.reversesId).filter((x): x is string => !!x));
       return {
-        stores: balances, toAssign, totalOwesMinor: balances.reduce((a, b) => a + b.owesMinor, 0),
+        stores: balances, toAssign, damage, totalOwesMinor: balances.reduce((a, b) => a + b.owesMinor, 0),
         entries: rows.map((r) => {
           const p = r.productId ? prods.get(r.productId) : undefined;
           return {
             id: r.id, docNumber: r.docNumber, kind: r.kind, locationId: r.locationId, store: names.get(r.locationId) ?? "", amountMinor: r.amountMinor,
             productName: p?.name ?? null, loose: p ? isLooseP(p) : false, quantity: r.quantity, unitCostMinor: r.unitCostMinor, note: r.note,
-            by: users.get(r.createdById) ?? null, at: r.createdAt, reversed: reversed.has(r.id), canReverse: (r.kind === "CHARGE" || r.kind === "PAYMENT") && !reversed.has(r.id),
+            by: users.get(r.createdById) ?? null, at: r.createdAt, reversed: reversed.has(r.id), canReverse: (r.kind === "CHARGE" || r.kind === "PAYMENT" || r.kind === "PROFIT_SHARE") && !reversed.has(r.id),
           };
         }),
       };
@@ -114,7 +132,7 @@ export class PayableService {
   async chargeFromCount(storeId: string, actor: Actor, input: { lineId?: string; locationId?: string }) {
     return this.run(actor, async () => {
       const line = input.lineId ? await prisma.stockCountLine.findFirst({
-        where: { id: input.lineId, storeId, postedQty: { lt: 0 }, count: { status: "APPROVED" } },
+        where: { id: input.lineId, storeId, postedQty: { lt: 0 }, walkInOrderId: null, count: { status: "APPROVED" } },
         select: { id: true, productId: true, postedQty: true, product: { select: productSelect }, count: { select: { docNumber: true, locationId: true } } },
       }) : null;
       if (!line) throw new StepError(notFound("That shortage was not found"));
@@ -164,8 +182,30 @@ export class PayableService {
     });
   }
 
+  /** Damage written off at a consignment store is Store 1's loss by default; the owner may charge it to that store, at Store 1's cost. */
+  async chargeDamage(storeId: string, actor: Actor, writeOffId: string) {
+    return this.run(actor, async () => {
+      const w = await prisma.stockWriteOff.findFirst({ where: { id: writeOffId, storeId }, include: { product: { select: productSelect } } });
+      if (!w) throw new StepError(notFound("Write-off not found"));
+      const main = await consignmentMain(prisma, storeId, w.locationId);
+      if (!main) throw new StepError(conflict("Only damage at a consignment store can be charged to it"));
+      const unit = await shelfCostFor(prisma, storeId, w.productId, main);
+      const amount = chargeAmount(isLooseP(w.product), w.quantity, unit);
+      if (amount <= 0) throw new StepError(invalid(`${w.product.name} has no cost price yet — set its cost first`));
+      return prisma.$transaction(async (tx) => {
+        const docNumber = await nextDocNumber(tx, storeId, "SP");
+        const e = await tx.storePayableEntry.create({
+          data: { storeId, docNumber, locationId: w.locationId, kind: "CHARGE", amountMinor: amount, productId: w.productId, quantity: w.quantity, unitCostMinor: unit, sourceLocationId: main, writeOffId: w.id, note: `Damage ${w.docNumber}: ${WRITE_OFF_LABEL[w.reason]}`.slice(0, 200), createdById: actor.userId },
+          select: { id: true },
+        });
+        await tx.auditLog.create({ data: { storeId, actorType: "USER", actorId: actor.userId, action: "payable.charge_damage", entityType: "StorePayableEntry", entityId: e.id, after: { docNumber, writeOff: w.docNumber, amountMinor: amount } } });
+        return { id: e.id, docNumber, amountMinor: amount };
+      }, txOptions());
+    });
+  }
+
   /** The store pays (a part, or all). */
-  async payment(storeId: string, actor: Actor, input: { locationId?: string; amountMinor?: unknown; note?: string }) {
+  async payment(storeId: string, actor: Actor, input: { locationId?: string; amountMinor?: unknown; note?: string; toStore?: boolean }) {
     return this.run(actor, async () => {
       const amount = input.amountMinor;
       if (typeof amount !== "number" || !Number.isInteger(amount) || amount < 1) throw new StepError(invalid("Enter the amount paid"));
@@ -173,16 +213,28 @@ export class PayableService {
       if (!debtor) throw new StepError(invalid("Choose the store that paid"));
       return prisma.$transaction(async (tx) => {
         const owes = (await tx.storePayableEntry.aggregate({ where: { storeId, locationId: debtor.id }, _sum: { amountMinor: true } }))._sum.amountMinor ?? 0;
-        if (amount > owes) throw new StepError(conflict(`${debtor.name} owes only ₱${(owes / 100).toLocaleString("en-PH", { minimumFractionDigits: 2 })}. Enter that or less.`));
+        const pesos = (m: number) => `₱${(m / 100).toLocaleString("en-PH", { minimumFractionDigits: 2 })}`;
+        // toStore: the balance is below zero (the main store owes this store its profit share) and the main store pays it.
+        if (input.toStore) {
+          if (amount > -owes) throw new StepError(conflict(owes >= 0 ? `The main store owes ${debtor.name} nothing now.` : `The main store owes ${debtor.name} only ${pesos(-owes)}. Enter that or less.`));
+        } else if (amount > owes) {
+          throw new StepError(conflict(owes <= 0 ? `${debtor.name} owes nothing now.` : `${debtor.name} owes only ${pesos(owes)}. Enter that or less.`));
+        }
+        const signed = input.toStore ? amount : -amount;
         const docNumber = await nextDocNumber(tx, storeId, "SP");
         const e = await tx.storePayableEntry.create({
-          data: { storeId, docNumber, locationId: debtor.id, kind: "PAYMENT", amountMinor: -amount, note: input.note?.trim().slice(0, 200) || "Payment received", createdById: actor.userId },
+          data: { storeId, docNumber, locationId: debtor.id, kind: "PAYMENT", amountMinor: signed, note: input.note?.trim().slice(0, 200) || (input.toStore ? "Profit share paid to the store" : "Payment received"), createdById: actor.userId },
           select: { id: true },
         });
-        await tx.auditLog.create({ data: { storeId, actorType: "USER", actorId: actor.userId, action: "payable.payment", entityType: "StorePayableEntry", entityId: e.id, after: { docNumber, locationId: debtor.id, amountMinor: amount } } });
-        return { id: e.id, docNumber, balanceMinor: owes - amount };
+        await tx.auditLog.create({ data: { storeId, actorType: "USER", actorId: actor.userId, action: "payable.payment", entityType: "StorePayableEntry", entityId: e.id, after: { docNumber, locationId: debtor.id, amountMinor: amount, toStore: !!input.toStore } } });
+        return { id: e.id, docNumber, balanceMinor: owes + signed };
       }, txOptions());
     });
+  }
+
+  /** The profit shares of a store (their undo entries are not charges). */
+  private async shareIds(storeId: string, locationId: string): Promise<string[]> {
+    return (await prisma.storePayableEntry.findMany({ where: { storeId, locationId, kind: "PROFIT_SHARE" }, select: { id: true } })).map((e) => e.id);
   }
 
   /** What the rice that left a store since its last sales report is worth at selling price. */
@@ -191,7 +243,8 @@ export class PayableService {
     const toAt = new Date();
     const first = last ? null : await prisma.storePayableEntry.findFirst({ where: { storeId, locationId, kind: "CHARGE" }, orderBy: { createdAt: "asc" }, select: { createdAt: true } });
     const fromAt = last?.toAt ?? first?.createdAt ?? new Date(toAt.getTime() - 7 * 24 * 3600 * 1000);
-    const rows = await prisma.storePayableEntry.findMany({ where: { storeId, locationId, kind: { in: ["CHARGE", "REVERSAL"] }, productId: { not: null }, createdAt: { gt: fromAt, lte: toAt } }, select: { kind: true, productId: true, quantity: true } });
+    const shareIds = await this.shareIds(storeId, locationId);
+    const rows = await prisma.storePayableEntry.findMany({ where: { storeId, locationId, kind: { in: ["CHARGE", "REVERSAL"] }, productId: { not: null }, createdAt: { gt: fromAt, lte: toAt }, OR: [{ reversesId: null }, { reversesId: { notIn: shareIds } }] }, select: { kind: true, productId: true, quantity: true } });
     const net = new Map<string, number>();
     for (const r of rows) net.set(r.productId!, (net.get(r.productId!) ?? 0) + (r.kind === "CHARGE" ? 1 : -1) * (r.quantity ?? 0));
     const ids = [...net.keys()];
@@ -241,19 +294,18 @@ export class PayableService {
       if (why.length < 3) throw new StepError(invalid("Enter the reason"));
       const e = await prisma.storePayableEntry.findFirst({ where: { id, storeId } });
       if (!e) throw new StepError(notFound("Entry not found"));
-      if (e.kind !== "CHARGE" && e.kind !== "PAYMENT") throw new StepError(conflict("This entry cannot be undone"));
+      if (e.kind !== "CHARGE" && e.kind !== "PAYMENT" && e.kind !== "PROFIT_SHARE") throw new StepError(conflict("This entry cannot be undone"));
       return prisma.$transaction(async (tx) => {
         if (await tx.storePayableEntry.findFirst({ where: { reversesId: e.id }, select: { id: true } })) throw new StepError(conflict("Already undone"));
         if (e.kind === "CHARGE" && e.orderId && (await tx.storePayableEntry.findFirst({ where: { storeId, orderId: e.orderId, productId: e.productId, kind: "REVERSAL" }, select: { id: true } }))) {
           throw new StepError(conflict("This sale was already voided or partly returned, so its charge cannot be undone by hand"));
         }
-        if (e.kind === "CHARGE") {
-          const owes = (await tx.storePayableEntry.aggregate({ where: { storeId, locationId: e.locationId }, _sum: { amountMinor: true } }))._sum.amountMinor ?? 0;
-          if (owes - e.amountMinor < 0) throw new StepError(conflict("Payments already cover this charge — undo the payment first"));
-        }
+        // A balance below zero is allowed: it means the main store owes this store (its profit share).
         const docNumber = await nextDocNumber(tx, storeId, "SP");
         // The count line is free to be charged again (to the right store).
         if (e.sourceLineId) await tx.storePayableEntry.update({ where: { id: e.id }, data: { sourceLineId: null } });
+        // Damage charged by mistake goes back to being Store 1's loss (and can be charged again).
+        if (e.writeOffId) await tx.storePayableEntry.update({ where: { id: e.id }, data: { writeOffId: null } });
         const r = await tx.storePayableEntry.create({
           data: { storeId, docNumber, locationId: e.locationId, kind: "REVERSAL", amountMinor: -e.amountMinor, productId: e.productId, quantity: e.quantity, unitCostMinor: e.unitCostMinor, reversesId: e.id, note: `Undo ${e.docNumber}: ${why}`.slice(0, 200), createdById: actor.userId },
           select: { id: true },
@@ -273,8 +325,12 @@ export class PayableService {
       const levels = await prisma.stockLevel.findMany({ where: { storeId, warehouseId: store.id }, select: { productId: true, quantityOnHand: true } });
       const ids = [...new Set([...moves.map((m) => m.productId), ...levels.map((l) => l.productId)])];
       const prods = new Map((await prisma.product.findMany({ where: { storeId, id: { in: ids } }, select: productSelect })).map((p) => [p.id, p]));
-      const charges = await prisma.storePayableEntry.groupBy({ by: ["productId"], where: { storeId, locationId: store.id, kind: { in: ["CHARGE", "REVERSAL"] }, productId: { not: null } }, _sum: { amountMinor: true } });
+      const charges = await prisma.storePayableEntry.groupBy({ by: ["productId"], where: { storeId, locationId: store.id, kind: { in: ["CHARGE", "REVERSAL"] }, productId: { not: null }, OR: [{ reversesId: null }, { reversesId: { notIn: await this.shareIds(storeId, store.id) } }] }, _sum: { amountMinor: true } });
       const owed = new Map(charges.map((c) => [c.productId!, c._sum.amountMinor ?? 0]));
+      // Profit share per item (what the main store owes this store for rice it took), in its own column.
+      const shareIds = await this.shareIds(storeId, store.id);
+      const shareRows = await prisma.storePayableEntry.groupBy({ by: ["productId"], where: { storeId, locationId: store.id, productId: { not: null }, OR: [{ kind: { in: ["PROFIT_SHARE", "SHARE_BACK"] } }, { kind: "REVERSAL", reversesId: { in: shareIds } }] }, _sum: { amountMinor: true } });
+      const shared = new Map(shareRows.map((c) => [c.productId ?? "", -(c._sum.amountMinor ?? 0)]));
       const at = (pid: string, types: string[], resack = false) => moves.filter((m) => m.productId === pid && types.includes(m.type) && (m.documentType === "COUNT_RESACK") === resack).reduce((a, m) => a + (m._sum.delta ?? 0), 0);
       const rows = ids.map((pid) => {
         const p = prods.get(pid);
@@ -285,7 +341,7 @@ export class PayableService {
         const countFix = at(pid, ["COUNT_ADJUST", "ADJUST"]);
         const resack = at(pid, ["COUNT_ADJUST"], true);
         const onHand = levels.find((l) => l.productId === pid)?.quantityOnHand ?? 0;
-        return { productId: pid, name: p?.name ?? "", loose: p ? isLooseP(p) : false, supplied, sold, returned, movedBack, countFix, resack, onHand, costOwedMinor: owed.get(pid) ?? 0 };
+        return { productId: pid, name: p?.name ?? "", loose: p ? isLooseP(p) : false, supplied, sold, returned, movedBack, countFix, resack, onHand, costOwedMinor: owed.get(pid) ?? 0, profitShareMinor: shared.get(pid) ?? 0 };
       }).filter((r) => r.supplied || r.sold || r.onHand || r.countFix).sort((a, b) => a.name.localeCompare(b.name));
       // The same, added up in kilos per rice variety: sacks, bags and loose kilos together.
       const varieties = new Map<string, { variety: string; suppliedG: number; soldG: number; returnedG: number; movedBackG: number; countFixG: number; onHandG: number }>();

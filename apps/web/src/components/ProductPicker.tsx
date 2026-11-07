@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { ProductDTO, ProductVariantDTO } from "../types";
+import { peso } from "../lib/number-format";
 
 interface ProductPickerProps {
   product: ProductDTO;
@@ -11,7 +12,7 @@ interface ProductPickerProps {
   onClose: () => void;
 }
 
-const toPesos = (minor: number) => `₱${(minor / 100).toFixed(2)}`;
+const toPesos = (minor: number) => peso(minor);
 
 export default function ProductPicker({ product, products, onAdd, onSwitch, onClose }: ProductPickerProps) {
   const hasVariants = product.variants.length > 0;

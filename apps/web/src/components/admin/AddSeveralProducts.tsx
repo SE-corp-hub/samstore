@@ -8,6 +8,8 @@ import { useState } from "react";
 import { API_URL } from "../../config";
 import { adminHeaders } from "../../lib/admin";
 import { toast } from "../../lib/toast";
+import { isBelowCost, pesoToMinor } from "../../lib/below-cost";
+import { askBelowCost } from "./BelowCostDialog";
 
 type SoldAs = "SACK" | "KILO" | "PIECE";
 interface Row { name: string; soldAs: SoldAs; kilos: string; price: string; cost: string; track: boolean; state: "idle" | "ok" | string }
@@ -26,6 +28,16 @@ export default function AddSeveralProducts({ onClose, onDone }: { onClose: () =>
   const save = async () => {
     setBusy(true);
     const next = [...rows];
+    // Rows priced under their cost: ask about each one before anything is saved.
+    for (let i = 0; i < next.length; i++) {
+      const r = next[i]!;
+      const price = pesoToMinor(r.price) ?? 0, cost = pesoToMinor(r.cost) ?? 0;
+      if (r.state === "ok" || !isBelowCost(price, cost)) continue;
+      const pick = await askBelowCost({ name: r.name.trim() || `Row ${i + 1}`, priceMinor: price, costMinor: cost, unit: r.soldAs === "KILO" ? "kilo" : r.soldAs === "SACK" ? "sack" : "piece", showCost: true, canChangeCost: true, proceed: "Save anyway" });
+      if (!pick) { setRows(next); setBusy(false); return; }
+      if (pick.kind === "price") next[i] = { ...r, price: (pick.priceMinor / 100).toFixed(2) };
+      if (pick.kind === "cost") next[i] = { ...r, cost: (pick.costMinor / 100).toFixed(2) };
+    }
     let okCount = 0;
     for (let i = 0; i < next.length; i++) {
       const r = next[i]!;
@@ -73,7 +85,7 @@ export default function AddSeveralProducts({ onClose, onDone }: { onClose: () =>
                     </select>
                   </td>
                   <td><input className="form-control text-end" aria-label="Kilos per sack" inputMode="decimal" disabled={r.soldAs !== "SACK"} value={r.soldAs === "SACK" ? r.kilos : ""} onChange={(e) => patch(i, { kilos: dec(e.target.value) })} /></td>
-                  <td><input className="form-control text-end" aria-label="Price" inputMode="decimal" placeholder="0.00" value={r.price} onChange={(e) => patch(i, { price: dec(e.target.value) })} /></td>
+                  <td><input className={`form-control text-end${isBelowCost(pesoToMinor(r.price), pesoToMinor(r.cost)) ? " is-invalid" : ""}`} aria-label="Price" inputMode="decimal" placeholder="0.00" value={r.price} onChange={(e) => patch(i, { price: dec(e.target.value) })} /></td>
                   <td><input className="form-control text-end" aria-label="Cost" inputMode="decimal" placeholder="0.00" value={r.cost} onChange={(e) => patch(i, { cost: dec(e.target.value) })} /></td>
                   <td>{rows.length > 1 && <button type="button" className="btn btn-link text-danger p-0" aria-label="Remove row" onClick={() => setRows(rows.filter((_, j) => j !== i))}>×</button>}</td>
                 </tr>

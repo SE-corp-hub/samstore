@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { API_URL } from "../../config";
 import { adminHeaders, getAdminRole, getAdminStoreId, roleCan } from "../../lib/admin";
 import NoStoreScope from "./NoStoreScope";
+import { peso } from "../../lib/number-format";
 
 interface ProfitData {
   revenueMinor: number; refundsMinor: number; netRevenueMinor: number;
@@ -23,7 +24,7 @@ interface CustomerStatementRow { name: string; totalPaidMinor: number; creditBal
 
 type ReportTab = "profit" | "sales" | "stock-low" | "sold-stock" | "income-loss" | "sales-by-payment" | "customer-statement";
 
-const toPesos = (m: number) => `₱${(m / 100).toFixed(2)}`;
+const toPesos = (m: number) => peso(m);
 
 export default function ReportsPanel() {
   const storeId = getAdminStoreId();
@@ -111,7 +112,7 @@ export default function ReportsPanel() {
       <div className="d-flex justify-content-between align-items-center mb-3">
         <h1 className="h4 mb-0"><i className="bi bi-graph-up me-2"></i>Reports</h1>
         <div className="d-flex gap-2">
-          <select className="form-select form-select-sm" style={{ width: 130 }} value={days} onChange={(e) => setDays(parseInt(e.target.value, 10))}>
+          <select className="form-select form-select-sm" style={{ width: 150 }} aria-label="Period" value={days} onChange={(e) => setDays(parseInt(e.target.value, 10))}>
             <option value={7}>Last 7 days</option>
             <option value={30}>Last 30 days</option>
             <option value={90}>Last 90 days</option>

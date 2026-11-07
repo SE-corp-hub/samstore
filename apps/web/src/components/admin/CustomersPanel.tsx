@@ -7,6 +7,7 @@ import { toast } from "../../lib/toast";
 import CustomerBarcode from "./CustomerBarcode";
 import { creditStatusWords } from "../../lib/credit-status";
 import { buildText, openTextApp } from "../../lib/text-message";
+import { peso } from "../../lib/number-format";
 
 interface CustomerRow {
   id: string;
@@ -46,7 +47,8 @@ const APPROVAL_BADGE: Record<string, string> = {
   SUSPENDED: "text-bg-danger",
 };
 
-const toPesos = (m: number) => `₱${(m / 100).toFixed(2)}`;
+const toPesos = peso;
+const APPROVAL_WORDS: Record<string, string> = { NOT_REQUIRED: "No approval needed", PENDING: "Waiting", APPROVED: "Approved", REJECTED: "Rejected", SUSPENDED: "Suspended" };
 
 const apiError = (d: unknown, fallback: string): string => {
   if (!d || typeof d !== "object") return fallback;
@@ -70,7 +72,7 @@ const limitWords = (c: { creditUnlimited?: boolean; creditLimitMinor: number }) 
 
 export default function CustomersPanel() {
   const [storeNameForText, setStoreNameForText] = useState("");
-  useEffect(() => { fetch(`${API_URL}/admin/settings`, { headers: adminHeaders() }).then((r) => (r.ok ? r.json() : null)).then((d) => setStoreNameForText(d?.store?.name ?? "")).catch(() => {}); }, []);
+  useEffect(() => { fetch(`${API_URL}/admin/settings`, { headers: adminHeaders() }).then((r) => (r.ok ? r.json() : null)).then((d) => setStoreNameForText(d?.name ?? "")).catch(() => {}); }, []);
   const [customers, setCustomers] = useState<CustomerRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -279,10 +281,10 @@ export default function CustomersPanel() {
 
       <div className="row g-2 mb-2">
         <div className="col-md-5">
-          <input className="form-control form-control-sm" placeholder="Search name, email or phone…" value={search} onChange={(e) => setSearch(e.target.value)} />
+          <input className="form-control form-control-sm" aria-label="Search customers" placeholder="Search name, email or phone…" value={search} onChange={(e) => setSearch(e.target.value)} />
         </div>
         <div className="col-md-3">
-          <select className="form-select form-select-sm" value={approvalFilter} onChange={(e) => setApprovalFilter(e.target.value)}>
+          <select className="form-select form-select-sm" aria-label="Approval" value={approvalFilter} onChange={(e) => setApprovalFilter(e.target.value)}>
             <option value="">All approval statuses</option>
             {Object.keys(APPROVAL_BADGE).map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
@@ -300,26 +302,28 @@ export default function CustomersPanel() {
       ) : customers.length === 0 ? (
         <p className="text-muted">No customers match.</p>
       ) : (
+        <div className="table-responsive">
         <table className="table table-hover align-middle">
           <thead>
             <tr>
               <th>Customer</th>
-                            <th>Contact</th>
-                            <th>Status</th>
+                            <th className="col-wide">Contact</th>
+                            <th className="col-wide">Status</th>
                             <th>Approval</th>
                             <th>Credit</th>
-                            <th>Joined</th>
+                            <th className="col-wide">Joined</th>
             </tr>
           </thead>
           <tbody>
             {customers.map((c) => (
               <tr key={c.id} style={{ cursor: "pointer" }} onClick={() => openProfile(c.id)}>
                 <td>
-                  <div className="d-flex align-items-center">
-                    <span className="fw-semibold">{c.name ?? c.email ?? c.phone ?? "Guest"}</span>
+                  <div className="d-flex align-items-center flex-wrap gap-1">
+                    <span className="fw-semibold">{c.name ?? c.email ?? c.phone ?? "Guest"}<span className="d-block small text-muted fw-normal d-lg-none">{c.phone ?? c.email ?? ""}</span></span>
                     <button
                                           className="btn btn-sm btn-outline-secondary ms-1"
                                           title="Edit customer"
+                                          aria-label={`Edit ${c.name ?? "customer"}`}
                                           onClick={(e) => { e.stopPropagation(); openEdit(c); }}
                                         >
                                           <i className="bi bi-pencil"></i>
@@ -327,24 +331,25 @@ export default function CustomersPanel() {
                                         <button
                                           className="btn btn-sm btn-outline-secondary ms-1"
                                           title="Customer barcode"
+                                          aria-label={`Barcode for ${c.name ?? "customer"}`}
                                           onClick={(e) => { e.stopPropagation(); setBarcodeTarget({ id: c.id, name: c.name }); }}
                                         >
                                           <i className="bi bi-upc-scan"></i>
                                         </button>
                   </div>
                 </td>
-                <td className="small text-muted">{c.email ?? c.phone ?? "—"}</td>
-                                <td><span className="badge text-bg-secondary">{c.approvalStatus}</span></td>
+                <td className="small text-muted col-wide">{c.email ?? c.phone ?? "—"}</td>
+                                <td className="col-wide"><span className="badge text-bg-secondary">{APPROVAL_WORDS[c.approvalStatus] ?? c.approvalStatus}</span></td>
                 <td>
                   {c.approvalStatus === "PENDING" ? (
                     <div className="d-flex gap-1">
-                      <button className="btn btn-sm btn-outline-success" onClick={(e) => { e.stopPropagation(); setApproval(c.id, "APPROVED"); }}><i className="bi bi-check-lg"></i></button>
-                      <button className="btn btn-sm btn-outline-danger" onClick={(e) => { e.stopPropagation(); setApproval(c.id, "REJECTED"); }}><i className="bi bi-x-lg"></i></button>
+                      <button className="btn btn-sm btn-outline-success" aria-label="Approve" title="Approve" onClick={(e) => { e.stopPropagation(); setApproval(c.id, "APPROVED"); }}><i className="bi bi-check-lg"></i></button>
+                      <button className="btn btn-sm btn-outline-danger" aria-label="Reject" title="Reject" onClick={(e) => { e.stopPropagation(); setApproval(c.id, "REJECTED"); }}><i className="bi bi-x-lg"></i></button>
                     </div>
                   ) : c.approvalStatus === "APPROVED" ? (
                     <button className="btn btn-sm btn-outline-warning" onClick={(e) => { e.stopPropagation(); setApproval(c.id, "SUSPENDED"); }}>Suspend</button>
                   ) : (
-                    <button className="btn btn-sm btn-outline-secondary" onClick={(e) => { e.stopPropagation(); setApproval(c.id, "APPROVED"); }}>Re-approve</button>
+                    <button className="btn btn-sm btn-outline-secondary text-nowrap" onClick={(e) => { e.stopPropagation(); setApproval(c.id, "APPROVED"); }}>Re-approve</button>
                   )}
                 </td>
                 <td>
@@ -359,11 +364,12 @@ export default function CustomersPanel() {
                     <button className="btn btn-sm btn-outline-warning" onClick={(e) => { e.stopPropagation(); setApproveTarget(c); }}>Approve credit</button>
                   )}
                 </td>
-                <td className="small text-muted">{new Date(c.joinedAt).toLocaleDateString()}</td>
+                <td className="small text-muted col-wide">{new Date(c.joinedAt).toLocaleDateString()}</td>
               </tr>
             ))}
           </tbody>
         </table>
+        </div>
       )}
 
       {/* Add customer modal */}
@@ -378,22 +384,22 @@ export default function CustomersPanel() {
                 </div>
                 <div className="modal-body">
                   {addError && <div className="alert alert-danger py-2 small mb-2">{addError}</div>}
-                  <label className="form-label small">Name <span className="text-danger">*</span></label>
-                  <input className="form-control" value={addName} onChange={(e) => setAddName(e.target.value)} placeholder="Customer name" />
-                  <label className="form-label small mt-2">Phone</label>
-                  <input className="form-control" value={addPhone} onChange={(e) => setAddPhone(e.target.value)} placeholder="Optional" />
-                  <label className="form-label small mt-2">Email</label>
-                                    <input className="form-control" type="email" value={addEmail} onChange={(e) => setAddEmail(e.target.value)} placeholder="Optional" />
-                                    <label className="form-label small mt-2">Address</label>
-                                    <input className="form-control" value={addAddress} onChange={(e) => setAddAddress(e.target.value)} placeholder="Home/barangay address (optional)" />
+                  <label htmlFor="customer-name" className="form-label small">Name <span className="text-danger">*</span></label>
+                  <input id="customer-name" className="form-control" value={addName} onChange={(e) => setAddName(e.target.value)} placeholder="Customer name" />
+                  <label htmlFor="customer-phone" className="form-label small mt-2">Phone</label>
+                  <input id="customer-phone" className="form-control" value={addPhone} onChange={(e) => setAddPhone(e.target.value)} placeholder="Optional" />
+                  <label htmlFor="customer-email" className="form-label small mt-2">Email</label>
+                                    <input id="customer-email" className="form-control" type="email" value={addEmail} onChange={(e) => setAddEmail(e.target.value)} placeholder="Optional" />
+                                    <label htmlFor="customer-address" className="form-label small mt-2">Address</label>
+                                    <input id="customer-address" className="form-control" value={addAddress} onChange={(e) => setAddAddress(e.target.value)} placeholder="Home/barangay address (optional)" />
                   <div className="form-check form-switch mt-3">
                     <input className="form-check-input" type="checkbox" id="addPreapprove" checked={addPreapprove} onChange={(e) => setAddPreapprove(e.target.checked)} />
                     <label className="form-check-label small" htmlFor="addPreapprove">Pre-approve credit</label>
                   </div>
                   {addPreapprove && (
                     <>
-                      <label className="form-label small mt-2">Credit limit (₱)</label>
-                      <input className="form-control" type="number" min="0" step="0.01" value={addLimit} onChange={(e) => setAddLimit(e.target.value)} placeholder="No limit" />
+                      <label htmlFor="customer-credit-limit" className="form-label small mt-2">Credit limit (₱)</label>
+                      <input id="customer-credit-limit" className="form-control" type="number" min="0" step="0.01" value={addLimit} onChange={(e) => setAddLimit(e.target.value)} placeholder="No limit" />
                       <div className="form-text">Leave empty for no limit. Only the owner or manager can set a limit.</div>
                     </>
                   )}
@@ -421,16 +427,16 @@ export default function CustomersPanel() {
                 </div>
                 <div className="modal-body">
                   {editError && <div className="alert alert-danger py-2 small mb-2">{editError}</div>}
-                  <label className="form-label small">Name <span className="text-danger">*</span></label>
-                  <input className="form-control" value={editName} onChange={(e) => setEditName(e.target.value)} placeholder="Customer name" />
-                  <label className="form-label small mt-2">Phone</label>
-                  <input className="form-control" value={editPhone} onChange={(e) => setEditPhone(e.target.value)} placeholder="Optional" />
-                  <label className="form-label small mt-2">Email</label>
-                                    <input className="form-control" type="email" value={editEmail} onChange={(e) => setEditEmail(e.target.value)} placeholder="Optional" />
-                                    <label className="form-label small mt-2">Address</label>
-                                    <input className="form-control" value={editAddress} onChange={(e) => setEditAddress(e.target.value)} placeholder="Home/barangay address (optional)" />
-                                    <label className="form-label small mt-2">Credit limit (₱)</label>
-                  <input className="form-control" type="number" min="0" step="0.01" value={editLimit} onChange={(e) => { setEditLimit(e.target.value); setEditLimitTouched(true); }} placeholder="No limit" />
+                  <label htmlFor="customer-name-2" className="form-label small">Name <span className="text-danger">*</span></label>
+                  <input id="customer-name-2" className="form-control" value={editName} onChange={(e) => setEditName(e.target.value)} placeholder="Customer name" />
+                  <label htmlFor="customer-phone-2" className="form-label small mt-2">Phone</label>
+                  <input id="customer-phone-2" className="form-control" value={editPhone} onChange={(e) => setEditPhone(e.target.value)} placeholder="Optional" />
+                  <label htmlFor="customer-email-2" className="form-label small mt-2">Email</label>
+                                    <input id="customer-email-2" className="form-control" type="email" value={editEmail} onChange={(e) => setEditEmail(e.target.value)} placeholder="Optional" />
+                                    <label htmlFor="customer-address-2" className="form-label small mt-2">Address</label>
+                                    <input id="customer-address-2" className="form-control" value={editAddress} onChange={(e) => setEditAddress(e.target.value)} placeholder="Home/barangay address (optional)" />
+                                    <label htmlFor="customer-credit-limit-2" className="form-label small mt-2">Credit limit (₱)</label>
+                  <input id="customer-credit-limit-2" className="form-control" type="number" min="0" step="0.01" value={editLimit} onChange={(e) => { setEditLimit(e.target.value); setEditLimitTouched(true); }} placeholder="No limit" />
                   <div className="form-text">Empty = no limit. 0 = no credit. Only the owner or manager can change this.</div>
                 </div>
                 <div className="modal-footer">
@@ -455,8 +461,8 @@ export default function CustomersPanel() {
                   <button type="button" className="btn-close" onClick={() => setApproveTarget(null)}></button>
                 </div>
                 <div className="modal-body">
-                  <label className="form-label small">Credit limit (₱)</label>
-                  <input className="form-control" type="number" min="0" step="0.01" value={limitInput} onChange={(e) => setLimitInput(e.target.value)} placeholder="No limit" />
+                  <label htmlFor="customer-credit-limit-3" className="form-label small">Credit limit (₱)</label>
+                  <input id="customer-credit-limit-3" className="form-control" type="number" min="0" step="0.01" value={limitInput} onChange={(e) => setLimitInput(e.target.value)} placeholder="No limit" />
                   <div className="form-text">Leave empty for no limit. When the customer reaches the limit they must pay first.</div>
                 </div>
                 <div className="modal-footer">

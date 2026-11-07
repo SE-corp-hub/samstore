@@ -4,7 +4,7 @@
 // the difference, "Count again" (once is enough; the first number is kept) and the reason why.
 // Reasons are labels recorded by hand: they never create a sale, a write-off or a charge.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { API_URL } from "../../config";
 import { adminHeaders } from "../../lib/admin";
 import { differenceText, pesoText as peso } from "../../lib/count-view";
@@ -16,6 +16,8 @@ import SignaturePad from "./SignaturePad";
 type ApiBody = { message?: string; errors?: string[] } & Record<string, unknown>;
 const errText = (d: ApiBody | null, f: string) => d?.errors?.join(", ") ?? d?.message ?? f;
 const qty = (loose: boolean, n: number) => (loose ? kg(n) : `${n}`);
+/** The reason that means "a customer took it and paid": these shortages can become walk-in sales. */
+const SOLD = "UNRINGED";
 
 async function call(method: "GET" | "POST", path: string, body?: unknown) {
   const res = await fetch(`${API_URL}${path}`, { method, headers: { ...(body === undefined ? {} : { "Content-Type": "application/json" }), ...adminHeaders() }, body: body === undefined ? undefined : JSON.stringify(body) });
@@ -32,8 +34,12 @@ interface Check {
   openedSacks: OpenedSack[]; openedAutomatic: boolean;
 }
 
-export default function CountCheck({ countId, docNumber, onBack, onSubmitted }: {
+export default function CountCheck({ countId, docNumber, onBack, onSubmitted, closing = false, steps }: {
   countId: string; docNumber: string; onBack: () => void; onSubmitted: (data: ApiBody) => void;
+  /** "Close the store": the one-tap "all short = sold to walk-ins" comes first. */
+  closing?: boolean;
+  /** The step bar of "Close the store", shown above the heading. */
+  steps?: ReactNode;
 }) {
   const [check, setCheck] = useState<Check | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -43,6 +49,7 @@ export default function CountCheck({ countId, docNumber, onBack, onSubmitted }: 
   const [sig, setSig] = useState<string | null>(null);
   const [photo, setPhoto] = useState<string | null>(null);
   const [resack, setResack] = useState<Record<string, boolean>>({});
+  const [changing, setChanging] = useState<Record<string, boolean>>({}); // reason buttons shown again for a line that has one
 
   const load = useCallback(async () => {
     const r = await call("GET", `/admin/counts/${countId}/check`);
@@ -58,6 +65,18 @@ export default function CountCheck({ countId, docNumber, onBack, onSubmitted }: 
     setCheck((c) => c && { ...c, lines: c.lines.map((x) => (x.productId === l.productId ? { ...x, reason } : x)) });
     const r = await call("POST", `/admin/counts/${countId}/reasons`, { lines: [{ productId: l.productId, reason, note: notes[l.productId] || undefined }] });
     if (!r.ok) { setError(errText(r.data, "Could not save the reason")); await load(); }
+  };
+  /** One tap: every short item without a reason yet is "Sold but not rung up" (one call for all). */
+  const allShortSold = async () => {
+    if (!check) return;
+    const todo = check.lines.filter((l) => l.varianceQty < 0 && !l.reason && l.reasons.some((r) => r.code === SOLD));
+    if (!todo.length) return;
+    setBusy(true); setError(null);
+    setCheck((c) => c && { ...c, lines: c.lines.map((x) => (todo.some((t) => t.productId === x.productId) ? { ...x, reason: SOLD } : x)) });
+    const r = await call("POST", `/admin/counts/${countId}/reasons`, { lines: todo.map((l) => ({ productId: l.productId, reason: SOLD, note: notes[l.productId] || undefined })) });
+    setBusy(false);
+    if (!r.ok) { setError(errText(r.data, "Could not save the reasons")); await load(); return; }
+    toast(`${todo.length} item${todo.length === 1 ? "" : "s"}: Sold but not rung up`);
   };
   const saveNote = async (l: DiffLine) => {
     if (!l.reason || (notes[l.productId] ?? "") === (l.note ?? "")) return;
@@ -94,9 +113,12 @@ export default function CountCheck({ countId, docNumber, onBack, onSubmitted }: 
   if (!check) return <div style={{ maxWidth: 720 }}>{error ? <div className="alert alert-danger">{error}</div> : <p className="text-muted">Checking the count…</p>}<button type="button" className="btn btn-outline-secondary" onClick={onBack}>← Back to counting</button></div>;
   const noReason = check.lines.filter((l) => !l.reason).length;
   const needPhoto = check.lines.some((l) => Math.abs(l.varianceValueMinor) >= check.lookLimitMinor && check.lookLimitMinor > 0);
+  const shortOpen = check.lines.filter((l) => l.varianceQty < 0 && !l.reason && l.reasons.some((r) => r.code === SOLD)).length;
+  const shortAll = check.lines.filter((l) => l.varianceQty < 0).length;
   return (
     <div style={{ maxWidth: 720 }}>
       <button type="button" className="btn btn-link px-0 mb-2" onClick={onBack}>← Back to counting</button>
+      {steps}
       <h2 className="h5">{docNumber} · Check the count</h2>
       <p className="mb-2">
         {check.counted} item{check.counted === 1 ? "" : "s"} counted · <strong className="text-success">{check.correct} correct</strong> · <strong className={check.lines.length ? "text-danger" : ""}>{check.lines.length} differ{check.lines.length === 1 ? "s" : ""}</strong>
@@ -104,6 +126,17 @@ export default function CountCheck({ countId, docNumber, onBack, onSubmitted }: 
       </p>
       {error && <div className="alert alert-danger py-2">{error}</div>}
       {check.lines.length === 0 && <div className="alert alert-success">Everything you counted matches the system.</div>}
+      {shortOpen > 0 && (
+        <div className={`card mb-3 ${closing ? "border-primary" : ""}`}>
+          <div className="card-body py-2">
+            <div className="fw-semibold">{shortAll} item{shortAll === 1 ? " is" : "s are"} short.</div>
+            <p className="mb-2">{closing ? "At closing, rice that is missing was usually sold to walk-in customers without a receipt." : "Was the missing rice sold to customers without a receipt?"} Mark them all at once, then change any that were spilled, wet or given away.</p>
+            <button type="button" className="btn btn-outline-primary btn-lg w-100" disabled={busy} onClick={() => void allShortSold()}>
+              <i className="bi bi-check2-all me-1" aria-hidden="true"></i>All {shortOpen} short: Sold but not rung up
+            </button>
+          </div>
+        </div>
+      )}
       {check.lines.map((l) => (
         <div key={l.productId} className="card mb-3">
           <div className="card-body py-2">
@@ -136,13 +169,27 @@ export default function CountCheck({ countId, docNumber, onBack, onSubmitted }: 
                 {l.asksRecount && <span className="small text-danger">Big difference. Count it again to be sure.</span>}
               </div>
             )}
-            <div className="fw-semibold small mt-2 mb-1">Why? {l.reason ? "" : <span className="text-danger">Choose one</span>}</div>
-            <div className="d-flex flex-wrap gap-1">
-              {l.reasons.map((r) => (
-                <button key={r.code} type="button" className={`btn btn-sm ${l.reason === r.code ? "btn-dark" : "btn-outline-dark"}`} onClick={() => void setReason(l, r.code)}>{r.label}</button>
-              ))}
-            </div>
-            {l.reason && (
+            {l.reason && !changing[l.productId] ? (
+              <div className="d-flex flex-wrap align-items-center gap-2 mt-2">
+                <span className="fw-semibold">Why:</span>
+                <span className="badge text-bg-light fs-6"><i className="bi bi-check-lg me-1" aria-hidden="true"></i>{l.reasons.find((r) => r.code === l.reason)?.label ?? l.reason}</span>
+                <button type="button" className="btn btn-outline-dark btn-sm" onClick={() => setChanging({ ...changing, [l.productId]: true })} aria-label={`Change the reason for ${l.name}`}>Change</button>
+              </div>
+            ) : (
+              <>
+                <div className="d-flex align-items-center gap-2 mt-2 mb-1">
+                  <span className="fw-semibold small">Why? {l.reason ? "" : <span className="text-danger">Choose one</span>}</span>
+                  {l.reason && <button type="button" className="btn btn-outline-dark btn-sm ms-auto" onClick={() => { setChanging({ ...changing, [l.productId]: false }); void saveNote(l); }}>Done</button>}
+                </div>
+                <div className="d-flex flex-wrap gap-1" role="group" aria-label={`Why is ${l.name} ${l.varianceQty < 0 ? "short" : "over"}?`}>
+                  {l.reasons.map((r) => (
+                    <button key={r.code} type="button" aria-pressed={l.reason === r.code} className={`btn btn-sm ${l.reason === r.code ? "btn-dark" : "btn-outline-dark"}`} onClick={() => void setReason(l, r.code)}>{r.label}</button>
+                  ))}
+                </div>
+              </>
+            )}
+            {l.reason && !changing[l.productId] && l.note && <div className="small text-muted mt-1">Note: {l.note}</div>}
+            {l.reason && changing[l.productId] && (
               <input className="form-control form-control-sm mt-2" placeholder="Add a note (optional)" aria-label={`Note for ${l.name}`} maxLength={120}
                 value={notes[l.productId] ?? ""} onChange={(e) => setNotes({ ...notes, [l.productId]: e.target.value })} onBlur={() => void saveNote(l)} />
             )}

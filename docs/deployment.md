@@ -23,7 +23,12 @@ ALLOW_DEMO_SEED=true npx tsx prisma/seed.ts   # demo data — throwaway dev DB o
 ## 2. API deployment (Render or Railway — any Node host)
 
 Build command: `npm install && npx prisma generate`
-Start command: `node --import tsx apps/api/src/main.ts` (or `npm run start:api`)
+Start command: `node apps/api/dist/main.mjs`
+
+`npm install` builds `apps/api/dist/main.mjs` by itself (`postinstall` → `scripts/build-api.mjs`): the
+whole API already translated to JavaScript, so a sleeping free server starts in ~7 s instead of ~20 s
+(0.1 CPU). The old start command `node --import tsx apps/api/src/main.ts` (or `npm run start:api`)
+still works and is the way back if the bundle ever misbehaves.
 Add the three env vars from §0. Port: use the platform-provided `PORT`.
 
 ## 3. Web deployment (Vercel)

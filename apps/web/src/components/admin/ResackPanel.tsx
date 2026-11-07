@@ -83,7 +83,7 @@ export default function ResackPanel() {
       // The store is pre-selected (own store, else the main one) and can be switched from the bar — the same as the owner.
       setLocationId(me?.homeLocationId ?? (active.find((l) => (l as { isDefault?: boolean }).isDefault) ?? active[0])?.id ?? "");
       setChosen(true);
-      fetch(`${API_URL}/admin/settings`, { headers: adminHeaders() }).then((r) => (r.ok ? r.json() : null)).then((d) => setStoreName(d?.store?.name ?? "")).catch(() => {});
+      fetch(`${API_URL}/admin/settings`, { headers: adminHeaders() }).then((r) => (r.ok ? r.json() : null)).then((d) => setStoreName(d?.name ?? "")).catch(() => {});
       setKargadors((ks?.kargadors ?? []) as KargadorOption[]);
       setProducts(((ps?.products ?? []) as Product[]).filter((p) => p.isActive !== false && weighed(p)));
     })().catch(() => setError("Could not load"));

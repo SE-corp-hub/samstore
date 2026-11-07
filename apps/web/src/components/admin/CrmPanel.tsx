@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import { API_URL } from "../../config";
 import { adminHeaders } from "../../lib/admin";
 import { toast } from "../../lib/toast";
+import { peso } from "../../lib/number-format";
 
 interface CrmCustomer {
   storeCustomerId: string;
@@ -33,7 +34,7 @@ interface Campaign {
   createdAt: string;
 }
 
-const toPesos = (m: number) => `₱${(m / 100).toFixed(2)}`;
+const toPesos = (m: number) => peso(m);
 
 export default function CrmPanel() {
   const [customers, setCustomers] = useState<CrmCustomer[] | null>(null);
@@ -151,16 +152,16 @@ export default function CrmPanel() {
           <h6 className="card-title small fw-bold">Segment explorer</h6>
           <div className="row g-1 align-items-end">
             <div className="col-auto">
-              <label className="form-label small d-block">Min LTV (₱)</label>
-              <input className="form-control form-control-sm" style={{ width: 110 }} type="number" min="0" value={rule.minLtvMinor} onChange={(e) => setRule({ ...rule, minLtvMinor: e.target.value })} />
+              <label htmlFor="crm-min-ltv" className="form-label small d-block">Min LTV (₱)</label>
+              <input id="crm-min-ltv" className="form-control form-control-sm" style={{ width: 110 }} type="number" min="0" value={rule.minLtvMinor} onChange={(e) => setRule({ ...rule, minLtvMinor: e.target.value })} />
             </div>
             <div className="col-auto">
-              <label className="form-label small d-block">Inactive ≥ days</label>
-              <input className="form-control form-control-sm" style={{ width: 110 }} type="number" min="0" value={rule.maxDaysSinceLastOrder} onChange={(e) => setRule({ ...rule, maxDaysSinceLastOrder: e.target.value })} />
+              <label htmlFor="crm-inactive-days" className="form-label small d-block">Inactive ≥ days</label>
+              <input id="crm-inactive-days" className="form-control form-control-sm" style={{ width: 110 }} type="number" min="0" value={rule.maxDaysSinceLastOrder} onChange={(e) => setRule({ ...rule, maxDaysSinceLastOrder: e.target.value })} />
             </div>
             <div className="col-auto">
-              <label className="form-label small d-block">Tag</label>
-              <input className="form-control form-control-sm" style={{ width: 110 }} value={rule.tag} onChange={(e) => setRule({ ...rule, tag: e.target.value })} />
+              <label htmlFor="crm-tag" className="form-label small d-block">Tag</label>
+              <input id="crm-tag" className="form-control form-control-sm" style={{ width: 110 }} value={rule.tag} onChange={(e) => setRule({ ...rule, tag: e.target.value })} />
             </div>
             <div className="col-auto">
               <div className="form-check form-switch">

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { API_URL } from "../../config";
 import { adminHeaders, getAdminRole } from "../../lib/admin";
 import { toast } from "../../lib/toast";
+import { peso } from "../../lib/number-format";
 
 interface StoreRow {
   id: string;
@@ -79,7 +80,7 @@ const MEMBER_ROLES = ["OWNER", "MANAGER", "STAFF", "SALES_AGENT", "DELIVERY"];
 
 const memberBadge = (status: string) => (status === "ACTIVE" ? "text-bg-success" : "text-bg-secondary");
 
-const toPesos = (m: number) => `₱${(m / 100).toFixed(2)}`;
+const toPesos = (m: number) => peso(m);
 
 const apiError = (d: unknown, fallback: string): string => {
   if (!d || typeof d !== "object") return fallback;
@@ -457,8 +458,8 @@ export default function StoresPanel() {
                 <div className="modal-body">
                   {statusError && <div className="alert alert-danger py-2 small mb-2">{statusError}</div>}
                   <p className="small text-muted mb-2">{STATUS_META[statusTarget.action].body}</p>
-                  <label className="form-label small">Reason <span className="text-muted">(optional)</span></label>
-                  <textarea
+                  <label htmlFor="stores-reason-optional" className="form-label small">Reason <span className="text-muted">(optional)</span></label>
+                  <textarea id="stores-reason-optional"
                     className="form-control"
                     rows={2}
                     value={statusReason}

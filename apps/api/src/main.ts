@@ -131,9 +131,12 @@ async function bootstrap() {
       const ip = (Array.isArray(xff) ? xff[0] : xff)?.split(",")[0]?.trim() ?? req.ip ?? "unknown";
       const burstKey = clientKey(ip, path.split("?")[0]);
       const authKey = clientKey(ip);
+      // Product pictures: one address each (its own burst limit), and a price list of 50+ pictures
+      // must not use up the shop's per-address allowance for everything else.
+      const photo = path.startsWith("/public/product-photo/");
       const ok =
         (await rateLimitOk(burstKey, { limit: 120, windowMs: 60_000, prefix: "pub" })) &&
-        (await rateLimitOk(authKey, { limit: 240, windowMs: 60_000, prefix: "ip" }));
+        (photo || (await rateLimitOk(authKey, { limit: 240, windowMs: 60_000, prefix: "ip" })));
       if (!ok) {
         res.status(429).json({ type: "rate_limited", message: "Too many requests — slow down and try again shortly." });
         return;

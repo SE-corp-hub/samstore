@@ -3,8 +3,15 @@
 //   with a weak or no signal.
 // * API calls are NEVER cached or replayed here: signed steps go through the app's own
 //   queue (with an Idempotency-Key), so the server decides, once, what happened.
-const CACHE = "tindahan-v1";
-const SHELL = ["/admin/dashboard", "/manifest.webmanifest", "/icon-192.png", "/icon-512.png"];
+// * The one exception: product pictures (/public/product-photo/<key>). Each key is a new
+//   picture that never changes, so it is kept for good and the POS buttons show it offline.
+const CACHE = "tindahan-v2";
+// Product pictures live apart from the screens, so a new app version never throws them away.
+const PHOTOS = "tindahan-photos-v1";
+const SHELL = ["/admin/dashboard", "/admin/login", "/manifest.webmanifest", "/icon-192.png", "/icon-512.png"];
+// A sleeping beta server takes 30 s or more to answer the first page. Past this wait the
+// saved copy of the screen opens instead, and the fresh copy is still saved for next time.
+const PAGE_WAIT_MS = 3000;
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).catch(() => undefined).then(() => self.skipWaiting()));
@@ -12,7 +19,7 @@ self.addEventListener("install", (event) => {
 
 self.addEventListener("activate", (event) => {
   event.waitUntil(
-    caches.keys().then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim()),
+    caches.keys().then((keys) => Promise.all(keys.filter((k) => k !== CACHE && k !== PHOTOS).map((k) => caches.delete(k)))).then(() => self.clients.claim()),
   );
 });
 
@@ -20,6 +27,14 @@ self.addEventListener("fetch", (event) => {
   const req = event.request;
   if (req.method !== "GET") return;
   const url = new URL(req.url);
+  if (url.pathname.includes("/public/product-photo/")) {
+    event.respondWith(caches.open(PHOTOS).then((c) => c.match(req).then((hit) => hit || fetch(req).then((res) => {
+      // A cross-origin picture is "opaque" (status 0): keep it too; a 404 or error is never kept.
+      if (res.ok || res.type === "opaque") c.put(req, res.clone());
+      return res;
+    }))));
+    return;
+  }
   // Only this app's own files; the API (another origin or /admin API paths) is never touched.
   if (url.origin !== self.location.origin) {
     if (url.hostname === "fonts.gstatic.com" || url.hostname === "fonts.googleapis.com") {
@@ -28,11 +43,21 @@ self.addEventListener("fetch", (event) => {
     return;
   }
   if (req.mode === "navigate") {
-    // Pages: the network first (fresh), the cached copy when there is no signal.
-    event.respondWith(
-      fetch(req).then((res) => { const copy = res.clone(); caches.open(CACHE).then((c) => c.put(req, copy)); return res; })
-        .catch(() => caches.match(req).then((hit) => hit || caches.match("/admin/dashboard"))),
-    );
+    // Pages: the network first (fresh), the cached copy when there is no signal or the
+    // server is slow to wake.
+    const fresh = fetch(req).then((res) => {
+      if (res.ok) { const copy = res.clone(); caches.open(CACHE).then((c) => c.put(req, copy)); }
+      return res;
+    });
+    event.waitUntil(fresh.catch(() => undefined));
+    const saved = () => caches.match(req).then((hit) => hit || caches.match("/admin/dashboard"));
+    event.respondWith(new Promise((resolve, reject) => {
+      let done = false;
+      const finish = (res) => { if (!done && res) { done = true; resolve(res); } };
+      const timer = setTimeout(() => saved().then(finish), PAGE_WAIT_MS);
+      fresh.then((res) => { clearTimeout(timer); finish(res); })
+        .catch(() => { clearTimeout(timer); saved().then((hit) => (hit ? finish(hit) : reject(new Error("offline")))); });
+    }));
     return;
   }
   if (url.pathname.startsWith("/_next/static/") || /\.(png|svg|ico|woff2?|css|js)$/.test(url.pathname)) {

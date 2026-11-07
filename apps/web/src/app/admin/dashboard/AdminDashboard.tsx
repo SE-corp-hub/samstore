@@ -4,21 +4,28 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   getAdminToken, getAdminStoreId, setAdminStoreId, getAdminRole, clearAdminSession,
-  NAV_GROUPS, allowedTabs, defaultTabFor, isOwnerRole, handleUnauthorized, navItemFor,
+  NAV_GROUPS, allowedTabs, defaultTabFor, isOwnerRole, handleUnauthorized, navItemFor, navGroupFor, toneFor,
 } from "../../../lib/admin";
 import dynamic from "next/dynamic";
 import { API_URL } from "../../../config";
 import { wakeFetch } from "../../../lib/wake-fetch";
-import { saveCopy, savedCopy } from "../../../lib/offlineCache";
+import { saveCopy, savedCopy, useOffline } from "../../../lib/offlineCache";
+
+/** Screens that work with no internet; every other screen still opens, but read-only (its buttons are off). */
+// Settings opens offline too: Printer is kept on this tablet, the other groups lock their own buttons.
+const OFFLINE_READY = new Set(["home", "pos", "preorders", "settings"]);
 
 const STORES_PATH = "/admin/stores/mine";
 import { resumePendingReceipt } from "../../../lib/slip-print";
 import { useLang, LANG_WORDS } from "../../../lib/lang";
 import QueueBadge, { SyncBar } from "../../../components/admin/QueueBadge";
 import StaffHome from "../../../components/admin/StaffHome";
+import TextSizePicker from "../../../components/admin/TextSizePicker";
+import LockScreen from "../../../components/admin/LockScreen";
+import { isScreenLocked, lockAgain, lockListFor, useFeatureLock } from "../../../lib/feature-lock";
 
 /** Rice Ops M10: the store screens get the large, high-contrast look (globals.css .rice-ui). */
-const RICE_TABS = new Set(["pos", "preorders", "utang", "utangrice", "agentorders", "agent", "approvals", "moves", "returns", "resack", "pasok", "purchaseorders", "bilangin", "storereport", "payable", "ulat", "drafts", "kargadors"]);
+const RICE_TABS = new Set(["pos", "preorders", "orders", "utang", "utangrice", "agentorders", "agent", "approvals", "moves", "returns", "resack", "pasok", "purchaseorders", "bilangin", "storereport", "payable", "ulat", "drafts", "kargadors", "settings"]);
 // The landing panel stays eager (it is the first paint); every other panel loads when
 // its tab opens. Shipping every panel at once cost ~95 kB of route JS for one visible screen,
 // and dragged jsbarcode/qrcode (used by two panels) into the initial payload.
@@ -61,7 +68,8 @@ const KargadorsPanel = panel(() => import("../../../components/admin/KargadorsPa
 const MovePanel = panel(() => import("../../../components/admin/MovePanel"));
 const ReturnsPanel = panel(() => import("../../../components/admin/ReturnsPanel"));
 const ResackPanel = panel(() => import("../../../components/admin/ResackPanel"));
-const BentaPanel = panel(() => import("../../../components/admin/BentaPanel"));
+// POS = the full sale screen (the separate Walk-in quick-sale screen was removed 2026-11-07).
+const PosPanel = panel(() => import("../../../components/admin/BentaPanel"));
 const PasokPanel = panel(() => import("../../../components/admin/PasokPanel"));
 const UtangRicePanel = panel(() => import("../../../components/admin/UtangRicePanel"));
 const AgentPanel = panel(() => import("../../../components/admin/AgentPanel"));
@@ -110,6 +118,10 @@ export default function AdminDashboard() {
   // renders while the answer is still "none", and every tab answers 403.
   const [storesStatus, setStoresStatus] = useState<"loading" | "ready" | "error">("loading");
   const [waking, setWaking] = useState(false); // the sleeping beta server is starting up
+  const offline = useOffline();
+  const locked = offline && !OFFLINE_READY.has(tab);
+  // PIN lock: screens the owner locked show the PIN pad instead, until the right PIN (works offline).
+  const pinLock = useFeatureLock(activeStore);
   const userNavigated = useRef(false);
 
   const loadStores = useCallback(async () => {
@@ -212,12 +224,14 @@ export default function AdminDashboard() {
   };
 
   const logout = () => {
+    lockAgain();
     clearAdminSession();
     router.push("/admin/login");
   };
 
   // Rice Ops M2: hand the phone to the next person — they log in with their own PIN.
   const switchUser = () => {
+    lockAgain();
     clearAdminSession();
     router.push("/admin/login?pin=1");
   };
@@ -285,12 +299,19 @@ export default function AdminDashboard() {
     .map((g) => ({ ...g, items: g.items.filter((i) => allowed.includes(i.id)) }))
     .filter((g) => g.items.length > 0);
 
+  const pinLocked = (id: string) => isScreenLocked(pinLock.lock, role, id);
+  const showPinPad = tab !== "home" && pinLocked(tab) && !pinLock.open;
+  const anyPinLock = !!pinLock.lock?.on && (pinLock.lock[lockListFor(role)]?.length ?? 0) > 0;
+  const lockIcon = (id: string) => (pinLocked(id)
+    ? <i className={`bi ${pinLock.open ? "bi-unlock" : "bi-lock-fill"} ms-auto nav-lock`} role="img" aria-label={pinLock.open ? "Locked screen, open now" : "Needs the lock PIN"}></i>
+    : null);
+
   const renderTab = () => {
     switch (tab) {
-      case "home": return <StaffHome role={role} onNavigate={(id) => { userNavigated.current = true; setTab(id); }} labelFor={navLabel} />;
+      case "home": return <StaffHome role={role} onNavigate={(id) => { userNavigated.current = true; setTab(id); }} labelFor={navLabel} isLocked={pinLock.open ? undefined : pinLocked} />;
       case "overview": return <OverviewPanel onNavigate={setTab} storeSlug={active?.slug} storeName={active?.name} />;
       // One POS: the rice-ready counter screen.
-      case "pos": return <BentaPanel />;
+      case "pos": return <PosPanel />;
       case "preorders": return <PreOrdersPanel onNavigate={setTab} />;
       case "utang": // the bar id; the menu id is "utangrice" (one merged Credit screen)
       case "utangrice": return <UtangRicePanel role={role} />;
@@ -301,7 +322,7 @@ export default function AdminDashboard() {
       case "reports": return <ReportsPanel />;
       case "orders": return <OrdersPanel />;
       case "products": return <ProductsPanel />;
-      case "settings": return <SettingsPanel />;
+      case "settings": return <SettingsPanel role={role} />;
       case "countersettings": return <CounterSettingsPanel />;
       case "vouchers": return <VouchersPanel />;
       case "team": return <TeamPanel />;
@@ -342,8 +363,8 @@ export default function AdminDashboard() {
       </div>
       <nav className="flex-grow-1 overflow-auto py-2">
         {visibleGroups.map((g) => (
-          <div key={g.group} className="mb-2">
-            <div className="nav-group-label px-3 small text-uppercase fw-semibold">{g.label}</div>
+          <div key={g.group} className={`mb-2 tone-${g.tone}`}>
+            <div className="nav-group-label px-3">{g.label}</div>
             <ul className="nav flex-column">
               {g.items.map((item) => (
                 <li className="nav-item" key={item.id}>
@@ -353,6 +374,7 @@ export default function AdminDashboard() {
                   >
                     <i className={`bi ${item.icon}`}></i>
                     <span>{navLabel(item.id, item.label)}</span>
+                    {lockIcon(item.id)}
                   </button>
                 </li>
               ))}
@@ -361,6 +383,7 @@ export default function AdminDashboard() {
         ))}
       </nav>
       <div className="p-3 border-top">
+        <div className="mb-3"><TextSizePicker /></div>
         <div className="small fw-semibold">{email || "Admin"}</div>
         <div className="small mb-2">{role} · {active?.name}</div>
         <button className="btn btn-outline-secondary btn-sm w-100 mb-2" onClick={switchUser}>
@@ -383,7 +406,8 @@ export default function AdminDashboard() {
       {/* Drawer: phones and tablets (either way), from the menu button; same dark look as the sidebar */}
       {mobileNav && (
         <>
-          <div className="modal fade show d-block d-lg-none touch-show-block" tabIndex={-1}>
+          <div className="modal fade show d-block d-lg-none touch-show-block" tabIndex={-1} role="dialog" aria-modal="true" aria-label="Menu"
+            onClick={(e) => { if (e.target === e.currentTarget) setMobileNav(false); }} onKeyDown={(e) => { if (e.key === "Escape") setMobileNav(false); }}>
             <div className="modal-dialog modal-dialog-scrollable" style={{ maxWidth: "min(320px, 85vw)", margin: 0 }}>
               <div className="modal-content admin-sidebar admin-drawer rounded-0 border-end min-vh-100" style={{ minHeight: "100vh" }}>
                 {sidebar}
@@ -402,10 +426,24 @@ export default function AdminDashboard() {
             <button className="btn btn-outline-secondary btn-sm d-lg-none touch-show me-2" onClick={() => setMobileNav(true)} aria-label="Menu">
               <i className="bi bi-list"></i>
             </button>
-            <span className="navbar-brand fw-semibold fs-6 mb-0 d-flex align-items-center gap-2">
-              {role === "DELIVERY" ? <i className="bi bi-truck"></i> : <i className={`bi ${navItemFor(NAV_ID[tab] ?? tab)?.icon ?? "bi-speedometer2"}`}></i>}
-              {role === "DELIVERY" ? "Courier" : tab === "home" ? "Home" : (() => { const n = navItemFor(NAV_ID[tab] ?? tab); return n ? navLabel(n.id, n.label) : "Dashboard"; })()}
-            </span>
+            {/* The screen's icon on its group colour, its name, and one line on what it is for. */}
+            {(() => {
+              const id = NAV_ID[tab] ?? tab;
+              const n = navItemFor(id);
+              const group = navGroupFor(id);
+              const name = role === "DELIVERY" ? "Courier" : tab === "home" ? "Home" : n ? navLabel(n.id, n.label) : "Dashboard";
+              const icon = role === "DELIVERY" ? "bi-truck" : tab === "home" ? "bi-grid-3x3-gap" : (n?.icon ?? "bi-speedometer2");
+              const hint = tab === "home" ? "Every screen, grouped by what it is for" : n?.hint;
+              return (
+                <div className={`screen-title ${group ? `tone-${group.tone}` : "tone-setup"}`}>
+                  <span className="screen-chip" aria-hidden="true"><i className={`bi ${icon}`}></i></span>
+                  <div className="min-w-0">
+                    <div className="screen-name">{name}</div>
+                    {hint && <div className="screen-hint">{hint}</div>}
+                  </div>
+                </div>
+              );
+            })()}
             <div className="ms-auto d-flex align-items-center gap-2">
               {(stores.length > 1 || (role === "PLATFORM_ADMIN" && stores.length > 0)) && (
                 <select
@@ -419,10 +457,15 @@ export default function AdminDashboard() {
                   ))}
                 </select>
               )}
+              {anyPinLock && pinLock.open && (
+                <button type="button" className="btn btn-sm btn-outline-dark lock-now" onClick={lockAgain} title="Lock the locked screens again">
+                  <i className="bi bi-lock-fill me-1" aria-hidden="true"></i>Lock
+                </button>
+              )}
               <QueueBadge />
-              <span className="badge text-bg-primary text-uppercase d-none d-sm-inline">{role}</span>
+              <span className="badge text-bg-primary role-badge text-uppercase d-none d-sm-inline">{role}</span>
               {active && (
-                <a className="btn btn-sm btn-outline-primary" href={`/${active.slug}`} target="_blank" rel="noreferrer" title="Open storefront">
+                <a className="btn btn-sm btn-outline-primary d-none d-sm-inline-block" href={`/${active.slug}`} target="_blank" rel="noreferrer" title="Open storefront" aria-label="Open storefront">
                   <i className="bi bi-box-arrow-up-right"></i>
                 </a>
               )}
@@ -435,7 +478,25 @@ export default function AdminDashboard() {
         <SyncBar />
 
         <main className={`container-fluid py-4 flex-grow-1${BAR_ROLES.includes(role) ? " has-staff-bar" : ""}`} style={{ background: "#faf7f2" }}>
-          {RICE_TABS.has(tab) ? <div className="rice-ui p-2 rounded">{renderTab()}</div> : renderTab()}
+          {showPinPad && pinLock.lock ? (
+            <LockScreen
+              lock={pinLock.lock}
+              screenName={(() => { const n = navItemFor(NAV_ID[tab] ?? tab); return n ? navLabel(n.id, n.label) : "This screen"; })()}
+              ownerSignedIn={isOwnerRole(role)}
+              onBack={() => { userNavigated.current = true; setTab(BAR_ROLES.includes(role) ? "home" : defaultTabFor(role)); }}
+            />
+          ) : <>
+          {locked && (
+            <div className="alert alert-secondary d-flex align-items-center gap-2" role="status">
+              <i className="bi bi-lock fs-4"></i>
+              <div><div className="fw-semibold">Needs internet</div><div className="small">You can open this screen, but its buttons are off until the tablet is online. POS and Pre-order work offline.</div></div>
+            </div>
+          )}
+          {/* Always the same wrapper, so going offline locks the screen without reloading it. */}
+          <fieldset disabled={locked} className="border-0 p-0 m-0" style={{ minWidth: 0 }}>
+            {RICE_TABS.has(tab) ? <div className="rice-ui p-2 rounded">{renderTab()}</div> : renderTab()}
+          </fieldset>
+          </>}
         </main>
 
         {BAR_ROLES.includes(role) && (
@@ -444,12 +505,12 @@ export default function AdminDashboard() {
               <button
                 key={b.id}
                 type="button"
-                className={(BAR_ALIAS[tab] ?? tab) === b.id ? "active" : ""}
+                className={`tone-${toneFor(NAV_ID[b.id] ?? b.id)}${(BAR_ALIAS[tab] ?? tab) === b.id ? " active" : ""}`}
                 aria-current={(BAR_ALIAS[tab] ?? tab) === b.id ? "page" : undefined}
                 onClick={() => { userNavigated.current = true; setTab(b.id); setMobileNav(false); }}
               >
                 <i className={`bi ${b.icon}`}></i>
-                <span>{b.label}</span>
+                <span>{b.label}{pinLocked(b.id) && !pinLock.open && <i className="bi bi-lock-fill ms-1 bar-lock" role="img" aria-label="Needs the lock PIN"></i>}</span>
               </button>
             ))}
             <button
