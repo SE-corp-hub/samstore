@@ -1,6 +1,6 @@
 "use client";
 
-// One product button, the same on POS (Walk-in and Full sale) and Pre-order: the name, the price in
+// One product button, the same on POS and Pre-order: the name, the price in
 // big digits, what is left here, and — once it is in the sale — a green edge with "✓ 2 in sale".
 // Out of stock is an amber "None left here" (careful: you may still sell at the counter), never red.
 // Everything is in rem, so the tiles grow with the Text size setting. A product with a picture shows it

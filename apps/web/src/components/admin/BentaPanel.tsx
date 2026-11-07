@@ -11,7 +11,7 @@
 //   New item: a rice that isn't in the system yet, with what is on hand now.
 // One idempotency key per sale, kept until it succeeds: a double-tap is one sale.
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { API_URL } from "../../config";
 import { adminHeaders, getAdminStoreId } from "../../lib/admin";
 import { toast } from "../../lib/toast";
@@ -103,8 +103,7 @@ function savedCart(): { locationId: string; cart: CartLine[]; key: string | null
   } catch { return null; }
 }
 
-/** `switcher`: the Walk-in / Full sale buttons, placed at the top of the product column so the sale card can start at the very top. */
-export default function BentaPanel({ switcher }: { switcher?: ReactNode }) {
+export default function BentaPanel() {
   const [locations, setLocations] = useState<Loc[]>([]);
   const [locationId, setLocationId] = useState("");
   const [homeLocationId, setHomeLocationId] = useState<string | null>(null);
@@ -695,7 +694,6 @@ export default function BentaPanel({ switcher }: { switcher?: ReactNode }) {
       {sideBySide ? (
         <div className="fit-row">
           <div className="fit-col fit-main">
-            {switcher}
             {storeBar}
             {heldCard}
             {errAlert}
@@ -711,7 +709,6 @@ export default function BentaPanel({ switcher }: { switcher?: ReactNode }) {
         </div>
       ) : (
         <div className="fit-col">
-          {switcher}
           {stepsRow}
           {storeBar}
           {heldCard}

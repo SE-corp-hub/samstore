@@ -229,7 +229,7 @@ html[data-text-size] .toast.text-bg-danger { background-color: #a3201b !importan
 html[data-text-size] :focus-visible { outline: 3px solid var(--sam-primary); outline-offset: 2px; }
 html[data-text-size] .btn:focus-visible { box-shadow: none; }
 
-/* ── 8. Selling screens: POS (Walk-in, Full sale) and Pre-order (2026-11-01).
+/* ── 8. Selling screens: POS and Pre-order (2026-11-01).
    What is in the sale is green, the total is the biggest number on the screen, every size is in rem
    (the Text size setting works here too), and the buttons keep the one-meaning colours:
    green = the one next step, blue outline = a second choice (Print, Change price, New item),
@@ -310,9 +310,6 @@ html[data-text-size] .btn:focus-visible { box-shadow: none; }
   background: #1f6f3f; color: #fff; font-size: 1.05rem; font-weight: 700;
 }
 
-/* Two-line choice buttons (Walk-in / Full sale): the name, then what it is for. */
-.seg-caption { display: block; font-size: max(16px, 0.85rem); font-weight: 500; line-height: 1.2; opacity: 0.92; }
-
 /* Product list headings ("Sold most here", one per variety) in full ink, sentence case. */
 .finder-heading { display: flex; align-items: center; gap: 0.4rem; margin: 0.25rem 0 0.5rem; font-size: 1.05rem; font-weight: 700; color: var(--sam-text); }
 .finder-heading.group { padding-bottom: 0.25rem; border-bottom: 2px solid #e1d6c6; }
@@ -347,12 +344,6 @@ html[data-text-size] .btn:focus-visible { box-shadow: none; }
 /* A little more room: the page padding above and below the selling screens is smaller. */
 main:has(> * > .rice-ui > .sell-fit), main:has(> .rice-ui > .sell-fit) { padding-top: 0.75rem !important; }
 .rice-ui:has(> .sell-fit) { padding-bottom: 0 !important; }
-
-/* The Walk-in / Full sale switch: one line each on a tablet ("Full sale · Credit, GCash, special price"). */
-@media (min-width: 768px) {
-  .sell-fit .seg-caption { display: inline; font-weight: 500; }
-  .sell-fit .seg-caption::before { content: " · "; }
-}
 
 /* The product bar: search box and variety buttons in one row (and a heading before them on Pre-order). */
 .finder-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; }

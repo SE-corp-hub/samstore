@@ -66,7 +66,8 @@ const KargadorsPanel = panel(() => import("../../../components/admin/KargadorsPa
 const MovePanel = panel(() => import("../../../components/admin/MovePanel"));
 const ReturnsPanel = panel(() => import("../../../components/admin/ReturnsPanel"));
 const ResackPanel = panel(() => import("../../../components/admin/ResackPanel"));
-const PosPanel = panel(() => import("../../../components/admin/PosPanel"));
+// POS = the full sale screen (the separate Walk-in quick-sale screen was removed 2026-11-07).
+const PosPanel = panel(() => import("../../../components/admin/BentaPanel"));
 const PasokPanel = panel(() => import("../../../components/admin/PasokPanel"));
 const UtangRicePanel = panel(() => import("../../../components/admin/UtangRicePanel"));
 const AgentPanel = panel(() => import("../../../components/admin/AgentPanel"));
