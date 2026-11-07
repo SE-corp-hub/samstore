@@ -10,10 +10,12 @@
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { API_URL } from "../../config";
-import { adminHeaders, getAdminStoreId, getAuthItem, setAuthItem } from "../../lib/admin";
+import { adminHeaders, getAdminStoreId, getAuthItem, isOwnerRole, setAuthItem } from "../../lib/admin";
 import { toast } from "../../lib/toast";
 import { askConfirm } from "../../lib/ask";
-import { cachedGet, useOffline } from "../../lib/offlineCache";
+import { cachedGet, savedCopy, useOffline } from "../../lib/offlineCache";
+import { LOCK_PATH, type FeatureLock } from "../../lib/feature-lock";
+import PinLockSettings, { lockSummary } from "./PinLockSettings";
 import { getPrinterSettings } from "../../lib/printer-settings";
 import { peso } from "../../lib/number-format";
 import { useMediaQuery, WIDE } from "../../lib/use-media-query";
@@ -96,7 +98,7 @@ function formFrom(s: StoreSettings["settings"]): Form {
 }
 
 type ServerGroup = "counter" | "credit" | "receipt" | "shop" | "messenger";
-type Group = "printer" | ServerGroup | "account";
+type Group = "printer" | ServerGroup | "lock" | "account";
 
 /** What each group sends when saved. Also used to tell whether a group has unsaved changes. */
 const PAYLOAD: Record<ServerGroup, (f: Form) => Record<string, unknown>> = {
@@ -141,6 +143,7 @@ const GROUPS: { id: Group; icon: string; title: string; server: boolean }[] = [
   { id: "receipt", icon: "bi-percent", title: "VAT and tax", server: true },
   { id: "shop", icon: "bi-globe", title: "Online shop", server: true },
   { id: "messenger", icon: "bi-chat-dots", title: "Messenger, points and privacy", server: true },
+  { id: "lock", icon: "bi-lock", title: "PIN lock", server: true },
   { id: "account", icon: "bi-person", title: "My account", server: true },
 ];
 
@@ -168,7 +171,7 @@ function Field({ id, label, help, problem, children }: { id: string; label: stri
   );
 }
 
-export default function SettingsPanel() {
+export default function SettingsPanel({ role = "" }: { role?: string }) {
   const storeId = getAdminStoreId();
   const wide = useMediaQuery(WIDE);
   const offline = useOffline();
@@ -291,6 +294,7 @@ export default function SettingsPanel() {
       case "receipt": return `${saved.vatEnabled ? `VAT ${saved.vatRate}%${saved.pricesIncludeVat ? " included" : " added"}` : "No VAT"}${saved.tin ? " · TIN set" : ""}${saved.seniorPwd ? " · Senior/PWD 20%" : ""}`;
       case "shop": return saved.paused ? "Closed for now" : `${saved.allowGuest ? "Open to guests" : "Open"} · ${[saved.deliveryEnabled && "delivery", saved.pickupEnabled && "pickup"].filter(Boolean).join(" and ") || "no delivery or pickup"}`;
       case "messenger": return `${saved.messengerConnected ? "Messenger connected" : "Messenger not connected"} · ${saved.loyaltyRate} point per ₱1`;
+      case "lock": return lockSummary(savedCopy<FeatureLock>(LOCK_PATH));
       case "account": return getAuthItem("samstore.admin.email") ?? "Name, email and password";
     }
   };
@@ -532,6 +536,8 @@ export default function SettingsPanel() {
             </div>
           </>
         );
+      case "lock":
+        return <PinLockSettings canChange={isOwnerRole(role) || role === "PLATFORM_ADMIN"} onSaved={() => setPrinterTick((t) => t + 1)} />;
       case "account":
         return <AccountSection />;
     }

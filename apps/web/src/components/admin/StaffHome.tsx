@@ -15,9 +15,11 @@ interface Props {
   onNavigate: (tab: string) => void;
   /** The menu's own wording for a screen (so names match the drawer). */
   labelFor?: (id: string, fallback: string) => string;
+  /** PIN lock: screens that ask for the lock PIN get a lock on their tile. */
+  isLocked?: (id: string) => boolean;
 }
 
-export default function StaffHome({ role, onNavigate, labelFor }: Props) {
+export default function StaffHome({ role, onNavigate, labelFor, isLocked }: Props) {
   const allowed = new Set(allowedTabs(role));
   const groups = NAV_GROUPS
     .map((g) => ({ ...g, items: g.items.filter((i) => allowed.has(i.id)) }))
@@ -36,9 +38,10 @@ export default function StaffHome({ role, onNavigate, labelFor }: Props) {
           <div className="row g-3">
             {g.items.map((it) => (
               <div key={it.id} className="col-6 col-md-4 col-xl-3">
-                <button type="button" className="staff-tile w-100" onClick={() => onNavigate(it.id)}>
+                <button type="button" className="staff-tile w-100 position-relative" onClick={() => onNavigate(it.id)}>
                   <i className={`bi ${it.icon}`} aria-hidden="true"></i>
                   <span>{labelFor ? labelFor(it.id, it.label) : it.label}</span>
+                  {isLocked?.(it.id) && <i className="bi bi-lock-fill tile-lock" role="img" aria-label="Needs the lock PIN"></i>}
                 </button>
               </div>
             ))}
