@@ -172,7 +172,7 @@ export const NAV_GROUPS: NavGroup[] = [
     icon: "bi-cash-coin",
     items: [
       { id: "utangrice", label: "Credit", icon: "bi-journal-text", hint: "Who owes the store; take payments" }, // Credit + Credit Ledger, merged
-      { id: "payable", label: "Store payable", icon: "bi-cash-coin", hint: "What Store 2 owes Store 1" },
+      { id: "payable", label: "Store payable", icon: "bi-cash-coin", hint: "What each store owes the main store" },
       { id: "approvals", label: "For your approval", icon: "bi-inbox", hint: "Requests waiting for your yes or no" },
       { id: "expenses", label: "Expenses", icon: "bi-receipt-cutoff", hint: "Money the store paid out" },
       { id: "purchases", label: "Purchases", icon: "bi-cart4", hint: "Stock bought and what was paid" },

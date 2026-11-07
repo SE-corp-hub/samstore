@@ -391,7 +391,7 @@ export default function BentaPanel() {
           </div></div>
         )}
         {(last.belowCost?.length ?? 0) > 0 && (
-          <div className="alert alert-warning">Sold below Store 1&apos;s cost: {last.belowCost!.join(", ")}. This store still owes the full cost — check the price.</div>
+          <div className="alert alert-warning">Sold below the main store&apos;s cost: {last.belowCost!.join(", ")}. This store still owes the full cost — check the price.</div>
         )}
         {checking ? (
           <QuickCount productId={checking.productId} name={checking.name} loose={!!byId.get(checking.productId)?.loose} locationId={locationId}
