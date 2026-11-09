@@ -191,6 +191,12 @@ export default function AdminDashboard() {
     }
   }, [router]);
 
+  // PC sidebar: keep the open screen's menu item in view (the menu is longer than the screen).
+  useEffect(() => {
+    const el = typeof document !== "undefined" ? document.querySelector<HTMLElement>("aside.admin-sidebar .nav-link.active") : null;
+    if (el && el.offsetParent !== null) el.scrollIntoView({ block: "nearest" });
+  }, [tab, authed, storesStatus]);
+
   // A receipt that could not print before the app was closed is offered again.
   useEffect(() => { resumePendingReceipt(); }, []);
   useEffect(() => {
@@ -353,7 +359,8 @@ export default function AdminDashboard() {
     }
   };
 
-  const sidebar = (
+  // `desktop` = the sidebar of a PC with a mouse (hidden on every touch screen); the tablet drawer keeps the plain footer.
+  const renderSidebar = (desktop: boolean) => (
     <div className="d-flex flex-column h-100">
       <div className="p-3 border-bottom">
         <div className="fw-bold h6 mb-0 d-flex align-items-center gap-2">
@@ -383,17 +390,38 @@ export default function AdminDashboard() {
           </div>
         ))}
       </nav>
-      <div className="p-3 border-top">
-        <div className="mb-3"><TextSizePicker /></div>
-        <div className="small fw-semibold">{email || "Admin"}</div>
-        <div className="small mb-2">{role} · {active?.name}</div>
-        <button className="btn btn-outline-secondary btn-sm w-100 mb-2" onClick={switchUser}>
-          <i className="bi bi-arrow-left-right me-1"></i>Switch user (PIN)
-        </button>
-        <button className="btn btn-outline-danger btn-sm w-100" onClick={logout}>
-          <i className="bi bi-box-arrow-right me-1"></i>Log out
-        </button>
-      </div>
+      {desktop ? (
+        <div className="side-foot border-top">
+          <TextSizePicker />
+          <div className="side-who">
+            <i className="bi bi-person-circle" aria-hidden="true"></i>
+            <div className="min-w-0">
+              <div className="side-email" title={email || "Admin"}>{email || "Admin"}</div>
+              <div className="side-role" title={`${role}${active?.name ? ` · ${active.name}` : ""}`}>{role}{active?.name ? ` · ${active.name}` : ""}</div>
+            </div>
+          </div>
+          <div className="side-actions">
+            <button type="button" className="btn side-btn" onClick={switchUser} title="Switch user (PIN)">
+              <i className="bi bi-arrow-left-right" aria-hidden="true"></i>Switch user
+            </button>
+            <button type="button" className="btn side-btn side-btn-out" onClick={logout}>
+              <i className="bi bi-box-arrow-right" aria-hidden="true"></i>Log out
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="p-3 border-top">
+          <div className="mb-3"><TextSizePicker /></div>
+          <div className="small fw-semibold">{email || "Admin"}</div>
+          <div className="small mb-2">{role} · {active?.name}</div>
+          <button className="btn btn-outline-secondary btn-sm w-100 mb-2" onClick={switchUser}>
+            <i className="bi bi-arrow-left-right me-1"></i>Switch user (PIN)
+          </button>
+          <button className="btn btn-outline-danger btn-sm w-100" onClick={logout}>
+            <i className="bi bi-box-arrow-right me-1"></i>Log out
+          </button>
+        </div>
+      )}
     </div>
   );
 
@@ -401,7 +429,7 @@ export default function AdminDashboard() {
     <div key={activeStore ?? "none"} className="admin-shell d-flex min-vh-100">
       {/* Sidebar: PC with a mouse only. Touch screens (phone, tablet either way) get the bottom bar. */}
       <aside className="admin-sidebar d-none d-lg-flex flex-column" style={{ width: 240, position: "sticky", top: 0, height: "100vh" }}>
-        {sidebar}
+        {renderSidebar(true)}
       </aside>
 
       {/* Drawer: phones and tablets (either way), from the menu button; same dark look as the sidebar */}
@@ -411,7 +439,7 @@ export default function AdminDashboard() {
             onClick={(e) => { if (e.target === e.currentTarget) setMobileNav(false); }} onKeyDown={(e) => { if (e.key === "Escape") setMobileNav(false); }}>
             <div className="modal-dialog modal-dialog-scrollable" style={{ maxWidth: "min(320px, 85vw)", margin: 0 }}>
               <div className="modal-content admin-sidebar admin-drawer rounded-0 border-end min-vh-100" style={{ minHeight: "100vh" }}>
-                {sidebar}
+                {renderSidebar(false)}
               </div>
             </div>
           </div>
