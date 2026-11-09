@@ -30,6 +30,11 @@ export interface StoreSettingsInput {
   tin?: string | null; // BIR taxpayer ID printed on the slip
   dailySalesTargetMinor?: number; // Overview: daily sales target (0 = off)
   hidePricePreOrder?: boolean; // P11: hide per-product prices in Pre Orders screen
+  // Quota promo: N sacks or more of the chosen groups → each sack cheaper (applied on the tablet).
+  quotaPromoEnabled?: boolean;
+  quotaPromoMinSacks?: number;
+  quotaPromoOffMinor?: number;
+  quotaPromoCategoryIds?: string[];
   seniorPwdDiscountEnabled?: boolean; // P3b: statutory 20% senior/PWD discount
   // P3g: Website→Messenger bridge — recorded connection state (sends stay suppressed).
   messengerConnected?: boolean;
@@ -86,6 +91,10 @@ export class StoreSettingsService {
         tin: store.settings?.tin ?? null,
         dailySalesTargetMinor: store.settings?.dailySalesTargetMinor ?? 0,
         hidePricePreOrder: store.settings?.hidePricePreOrder ?? false,
+        quotaPromoEnabled: store.settings?.quotaPromoEnabled ?? false,
+        quotaPromoMinSacks: store.settings?.quotaPromoMinSacks ?? 10,
+        quotaPromoOffMinor: store.settings?.quotaPromoOffMinor ?? 2000,
+        quotaPromoCategoryIds: store.settings?.quotaPromoCategoryIds ?? [],
         seniorPwdDiscountEnabled: store.settings?.seniorPwdDiscountEnabled ?? false,
         messengerConnected: store.settings?.messengerConnected ?? false,
         messengerPageId: store.settings?.messengerPageId ?? null,
@@ -111,6 +120,20 @@ export class StoreSettingsService {
     }
     if (input.orderCutoff !== undefined && input.orderCutoff !== null && !/^\d{2}:\d{2}$/.test(input.orderCutoff)) {
       return { ok: false, error: { type: "validation", errors: ["orderCutoff must be HH:MM (24h)"] } };
+    }
+    if (input.quotaPromoMinSacks !== undefined && (input.quotaPromoMinSacks < 1 || input.quotaPromoMinSacks > 1000)) {
+      return { ok: false, error: { type: "validation", errors: ["Quota promo: the number of sacks must be 1 to 1,000"] } };
+    }
+    if (input.quotaPromoOffMinor !== undefined && (input.quotaPromoOffMinor < 1 || input.quotaPromoOffMinor > 100_000)) {
+      return { ok: false, error: { type: "validation", errors: ["Quota promo: the amount off must be ₱0.01 to ₱1,000 per sack"] } };
+    }
+    if (input.quotaPromoCategoryIds !== undefined) {
+      const ids = input.quotaPromoCategoryIds;
+      if (!Array.isArray(ids) || ids.length > 50 || ids.some((x) => typeof x !== "string")) {
+        return { ok: false, error: { type: "validation", errors: ["Quota promo: choose the groups from the list"] } };
+      }
+      const found = ids.length ? await prisma.category.count({ where: { storeId, id: { in: ids } } }) : 0;
+      if (found !== new Set(ids).size) return { ok: false, error: { type: "validation", errors: ["Quota promo: a chosen group is not in this store"] } };
     }
 
     await prisma.storeSettings.upsert({
@@ -138,6 +161,10 @@ export class StoreSettingsService {
         ...(input.tin !== undefined ? { tin: input.tin } : {}),
         ...(input.dailySalesTargetMinor !== undefined ? { dailySalesTargetMinor: input.dailySalesTargetMinor } : {}),
         ...(input.hidePricePreOrder !== undefined ? { hidePricePreOrder: input.hidePricePreOrder } : {}),
+        ...(input.quotaPromoEnabled !== undefined ? { quotaPromoEnabled: input.quotaPromoEnabled } : {}),
+        ...(input.quotaPromoMinSacks !== undefined ? { quotaPromoMinSacks: input.quotaPromoMinSacks } : {}),
+        ...(input.quotaPromoOffMinor !== undefined ? { quotaPromoOffMinor: input.quotaPromoOffMinor } : {}),
+        ...(input.quotaPromoCategoryIds !== undefined ? { quotaPromoCategoryIds: [...new Set(input.quotaPromoCategoryIds)] } : {}),
         ...(input.seniorPwdDiscountEnabled !== undefined ? { seniorPwdDiscountEnabled: input.seniorPwdDiscountEnabled } : {}),
         ...(input.messengerConnected !== undefined ? { messengerConnected: input.messengerConnected } : {}),
         ...(input.messengerPageId !== undefined ? { messengerPageId: input.messengerPageId } : {}),
@@ -166,6 +193,10 @@ export class StoreSettingsService {
         showVatLabel: input.showVatLabel ?? true,
         dailySalesTargetMinor: input.dailySalesTargetMinor ?? 0,
         hidePricePreOrder: input.hidePricePreOrder ?? false,
+        quotaPromoEnabled: input.quotaPromoEnabled ?? false,
+        quotaPromoMinSacks: input.quotaPromoMinSacks ?? 10,
+        quotaPromoOffMinor: input.quotaPromoOffMinor ?? 2000,
+        quotaPromoCategoryIds: input.quotaPromoCategoryIds ? [...new Set(input.quotaPromoCategoryIds)] : [],
         seniorPwdDiscountEnabled: input.seniorPwdDiscountEnabled ?? false,
         messengerConnected: input.messengerConnected ?? false,
         messengerPageId: input.messengerPageId ?? null,

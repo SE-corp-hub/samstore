@@ -295,6 +295,12 @@ model StoreSettings {
   seniorPwdDiscountEnabled  Boolean        @default(false)
   dailySalesTargetMinor     Int            @default(0) // Overview: daily sales target (0 = off)
   hidePricePreOrder         Boolean        @default(false) // Hide per-product prices in Pre Orders screen
+  // Quota promo (2026-11-09): with at least quotaPromoMinSacks sacks of the chosen groups (categories) in
+  // one sale or pre-order, each of those sacks is quotaPromoOffMinor cheaper. The tablet applies it.
+  quotaPromoEnabled         Boolean        @default(false)
+  quotaPromoMinSacks        Int            @default(10)
+  quotaPromoOffMinor        Int            @default(2000)
+  quotaPromoCategoryIds     String[]       @default([])
   closedStoreMessage        String?
   // P3g: Website→Messenger bridge — the store's connection state. Sends stay
   // SUPPRESSED (portal status) until a live provider is operator-approved; the

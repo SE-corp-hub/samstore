@@ -816,6 +816,7 @@ export class AdminController {
       loyaltyPointsPerPeso?: number; loyaltyWelcomeBonusPoints?: number; loyaltyExpiryMonths?: number;
       orderNumberPrefix?: string | null;
       privacyRetentionDays?: number;
+      quotaPromoEnabled?: boolean; quotaPromoMinSacks?: number; quotaPromoOffMinor?: number; quotaPromoCategoryIds?: string[];
     },
     @Headers("x-store-id") headerStoreId?: string,
   ) {

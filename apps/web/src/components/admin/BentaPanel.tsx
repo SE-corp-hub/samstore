@@ -16,6 +16,7 @@ import { API_URL } from "../../config";
 import { adminHeaders, getAdminStoreId } from "../../lib/admin";
 import { toast } from "../../lib/toast";
 import { sendStep } from "../../lib/offlineQueue";
+import { PROMO_OFF, PROMO_REASON, promoFrom, promoPrices, promoSacks, type QuotaPromo } from "../../lib/quota-promo";
 import { cachedGet, offlineRef, savedCopy, savedThenFresh, useOffline } from "../../lib/offlineCache";
 
 /** Shown on a button that needs the internet while the tablet is offline. */
@@ -47,6 +48,8 @@ import { noteUse } from "../../lib/product-find";
 interface Loc { id: string; name: string; code: string | null; type: string }
 interface Item {
   id: string; name: string; photoKey?: string | null; loose: boolean; gramsPerUnit: number | null; priceMinor: number; forReview: boolean;
+  /** Products → group; the quota promo is for some groups only. */
+  categoryId?: string | null;
   stock: Record<string, number>; tracked: boolean;
   /** Unit cost here (per piece, or per kilo): selling under it loses money. Staff get it only to compare. */
   floorMinor?: number; ownShelfCost?: boolean;
@@ -148,6 +151,7 @@ export default function BentaPanel() {
   const [priceText, setPriceText] = useState(""); // what is typed on the price pad while a line is open
   const [fromOpen, setFromOpen] = useState(false);
   const [seesCost, setSeesCost] = useState(false);
+  const [promo, setPromo] = useState<QuotaPromo>(PROMO_OFF); // the owner's quota promo (Settings), saved with the price list
   const keptBelow = useRef(new Set<string>()); // below-cost prices someone chose to sell at anyway
 
   const catalogAsk = useRef(0); // only the latest location asked for may fill the screen
@@ -161,6 +165,7 @@ export default function BentaPanel() {
       setLocations((d.locations as Loc[]).filter((l) => (l as { type?: string }).type !== "BUFFER"));
       setItems(d.products as Item[]);
       setSeesCost(d.seesCost === true);
+      setPromo(promoFrom(d.quotaPromo as Parameters<typeof promoFrom>[0]));
       shown = (d.location as Loc).id;
       setLocationId(shown);
     };
@@ -249,7 +254,16 @@ export default function BentaPanel() {
   };
   const here = locations.find((l) => l.id === locationId);
   const code = (id: string) => { const l = locations.find((x) => x.id === id); return l?.code ?? l?.name ?? "?"; };
-  const computed = cart.map((l) => lineOf(byId.get(l.productId), l));
+  // Quota promo: enough sacks of the chosen groups in this sale and each of them is cheaper. It goes to
+  // the server as a price change with the reason "Quota promo"; a price someone typed is left alone.
+  const promoLines = cart.map((l) => {
+    const it = byId.get(l.productId);
+    return { categoryId: it?.categoryId, isSack: l.mode === "PIECE" && !!it?.gramsPerUnit && !it.loose, quantity: Number(l.value) || 0, listMinor: it?.priceMinor ?? 0, manualPrice: l.price !== undefined };
+  });
+  const promoAt = promoPrices(promoLines, promo);
+  const sacksForPromo = promoSacks(promoLines, promo);
+  const priced: CartLine[] = cart.map((l, i) => (promoAt[i] != null ? { ...l, price: promoAt[i]!, reason: PROMO_REASON } : l));
+  const computed = priced.map((l) => lineOf(byId.get(l.productId), l));
   const total = computed.reduce((s, c) => s + c.totalMinor, 0);
   const change = pay === "cash" && tendered ? toMinor(tendered) - total : 0;
   const customer = customers.find((c) => c.id === customerId);
@@ -284,7 +298,7 @@ export default function BentaPanel() {
     if (paper && staffSig && slipPhoto) signatures.push({ signerKind: "STAFF", imagePng: staffSig }, { signerKind: "SLIP_PHOTO", imagePng: slipPhoto });
     const body = {
       idempotencyKey: keyRef.current, locationId,
-      lines: cart.map((l) => ({
+      lines: priced.map((l) => ({
         productId: l.productId, sourceLocationId: l.sourceLocationId ?? undefined,
         ...(l.mode === "PIECE" ? { quantity: Number(l.value) } : l.mode === "KILO" ? { kilos: l.value } : { amountMinor: toMinor(l.value) }),
         ...(l.price !== undefined && l.price !== byId.get(l.productId)?.priceMinor ? { unitPriceMinorOverride: l.price, priceOverrideReason: l.reason?.trim() } : {}),
@@ -305,7 +319,7 @@ export default function BentaPanel() {
         // Offline: the sale is done at the counter — show it and print the receipt from this tablet.
         setLast({
           status: "COMPLETED", offline: true, smsStatus: null, orderNumber: offlineRef(keyRef.current), totalMinor: total, changeMinor: Math.max(0, change),
-          lines: cart.map((l) => {
+          lines: priced.map((l) => {
             const it = byId.get(l.productId);
             const c = lineOf(it, l);
             return { name: it?.name ?? "Item", soldBy: l.mode === "PIECE" ? "PIECE" : "WEIGHT", quantity: c.units, grams: c.grams, lineTotalMinor: c.totalMinor };
@@ -503,7 +517,7 @@ export default function BentaPanel() {
     }));
   };
   const goPay = async () => {
-    for (let i = 0; i < cart.length; i++) if (!(await passesCost(cart[i]!, i))) return;
+    for (let i = 0; i < priced.length; i++) if (!(await passesCost(priced[i]!, i))) return;
     if (!pay) setPay("cash");
     setStep("pay");
   };
@@ -518,7 +532,11 @@ export default function BentaPanel() {
   const cartCard = cart.length > 0 && (
     <div className={`sale-card fit-card${fit || wide ? "" : " position-sticky bottom-0 sticky-above-bar shadow"}${fit && !wide ? " fit-bottom" : ""}`}>
       <div className="card-body">
-        <div className="sale-card-title"><i className="bi bi-basket2-fill" aria-hidden="true"></i>This sale · {cartCount} {cartCount === 1 ? "item" : "items"}</div>
+        <div className="sale-card-title"><i className="bi bi-basket2-fill" aria-hidden="true"></i>This sale · {cartCount} {cartCount === 1 ? "item" : "items"}
+          {promo.on && sacksForPromo > 0 && (promoAt.some((x) => x != null)
+            ? <span className="badge text-bg-success ms-2">Promo −{peso(promo.offMinor)} each</span>
+            : <span className="text-muted fw-normal ms-2">· {promo.minSacks - sacksForPromo} more {promo.minSacks - sacksForPromo === 1 ? "sack" : "sacks"} for the promo</span>)}
+        </div>
         <ul className="list-unstyled mb-2 sale-lines" style={{ fontVariantNumeric: "tabular-nums", maxHeight: fit || wide ? undefined : "32vh" }}>
           {cart.map((l, idx) => {
             const it = byId.get(l.productId);
@@ -535,7 +553,8 @@ export default function BentaPanel() {
                   {l.mode === "PESO" && <span className="text-muted"> (₱{l.value})</span>}
                   {l.sourceLocationId && <span className="badge text-bg-info ms-1">from {code(l.sourceLocationId)}</span>}
                   {l.price !== undefined && <span className="badge text-bg-warning ms-1">new price</span>}
-                  {it && isBelowCost(l.price ?? it.priceMinor, it.floorMinor) && <span className="badge text-bg-danger ms-1">below cost</span>}
+                  {promoAt[idx] != null && <span className="badge text-bg-success ms-1">promo</span>}
+                  {it && isBelowCost(priced[idx]!.price ?? it.priceMinor, it.floorMinor) && <span className="badge text-bg-danger ms-1">below cost</span>}
                 </span>
                 {/* Beside the name, so sideways (narrow card) the row wraps as: name + Price, then − n + and the amount. */}
                 <button type="button" className="btn btn-outline-primary line-edit" aria-label={`Price of ${name}`} onClick={() => startEdit(l, idx)}>

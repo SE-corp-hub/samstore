@@ -133,7 +133,7 @@ async function soldLast30Days(storeId: string): Promise<Record<string, number>> 
 
 const productSelect = {
   id: true, name: true, sku: true, priceMinor: true, costMinor: true, isActive: true, reviewStatus: true,
-  stockBaseUnit: true, stockBaseQuantity: true, stockConversionFamily: true, soldByWeight: true, trackStock: true, photoKey: true,
+  stockBaseUnit: true, stockBaseQuantity: true, stockConversionFamily: true, soldByWeight: true, trackStock: true, photoKey: true, categoryId: true,
 } as const;
 type P = Prisma.ProductGetPayload<{ select: typeof productSelect }>;
 
@@ -215,7 +215,7 @@ export class BentaService {
   async catalog(storeId: string, actor: Actor, locationId: string | undefined) {
     return this.run(async () => {
       const wanted = locationId || actor.homeLocationId || null;
-      const [warehouses, products, prices, levels, sold, costMode] = await Promise.all([
+      const [warehouses, products, prices, levels, sold, costMode, promo] = await Promise.all([
         prisma.warehouse.findMany({ where: { storeId }, select: { id: true, name: true, code: true, type: true, isActive: true, isDefault: true, consignment: true }, orderBy: [{ isDefault: "desc" }, { name: "asc" }] }),
         prisma.product.findMany({ where: { storeId, isActive: true, reviewStatus: { not: "MERGED" } }, select: productSelect, orderBy: { name: "asc" } }),
         // The asked-for location's prices; with none asked, every location's (the default is picked below).
@@ -223,6 +223,7 @@ export class BentaService {
         prisma.stockLevel.findMany({ where: { storeId, warehouseId: { not: null } }, select: { productId: true, warehouseId: true, quantityOnHand: true, quantityReserved: true, costMinor: true } }),
         soldLast30Days(storeId),
         costModeOf(prisma, storeId),
+        prisma.storeSettings.findUnique({ where: { storeId }, select: { quotaPromoEnabled: true, quotaPromoMinSacks: true, quotaPromoOffMinor: true, quotaPromoCategoryIds: true } }),
       ]);
       // Same choice as location(): the one asked for, else the person's home, else the store default.
       const main = warehouses.find((w) => w.isDefault);
@@ -249,7 +250,7 @@ export class BentaService {
       }
       const items = products
         .map((p) => ({
-          id: p.id, name: p.name, sku: p.sku, photoKey: p.photoKey, loose: isLoose(p), gramsPerUnit: p.stockBaseUnit === "g" ? p.stockBaseQuantity : null,
+          id: p.id, name: p.name, sku: p.sku, photoKey: p.photoKey, categoryId: p.categoryId, loose: isLoose(p), gramsPerUnit: p.stockBaseUnit === "g" ? p.stockBaseQuantity : null,
           priceMinor: priceAt(p.priceMinor, priceBy.get(p.id)), mainPriceMinor: p.priceMinor, forReview: p.reviewStatus === "FOR_REVIEW",
           stock: stockBy.get(p.id) ?? {}, tracked: p.trackStock !== false && stockBy.has(p.id), sold30d: sold[p.id] ?? 0,
           floorMinor: effectiveCost(costMode, shelfCost.get(p.id), p.costMinor ?? 0),
@@ -258,7 +259,9 @@ export class BentaService {
         }))
         .sort((a, b) => b.sold30d - a.sold30d || a.name.localeCompare(b.name));
       const locations = warehouses.filter((w) => w.isActive).map((w) => ({ id: w.id, name: w.name, code: w.code, type: w.type }));
-      return { location: loc, locations, products: items, seesCost: seesCost(actor.role) };
+      // The quota promo travels with the price list, so the tablet applies it with no internet too.
+      const quotaPromo = promo ? { quotaPromoEnabled: promo.quotaPromoEnabled, quotaPromoMinSacks: promo.quotaPromoMinSacks, quotaPromoOffMinor: promo.quotaPromoOffMinor, quotaPromoCategoryIds: promo.quotaPromoCategoryIds } : null;
+      return { location: loc, locations, products: items, seesCost: seesCost(actor.role), quotaPromo };
     });
   }
 
