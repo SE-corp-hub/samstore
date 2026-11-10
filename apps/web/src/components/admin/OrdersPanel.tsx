@@ -58,6 +58,7 @@ const TABS: { id: string; label: string; status?: string[] }[] = [
 interface EditLine { productId: string; productName: string; quantity: number; unitPriceMinor: number }
 interface ProductOption { id: string; name: string; sku: string }
 
+const HUB_CHANNEL: Record<string, string> = { messenger: "Messenger chat", order_form: "Order form", comment: "Comment", live: "Live", agent: "Agent", counter: "Counter" };
 const toPesos = (m: number) => `₱${(m / 100).toFixed(2)}`;
 const dayRange = (d: Date) => ({ from: new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0).toISOString(), to: new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59).toISOString() });
 
@@ -1050,7 +1051,7 @@ export default function OrdersPanel() {
                                     {orderDetail.paymentMethod && (
                                       <><dt className="col-5">Method</dt><dd className="col-7">{orderDetail.paymentMethod === "credit" ? <><i className="bi bi-journal-text me-1 text-warning"></i>Utang (credit)</> : orderDetail.paymentMethod}</dd></>
                                     )}
-                                    {orderDetail.source && <><dt className="col-5">Source</dt><dd className="col-7">{orderDetail.source === "PRE_ORDER" ? "Pre-order" : orderDetail.source === "pos" ? "POS" : "Online"}</dd></>}
+                                    {orderDetail.source && <><dt className="col-5">Source</dt><dd className="col-7">{orderDetail.source === "PRE_ORDER" ? "Pre-order" : orderDetail.source === "pos" ? "POS" : orderDetail.source === "hub" ? [orderDetail.sourcePage, HUB_CHANNEL[orderDetail.sourceChannel ?? ""], orderDetail.externalRef && `hub ${orderDetail.externalRef}`].filter(Boolean).join(" · ") || "SE Corp Hub" : "Online"}</dd></>}
                                                                         {(orderDetail.deliveryType ?? "delivery") === "delivery" ? (
                                                                           <><dt className="col-5">Fulfillment</dt><dd className="col-7"><i className="bi bi-truck me-1"></i>Delivery</dd></>
                                                                         ) : (
