@@ -51,6 +51,19 @@ export interface CreditGateway {
   record(orderId: string, storeId: string, storeCustomerId: string, amountMinor: number): Promise<void>;
 }
 
+/**
+ * What a trusted caller (the hub door, behind its shared secret) may set that a shopper never can:
+ * where the order was taken, a discount already agreed with the customer, and the delivery fee.
+ */
+export interface TrustedOrderExtras {
+  source: string;
+  sourceChannel?: string | null;
+  sourcePage?: string | null;
+  externalRef?: string | null;
+  discountMinor?: number;
+  deliveryFeeMinor?: number;
+}
+
 /** DI token — explicit, so dependency resolution doesn't rely on emitDecoratorMetadata. */
 export const CHECKOUT_SERVICE = Symbol("CHECKOUT_SERVICE");
 
@@ -69,7 +82,7 @@ export class CheckoutService {
     private readonly credit?: CreditGateway,
   ) {}
 
-  async checkout(request: CheckoutRequest): Promise<CheckoutResult> {
+  async checkout(request: CheckoutRequest, trusted?: TrustedOrderExtras): Promise<CheckoutResult> {
     // 1. Server-side validation (never trust the client)
     const validation = validateCheckoutInput(request);
     if (!validation.ok) {
@@ -175,7 +188,7 @@ export class CheckoutService {
 
     // 5b. Delivery type (U5): pickup = no fee + no address required.
     const deliveryType = request.deliveryType ?? "delivery";
-    const deliveryFee = deliveryType === "pickup" ? 0 : store.deliveryFeeMinor;
+    const deliveryFee = deliveryType === "pickup" ? 0 : (trusted?.deliveryFeeMinor ?? store.deliveryFeeMinor);
 
     // 6. Server-authoritative totals
     let totals;
@@ -221,6 +234,10 @@ export class CheckoutService {
       loyaltyPoints = request.loyaltyPoints;
       discountMinor += redeemResult.discountMinor;
     }
+    // 6c2. A trusted caller's agreed discount comes off last, never below zero.
+    if (trusted?.discountMinor) {
+      discountMinor += Math.min(trusted.discountMinor, totals.totalMinor - discountMinor);
+    }
     const finalTotal = totals.totalMinor - discountMinor;
 
     // 6d. Payment method: credit requires an approved customer within limit.
@@ -264,6 +281,14 @@ export class CheckoutService {
       orderNumber,
       storeId: store.id,
       status: "RECEIVED",
+      ...(trusted
+        ? {
+            source: trusted.source,
+            sourceChannel: trusted.sourceChannel ?? null,
+            sourcePage: trusted.sourcePage ?? null,
+            externalRef: trusted.externalRef ?? null,
+          }
+        : {}),
       currencyCode: store.currencyCode,
       deliveryType,
       subtotalMinor: totals.subtotalMinor,

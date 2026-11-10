@@ -1,6 +1,8 @@
 import { Module } from "@nestjs/common";
 import { CHECKOUT_SERVICE, CheckoutService } from "./checkout/checkout.service.js";
 import { CheckoutController } from "./checkout/checkout.controller.js";
+import { HubOrdersController } from "./integrations/hub-orders.controller.js";
+import { HUB_ORDER_SERVICE, HubOrderService } from "./integrations/hub-orders.service.js";
 import { PublicStoreController } from "./public/public-store.controller.js";
 import { PublicStoreService } from "./public/public-store.service.js";
 import { CartController } from "./cart/cart.controller.js";
@@ -51,7 +53,7 @@ import {
 const CLAIM_SECRET = process.env.CLAIM_SIGNING_SECRET ?? "dev-only-in-memory-secret-0123456789";
 
 @Module({
-  controllers: [CheckoutController, PublicStoreController, CartController, AuthController, AdminController, OrderLookupController, CustomerAuthController, PosController, PaymentsController, CreditController, ExpensesController, PurchasesController, InventoryController, ReportsController, DeliveryController, HealthController, RegisterController],
+  controllers: [CheckoutController, HubOrdersController, PublicStoreController, CartController, AuthController, AdminController, OrderLookupController, CustomerAuthController, PosController, PaymentsController, CreditController, ExpensesController, PurchasesController, InventoryController, ReportsController, DeliveryController, HealthController, RegisterController],
   providers: [
     {
       provide: DELIVERY_SERVICE,
@@ -188,6 +190,13 @@ const CLAIM_SECRET = process.env.CLAIM_SIGNING_SECRET ?? "dev-only-in-memory-sec
           },
         );
       },
+    },
+    {
+      // The hub door reuses the checkout path, so a hub order reserves stock and numbers itself like any other.
+      provide: HUB_ORDER_SERVICE,
+      inject: [CHECKOUT_SERVICE],
+      useFactory: (checkout: CheckoutService) =>
+        new HubOrderService(new PrismaStoreRepository(), new PrismaCatalogRepository(), new PrismaCartRepository(), checkout),
     },
   ],
   exports: [CHECKOUT_SERVICE, "MESSENGER_SERVICE"],
