@@ -83,6 +83,10 @@ export interface AdminOrder {
   createdAt: string;
   paymentStatus?: string;
   source?: string;
+  /** Orders from SE Corp Hub: the channel, the selling page and the hub's own reference. */
+  sourceChannel?: string | null;
+  sourcePage?: string | null;
+  externalRef?: string | null;
   deliveryType?: string;
   paymentMethod?: string;
   signatureData?: string;

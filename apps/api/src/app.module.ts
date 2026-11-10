@@ -2,6 +2,8 @@ import { Module } from "@nestjs/common";
 import { claimSecret, jwtSecret } from "./security/secrets.js";
 import { CHECKOUT_SERVICE, CheckoutService } from "./checkout/checkout.service.js";
 import { CheckoutController } from "./checkout/checkout.controller.js";
+import { HubOrdersController } from "./integrations/hub-orders.controller.js";
+import { HUB_ORDER_SERVICE, HubOrderService } from "./integrations/hub-orders.service.js";
 import { PublicStoreController } from "./public/public-store.controller.js";
 import { PublicStoreService } from "./public/public-store.service.js";
 import { CartController } from "./cart/cart.controller.js";
@@ -76,7 +78,7 @@ import {
 const CLAIM_SECRET = claimSecret(); // M11: no committed fallback (see security/secrets.ts)
 
 @Module({
-    controllers: [CheckoutController, PublicStoreController, CartController, AuthController, AdminController, PeopleController, TransferFlowController, ResackController, BentaController, UtangController, AgentOrderController, CountController, RiceReportsController, PayableController, PurchaseOrderController, OrderLookupController, CustomerAuthController, PosController, PaymentsController, PaymentsWebhookController, DeliveryZonesAdminController, DeliveryBookingsAdminController, MessengerConnectionAdminController, ChatbotAdminController, ChatAgentAdminController, CrmAdminController, ErpAdminController, BirAdminController, SecurityIncidentAdminController, CreditController, ExpensesController, PurchasesController, InventoryController, ReportsController, DeliveryController, HealthController, RegisterController, RolePermissionsController, AddressController],
+    controllers: [CheckoutController, HubOrdersController, PublicStoreController, CartController, AuthController, AdminController, PeopleController, TransferFlowController, ResackController, BentaController, UtangController, AgentOrderController, CountController, RiceReportsController, PayableController, PurchaseOrderController, OrderLookupController, CustomerAuthController, PosController, PaymentsController, PaymentsWebhookController, DeliveryZonesAdminController, DeliveryBookingsAdminController, MessengerConnectionAdminController, ChatbotAdminController, ChatAgentAdminController, CrmAdminController, ErpAdminController, BirAdminController, SecurityIncidentAdminController, CreditController, ExpensesController, PurchasesController, InventoryController, ReportsController, DeliveryController, HealthController, RegisterController, RolePermissionsController, AddressController],
   providers: [
     {
       provide: DELIVERY_SERVICE,
@@ -227,6 +229,13 @@ const CLAIM_SECRET = claimSecret(); // M11: no committed fallback (see security/
           address, // AddressGateway — PH hierarchy validate + snapshot (P1)
         );
       },
+    },
+    {
+      // The hub door reuses the checkout path, so a hub order reserves stock and numbers itself like any other.
+      provide: HUB_ORDER_SERVICE,
+      inject: [CHECKOUT_SERVICE],
+      useFactory: (checkout: CheckoutService) =>
+        new HubOrderService(new PrismaStoreRepository(), new PrismaCatalogRepository(), new PrismaCartRepository(), checkout),
     },
   ],
   exports: [CHECKOUT_SERVICE, "MESSENGER_SERVICE"],

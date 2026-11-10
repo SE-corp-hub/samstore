@@ -1,0 +1,120 @@
+// The hub door: SE Corp Hub takes an order on a Facebook Page (chat, order form, comment, Live) and hands it
+// here, so it lands in this store's Orders like any other. Framework-free, like CheckoutService, which does the
+// real work: the door only finds the store and its items, builds the cart, and says where the order came from.
+// Prices are this store's own; the hub may pass a discount and a delivery fee it already agreed with the customer.
+
+import { createHash, timingSafeEqual } from "node:crypto";
+import type { ApiError, CheckoutResponse } from "@sam-store/contracts";
+import type { CheckoutService } from "../checkout/checkout.service.js";
+import type { CartRepository, CatalogRepository, StoreRepository } from "../persistence/repositories.js";
+import { randomId } from "../persistence/repositories.js";
+
+export const HUB_CHANNELS = ["messenger", "order_form", "comment", "live", "agent", "counter"] as const;
+
+export interface HubOrderRequest {
+  storeSlug: string;
+  /** The hub's own key for this order: the same key again returns the same order. */
+  idempotencyKey: string;
+  /** The hub's order reference, shown to staff, e.g. "#1001". */
+  externalRef?: string;
+  channel: (typeof HUB_CHANNELS)[number];
+  /** The selling page's name, e.g. "Samrice". */
+  pageName: string;
+  customerName: string;
+  customerPhone: string;
+  deliveryType?: "delivery" | "pickup";
+  address?: string;
+  landmark?: string;
+  notes?: string;
+  /** Each item by SKU, or by its exact name (case does not matter). */
+  items: { sku?: string; name?: string; quantity: number }[];
+  discountMinor?: number;
+  deliveryFeeMinor?: number;
+}
+
+export type HubOrderResult = { ok: true; value: CheckoutResponse } | { ok: false; error: ApiError };
+
+/** True only for the configured secret, compared in constant time. An unset or short secret keeps the door shut. */
+export function hubSecretOk(given: string | undefined, expected: string | undefined): boolean {
+  if (!given || !expected || expected.length < 32) return false;
+  const a = createHash("sha256").update(given).digest();
+  const b = createHash("sha256").update(expected).digest();
+  return timingSafeEqual(a, b);
+}
+
+const norm = (s: string) => s.trim().toLowerCase().replace(/\s+/g, " ");
+
+export const HUB_ORDER_SERVICE = Symbol("HUB_ORDER_SERVICE");
+
+export class HubOrderService {
+  constructor(
+    private readonly stores: StoreRepository,
+    private readonly catalog: CatalogRepository,
+    private readonly carts: CartRepository,
+    private readonly checkout: CheckoutService,
+  ) {}
+
+  async place(req: HubOrderRequest): Promise<HubOrderResult> {
+    const store = await this.stores.findBySlug(req.storeSlug);
+    if (!store) return { ok: false, error: { type: "not_found", message: "Store not found" } };
+
+    // Only this store's active items can match, so another store's SKU is simply unknown here.
+    const products = await this.catalog.listActiveProducts(store.id);
+    const lines: { productId: string; quantity: number; unitPriceMinor: number }[] = [];
+    const unknown: string[] = [];
+    for (const item of req.items) {
+      const p = products.find(
+        (x) => (item.sku && norm(x.sku) === norm(item.sku)) || (item.name && norm(x.name) === norm(item.name)),
+      );
+      if (!p) unknown.push(item.name ?? item.sku ?? "?");
+      else {
+        const same = lines.find((l) => l.productId === p.id);
+        if (same) same.quantity += item.quantity;
+        else lines.push({ productId: p.id, quantity: item.quantity, unitPriceMinor: p.priceMinor });
+      }
+    }
+    if (unknown.length > 0) {
+      return {
+        ok: false,
+        error: { type: "validation", errors: unknown.map((n) => `"${n}" is not an active item in this store`) },
+      };
+    }
+
+    // The cart's token comes from the key, so a retry finds the same cart and checkout returns the same order.
+    const cartToken = `hub-${createHash("sha256").update(`${store.id}:${req.idempotencyKey}`).digest("hex")}`;
+    // Lines are added one by one (that is how the database cart saves them), and only the ones not there yet,
+    // so a retry after a half-built cart finishes it instead of doubling it.
+    const cart =
+      (await this.carts.findByToken(cartToken)) ??
+      (await this.carts.create({ id: randomId(), storeId: store.id, token: cartToken, status: "OPEN", lines: [] }));
+    if (cart.status === "OPEN") {
+      for (const l of lines) {
+        if (!cart.lines.some((x) => x.productId === l.productId)) {
+          await this.carts.addItem(cart.id, store.id, l.productId, l.quantity, l.unitPriceMinor);
+        }
+      }
+    }
+
+    const pickup = req.deliveryType === "pickup";
+    return this.checkout.checkout(
+      {
+        cartToken,
+        idempotencyKey: `hub:${store.id}:${req.idempotencyKey}`.slice(0, 128),
+        customerName: req.customerName,
+        customerPhone: req.customerPhone,
+        deliveryType: pickup ? "pickup" : "delivery",
+        ...(req.address ? { deliveryAddressLine1: req.address } : {}),
+        ...(req.landmark ? { landmark: req.landmark } : {}),
+        ...(req.notes ? { notes: req.notes } : {}),
+      },
+      {
+        source: "hub",
+        sourceChannel: req.channel,
+        sourcePage: req.pageName,
+        externalRef: req.externalRef ?? null,
+        ...(req.discountMinor ? { discountMinor: req.discountMinor } : {}),
+        ...(req.deliveryFeeMinor !== undefined ? { deliveryFeeMinor: req.deliveryFeeMinor } : {}),
+      },
+    );
+  }
+}
