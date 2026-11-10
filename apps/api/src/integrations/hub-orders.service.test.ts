@@ -148,3 +148,16 @@ test("the door stays shut without the secret, with a wrong one, or when none is 
   assert.equal(hubSecretOk("", ""), false);
   assert.equal(hubSecretOk("short", "short"), false); // a weak secret is treated as not set
 });
+
+test("the product list for the hub: this store's items only, with what can still be sold", async () => {
+  const { svc } = build();
+  const list = await svc.products("sam-store");
+  assert.deepEqual(
+    list?.map((p) => [p.name, p.priceMinor, p.available]).sort(),
+    [
+      ["Samrice Dinorado 25kg", 150000, 100],
+      ["Samrice Jasmine 25kg", 140000, 100],
+    ].sort(),
+  );
+  assert.equal(await svc.products("no-such-store"), null);
+});

@@ -54,6 +54,19 @@ export class HubOrderService {
     private readonly checkout: CheckoutService,
   ) {}
 
+  /** The store's active items with what can still be sold, for the hub to copy: Sam Store owns names and prices. */
+  async products(storeSlug: string): Promise<{ sku: string; name: string; category: string | null; priceMinor: number; available: number }[] | null> {
+    const store = await this.stores.findBySlug(storeSlug);
+    if (!store) return null;
+    return (await this.catalog.listActiveProducts(store.id)).map((p) => ({
+      sku: p.sku,
+      name: p.name,
+      category: p.categoryName,
+      priceMinor: p.priceMinor,
+      available: Math.max(0, p.quantityOnHand - p.quantityReserved),
+    }));
+  }
+
   async place(req: HubOrderRequest): Promise<HubOrderResult> {
     const store = await this.stores.findBySlug(req.storeSlug);
     if (!store) return { ok: false, error: { type: "not_found", message: "Store not found" } };
