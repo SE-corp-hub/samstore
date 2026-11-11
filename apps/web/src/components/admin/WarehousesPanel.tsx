@@ -231,7 +231,7 @@ export default function WarehousesPanel() {
               <div className="row g-2">
                 <div className="col-8">
                   <label className="form-label small mb-1" htmlFor="loc-name">Name</label>
-                  <input id="loc-name" className="form-control form-control-sm" placeholder="e.g. Store 2" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required minLength={2} maxLength={60} />
+                  <input id="loc-name" className="form-control form-control-sm" placeholder="e.g. Lipa" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required minLength={2} maxLength={60} />
                 </div>
                 <div className="col-4">
                   <label className="form-label small mb-1" htmlFor="loc-code">Code</label>

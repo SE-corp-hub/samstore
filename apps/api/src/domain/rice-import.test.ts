@@ -42,6 +42,20 @@ test("M12 import: products — sack weight, per-location prices, and every bad r
   assert.deepEqual(parseProducts("sku,name\nA,B", CODES).errors[0]?.message, "Missing column(s): sold_as, price");
 });
 
+test("M12 import: products — an optional category column groups the products", () => {
+  const csv = [
+    "sku,name,variety,sold_as,kg_per_sack,cost,price,category",
+    "RIZ-25,Riz Dinorado 25kg,Riz Dinorado,SACK,25,1250,1300,  Dinorado ",
+    "ALS-25,Alsa 25kg,Alsa,SACK,25,1150,1200,",
+    "BAD-25,Bad 25kg,,SACK,25,1,2,!!",
+  ].join("\n");
+  const p = parseProducts(csv, CODES);
+  assert.equal(p.rows[0]!.category, "Dinorado");
+  assert.equal(p.rows[1]!.category, null, "blank = keep the product's category");
+  assert.ok(p.errors.some((e) => e.row === 4 && e.message.startsWith("category")), JSON.stringify(p.errors));
+  assert.equal(parseProducts("sku,name,sold_as,price\nA-1,Ab,PIECE,5", CODES).rows[0]!.category, null, "files without the column still work");
+});
+
 test("M12 import: customers — mobile numbers, current utang needs a start date, no duplicates", () => {
   const csv = [
     "name,phone,limit,utang,utang_since,note",

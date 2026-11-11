@@ -73,19 +73,21 @@ export async function reservationLegsForOrder(
   storeId: string,
   orderId: string,
 ): Promise<ReservationLeg[]> {
+  // An order edited in Orders gives back what it held (RELEASE_RESERVATION) and holds its new lines (RESERVE),
+  // so what it still holds is RESERVE minus RELEASE_RESERVATION, per stock row.
   const moves = await tx.stockMovement.findMany({
-    where: { storeId, orderId, type: "RESERVE" },
-    select: { productId: true, variantId: true, warehouseId: true, delta: true },
+    where: { storeId, orderId, type: { in: ["RESERVE", "RELEASE_RESERVATION"] } },
+    select: { productId: true, variantId: true, warehouseId: true, delta: true, type: true },
   });
   const byRow = new Map<string, ReservationLeg>();
   for (const m of moves) {
     if (!m.productId || m.delta <= 0) continue;
     const key = `${m.productId}|${m.variantId ?? ""}|${m.warehouseId ?? ""}`;
     const leg = byRow.get(key) ?? { productId: m.productId, variantId: m.variantId, warehouseId: m.warehouseId, quantity: 0 };
-    leg.quantity += m.delta;
+    leg.quantity += m.type === "RESERVE" ? m.delta : -m.delta;
     byRow.set(key, leg);
   }
-  return [...byRow.values()];
+  return [...byRow.values()].filter((l) => l.quantity > 0);
 }
 
 /** True while an order still holds stock it reserved (online checkout, not yet settled). */
@@ -141,7 +143,7 @@ async function consumeLeg(tx: MovementTx, order: { id: string; storeId: string }
   });
 }
 
-async function releaseLeg(tx: MovementTx, order: { id: string; storeId: string }, leg: ReservationLeg): Promise<void> {
+async function releaseLeg(tx: MovementTx, order: { id: string; storeId: string }, leg: ReservationLeg, note = "online order cancelled — reservation released", createdBy = SETTLEMENT_ACTOR): Promise<void> {
   if (leg.variantId) {
     const changed = await tx.productVariant.updateMany({
       where: { id: leg.variantId, storeId: order.storeId, quantityReserved: { gte: leg.quantity } },
@@ -156,8 +158,8 @@ async function releaseLeg(tx: MovementTx, order: { id: string; storeId: string }
       delta: leg.quantity,
       type: "RELEASE_RESERVATION",
       orderId: order.id,
-      createdBy: SETTLEMENT_ACTOR,
-      note: "online order cancelled — reservation released",
+      createdBy,
+      note,
       balanceAfter: fresh?.quantityReserved ?? null,
     });
     return;
@@ -177,8 +179,8 @@ async function releaseLeg(tx: MovementTx, order: { id: string; storeId: string }
     delta: leg.quantity,
     type: "RELEASE_RESERVATION",
     orderId: order.id,
-    createdBy: SETTLEMENT_ACTOR,
-    note: "online order cancelled — reservation released",
+    createdBy,
+    note,
     balanceAfter: fresh?.quantityReserved ?? null,
   });
 }
@@ -197,7 +199,11 @@ export async function settleOrderReservations(
   disposition: StockDisposition,
 ): Promise<SettlementResult> {
   const legs = await reservationLegsForOrder(tx, order.storeId, order.id);
-  if (legs.length === 0) return { outcome: "no-reservation", lines: 0, quantity: 0 };
+  if (legs.length === 0) {
+    // A released reservation nets to nothing; it was still settled once, so say so.
+    const done = await tx.order.findFirst({ where: { id: order.id, storeId: order.storeId, stockDisposition: { not: null } }, select: { id: true } });
+    return { outcome: done ? "already-settled" : "no-reservation", lines: 0, quantity: 0 };
+  }
 
   // Guarded claim: the first caller wins, everyone else is a no-op. Concurrent
   // callers serialise on this row lock instead of double-settling.
@@ -227,4 +233,63 @@ export async function settleForStatus(
   const disposition = dispositionForOrderStatus(toStatus);
   if (!disposition) return { outcome: "no-reservation", lines: 0, quantity: 0 };
   return settleOrderReservations(tx, order, disposition);
+}
+
+/**
+ * Order edit (Orders → Change items) on an order that still HOLDS stock (online / SE Corp Hub checkout):
+ * give back everything it holds, then hold the new lines, in the caller's transaction. The units never
+ * moved, so only `quantityReserved` changes, and the ledger shows both legs against the order.
+ * Throws InsufficientStockError when a new line cannot be held, so the whole edit rolls back.
+ */
+export async function moveOrderReservation(
+  tx: MovementTx,
+  order: { id: string; storeId: string },
+  lines: { productId: string; quantity: number }[],
+  actorId: string,
+): Promise<void> {
+  const old = await reservationLegsForOrder(tx, order.storeId, order.id);
+  for (const leg of old) await releaseLeg(tx, order, leg, "order edited — old lines given back", actorId);
+  // Hold the new lines where the order held them before when it can (same location), else anywhere with stock.
+  const tracked = await tx.product.findMany({
+    where: { storeId: order.storeId, id: { in: lines.map((l) => l.productId) }, trackStock: true },
+    select: { id: true },
+  });
+  const isTracked = new Set(tracked.map((p) => p.id));
+  for (const line of lines) {
+    if (line.quantity <= 0 || !isTracked.has(line.productId)) continue; // Track stock off — nothing is held
+    const levels = await tx.stockLevel.findMany({ where: { storeId: order.storeId, productId: line.productId } });
+    if (levels.length === 0) continue;
+    const before = old.find((l) => l.productId === line.productId && !l.variantId)?.warehouseId;
+    levels.sort((a, b) => rank(a.warehouseId, before) - rank(b.warehouseId, before));
+    let remaining = line.quantity;
+    for (const lvl of levels) {
+      if (remaining <= 0) break;
+      const rows = await tx.$executeRawUnsafe(
+        'UPDATE "StockLevel" SET "quantityReserved" = "quantityReserved" + $2 WHERE "id" = $1 AND ("quantityOnHand" - "quantityReserved") >= $2',
+        lvl.id,
+        remaining,
+      );
+      if (rows !== 1) continue;
+      const fresh = await tx.stockLevel.findUnique({ where: { id: lvl.id }, select: { quantityReserved: true } });
+      await recordMovement(tx, {
+        storeId: order.storeId,
+        productId: line.productId,
+        warehouseId: lvl.warehouseId,
+        delta: remaining,
+        type: "RESERVE",
+        orderId: order.id,
+        createdBy: actorId,
+        note: "order edited — new lines held",
+        balanceAfter: fresh?.quantityReserved ?? null,
+      });
+      remaining = 0;
+    }
+    if (remaining > 0) throw new InsufficientStockError(line.productId, remaining);
+  }
+}
+
+/** Where to hold first: the location the order used before, then any location, then the location-less row. */
+function rank(warehouseId: string | null, before: string | null | undefined): number {
+  if (before && warehouseId === before) return 0;
+  return warehouseId ? 1 : 2;
 }

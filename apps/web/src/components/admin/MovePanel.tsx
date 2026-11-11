@@ -13,11 +13,16 @@ import { QUEUE_EVENT, queuedSteps, sendStep } from "../../lib/offlineQueue";
 import { offlineRef } from "../../lib/offlineCache";
 import { printSlip, type Slip } from "../../lib/slip-print";
 import StoreBar from "./StoreBar";
+import { peso } from "../../lib/number-format";
 
 interface Place { id: string; name: string; code: string | null; isActive: boolean }
 interface ProductOption { id: string; name: string }
-interface MoveRow { id: string; docNumber: string | null; productName: string; quantity: number; from: string; to: string; note: string | null; at: string }
-type Body = { message?: string; errors?: string[]; docNumber?: string };
+interface MoveRow { id: string; docNumber: string | null; productName: string; quantity: number; from: string; to: string; note: string | null; at: string; profitShareMinor?: number | null }
+type Body = { message?: string; errors?: string[]; docNumber?: string; profitShareMinor?: number };
+
+/** Owner/manager only (the server leaves it out for staff): the profit share this move booked for the store it came from. */
+const shareLines = (share: number | null | undefined, from: string, to: string) =>
+  !share ? [] : share > 0 ? [{ label: `Profit share ${to} owes ${from}`, value: peso(share) }] : [{ label: `Profit share taken back (rice back at ${to})`, value: peso(-share) }];
 type Range = "today" | "yesterday" | "week" | "custom";
 
 // Moves made while the server could not be reached wait on this tablet; each keeps its receipt (the queue "view") to reprint.
@@ -61,9 +66,9 @@ export default function MovePanel() {
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
   const [loading, setLoading] = useState(false);
-  const slip = (m: { docNumber: string | null; at: Date | string; from: string; to: string; productName: string; quantity: number; note?: string | null }): Slip => ({
+  const slip = (m: { docNumber: string | null; at: Date | string; from: string; to: string; productName: string; quantity: number; note?: string | null; profitShareMinor?: number | null }): Slip => ({
     storeName: storeName || "SAM STORE", title: "MOVE STOCK RECEIPT", reference: m.docNumber, when: new Date(m.at).toLocaleString("en-PH"),
-    lines: [{ label: "From", value: m.from }, { label: "To", value: m.to }, ...(m.note && m.note !== "Moved" ? [{ label: "Note", value: m.note }] : [])],
+    lines: [{ label: "From", value: m.from }, { label: "To", value: m.to }, ...shareLines(m.profitShareMinor, m.from, m.to), ...(m.note && m.note !== "Moved" ? [{ label: "Note", value: m.note }] : [])],
     rows: [{ name: m.productName, qty: String(m.quantity) }],
     signatures: [{ role: "Moved by", name: "" }, { role: "Received by", name: "" }], widthMm: 58,
   });
@@ -126,7 +131,7 @@ export default function MovePanel() {
     const d = r.data as Body | null;
     if (!r.ok) { setError(d?.errors?.join(", ") ?? d?.message ?? "The move did not go through"); return; }
     toast(`Moved ${n} — ${d?.docNumber ?? "done"}`);
-    setReceipt({ ...made, reference: d?.docNumber ?? null });
+    setReceipt({ ...made, reference: d?.docNumber ?? null, lines: [{ label: "From", value: fromName ?? "" }, { label: "To", value: toName ?? "" }, ...shareLines(d?.profitShareMinor, fromName ?? "", toName ?? ""), ...(made.lines ?? []).filter((l) => l.label === "Note")] });
     setQty("1"); setNote(""); setProductId("");
     void loadRows().catch(() => {});
   };
@@ -140,7 +145,7 @@ export default function MovePanel() {
         <div className="small text-muted mb-1">Taking from</div>
         <div className="d-flex flex-wrap gap-2">
           {places.filter((p) => p.id !== to).map((p) => (
-            <button key={p.id} type="button" className={`btn btn-lg ${p.id === from ? "btn-primary" : "btn-outline-primary"}`} onClick={() => setFrom(p.id)}>{p.name}</button>
+            <button key={p.id} type="button" className={`btn btn-lg ${p.id === from ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setFrom(p.id)}>{p.name}</button>
           ))}
         </div>
       </div>
@@ -200,6 +205,7 @@ export default function MovePanel() {
             <li key={m.id} className="list-group-item small d-flex align-items-center gap-2">
               <div className="me-auto">
                 <b>{m.quantity} × {m.productName}</b> · {m.from} → {m.to}
+                {!!m.profitShareMinor && <div className="text-info-emphasis">{m.profitShareMinor > 0 ? `Profit share ${m.to} owes ${m.from}: ${peso(m.profitShareMinor)}` : `Profit share taken back: ${peso(-m.profitShareMinor)}`}</div>}
                 <div className="text-muted">{m.docNumber} · {new Date(m.at).toLocaleString("en-PH")}{m.note && m.note !== "Moved" ? ` · ${m.note}` : ""}</div>
               </div>
               <button type="button" className="btn btn-outline-dark text-nowrap" aria-label={`Receipt ${m.docNumber ?? ""}`.trim()} onClick={() => printSlip(slip(m))}><i className="bi bi-receipt me-1" aria-hidden="true"></i>Receipt</button>

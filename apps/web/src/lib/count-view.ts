@@ -177,3 +177,8 @@ export function overviewRows<T extends OverviewItem>(items: T[], query: string, 
   const kept = items.filter((i) => words.every((w) => norm(`${i.name} ${i.variety}`).includes(w)));
   return kept.sort((a, b) => (byAge ? oldestCount(a) - oldestCount(b) : 0) || a.name.localeCompare(b.name));
 }
+
+/** The note that marks a "Close the store" count (the server matches it). */
+export const CLOSE_STORE_NOTE = "Close the store";
+/** Set by the Home reminder: open Count at this store and start (or continue) closing it. */
+export const CLOSE_STORE_KEY = "sam.closeStore";

@@ -22,6 +22,7 @@ after(async () => {
     await prisma.storeCustomer.deleteMany({ where });
     await prisma.locationPrice.deleteMany({ where });
     await prisma.product.deleteMany({ where });
+    await prisma.category.deleteMany({ where });
     await prisma.kargador.deleteMany({ where });
     const members = await prisma.userStore.findMany({ where, select: { userId: true } });
     userIds.push(...members.map((m) => m.userId));
@@ -126,6 +127,26 @@ test("M12: a bad row anywhere means nothing is written; a good import lands ever
   const sheet = await svc.signoff(fx.storeId, "2026-10-15 09:00");
   assert.equal(sheet.customers.find((c) => c.utangMinor > 0)?.utangSince, "2026-09-01");
   assert.equal(sheet.products.length, 2);
+});
+
+test("M12: a category column groups products; the same name is one category; blank leaves it", async () => {
+  const fx = await fixture();
+  const svc = new RiceImportService();
+  const sku = `${run}-CAT`.toUpperCase();
+  const csv = (a: string, b: string) => `sku,name,sold_as,kg_per_sack,price,category\n${sku}-1,Riz Dinorado ${run},SACK,25,1300,${a}\n${sku}-2,Crystal Dinorado ${run},SACK,5,275,${b}\n`;
+  const first = await svc.apply(fx.storeId, fx.ownerId, { products: csv("Dinorado", "dinorado") }, "2026-10-15");
+  assert.equal(first.ok, true, JSON.stringify(first.plan.errors));
+  const cats = await prisma.category.findMany({ where: { storeId: fx.storeId } });
+  assert.deepEqual(cats.map((c) => c.name), ["Dinorado"], "one category for both spellings");
+  const prods = await prisma.product.findMany({ where: { storeId: fx.storeId }, select: { categoryId: true } });
+  assert.ok(prods.every((p) => p.categoryId === cats[0]!.id));
+  const again = await svc.plan(fx.storeId, { products: csv("Dinorado", "Dinorado") }, "2026-10-15");
+  assert.equal(again.products.same, 2, "same category = nothing to change");
+  const blank = await svc.apply(fx.storeId, fx.ownerId, { products: csv("", "") }, "2026-10-15");
+  assert.equal(blank.plan.products.same, 2, "a blank category is not a change");
+  assert.equal(await prisma.product.count({ where: { storeId: fx.storeId, categoryId: cats[0]!.id } }), 2, "blank keeps the category");
+  const moved = await svc.plan(fx.storeId, { products: csv("Dinorado", "Other rice") }, "2026-10-15");
+  assert.equal(moved.products.update, 1);
 });
 
 test("M12: the import never reaches another store; a sold-as change or the owner in staff.csv is refused", async () => {

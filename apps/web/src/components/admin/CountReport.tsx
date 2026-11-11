@@ -2,7 +2,7 @@
 
 // Rice Ops — one posted count explained in plain words: what is short or over and why, what happened to each
 // item since the last count, the weight of each kind of rice (sacks and loose together), the resack jobs
-// around it, and (owner) what the consignment store was charged. Staff see the pesos too.
+// around it, (owner) what the consignment store was charged, and (owner/manager) "missing = sold to walk-ins". Staff see the pesos too.
 
 import { useEffect, useState } from "react";
 import { API_URL } from "../../config";
@@ -10,6 +10,7 @@ import { adminHeaders } from "../../lib/admin";
 import { differenceText, downloadCsv, formatKg, pesoText, sinceText, titleCase } from "../../lib/count-view";
 import { getPrinterSettings } from "../../lib/printer-settings";
 import { printSlip } from "../../lib/slip-print";
+import CountWalkIn, { type WalkInInfo } from "./CountWalkIn";
 
 type ApiBody = { message?: string; errors?: string[] } & Record<string, unknown>;
 const unit = (loose: boolean, n: number) => (loose ? formatKg(n / 1000) : `${n}`);
@@ -18,7 +19,7 @@ const day = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString("en-
 interface Since { from: { docNumber: string; countedQty: number; countedAt: string } | null; buckets: Record<string, number>; ledgerShouldBe: number }
 interface RLine {
   productId: string; name: string; loose: boolean; countedQty: number; expectedQty: number; firstCountedQty: number | null; varianceQty: number; varianceValueMinor: number; explainedQty: number;
-  reason: string | null; reasonLabel: string | null; note: string | null; countedBy: string | null; since: Since | null;
+  reason: string | null; reasonLabel: string | null; note: string | null; countedBy: string | null; since: Since | null; soldToWalkIns?: boolean;
 }
 interface Weight { variety: string; countedKg: number; systemKg: number; diffKg: number; complete: boolean; parts: { name: string; countedKg: number; systemKg: number }[] }
 interface Resack { docNumber: string; at: string; status: string; from: string; to: string; lossGrams: number | null }
@@ -27,13 +28,14 @@ interface Report {
   count: { id: string; docNumber: string; kind: string; status: string; location: string; postedAt: string | null; startedAt: string; countedBy: string | null };
   summary: { counted: number; correct: number; short: number; over: number; explained: number; kulangValueMinor: number; sobraValueMinor: number };
   openedByCount: { variety: string; sacks: number; kg: number; unexplainedKg: number; automatic: boolean }[];
-  lines: RLine[]; correct: { productId: string; name: string; loose: boolean; countedQty: number }[]; weight: Weight[]; resacks: Resack[]; charge: Charge | null;
+  lines: RLine[]; correct: { productId: string; name: string; loose: boolean; countedQty: number }[]; weight: Weight[]; resacks: Resack[]; charge: Charge | null; walkIn?: WalkInInfo | null;
 }
 
 export default function CountReport({ countId, onBack, backLabel = "← Counts", embedded = false }: { countId: string; onBack?: () => void; backLabel?: string; embedded?: boolean }) {
   const [report, setReport] = useState<Report | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [storeName, setStoreName] = useState("");
+  const [reload, setReload] = useState(0);
 
   useEffect(() => {
     let live = true;
@@ -46,7 +48,7 @@ export default function CountReport({ countId, onBack, backLabel = "← Counts",
     })().catch(() => { if (live) setError("Could not open the report"); });
     void fetch(`${API_URL}/admin/settings`, { headers: adminHeaders() }).then((r) => (r.ok ? r.json() : null)).then((d) => { if (live) setStoreName(d?.name ?? ""); }).catch(() => {});
     return () => { live = false; };
-  }, [countId]);
+  }, [countId, reload]);
 
   if (!report) {
     return (
@@ -96,6 +98,8 @@ export default function CountReport({ countId, onBack, backLabel = "← Counts",
         <div className="col-6 col-md-3"><div className="border rounded py-2"><div className="small text-muted">Over ({summary.over})</div><div className="fs-5">{pesoText(summary.sobraValueMinor)}</div></div></div>
       </div>
 
+      {report.walkIn && <CountWalkIn countId={count.id} info={report.walkIn} onDone={() => setReload((n) => n + 1)} />}
+
       {summary.explained > 0 && <p className="small text-muted">{summary.explained} item{summary.explained === 1 ? " is" : "s are"} explained by an opened sack that was recorded as a resack, so nothing is lost there.</p>}
       {lines.length === 0 && <div className="alert alert-success">Everything counted matches the system.</div>}
       {lines.map((l) => (
@@ -103,7 +107,7 @@ export default function CountReport({ countId, onBack, backLabel = "← Counts",
           <div className="card-body py-2">
             <div className="d-flex flex-wrap justify-content-between gap-2">
               <div>
-                <div className="fw-semibold">{l.name}</div>
+                <div className="fw-semibold">{l.name}{l.soldToWalkIns && <span className="badge text-bg-success ms-2">Sold to walk-ins</span>}</div>
                 <div className="small text-muted">Counted {unit(l.loose, l.countedQty)}; the system had {unit(l.loose, l.expectedQty)}.{l.firstCountedQty !== null && l.firstCountedQty !== l.countedQty && <> First count: {unit(l.loose, l.firstCountedQty)}.</>}</div>
               </div>
               <div className="text-end">

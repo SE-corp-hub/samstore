@@ -18,13 +18,15 @@
 
 import { costModeOf, effectiveCost, recordCostIn, shelfCostFor } from "../domain/shelf-cost.js";
 import type { ApiError } from "@sam-store/contracts";
+import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../persistence/prisma-repositories.js";
-import { cacheBust, cacheKey } from "../persistence/ttl-cache.js";
+import { cacheBust, cacheGet, cacheKey, cacheSet } from "../persistence/ttl-cache.js";
 import { PrismaOrderSequenceRepository } from "../persistence/prisma-repositories.js";
 import { randomId } from "../persistence/repositories.js";
 import { addForTrip, deductStock, InsufficientStockError, recordMovement, releaseForTrip, reserveForTrip, unreserveForTrip, type TripLeg } from "../domain/movements.js";
-import { chargeSale, consignmentMain } from "../payable/charges.js";
+import { bookProfitShare, chargeSale } from "../payable/charges.js";
+import { shortsBecomeSale, walkInLines, WalkInTaken } from "../counts/count-walk-in.js";
 import { seesCost } from "../domain/cost-redact.js";
 import { applyReceipt, loadOpenOrder } from "../purchase-orders/receive.js";
 import { coverShortage, deductWithBuffer } from "../domain/buffer.js";
@@ -115,9 +117,23 @@ export interface BentaSaleView {
 const PAY_CODE: Record<PayMethod, string> = { cash: "cash", gcash: "gcash", maya: "maya", bank: "bank_transfer", split: "split", utang: "credit" };
 const SPLIT_PARTS: Record<string, string> = { cash: "cash", gcash: "gcash", maya: "maya", bank: "bank_transfer" };
 
+/**
+ * How many times each product sold in the last 30 days (orders the Benta buttons, most-sold first).
+ * It only sorts buttons, so it is kept 10 minutes instead of counting every sale line on each visit.
+ */
+async function soldLast30Days(storeId: string): Promise<Record<string, number>> {
+  const key = cacheKey("benta-sold", storeId);
+  const hit = await cacheGet<Record<string, number>>(key);
+  if (hit) return hit;
+  const sold = await prisma.orderItem.groupBy({ by: ["productId"], where: { storeId, order: { createdAt: { gte: new Date(Date.now() - 30 * 86_400_000) }, status: { not: "CANCELLED" } } }, _count: { _all: true } });
+  const counts = Object.fromEntries(sold.map((x) => [x.productId ?? "", x._count._all]));
+  await cacheSet(key, counts, 10 * 60_000);
+  return counts;
+}
+
 const productSelect = {
   id: true, name: true, sku: true, priceMinor: true, costMinor: true, isActive: true, reviewStatus: true,
-  stockBaseUnit: true, stockBaseQuantity: true, stockConversionFamily: true, soldByWeight: true, trackStock: true,
+  stockBaseUnit: true, stockBaseQuantity: true, stockConversionFamily: true, soldByWeight: true, trackStock: true, photoKey: true,
 } as const;
 type P = Prisma.ProductGetPayload<{ select: typeof productSelect }>;
 
@@ -149,6 +165,8 @@ registerApprovalHandler("UTANG_OVER_LIMIT", async (tx, a) => {
     } else {
       // From another location: the hold is released and the stock leaves that place now.
       await releaseForTrip(tx, leg(i.productId, i.sourceLocationId), i.quantity, i.quantity, "CONSUME");
+      // Taken from Store 2's shelf: Store 2 earns its profit share, as on any sale (see sell()).
+      if (order.sellingLocationId) await bookProfitShare(tx, { storeId: a.storeId, fromId: i.sourceLocationId, toId: order.sellingLocationId, productId: i.productId, quantity: i.quantity, actorId: a.decidedById, ref: `sale ${order.orderNumber}`, orderId: order.id });
     }
   }
   await tx.payment.create({ data: { orderId: order.id, storeId: a.storeId, method: "credit", amountMinor: order.totalMinor, type: "payment", note: "Credit (approved by the owner)", createdBy: a.decidedById } });
@@ -189,27 +207,40 @@ export class BentaService {
 
   // ─────────────────────────── catalog ───────────────────────────
 
-  /** Products for the Benta screen: price at this location, stock at every location, most-sold first. */
+  /**
+   * Products for the Benta screen: price at this location, stock at every location, most-sold first.
+   * Everything is asked in one go (one database round trip, not eight one after another): the
+   * location, the main store (consignment) and the shelf costs are picked from rows read together.
+   */
   async catalog(storeId: string, actor: Actor, locationId: string | undefined) {
     return this.run(async () => {
-      const loc = await this.location(storeId, actor, locationId);
-      const [products, locations, prices, levels, sold] = await Promise.all([
+      const wanted = locationId || actor.homeLocationId || null;
+      const [warehouses, products, prices, levels, sold, costMode] = await Promise.all([
+        prisma.warehouse.findMany({ where: { storeId }, select: { id: true, name: true, code: true, type: true, isActive: true, isDefault: true, consignment: true }, orderBy: [{ isDefault: "desc" }, { name: "asc" }] }),
         prisma.product.findMany({ where: { storeId, isActive: true, reviewStatus: { not: "MERGED" } }, select: productSelect, orderBy: { name: "asc" } }),
-        prisma.warehouse.findMany({ where: { storeId, isActive: true }, select: { id: true, name: true, code: true, type: true }, orderBy: [{ isDefault: "desc" }, { name: "asc" }] }),
-        prisma.locationPrice.findMany({ where: { storeId, warehouseId: loc.id }, select: { productId: true, priceMinor: true } }),
-        prisma.stockLevel.findMany({ where: { storeId, warehouseId: { not: null } }, select: { productId: true, warehouseId: true, quantityOnHand: true, quantityReserved: true } }),
-        prisma.orderItem.groupBy({ by: ["productId"], where: { storeId, order: { createdAt: { gte: new Date(Date.now() - 30 * 86_400_000) }, status: { not: "CANCELLED" } } }, _count: { _all: true } }),
+        // The asked-for location's prices; with none asked, every location's (the default is picked below).
+        prisma.locationPrice.findMany({ where: { storeId, ...(wanted ? { warehouseId: wanted } : {}) }, select: { productId: true, warehouseId: true, priceMinor: true } }),
+        prisma.stockLevel.findMany({ where: { storeId, warehouseId: { not: null } }, select: { productId: true, warehouseId: true, quantityOnHand: true, quantityReserved: true, costMinor: true } }),
+        soldLast30Days(storeId),
+        costModeOf(prisma, storeId),
       ]);
-      const priceBy = new Map(prices.map((p) => [p.productId, p.priceMinor]));
+      // Same choice as location(): the one asked for, else the person's home, else the store default.
+      const main = warehouses.find((w) => w.isDefault);
+      const id = wanted ?? main?.id;
+      const found = warehouses.find((w) => w.id === id && w.isActive);
+      if (!found) throw new StepError(invalid("Choose a location"));
+      const refusal = locationRefusal(actor, found.id);
+      if (refusal) throw new StepError(forbidden(refusal));
+      const loc = { id: found.id, name: found.name, type: found.type };
+      const priceBy = new Map(prices.filter((p) => p.warehouseId === loc.id).map((p) => [p.productId, p.priceMinor]));
       // The cost a sale here is measured against (a consignment store: the main store's cost), so the
       // tablet can warn about a price below cost with no internet. Staff get the number only to compare
       // with; their screen never shows it (seesCost tells the screen which way to word the warning).
-      const costLoc = (await consignmentMain(prisma, storeId, loc.id)) ?? loc.id;
-      const costMode = await costModeOf(prisma, storeId);
+      // (consignmentMain() in payable/charges.ts, from the rows above.)
+      const costLoc = found.consignment && main && main.id !== found.id ? main.id : loc.id;
       const shelfCost = new Map(costMode === "PER_LOCATION"
-        ? (await prisma.stockLevel.findMany({ where: { storeId, warehouseId: costLoc, costMinor: { not: null } }, select: { productId: true, costMinor: true } })).map((l) => [l.productId, l.costMinor!])
+        ? levels.filter((l) => l.warehouseId === costLoc && l.costMinor !== null).map((l) => [l.productId, l.costMinor!])
         : []);
-      const soldBy = new Map(sold.map((s) => [s.productId ?? "", s._count._all]));
       const stockBy = new Map<string, Record<string, number>>();
       for (const l of levels) {
         const m = stockBy.get(l.productId) ?? {};
@@ -218,14 +249,15 @@ export class BentaService {
       }
       const items = products
         .map((p) => ({
-          id: p.id, name: p.name, sku: p.sku, loose: isLoose(p), gramsPerUnit: p.stockBaseUnit === "g" ? p.stockBaseQuantity : null,
+          id: p.id, name: p.name, sku: p.sku, photoKey: p.photoKey, loose: isLoose(p), gramsPerUnit: p.stockBaseUnit === "g" ? p.stockBaseQuantity : null,
           priceMinor: priceAt(p.priceMinor, priceBy.get(p.id)), mainPriceMinor: p.priceMinor, forReview: p.reviewStatus === "FOR_REVIEW",
-          stock: stockBy.get(p.id) ?? {}, tracked: p.trackStock !== false && stockBy.has(p.id), sold30d: soldBy.get(p.id) ?? 0,
+          stock: stockBy.get(p.id) ?? {}, tracked: p.trackStock !== false && stockBy.has(p.id), sold30d: sold[p.id] ?? 0,
           floorMinor: effectiveCost(costMode, shelfCost.get(p.id), p.costMinor ?? 0),
           /** This shelf counts its own cost: changing the product cost would not move it. */
           ownShelfCost: shelfCost.has(p.id),
         }))
         .sort((a, b) => b.sold30d - a.sold30d || a.name.localeCompare(b.name));
+      const locations = warehouses.filter((w) => w.isActive).map((w) => ({ id: w.id, name: w.name, code: w.code, type: w.type }));
       return { location: loc, locations, products: items, seesCost: seesCost(actor.role) };
     });
   }
@@ -252,7 +284,7 @@ export class BentaService {
   }
 
   /** An open drawer shift at this location (or a location-less register); required only when the store says so. */
-  private async drawerFor(storeId: string, locationId: string): Promise<string | null> {
+  private async drawerFor(storeId: string, locationId: string, optional = false): Promise<string | null> {
     const sessions = await prisma.registerSession.findMany({
       where: { storeId, status: "OPEN", register: { OR: [{ locationId }, { locationId: null }] } },
       select: { id: true, register: { select: { locationId: true } } },
@@ -261,11 +293,13 @@ export class BentaService {
     const exact = sessions.find((s) => s.register.locationId === locationId) ?? sessions[0];
     if (exact) return exact.id;
     const settings = await prisma.storeSettings.findUnique({ where: { storeId }, select: { requireOpenShift: true } });
-    if (settings?.requireOpenShift) throw new StepError(conflict("No cash drawer is open here — open the drawer before taking cash"));
+    if (settings?.requireOpenShift && !optional) throw new StepError(conflict("No cash drawer is open here — open the drawer before taking cash"));
     return null;
   }
 
-  async sell(storeId: string, actor: Actor, input: BentaInput): Promise<BentaResult<BentaSaleView>> {
+  /** `fromCount`: the sale records a count's shortages (see sellCountShorts); only the server sets it. */
+  async sell(storeId: string, actor: Actor, input: BentaInput, internal: { fromCount?: { countId: string; countDoc: string; lineIds: string[] } } = {}): Promise<BentaResult<BentaSaleView>> {
+    const fromCount = internal.fromCount;
     let key: string;
     try {
       key = saleKey(storeId, input.idempotencyKey);
@@ -338,7 +372,7 @@ export class BentaService {
         customerName = pcust.customer.name ?? "Customer";
       }
       const paper = input.paperSlip ? checkPaperSlip(input.paperSlip, new Date()) : null;
-      const registerSessionId = method === "utang" ? null : await this.drawerFor(storeId, loc.id);
+      const registerSessionId = method === "utang" ? null : await this.drawerFor(storeId, loc.id, !!fromCount);
 
       const store = await prisma.store.findUnique({ where: { id: storeId }, include: { settings: true } });
       if (!store) throw new StepError(notFound("Store not found"));
@@ -387,7 +421,7 @@ export class BentaService {
             data: {
               id: orderId, orderNumber, storeId, status: waitOwner ? "ON_HOLD" : "COMPLETED", source: waitOwner ? "UTANG_PENDING" : "pos", currencyCode: store.currencyCode,
               subtotalMinor: subtotal, deliveryFeeMinor: 0, discountMinor: 0, totalMinor: subtotal, ...taxCols,
-              snapshot: { lines: items, source: "benta", paymentMethod: PAY_CODE[method], locationId: loc.id, ...(paper ? { paperSlip: { slipNo: paper.slipNo, occurredAt: paper.occurredAt.toISOString() } } : {}) } as Prisma.InputJsonValue,
+              snapshot: { lines: items, source: "benta", paymentMethod: PAY_CODE[method], locationId: loc.id, ...(fromCount ? { fromCount: { countId: fromCount.countId, docNumber: fromCount.countDoc } } : {}), ...(paper ? { paperSlip: { slipNo: paper.slipNo, occurredAt: paper.occurredAt.toISOString() } } : {}) } as Prisma.InputJsonValue,
               paymentMethod: PAY_CODE[method], paymentStatus: method === "utang" ? "PENDING" : "COLLECTED",
               idempotencyKey: key, cartToken: "", customerName, customerPhone: "", deliveryAddressLine1: "",
               storeCustomerId, fulfillmentType: "PICKUP", registerSessionId,
@@ -403,7 +437,7 @@ export class BentaService {
               catalogUnitPriceMinor: i.priceOverridden ? i.catalogUnitPriceMinor : null, unitCostMinor: i.unitCostMinor,
             })),
           });
-          await tx.orderStatusHistory.create({ data: { orderId, storeId, toStatus: waitOwner ? "ON_HOLD" : "COMPLETED", actorType: "pos", actorId: actor.userId, reason: waitOwner ? "Credit over the limit — waiting for the owner" : paper ? `From a paper slip #${paper.slipNo}` : null } });
+          await tx.orderStatusHistory.create({ data: { orderId, storeId, toStatus: waitOwner ? "ON_HOLD" : "COMPLETED", actorType: "pos", actorId: actor.userId, reason: waitOwner ? "Credit over the limit — waiting for the owner" : fromCount ? `Missing in count ${fromCount.countDoc} = sold to walk-ins` : paper ? `From a paper slip #${paper.slipNo}` : null } });
 
           // Signatures: utang → the customer signs; a paper slip → staff + the slip photo.
           if (method === "utang") {
@@ -430,7 +464,9 @@ export class BentaService {
               requestedById: actor.userId,
             })).id;
           } else {
-            await writeTenders(tx, { storeId, orderId, actorId: actor.userId, plan: plan!, note: paper ? `Benta (papel #${paper.slipNo})` : "Benta", registerSessionId });
+            // The count's shortages go back on the shelf first, so this sale takes them once.
+            if (fromCount) await shortsBecomeSale(tx, { storeId, countId: fromCount.countId, lineIds: fromCount.lineIds, orderId, orderNumber, actorId: actor.userId });
+            await writeTenders(tx, { storeId, orderId, actorId: actor.userId, plan: plan!, note: paper ? `Benta (papel #${paper.slipNo})` : fromCount ? `Walk-ins (count ${fromCount.countDoc})` : "Benta", registerSessionId });
             const local = priced.filter((l) => !l.sourceLocationId);
             for (const l of local) {
               await deductWithBuffer(tx, storeId, { productId: l.product.id, quantity: l.stockQty }, { orderId, createdBy: actor.userId, warehouseId: loc.id, documentType: "SALE", documentId: orderId });
@@ -439,6 +475,8 @@ export class BentaService {
             for (const l of priced.filter((x) => x.sourceLocationId)) {
               await coverShortage(tx, storeId, { productId: l.product.id, warehouseId: l.sourceLocationId!, needed: l.stockQty, actorId: actor.userId, documentType: "SALE", documentId: orderId, reason: `sale ${orderNumber}` });
               await deductStock(tx, storeId, [{ productId: l.product.id, quantity: l.stockQty }], { type: "CONSUME", orderId, createdBy: actor.userId, warehouseId: l.sourceLocationId!, documentType: "SALE", documentId: orderId });
+              // Store 1 sells rice straight off Store 2's shelf: Store 1 owes Store 2 its profit, as if the rice had been moved.
+              await bookProfitShare(tx, { storeId, fromId: l.sourceLocationId!, toId: loc.id, productId: l.product.id, quantity: l.stockQty, actorId: actor.userId, ref: `sale ${orderNumber}`, orderId });
             }
             // A consignment store owes the main store's cost for what it sells.
             const charged = await chargeSale(tx, {
@@ -456,10 +494,11 @@ export class BentaService {
             }
           }
           await tx.auditLog.create({
-            data: { storeId, actorType: "USER", actorId: actor.userId, action: paper ? "benta.paper_slip" : "benta.sell", entityType: "Order", entityId: orderId, after: { orderNumber, totalMinor: subtotal, method, locationId: loc.id, ...(paper ? { slipNo: paper.slipNo, occurredAt: paper.occurredAt.toISOString() } : at !== now ? { soldOfflineAt: at.toISOString() } : {}) } },
+            data: { storeId, actorType: "USER", actorId: actor.userId, action: paper ? "benta.paper_slip" : fromCount ? "benta.count_walk_in" : "benta.sell", entityType: "Order", entityId: orderId, after: { orderNumber, totalMinor: subtotal, method, locationId: loc.id, ...(paper ? { slipNo: paper.slipNo, occurredAt: paper.occurredAt.toISOString() } : at !== now ? { soldOfflineAt: at.toISOString() } : {}) } },
           });
         }, txOptions());
       } catch (e) {
+        if (e instanceof WalkInTaken) throw new StepError(conflict(e.message));
         if (e instanceof InsufficientStockError) throw new StepError(conflict(await this.shortText(storeId, e.productId, loc, priced.find((l) => l.product.id === e.productId)?.sourceLocationId ?? null)));
         if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
           const target = JSON.stringify(e.meta?.target ?? "");
@@ -494,6 +533,34 @@ export class BentaService {
       throw e;
     });
     return out;
+  }
+
+  /**
+   * "Missing = sold to walk-ins": record an approved count's shortages as one walk-in cash sale at the
+   * counted store's price, in the drawer that is open there (none open: the sale is kept without a drawer).
+   * Asking again for the same count gives back the same sale.
+   */
+  async sellCountShorts(storeId: string, actor: Actor, countId: string, lineIds?: string[]): Promise<BentaResult<BentaSaleView>> {
+    const count = await prisma.stockCount.findFirst({ where: { id: countId, storeId }, select: { id: true, docNumber: true, status: true, locationId: true } });
+    if (!count) return notFound("Count not found");
+    const refusal = locationRefusal(actor, count.locationId);
+    if (refusal) return forbidden(refusal);
+    if (count.status !== "APPROVED") return conflict("Post the count first");
+    const open = await walkInLines(prisma, storeId, count.id);
+    const pick = lineIds?.length ? open.filter((l) => lineIds.includes(l.lineId)) : open;
+    if (pick.length === 0) {
+      // Asked again (a double tap, or a retry after a lost answer): give back the sale they became.
+      const done = await prisma.stockCountLine.findFirst({ where: { countId: count.id, walkInOrderId: { not: null }, ...(lineIds?.length ? { id: { in: lineIds } } : {}) }, orderBy: { countedAt: "desc" }, select: { walkInOrderId: true } });
+      const order = done?.walkInOrderId ? await prisma.order.findFirst({ where: { id: done.walkInOrderId, storeId }, select: { idempotencyKey: true } }) : null;
+      const earlier = order?.idempotencyKey ? await this.replay(storeId, order.idempotencyKey) : null;
+      return earlier ? { ok: true, value: earlier } : conflict("Nothing missing to record in this count");
+    }
+    const idempotencyKey = `count-walk-in:${count.id}:${createHash("sha256").update(pick.map((l) => l.lineId).sort().join(",")).digest("hex").slice(0, 32)}`;
+    return this.sell(storeId, actor, {
+      idempotencyKey, locationId: count.locationId, customerName: "Walk-in",
+      lines: pick.map((l) => (l.loose ? { productId: l.productId, grams: l.quantity } : { productId: l.productId, quantity: l.quantity })),
+      payment: { method: "cash" },
+    }, { fromCount: { countId: count.id, countDoc: count.docNumber, lineIds: pick.map((l) => l.lineId) } });
   }
 
   /** "Isang sako na lang sa Store 2. Bawasan, o kunin sa WH." */
