@@ -27,7 +27,7 @@ export const ALLOWED_TRANSITIONS: Record<OrderState, OrderState[]> = {
   ON_HOLD: ["COMPLETED", "CANCELLED"], // POS held — complete or void
   COMPLETED: [], // terminal POS/counter state
   CANCELLED: [],
-  FAILED_DELIVERY: ["OUT_FOR_DELIVERY"], // retry delivery
+  FAILED_DELIVERY: ["OUT_FOR_DELIVERY", "CANCELLED"], // retry delivery, or cancel it (the rice comes back, its hold is given back)
 };
 
 /** States that are terminal — no transitions out. */

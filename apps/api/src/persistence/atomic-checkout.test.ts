@@ -254,3 +254,53 @@ test("M6: the credit-limit guarded UPDATE blocks a purchase over the balance cei
   const scNow = await prisma.storeCustomer.findUnique({ where: { id: sc.id } });
   assert.equal(scNow?.creditBalanceMinor, 100000, "balance never exceeds the limit");
 });
+test("hub order: the hold starts at the named location, splits across locations when one is short, and settles each leg where it was held", async () => {
+  const { settleOrderReservations } = await import("../domain/stock-settlement.js");
+  const store = await prisma.store.create({ data: { slug: `${run}-split`.toLowerCase(), name: `Split ${run}` } });
+  ids.stores.push(store.id);
+  const product = await prisma.product.create({ data: { storeId: store.id, sku: `SPL-${store.id.slice(-4)}`, name: "Rice", priceMinor: 1000 } });
+  ids.products.push(product.id);
+  const s1 = await prisma.warehouse.create({ data: { storeId: store.id, name: "Store 1", code: "S1", isDefault: true } });
+  const s2 = await prisma.warehouse.create({ data: { storeId: store.id, name: "Store 2", code: "S2" } });
+  await prisma.stockLevel.create({ data: { storeId: store.id, productId: product.id, warehouseId: s1.id, quantityOnHand: 4 } });
+  await prisma.stockLevel.create({ data: { storeId: store.id, productId: product.id, warehouseId: s2.id, quantityOnHand: 3 } });
+  const repo = new PrismaOrderRepository();
+  const mk = (tag: string, qty: number) => ({
+    id: randomId(), orderNumber: `S${tag}-${store.id.slice(-4)}`, storeId: store.id, status: "RECEIVED", source: "hub",
+    sellingLocationId: s2.id, currencyCode: "PHP", deliveryType: "delivery",
+    subtotalMinor: 1000 * qty, deliveryFeeMinor: 0, discountMinor: 0, totalMinor: 1000 * qty,
+    snapshot: {}, paymentMethod: "cod", paymentStatus: "PENDING", idempotencyKey: `spl-${tag}-${store.id.slice(-4)}`, cartToken: `c-${tag}`,
+    customerName: "C", customerPhone: "+63", deliveryAddressLine1: "x", deliveryAddressLine2: null, landmark: null, deliverySchedule: null, notes: null,
+    claimToken: null, items: [{ productId: product.id, productName: "Rice", sku: "R", unitPriceMinor: 1000, quantity: qty, lineTotalMinor: 1000 * qty }],
+    storeCustomerId: null, createdAt: new Date(),
+  });
+  const held = async () => Object.fromEntries((await prisma.stockLevel.findMany({ where: { productId: product.id } })).map((l) => [l.warehouseId === s1.id ? "s1" : "s2", l.quantityReserved]));
+
+  // 2 fit in Store 2, the location the hub named: nothing is held at Store 1.
+  const a = await repo.createAtomic(mk("a", 2), { stockReservations: [{ productId: product.id, quantity: 2 }], preferWarehouseId: s2.id });
+  assert.deepEqual(await held(), { s1: 0, s2: 2 });
+  assert.equal((await prisma.order.findUnique({ where: { id: a.id } }))?.sellingLocationId, s2.id);
+
+  // 4 more: Store 2 has 1 left, Store 1 has 4. Before, this was refused; now 1 + 3.
+  const b = await repo.createAtomic(mk("b", 4), { stockReservations: [{ productId: product.id, quantity: 4 }], preferWarehouseId: s2.id });
+  assert.deepEqual(await held(), { s1: 3, s2: 3 });
+
+  // 2 more: only 1 unit is free anywhere. Refused, and nothing of it stays held.
+  await assert.rejects(repo.createAtomic(mk("c", 2), { stockReservations: [{ productId: product.id, quantity: 2 }], preferWarehouseId: s2.id }), /stock/i);
+  assert.deepEqual(await held(), { s1: 3, s2: 3 });
+
+  // Delivered: each leg leaves the shelf it was held on.
+  await prisma.$transaction((tx) => settleOrderReservations(tx, { id: b.id, storeId: store.id }, "CONSUMED"));
+  const after = await prisma.stockLevel.findMany({ where: { productId: product.id } });
+  assert.deepEqual(Object.fromEntries(after.map((l) => [l.warehouseId === s1.id ? "s1" : "s2", [l.quantityOnHand, l.quantityReserved]])), { s1: [1, 0], s2: [2, 2] });
+  await prisma.stockMovement.deleteMany({ where: { storeId: store.id } });
+  await prisma.stockLevel.deleteMany({ where: { storeId: store.id } });
+  ids.products.splice(ids.products.indexOf(product.id), 1);
+  await prisma.orderClaimToken.deleteMany({ where: { storeId: store.id } });
+  await prisma.orderStatusHistory.deleteMany({ where: { storeId: store.id } });
+  await prisma.orderItem.deleteMany({ where: { order: { storeId: store.id } } });
+  await prisma.outboxEvent.deleteMany({ where: { storeId: store.id } });
+  await prisma.order.deleteMany({ where: { storeId: store.id } });
+  await prisma.product.deleteMany({ where: { id: product.id } });
+  await prisma.warehouse.deleteMany({ where: { storeId: store.id } });
+});

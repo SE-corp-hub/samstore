@@ -16,6 +16,7 @@ import SignaturePad from "./SignaturePad";
 import PaymentReview from "./PaymentReview";
 import ChatPanel from "./ChatPanel";
 import OrderItemsTable from "./OrderItemsTable";
+import HubLinkCard from "./HubLinkCard";
 import { toast } from "../../lib/toast";
 import { useMediaQuery, WIDE } from "../../lib/use-media-query";
 import { peso } from "../../lib/number-format";
@@ -491,6 +492,7 @@ export default function OrdersPanel() {
         a.push({ key: "failed", label: "Delivery failed", icon: "bi-exclamation-triangle", tone: "danger", run: () => void transition(o.id, "FAILED_DELIVERY") });
       }
       if (s === "FAILED_DELIVERY") a.push({ key: "retry", label: "Retry delivery", icon: "bi-arrow-repeat", tone: "main", run: () => void transition(o.id, "OUT_FOR_DELIVERY") });
+      if (s === "FAILED_DELIVERY") a.push({ key: "cancel", label: "Cancel order", icon: "bi-x-lg", tone: "danger", run: () => void transition(o.id, "CANCELLED") });
       if (s !== "ON_HOLD") a.push({ key: "receipt", label: "Reprint receipt", icon: "bi-printer", tone: "plain", run: () => setReceiptOrder(o.id) });
       if (canVoidRefund && s === "COMPLETED") {
         const refund = o.paymentStatus === "COLLECTED";
@@ -846,6 +848,7 @@ export default function OrdersPanel() {
             <i className={`bi bi-arrow-clockwise ${loading ? "spin" : ""}`} aria-hidden="true"></i>
           </button>
         </div>
+        <HubLinkCard offline={offline} onPlaced={() => void load()} />
         {offline && (
           <div className="alert alert-secondary py-2" role="status"><i className="bi bi-wifi-off me-1"></i>Offline: showing the orders last saved on this tablet. Changing an order needs the internet.</div>
         )}

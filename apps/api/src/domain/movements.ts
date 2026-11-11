@@ -596,3 +596,48 @@ export async function adjustForCount(tx: MovementTx, leg: TripLeg, delta: number
   await recordMovement(tx, { ...leg, orderId: null, createdBy: leg.actorId, delta, type: "COUNT_ADJUST", balanceAfter: rows[0].quantityOnHand });
   return rows[0].quantityOnHand;
 }
+
+/**
+ * Holds `quantity` of a product for an order (quantityReserved only; the units stay on the shelf). The preferred
+ * location goes first, then the other locations, then the location-less row. When no one location has enough, the
+ * hold is split across locations, each leg a RESERVE movement at its own location, so settling the order later
+ * consumes or releases each leg where it was held. Every write is guarded (`onHand - reserved >= qty`), so two
+ * orders can never hold the same unit. Returns what could NOT be held (0 = all held); a product with no stock rows
+ * at all holds nothing and returns 0, as before.
+ */
+export async function holdAcrossLevels(
+  tx: MovementTx,
+  h: { storeId: string; productId: string; quantity: number; prefer?: string | null; orderId: string; actorId: string; note?: string },
+): Promise<number> {
+  const levels = await tx.stockLevel.findMany({ where: { storeId: h.storeId, productId: h.productId } });
+  if (levels.length === 0 || h.quantity <= 0) return 0;
+  const rank = (w: string | null) => (h.prefer && w === h.prefer ? 0 : w ? 1 : 2);
+  levels.sort((a, b) => rank(a.warehouseId) - rank(b.warehouseId));
+  let remaining = h.quantity;
+  for (const lvl of levels) {
+    if (remaining <= 0) break;
+    const free = lvl.quantityOnHand - lvl.quantityReserved;
+    if (free <= 0) continue;
+    const take = Math.min(free, remaining);
+    const rows = await tx.$executeRawUnsafe(
+      'UPDATE "StockLevel" SET "quantityReserved" = "quantityReserved" + $2 WHERE "id" = $1 AND ("quantityOnHand" - "quantityReserved") >= $2',
+      lvl.id,
+      take,
+    );
+    if (rows !== 1) continue; // someone else took it meanwhile: try the next location
+    const fresh = await tx.stockLevel.findUnique({ where: { id: lvl.id }, select: { quantityReserved: true } });
+    await recordMovement(tx, {
+      storeId: h.storeId,
+      productId: h.productId,
+      warehouseId: lvl.warehouseId,
+      delta: take,
+      type: "RESERVE",
+      orderId: h.orderId,
+      createdBy: h.actorId,
+      ...(h.note ? { note: h.note } : {}),
+      balanceAfter: fresh?.quantityReserved ?? null,
+    });
+    remaining -= take;
+  }
+  return remaining;
+}

@@ -247,7 +247,11 @@ const CLAIM_SECRET = claimSecret(); // M11: no committed fallback (see security/
             (
               await prisma.order.findMany({
                 where: { storeId, source: "hub", OR: [{ updatedAt: { gte: since } }, { createdAt: { gte: new Date(since.getTime() - 4 * 86_400_000) } }] },
-                include: { items: true },
+                include: {
+                  items: true,
+                  // The last cancel / failed-delivery reason, so the hub can tell why.
+                  statusHistory: { where: { toStatus: { in: ["CANCELLED", "FAILED_DELIVERY"] } }, orderBy: { createdAt: "desc" }, take: 1, select: { reason: true } },
+                },
                 orderBy: { createdAt: "desc" },
                 take: 200,
               })
@@ -258,8 +262,15 @@ const CLAIM_SECRET = claimSecret(); // M11: no committed fallback (see security/
               totalMinor: o.totalMinor,
               deliveryFeeMinor: o.deliveryFeeMinor,
               discountMinor: o.discountMinor,
+              paymentStatus: o.paymentStatus,
+              reason: o.statusHistory[0]?.reason ?? null,
               items: o.items.map((i) => ({ name: i.productName, quantity: i.quantity, unitPriceMinor: i.unitPriceMinor })),
             })),
+          // The hub link names the selling location by its code (samrice=bigasan@S2).
+          async (storeId, code) =>
+            (await prisma.warehouse.findFirst({ where: { storeId, code: { equals: code.trim(), mode: "insensitive" }, isActive: true }, select: { id: true } }))?.id ?? null,
+          async (storeId, warehouseId) =>
+            new Map((await prisma.locationPrice.findMany({ where: { storeId, warehouseId }, select: { productId: true, priceMinor: true } })).map((p) => [p.productId, p.priceMinor])),
         ),
     },
   ],

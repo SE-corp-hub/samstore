@@ -18,7 +18,7 @@ import type {
   AtomicCheckoutEffects,
 } from "./repositories.js";
 import { OrderStatus, PaymentStatus } from "@prisma/client";
-import { InsufficientStockError, untrackedIds } from "../domain/movements.js";
+import { InsufficientStockError, holdAcrossLevels, untrackedIds } from "../domain/movements.js";
 import { UNLIMITED_STOCK, isTracked } from "../domain/stock-tracking.js";
 
 // Module 4/5 hardening: the managed Postgres pooler can take several seconds to
@@ -445,6 +445,7 @@ export class PrismaOrderRepository implements OrderRepository {
           sourceChannel: order.sourceChannel ?? null,
           sourcePage: order.sourcePage ?? null,
           externalRef: order.externalRef ?? null,
+          sellingLocationId: order.sellingLocationId ?? null,
           currencyCode: order.currencyCode,
           deliveryType: order.deliveryType ?? "delivery",
           fulfillmentType: order.deliveryType === "pickup" ? "PICKUP" : "DELIVERY", // M3: explicit
@@ -547,6 +548,7 @@ export class PrismaOrderRepository implements OrderRepository {
           sourceChannel: order.sourceChannel ?? null,
           sourcePage: order.sourcePage ?? null,
           externalRef: order.externalRef ?? null,
+          sellingLocationId: order.sellingLocationId ?? null,
           currencyCode: order.currencyCode,
           deliveryType: order.deliveryType ?? "delivery",
           fulfillmentType: order.deliveryType === "pickup" ? "PICKUP" : "DELIVERY",
@@ -647,25 +649,16 @@ export class PrismaOrderRepository implements OrderRepository {
           }
           continue;
         }
-        const levels = await tx.stockLevel.findMany({ where: { storeId: order.storeId, productId: r.productId } });
-        if (levels.length === 0) continue;
-        levels.sort((a, b) => (a.warehouseId ? 0 : 1) - (b.warehouseId ? 0 : 1));
-        let remaining = r.quantity;
-        for (const lvl of levels) {
-          if (remaining <= 0) break;
-          const rows = await tx.$executeRawUnsafe(
-            'UPDATE "StockLevel" SET "quantityReserved" = "quantityReserved" + $2 WHERE "id" = $1 AND ("quantityOnHand" - "quantityReserved") >= $2',
-            lvl.id,
-            remaining,
-          );
-          if (rows === 1) {
-            const fresh = await tx.stockLevel.findUnique({ where: { id: lvl.id }, select: { quantityReserved: true } });
-            await tx.stockMovement.create({
-              data: { storeId: order.storeId, productId: r.productId, warehouseId: lvl.warehouseId, delta: remaining, type: "RESERVE", orderId: o.id, createdBy: "checkout", balanceAfter: fresh?.quantityReserved ?? null },
-            });
-            remaining = 0;
-          }
-        }
+        // The named location first (a hub order's own store), then the others. When no single location has
+        // enough, the hold is split across locations, so an order the shelves can fill together is never refused.
+        const remaining = await holdAcrossLevels(tx, {
+          storeId: order.storeId,
+          productId: r.productId,
+          quantity: r.quantity,
+          prefer: effects.preferWarehouseId ?? null,
+          orderId: o.id,
+          actorId: "checkout",
+        });
         if (remaining > 0) {
           throw new InsufficientStockError(r.productId, remaining);
         }
