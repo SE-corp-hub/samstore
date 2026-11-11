@@ -234,7 +234,7 @@ export class PayableService {
 
   /** The profit shares of a store (their undo entries are not charges). */
   private async shareIds(storeId: string, locationId: string): Promise<string[]> {
-    return (await prisma.storePayableEntry.findMany({ where: { storeId, locationId, kind: "PROFIT_SHARE" }, select: { id: true } })).map((e) => e.id);
+    return (await prisma.storePayableEntry.findMany({ where: { storeId, locationId, kind: { in: ["PROFIT_SHARE", "SHARE_BACK"] } }, select: { id: true } })).map((e) => e.id);
   }
 
   /** What the rice that left a store since its last sales report is worth at selling price. */
