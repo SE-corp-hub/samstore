@@ -53,6 +53,7 @@ interface OrderAction { key: string; label: string; icon: string; tone: "main" |
 interface EditLine { productId: string; productName: string; quantity: number; unitPriceMinor: number }
 interface ProductOption { id: string; name: string; sku: string }
 
+const HUB_CHANNEL: Record<string, string> = { messenger: "Messenger chat", order_form: "Order form", comment: "Comment", live: "Live", agent: "Agent", counter: "Counter" };
 const toPesos = (m: number) => peso(m);
 const dayRange = (d: Date) => ({ from: new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0).toISOString(), to: new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59).toISOString() });
 
@@ -634,7 +635,7 @@ export default function OrdersPanel() {
         <div className="d-flex justify-content-between align-items-end gap-2 mb-2">
           <div className="min-w-0">
             <div className="fw-bold fs-5 text-truncate">{o.customerName}</div>
-            <div className="small text-muted">{isDeliv(o) ? "Delivery" : "Pickup"} · {o.source === "PRE_ORDER" ? "Pre-order" : o.source === "pos" ? "POS" : "Online"} · {placedAt(o.createdAt)}</div>
+            <div className="small text-muted">{isDeliv(o) ? "Delivery" : "Pickup"} · {o.source === "PRE_ORDER" ? "Pre-order" : o.source === "pos" ? "POS" : o.source === "hub" ? [o.sourcePage, HUB_CHANNEL[o.sourceChannel ?? ""], o.externalRef && `hub ${o.externalRef}`].filter(Boolean).join(" · ") || "SE Corp Hub" : "Online"} · {placedAt(o.createdAt)}</div>
           </div>
           <div className="fs-4 fw-bold num">{toPesos(o.totalMinor)}</div>
         </div>

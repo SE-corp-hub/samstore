@@ -1368,7 +1368,11 @@ model Order {
   /// Guarded claim marker for the reservation lifecycle (single source of truth
   /// for "this order's reservation was already settled") — see OrderStockDisposition.
   stockDisposition     OrderStockDisposition?
-  source               String               @default("online") // online | pos
+  source               String               @default("online") // online | pos | hub
+  // Hub door: where an order from SE Corp Hub was taken (all null for the shop link and the counter).
+  sourceChannel        String? // messenger | order_form | comment | live | agent
+  sourcePage           String? // the selling page's name, e.g. "Samrice"
+  externalRef          String? // the hub's own order reference, e.g. "#1001"
   deliveryType         String               @default("delivery") // delivery | pickup (UI U5)
   fulfillmentType      OrderFulfillmentType @default(DELIVERY) // M3: explicit; backfilled from address
   currencyCode         String

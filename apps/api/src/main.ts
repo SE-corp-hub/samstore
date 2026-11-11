@@ -63,6 +63,18 @@ async function bootstrap() {
     app.getHttpAdapter().getInstance().on?.("close", () => { outbox.stop(); stopReminders(); });
   }
 
+  // SE Corp Hub: fetch its waiting orders and send it this store's items, every minute while running
+  // (integrations/hub-orders.service.ts). Sam Store calls the hub because Render's guard blocks calls from the hub.
+  const hubUrl = process.env.HUB_URL;
+  const hubSecret = process.env.HUB_ORDER_SECRET;
+  if (hubUrl && hubSecret && hubSecret.length >= 32) {
+    const { HUB_ORDER_SERVICE, syncWithHub } = await import("./integrations/hub-orders.service.js");
+    const hub = app.get(HUB_ORDER_SERVICE);
+    const beat = () => void syncWithHub(hub, hubUrl, hubSecret).catch((e: Error) => console.warn(`[sam-store] hub sync: ${e.message}`));
+    setTimeout(beat, 5_000).unref?.();
+    setInterval(beat, 60_000).unref?.();
+  }
+
   app.use(express.json({ limit: "5mb" }));
   app.use(express.urlencoded({ extended: true, limit: "5mb" }));
 
