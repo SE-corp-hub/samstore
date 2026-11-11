@@ -208,3 +208,25 @@ test("a hub that refuses the secret stops the beat before anything is placed", a
   await assert.rejects(syncWithHub(svc, "https://hub.example", "h".repeat(40), refuse), /401/);
   assert.equal(orders.exportedForTests().orders.length, 0);
 });
+
+test("each beat also sends how the store's hub orders stand now, so an edit here shows in the hub", async () => {
+  const { svc: base } = build();
+  const asked: { storeId: string; since: Date }[] = [];
+  const now = { orderNumber: "SAMSTO-000007", status: "PREPARING", deliveryType: "delivery", totalMinor: 155000, deliveryFeeMinor: 5000, discountMinor: 0, items: [{ name: "Samrice Dinorado 25kg", quantity: 1, unitPriceMinor: 150000 }] };
+  const svc = new HubOrderService(
+    (base as unknown as { stores: InMemoryStoreRepository }).stores,
+    (base as unknown as { catalog: InMemoryCatalogRepository }).catalog,
+    (base as unknown as { carts: InMemoryCartRepository }).carts,
+    (base as unknown as { checkout: CheckoutService }).checkout,
+    async (storeId, since) => (asked.push({ storeId, since }), [now]),
+  );
+  let body: { updates?: unknown[] } = {};
+  const hub = (async (_url: string, init: RequestInit = {}) => {
+    if (init.method === "POST") body = JSON.parse(String(init.body));
+    return Response.json(init.method === "POST" ? { ok: true } : { stores: ["sam-store", "no-such-store"], orders: [] });
+  }) as unknown as typeof fetch;
+  await syncWithHub(svc, "https://hub.example", "h".repeat(40), hub);
+  assert.deepEqual(body.updates, [{ store: "sam-store", ...now }], "an unknown store sends nothing");
+  assert.equal(asked[0]?.storeId, "store-1");
+  assert.ok(Date.now() - asked[0]!.since.getTime() >= 3 * 86_400_000 - 1000, "the last 3 days of changes");
+});
