@@ -55,6 +55,7 @@ interface StoreSettings {
     tin: string | null;
     dailySalesTargetMinor: number;
     hidePricePreOrder: boolean;
+    quotaPromoEnabled?: boolean; quotaPromoMinSacks?: number; quotaPromoOffMinor?: number; quotaPromoCategoryIds?: string[];
     seniorPwdDiscountEnabled: boolean;
     messengerConnected: boolean;
     messengerPageId: string | null;
@@ -69,6 +70,7 @@ interface StoreSettings {
 /** Everything on the screen that is saved to the server, as the boxes hold it. */
 interface Form {
   dailyTarget: string; hidePrePrice: boolean; requireOpenShift: boolean;
+  promoOn: boolean; promoMin: string; promoOff: string; promoCats: string[];
   creditLimit: string; creditTermDays: string;
   vatEnabled: boolean; vatRate: string; pricesIncludeVat: boolean; vatShowOnReceipt: boolean; showVat: boolean; tin: string; seniorPwd: boolean;
   receiptHeader: string; receiptFooter: string;
@@ -84,6 +86,7 @@ const toInt = (s: string, fallback: number) => { const n = parseInt(s.replace(/,
 function formFrom(s: StoreSettings["settings"]): Form {
   return {
     dailyTarget: pesos(s.dailySalesTargetMinor), hidePrePrice: s.hidePricePreOrder ?? false, requireOpenShift: s.requireOpenShift === true,
+    promoOn: s.quotaPromoEnabled === true, promoMin: String(s.quotaPromoMinSacks ?? 10), promoOff: pesos(s.quotaPromoOffMinor ?? 2000), promoCats: [...(s.quotaPromoCategoryIds ?? [])].sort(),
     creditLimit: pesos(s.creditLimitMinor), creditTermDays: String(s.creditTermDays ?? 30),
     vatEnabled: s.vatEnabled ?? true, vatRate: String((s.vatRateBp ?? 1200) / 100), pricesIncludeVat: s.pricesIncludeVat ?? true,
     vatShowOnReceipt: s.vatShowOnReceipt ?? true, showVat: s.showVatLabel ?? true, tin: s.tin ?? "", seniorPwd: s.seniorPwdDiscountEnabled ?? false,
@@ -102,7 +105,10 @@ type Group = "printer" | ServerGroup | "lock" | "account";
 
 /** What each group sends when saved. Also used to tell whether a group has unsaved changes. */
 const PAYLOAD: Record<ServerGroup, (f: Form) => Record<string, unknown>> = {
-  counter: (f) => ({ dailySalesTargetMinor: toMinor(f.dailyTarget), hidePricePreOrder: f.hidePrePrice, requireOpenShift: f.requireOpenShift }),
+  counter: (f) => ({
+    dailySalesTargetMinor: toMinor(f.dailyTarget), hidePricePreOrder: f.hidePrePrice, requireOpenShift: f.requireOpenShift,
+    quotaPromoEnabled: f.promoOn, quotaPromoMinSacks: toInt(f.promoMin, 10), quotaPromoOffMinor: toMinor(f.promoOff), quotaPromoCategoryIds: f.promoCats,
+  }),
   credit: (f) => ({ creditLimitMinor: toMinor(f.creditLimit), creditTermDays: toInt(f.creditTermDays, 30) }),
   receipt: (f) => ({
     vatEnabled: f.vatEnabled, vatRateBp: Math.round(Number(f.vatRate || "0") * 100), pricesIncludeVat: f.pricesIncludeVat,
@@ -126,6 +132,11 @@ const PAYLOAD: Record<ServerGroup, (f: Form) => Record<string, unknown>> = {
 function problems(g: ServerGroup, f: Form): Partial<Record<keyof Form, string>> {
   const p: Partial<Record<keyof Form, string>> = {};
   if (g === "credit" && toInt(f.creditTermDays, 0) < 1) p.creditTermDays = "At least 1 day.";
+  if (g === "counter") {
+    if (toInt(f.promoMin, 0) < 1) p.promoMin = "At least 1 sack.";
+    if (toMinor(f.promoOff) <= 0) p.promoOff = "More than ₱0.";
+    if (f.promoOn && !f.promoCats.length) p.promoCats = "Choose at least one group.";
+  }
   if (g === "receipt") { const r = Number(f.vatRate || "0"); if (!(r >= 0 && r <= 100)) p.vatRate = "Between 0 and 100."; }
   if (g === "shop" && toInt(f.maxOpenOrders, 0) < 1) p.maxOpenOrders = "At least 1.";
   if (g === "messenger") {
@@ -187,6 +198,7 @@ export default function SettingsPanel({ role = "" }: { role?: string }) {
   const [mpDeepLink, setMpDeepLink] = useState("");
   const [mpErr, setMpErr] = useState<string | null>(null);
   const [printerTick, setPrinterTick] = useState(0);
+  const [categories, setCategories] = useState<{ id: string; name: string }[]>([]); // product groups, for the quota promo
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -197,6 +209,8 @@ export default function SettingsPanel({ role = "" }: { role?: string }) {
       setData(d); setSaved(f); setForm(f); setError(null);
     } else setError("Could not load the settings. Check the internet and try again.");
     setLoading(false);
+    const c = await cachedGet<{ categories?: { id: string; name: string }[] }>("/admin/products/categories");
+    setCategories(c?.categories ?? []);
   }, []);
 
   useEffect(() => { if (storeId) void load(); }, [load, storeId]);
@@ -357,6 +371,36 @@ export default function SettingsPanel({ role = "" }: { role?: string }) {
               help="On: each day starts by counting the drawer. Off: staff can sell any time." />
             <SwitchRow id="st-hideprice" label="Hide item prices on pre-orders" checked={form.hidePrePrice} onChange={(v) => set({ hidePrePrice: v })}
               help="The Pre-order screen shows only the total, not the price of each item." />
+            <SwitchRow id="st-promo" label="Quota promo" checked={form.promoOn} onChange={(v) => set({ promoOn: v })}
+              help="On: when one sale or pre-order has enough sacks of the groups below, each of those sacks is cheaper. It shows as a price change with the reason Quota promo." />
+            {form.promoOn && (
+              <div className="ms-md-4 mb-3">
+                <div className="d-flex flex-wrap gap-3">
+                  <Field id="st-promo-min" label="At least this many sacks" problem={p.promoMin}>
+                    <WholeInput id="st-promo-min" className={`form-control form-control-lg${p.promoMin ? " is-invalid" : ""}`} value={form.promoMin} onChange={(v) => set({ promoMin: v })} style={{ maxWidth: 160 }} />
+                  </Field>
+                  <Field id="st-promo-off" label="Less per sack (₱)" problem={p.promoOff}>
+                    <PesoInput id="st-promo-off" className={`form-control form-control-lg${p.promoOff ? " is-invalid" : ""}`} value={form.promoOff} onChange={(v) => set({ promoOff: v })} style={{ maxWidth: 160 }} />
+                  </Field>
+                </div>
+                <fieldset className="mb-2">
+                  <legend className="form-label fs-6 fw-semibold mb-1">For these groups</legend>
+                  {categories.length === 0 && <p className="text-muted mb-1">No groups yet. Give products a group (Products, category) first.</p>}
+                  <div className="d-flex flex-wrap gap-2">
+                    {categories.map((c) => {
+                      const on = form.promoCats.includes(c.id);
+                      return (
+                        <button key={c.id} type="button" className={`btn btn-lg ${on ? "btn-dark" : "btn-outline-dark"}`} aria-pressed={on}
+                          onClick={() => set({ promoCats: (on ? form.promoCats.filter((x) => x !== c.id) : [...form.promoCats, c.id]).sort() })}>
+                          {on && <i className="bi bi-check-lg me-1" aria-hidden="true"></i>}{c.name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {p.promoCats && <div className="text-danger small mt-1">{p.promoCats}</div>}
+                </fieldset>
+              </div>
+            )}
             <Field id="st-target" label="Daily sales target (₱)" help="Shown on Overview so you can see how the day is going. Leave empty for none.">
               <PesoInput id="st-target" className="form-control form-control-lg" value={form.dailyTarget} onChange={(v) => set({ dailyTarget: v })} placeholder="No target" style={{ maxWidth: 260 }} />
             </Field>

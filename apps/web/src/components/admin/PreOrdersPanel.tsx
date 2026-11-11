@@ -29,6 +29,7 @@ import { noteUse } from "../../lib/product-find";
 import { printSlip, type Slip } from "../../lib/slip-print";
 import { cachedGet, offlineRef, savedThenFresh, useOffline } from "../../lib/offlineCache";
 import { QUEUE_EVENT, queuedSteps, sendStep } from "../../lib/offlineQueue";
+import { PROMO_OFF, PROMO_REASON, promoFrom, promoPrices, promoSacks, type QuotaPromo } from "../../lib/quota-promo";
 import { newSaleKey } from "../../lib/saleKey";
 
 const PREORDER_PATH = "/admin/pos/preorder";
@@ -218,6 +219,8 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
   const [buildNewPhone, setBuildNewPhone] = useState("");
   const [buildBusy, setBuildBusy] = useState(false);
   const [hidePrice, setHidePrice] = useState(false); // StoreSettings.hidePricePreOrder
+  const [promo, setPromo] = useState<QuotaPromo>(PROMO_OFF); // quota promo (Settings), from the saved price list
+  const [promoInfo, setPromoInfo] = useState<Map<string, { categoryId: string | null; isSack: boolean }>>(new Map());
   const wide = useMediaQuery(WIDE);
   // Tablet or PC: the screen is exactly the space between the bars (no page scroll); the list and the products scroll in their own boxes.
   const fit = useMediaQuery(FIT);
@@ -270,7 +273,9 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
           setHidePrice(Boolean(s?.settings?.hidePricePreOrder));
           setStoreName(s?.name ?? "");
         }),
-        savedThenFresh<{ products?: { id: string; floorMinor?: number; ownShelfCost?: boolean; loose?: boolean; gramsPerUnit?: number | null }[]; seesCost?: boolean }>("/admin/benta/catalog", (cat) => {
+        savedThenFresh<{ products?: { id: string; floorMinor?: number; ownShelfCost?: boolean; loose?: boolean; gramsPerUnit?: number | null; categoryId?: string | null }[]; seesCost?: boolean; quotaPromo?: Parameters<typeof promoFrom>[0] }>("/admin/benta/catalog", (cat) => {
+          setPromo(promoFrom(cat?.quotaPromo));
+          setPromoInfo(new Map((cat?.products ?? []).map((x) => [x.id, { categoryId: x.categoryId ?? null, isSack: !x.loose && !!x.gramsPerUnit }])));
           setFloors(new Map((cat?.products ?? []).map((x) => [x.id, { floorMinor: x.floorMinor ?? 0, ownShelfCost: !!x.ownShelfCost, unit: x.loose ? "kilo" : x.gramsPerUnit ? "sack" : "piece" }])));
           setSeesCost(cat?.seesCost === true);
         }),
@@ -315,7 +320,8 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
         name: i.variantName ? `${i.productName} · ${i.variantName}` : i.productName,
         priceMinor: list,
       } as PosProduct;
-      const changed = i.unitPriceMinor !== list;
+      // A quota promo price is worked out again from the lines (it goes if the order drops under the sacks needed).
+      const changed = i.unitPriceMinor !== list && i.priceOverrideReason !== PROMO_REASON;
       return { product, quantity: i.quantity, variantId: i.variantId ?? null, price: changed ? i.unitPriceMinor : undefined, reason: changed ? i.priceOverrideReason ?? undefined : undefined };
     });
     clearBuild();
@@ -405,7 +411,16 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
   };
 
   // ── New / change pre-order ──
-  const buildSubtotal = buildCart.reduce((s, l) => s + unitOf(l) * l.quantity, 0);
+  // Quota promo: enough sacks of the chosen groups in this order and each is cheaper (sent as a price
+  // change with the reason "Quota promo"). A typed price, or a variant, is left alone.
+  const promoLines = buildCart.map((l) => {
+    const info = promoInfo.get(l.product.id);
+    return { categoryId: info?.categoryId, isSack: !!info?.isSack, quantity: l.quantity, listMinor: l.product.priceMinor, manualPrice: l.price !== undefined || !!l.variantId };
+  });
+  const promoAt = promoPrices(promoLines, promo);
+  const sacksForPromo = promoSacks(promoLines, promo);
+  const pricedCart: CartLine[] = buildCart.map((l, i) => (promoAt[i] != null ? { ...l, price: promoAt[i]!, reason: PROMO_REASON } : l));
+  const buildSubtotal = pricedCart.reduce((s, l) => s + unitOf(l) * l.quantity, 0);
   const lineKey = (l: CartLine) => `${l.product.id}|${l.variantId ?? ""}`;
 
   const addProduct = (product: PosProduct) => {
@@ -432,7 +447,7 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
 
   /** Below cost: one popup per line before saving. False = stop (the person went back or is fixing a price). */
   const passesCost = async (): Promise<boolean> => {
-    for (const l of buildCart) {
+    for (const l of pricedCart) {
       let floor = floorOf(l);
       const unit = unitOf(l);
       while (isBelowCost(unit, floor) && !keptBelow.current.has(okKey(l.product.id, unit, floor))) {
@@ -472,7 +487,7 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
         if (typeof navigator !== "undefined" && navigator.onLine === false) { setError("Changing a pre-order needs the internet. Make a new one, or try again when the internet is back."); return; }
         res = await fetch(`${API_URL}/admin/pos/preorders/${editingPre.id}/items`, {
           method: "PATCH", headers: { "Content-Type": "application/json", ...adminHeaders() },
-          body: JSON.stringify({ items: buildCart.map((l) => ({ productId: l.product.id, variantId: l.variantId ?? undefined, quantity: l.quantity, ...overridePart(l) })) }),
+          body: JSON.stringify({ items: pricedCart.map((l) => ({ productId: l.product.id, variantId: l.variantId ?? undefined, quantity: l.quantity, ...overridePart(l) })) }),
         });
       } else {
         // A new customer is made by the server with the pre-order, so this works with no internet too.
@@ -480,12 +495,12 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
         if (!buildCustomerId && !name) { setError("Choose a customer or type a new name."); return; }
         const key = newSaleKey();
         const who = buildCustomerId ? { customerId: buildCustomerId } : { customerName: name, customerPhone: buildNewPhone.trim() || undefined };
-        const body = { items: buildCart.map((l) => ({ productId: l.product.id, quantity: l.quantity, ...overridePart(l) })), ...who, idempotencyKey: key };
+        const body = { items: pricedCart.map((l) => ({ productId: l.product.id, quantity: l.quantity, ...overridePart(l) })), ...who, idempotencyKey: key };
         const customerName = buildCustomerId ? (buildCustomers.find((c) => c.id === buildCustomerId)?.name ?? "") : name;
         const view: Preorder = {
           id: key, orderNumber: offlineRef(key), customerName, storeCustomerId: buildCustomerId || null, status: "ON_HOLD",
-          totalMinor: buildCart.reduce((t, l) => t + unitOf(l) * l.quantity, 0), createdAt: new Date().toISOString(), dueAt: null,
-          items: buildCart.map((l) => ({ productId: l.product.id, productName: l.product.name, unitPriceMinor: unitOf(l), quantity: l.quantity, lineTotalMinor: unitOf(l) * l.quantity })),
+          totalMinor: pricedCart.reduce((t, l) => t + unitOf(l) * l.quantity, 0), createdAt: new Date().toISOString(), dueAt: null,
+          items: pricedCart.map((l) => ({ productId: l.product.id, productName: l.product.name, unitPriceMinor: unitOf(l), quantity: l.quantity, lineTotalMinor: unitOf(l) * l.quantity })),
         };
         const sent = await sendStep(PREORDER_PATH, body, `Pre-order ${customerName}`, view);
         if (sent.status === "queued") {
@@ -756,13 +771,14 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
         <h2 id="po-check" className="h5 mb-2 d-flex align-items-center"><Num n={3} />Check the order</h2>
         {buildCart.length === 0 && <p className="text-muted text-center py-2 mb-0">Nothing yet. Tap items {wide ? "on the left" : "above"} (part 2).</p>}
         <div className="sale-lines">
-        {buildCart.map((l) => {
+        {buildCart.map((l, idx) => {
           const changed = l.price !== undefined && l.price !== l.product.priceMinor;
+          const onPromo = promoAt[idx] != null;
           return (
             <div key={lineKey(l)} className="border-bottom py-2">
               <div className="d-flex justify-content-between align-items-baseline gap-2">
-                <div className="fw-semibold">{l.product.name}</div>
-                <div className="fw-bold text-end text-nowrap" style={{ fontVariantNumeric: "tabular-nums" }}>{maybePrice(unitOf(l) * l.quantity)}</div>
+                <div className="fw-semibold">{l.product.name}{onPromo && <span className="badge text-bg-success ms-1">promo</span>}</div>
+                <div className="fw-bold text-end text-nowrap" style={{ fontVariantNumeric: "tabular-nums" }}>{maybePrice(unitOf(pricedCart[idx]!) * l.quantity)}</div>
               </div>
               <div className="d-flex flex-wrap justify-content-between align-items-center gap-2 mt-2">
                 <div className="d-flex align-items-center gap-1" role="group" aria-label={`How many ${l.product.name}`}>
@@ -777,10 +793,10 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
                 <label className="d-flex align-items-center gap-2 mb-0">
                   <span className="text-muted">Price each</span>
                   <PesoInput className={`form-control ${changed ? "border-warning bg-warning-subtle" : ""}`} style={{ width: 130 }} aria-label={`Price each of ${l.product.name}`}
-                    value={l.priceText ?? (unitOf(l) / 100).toFixed(2)} placeholder={(l.product.priceMinor / 100).toFixed(2)} onChange={(v) => setLinePrice(l, v)} />
+                    value={l.priceText ?? (unitOf(pricedCart[idx]!) / 100).toFixed(2)} placeholder={(l.product.priceMinor / 100).toFixed(2)} onChange={(v) => setLinePrice(l, v)} />
                 </label>
               </div>
-              {lineBelow(l) && (
+              {lineBelow(pricedCart[idx]!) && (
                 <div className="small text-danger fw-semibold mt-1" role="status">
                   <i className="bi bi-exclamation-triangle-fill me-1" aria-hidden="true"></i>
                   {seesCost ? `Below the unit cost of ${toPesos(floorOf(l))}` : "Below cost: check with the owner"}
@@ -797,7 +813,11 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
         })}
         </div>
         <div className="sale-total">
-          <span className="label">Total · {itemsInOrder} item{itemsInOrder === 1 ? "" : "s"}</span><span className="amount">{maybePrice(buildSubtotal)}</span>
+          <span className="label">Total · {itemsInOrder} item{itemsInOrder === 1 ? "" : "s"}
+            {promo.on && sacksForPromo > 0 && (promoAt.some((x) => x != null)
+              ? <span className="badge text-bg-success ms-2">Promo −{toPesos(promo.offMinor)} each</span>
+              : <span className="text-muted fw-normal small ms-2">· {promo.minSacks - sacksForPromo} more for the promo</span>)}
+          </span><span className="amount">{maybePrice(buildSubtotal)}</span>
         </div>
         {(wide || fit) && (
           <div className="pos-actions mt-2">
