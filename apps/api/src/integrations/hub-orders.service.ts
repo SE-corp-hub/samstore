@@ -116,6 +116,8 @@ export class HubOrderService {
         idempotencyKey: `hub:${store.id}:${req.idempotencyKey}`.slice(0, 128),
         customerName: req.customerName,
         customerPhone: req.customerPhone,
+        // The customer gave these details to the hub's Page to place this very order.
+        consentGranted: true,
         deliveryType: pickup ? "pickup" : "delivery",
         ...(req.address ? { deliveryAddressLine1: req.address } : {}),
         ...(req.landmark ? { landmark: req.landmark } : {}),

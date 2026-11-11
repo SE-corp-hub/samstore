@@ -39,6 +39,8 @@ const product = (over: Partial<ProductRecord> = {}): ProductRecord => ({
   images: [],
   quantityOnHand: 100,
   quantityReserved: 0,
+  featured: false,
+  tags: [],
   ...over,
 });
 
