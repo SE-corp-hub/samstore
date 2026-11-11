@@ -242,6 +242,40 @@ export const CHECKOUT_DTO: ObjectRule = {
   },
 };
 
+/** The hub door (integrations/hub-orders): an order SE Corp Hub took on a selling page. */
+export const HUB_ORDER_DTO: ObjectRule = {
+  kind: "object",
+  fields: {
+    storeSlug: { kind: "string", required: true, min: 2, max: 80 },
+    idempotencyKey: { kind: "string", required: true, min: 8, max: 80 },
+    externalRef: { kind: "string", max: 64 },
+    channel: { kind: "string", required: true, values: ["messenger", "order_form", "comment", "live", "agent", "counter"] },
+    pageName: { kind: "string", required: true, min: 1, max: 120 },
+    customerName: { kind: "string", required: true, min: 2, max: 120 },
+    customerPhone: { kind: "string", required: true, min: 7, max: 32 },
+    deliveryType: { kind: "string", values: ["delivery", "pickup"] },
+    address: { kind: "string", max: 200 },
+    landmark: { kind: "string", max: 200 },
+    notes: { kind: "string", max: 500 },
+    items: {
+      kind: "array",
+      required: true,
+      min: 1,
+      max: 50,
+      item: {
+        kind: "object",
+        fields: {
+          sku: { kind: "string", max: 64 },
+          name: { kind: "string", max: 200 },
+          quantity: { kind: "int", required: true, min: 1, max: 999 },
+        },
+      },
+    },
+    discountMinor: { kind: "int", min: 0, max: 100_000_000 },
+    deliveryFeeMinor: { kind: "int", min: 0, max: 10_000_000 },
+  },
+};
+
 export const CART_ADD_DTO: ObjectRule = {
   kind: "object",
   fields: {

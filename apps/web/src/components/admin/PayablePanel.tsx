@@ -29,7 +29,8 @@ interface Bal { id: string; name: string; code: string | null; isMain: boolean; 
 interface ToCharge { lineId: string; countDoc: string; countedAt: string | null; atId: string; at: string; productId: string; name: string; loose: boolean; quantity: number; unitCostMinor: number; amountMinor: number }
 interface Entry { id: string; docNumber: string; kind: string; locationId: string; store: string; amountMinor: number; productName: string | null; loose: boolean; quantity: number | null; unitCostMinor: number | null; note: string | null; by: string | null; at: string; reversed: boolean; canReverse: boolean }
 interface Damage { writeOffId: string; docNumber: string; at: string; atId: string; store: string; name: string; loose: boolean; quantity: number; reasonLabel: string; note: string | null; amountMinor: number; chargedAs: string | null }
-interface Summary { stores: Bal[]; toAssign: ToCharge[]; entries: Entry[]; totalOwesMinor: number; damage?: Damage[] }
+interface Extra { lineId: string; countDoc: string; at: string | null; atId: string; store: string; name: string; loose: boolean; extra: number; chargedQty: number | null; chargedOn: string | null; quantity: number | null; amountMinor: number; takenOffAs: string | null }
+interface Summary { stores: Bal[]; toAssign: ToCharge[]; entries: Entry[]; totalOwesMinor: number; damage?: Damage[]; extras?: Extra[] }
 interface ProductOption { id: string; name: string; loose: boolean }
 type Body = { message?: string; errors?: string[] };
 
@@ -103,7 +104,7 @@ export default function PayablePanel() {
     if (!reason) return;
     await act(`/admin/payable/entries/${e.id}/reverse`, { reason }, "Undone");
   };
-  const mainName = data?.stores.find((x) => x.isMain)?.name ?? "Store 1";
+  const mainName = data?.stores.find((x) => x.isMain)?.name ?? "the main store";
   const statement = async (b: Bal) => {
     const r = await call(`/admin/payable/statement?locationId=${b.id}`, "GET");
     if (!r.ok) { setError(errText(r.data, "Could not load the statement")); return; }
@@ -174,7 +175,7 @@ export default function PayablePanel() {
                   return <tr key={v.variety}><td className="text-capitalize">{v.variety}</td><td className="text-end">{kg(v.suppliedG)}</td><td className="text-end">{kg(v.soldG)}</td><td className="text-end">{kg(v.returnedG)}</td><td className="text-end">{kg(v.movedBackG)}</td><td className={`text-end ${v.countFixG < 0 ? "text-danger" : ""}`}>{kg(v.countFixG)}</td><td className="text-end fw-semibold">{kg(v.onHandG)}</td></tr>;
                 })}</tbody>
               </table></div>
-              <div className="small text-muted mt-1">&quot;Gone by count&quot; is rice the count found missing. With no POS, that is rice sold (or lost); the store pays Store 1&apos;s cost for it.</div>
+              <div className="small text-muted mt-1">&quot;Gone by count&quot; is rice the count found missing. With no POS, that is rice sold (or lost); the store pays {mainName}&apos;s cost for it.</div>
             </>
           )}
         </div>
@@ -212,10 +213,37 @@ export default function PayablePanel() {
         </div>
       )}
 
+      {(data.extras ?? []).length > 0 && (
+        <section className="mb-4" aria-labelledby="pp-extras">
+          <h6 id="pp-extras">Extra rice found after a charge</h6>
+          <p className="text-muted small mb-2">A count found rice the store was already charged for as missing. Take that charge off if the rice really is there.</p>
+          <ul className="list-group" style={{ fontVariantNumeric: "tabular-nums" }}>
+            {(data.extras ?? []).map((x) => (
+              <li key={x.lineId} className="list-group-item d-flex flex-wrap justify-content-between align-items-center gap-2">
+                <div>
+                  <div>{qtyText(x.loose, x.extra)} {x.name} extra at {x.store}</div>
+                  <div className="small text-muted">
+                    {x.countDoc}{x.at ? ` · ${new Date(x.at).toLocaleDateString()}` : ""}
+                    {x.chargedQty !== null ? ` · ${qtyText(x.loose, x.chargedQty)} still charged as missing${x.chargedOn ? ` since ${new Date(x.chargedOn).toLocaleDateString()}` : ""}` : ""}
+                  </div>
+                </div>
+                {x.takenOffAs ? (
+                  <span className="badge text-bg-success fs-6"><i className="bi bi-check-circle me-1" aria-hidden="true"></i>Taken off ({x.takenOffAs})</span>
+                ) : (
+                  <button type="button" className="btn btn-outline-success text-nowrap" style={{ minHeight: 44 }} disabled={busy} onClick={() => void act(`/admin/payable/extras/${x.lineId}/undo`, {}, `Took ${peso(x.amountMinor)} off ${x.store}`)}>
+                    Take {peso(x.amountMinor)} off {x.store}
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       {(data.damage ?? []).length > 0 && (
         <section className="mb-4" aria-labelledby="pp-damage">
           <h6 id="pp-damage">Damage at the consignment store</h6>
-          <p className="text-muted small mb-2">Written off in the last 30 days. It is Store 1&apos;s loss unless you charge it to the store.</p>
+          <p className="text-muted small mb-2">Written off in the last 30 days. It is {mainName}&apos;s loss unless you charge it to the store.</p>
           <ul className="list-group" style={{ fontVariantNumeric: "tabular-nums" }}>
             {(data.damage ?? []).map((d) => (
               <li key={d.writeOffId} className="list-group-item d-flex flex-wrap justify-content-between align-items-center gap-2">

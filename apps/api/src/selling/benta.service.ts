@@ -133,7 +133,7 @@ async function soldLast30Days(storeId: string): Promise<Record<string, number>> 
 
 const productSelect = {
   id: true, name: true, sku: true, priceMinor: true, costMinor: true, isActive: true, reviewStatus: true,
-  stockBaseUnit: true, stockBaseQuantity: true, stockConversionFamily: true, soldByWeight: true, trackStock: true,
+  stockBaseUnit: true, stockBaseQuantity: true, stockConversionFamily: true, soldByWeight: true, trackStock: true, photoKey: true,
 } as const;
 type P = Prisma.ProductGetPayload<{ select: typeof productSelect }>;
 
@@ -249,7 +249,7 @@ export class BentaService {
       }
       const items = products
         .map((p) => ({
-          id: p.id, name: p.name, sku: p.sku, loose: isLoose(p), gramsPerUnit: p.stockBaseUnit === "g" ? p.stockBaseQuantity : null,
+          id: p.id, name: p.name, sku: p.sku, photoKey: p.photoKey, loose: isLoose(p), gramsPerUnit: p.stockBaseUnit === "g" ? p.stockBaseQuantity : null,
           priceMinor: priceAt(p.priceMinor, priceBy.get(p.id)), mainPriceMinor: p.priceMinor, forReview: p.reviewStatus === "FOR_REVIEW",
           stock: stockBy.get(p.id) ?? {}, tracked: p.trackStock !== false && stockBy.has(p.id), sold30d: sold[p.id] ?? 0,
           floorMinor: effectiveCost(costMode, shelfCost.get(p.id), p.costMinor ?? 0),

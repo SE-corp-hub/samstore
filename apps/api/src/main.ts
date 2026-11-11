@@ -63,6 +63,30 @@ async function bootstrap() {
     app.getHttpAdapter().getInstance().on?.("close", () => { outbox.stop(); stopReminders(); });
   }
 
+  // SE Corp Hub: fetch its waiting orders every 15 s while running, so a Facebook order reaches Orders in
+  // seconds; send it this store's items and how its hub orders stand once a minute (or right after orders came).
+  // (integrations/hub-orders.service.ts). Sam Store calls the hub because Render's guard blocks calls from the hub.
+  const hubUrl = process.env.HUB_URL;
+  const hubSecret = process.env.HUB_ORDER_SECRET;
+  if (hubUrl && hubSecret && hubSecret.length >= 32) {
+    const { HUB_ORDER_SERVICE, syncWithHub } = await import("./integrations/hub-orders.service.js");
+    const hub = app.get(HUB_ORDER_SERVICE);
+    const everyMs = Math.max(5_000, Number(process.env.HUB_SYNC_SECONDS ?? 15) * 1000 || 15_000);
+    const fullEvery = Math.max(1, Math.round(60_000 / everyMs));
+    let n = 0;
+    let busy = false; // a slow hub never stacks beats on top of each other
+    const beat = () => {
+      if (busy) return;
+      busy = true;
+      const full = n++ % fullEvery === 0;
+      void syncWithHub(hub, hubUrl, hubSecret, fetch, { full })
+        .catch((e: Error) => console.warn(`[sam-store] hub sync: ${e.message}`))
+        .finally(() => { busy = false; });
+    };
+    setTimeout(beat, 5_000).unref?.();
+    setInterval(beat, everyMs).unref?.();
+  }
+
   app.use(express.json({ limit: "5mb" }));
   app.use(express.urlencoded({ extended: true, limit: "5mb" }));
 
@@ -131,9 +155,12 @@ async function bootstrap() {
       const ip = (Array.isArray(xff) ? xff[0] : xff)?.split(",")[0]?.trim() ?? req.ip ?? "unknown";
       const burstKey = clientKey(ip, path.split("?")[0]);
       const authKey = clientKey(ip);
+      // Product pictures: one address each (its own burst limit), and a price list of 50+ pictures
+      // must not use up the shop's per-address allowance for everything else.
+      const photo = path.startsWith("/public/product-photo/");
       const ok =
         (await rateLimitOk(burstKey, { limit: 120, windowMs: 60_000, prefix: "pub" })) &&
-        (await rateLimitOk(authKey, { limit: 240, windowMs: 60_000, prefix: "ip" }));
+        (photo || (await rateLimitOk(authKey, { limit: 240, windowMs: 60_000, prefix: "ip" })));
       if (!ok) {
         res.status(429).json({ type: "rate_limited", message: "Too many requests — slow down and try again shortly." });
         return;

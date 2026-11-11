@@ -10,6 +10,7 @@ import { connectionState } from "../../lib/offlineCache";
 import { getWidget, overviewNotice, RETRY_EVERY_MS, type Notice } from "../../lib/overview-load";
 import BarChart from "./BarChart";
 import { peso } from "../../lib/number-format";
+import CountReminder from "./CountReminder";
 
 const toPesos = (m: number) => peso(m);
 
@@ -131,6 +132,7 @@ export default function OverviewPanel({ onNavigate, storeSlug, storeName }: Over
 
   return (
     <div>
+      <CountReminder onNavigate={onNavigate} />
       <div className="d-flex justify-content-between align-items-center flex-wrap mb-3">
         <div>
           <h1 className="h4 mb-0">Good day!</h1>

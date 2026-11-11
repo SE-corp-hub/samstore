@@ -2,7 +2,8 @@
 //
 // Four CSV files, made in Excel/Google Sheets ("Save as CSV"), one row per item:
 //   products.csv   sku, name, variety, sold_as (SACK|KILO|PIECE), kg_per_sack, cost, price,
-//                  price_S1, price_S2, … (optional per-location price; blank = main price)
+//                  price_S1, price_S2, … (optional per-location price; blank = main price),
+//                  category (optional: the group in Products / Inventory; blank = leave as it is)
 //   customers.csv  name, phone, limit, utang, utang_since (YYYY-MM-DD), note
 //   staff.csv      name, phone, role (MANAGER|STAFF|SALES_AGENT|DELIVERY), home (S1…), pin
 //   kargadors.csv  name, phone, home, photo_url
@@ -12,12 +13,15 @@
 
 import { pinProblem } from "./people.js";
 import { toE164 } from "./phone.js";
+import { slugify } from "./product-validation.js";
 
 export type ImportError = { file: string; row: number; message: string };
 
 export type ProductRow = {
   row: number; sku: string; name: string; variety: string | null; soldAs: "SACK" | "KILO" | "PIECE";
   gramsPerSack: number | null; costMinor: number; priceMinor: number; locationPrices: Record<string, number>;
+  /** Blank = keep the product's category as it is. */
+  category: string | null;
 };
 export type CustomerRow = { row: number; name: string; phone: string; limitMinor: number; utangMinor: number; utangSince: string | null; note: string | null };
 export type StaffRow = { row: number; name: string; phone: string; role: "MANAGER" | "STAFF" | "SALES_AGENT" | "DELIVERY"; home: string | null; pin: string | null };
@@ -156,7 +160,9 @@ export function parseProducts(text: string, codes: string[]): Parsed<ProductRow>
       locationPrices[code] = v;
     }
     const variety = cleanName(r.get("variety")) || null;
-    return { row: r.row, sku, name, variety, soldAs, gramsPerSack, costMinor: cost, priceMinor: price, locationPrices };
+    const category = cleanName(r.get("category")) || null;
+    if (category && (category.length < 2 || category.length > 60 || !slugify(category))) throw new Error("category: 2–60 letters");
+    return { row: r.row, sku, name, variety, soldAs, gramsPerSack, costMinor: cost, priceMinor: price, locationPrices, category };
   });
   p.errors.push(...dupes(file, p.rows, (x) => x.sku, "SKU", (x) => x.row));
   p.errors.push(...dupes(file, p.rows, (x) => x.name.toLowerCase(), "name", (x) => x.row));

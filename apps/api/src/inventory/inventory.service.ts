@@ -75,6 +75,7 @@ export class InventoryService {
         id: p.id,
         name: p.name,
         sku: p.sku,
+        photoKey: p.photoKey,
         category: p.category?.name ?? null,
         quantityOnHand: onHand,
         quantityReserved: reserved,

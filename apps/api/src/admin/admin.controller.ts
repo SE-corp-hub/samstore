@@ -1,3 +1,4 @@
+import { summarizeOrderItems, OPEN_ITEM_STATUSES } from "../domain/order-items-summary.js";
 import {
   Body,
   Controller,
@@ -18,14 +19,18 @@ import {
   UseGuards,
 } from "@nestjs/common";
 import { redactCost, seesCost } from "../domain/cost-redact.js";
-import type { ApiError } from "@sam-store/contracts";
+import { cleanScreenIds, lockPinMatches, newLockSecret, readFeatureLock } from "../domain/feature-lock.js";
+import { verifyPassword } from "../auth/auth.domain.js";
+import { Prisma } from "@prisma/client";
+import type { ApiError, PosHoldItemsRequest } from "@sam-store/contracts";
 import { JwtAuthGuard, type AuthPrincipal } from "../auth/auth.guard.js";
 import { requireUser, resolveTenant, TENANT_ROLES } from "../auth/tenant-context.js";
 import { prisma } from "../persistence/prisma-repositories.js";
 import { cacheGet, cacheSet, cacheBust, cacheKey } from "../persistence/ttl-cache.js";
 import { AUTH_SERVICE, AuthService } from "../auth/auth.service.js";
 import { ProductAdminService } from "./product-admin.service.js";
-import { OrderAdminService } from "./order-admin.service.js";
+import { OrderAdminService, type OrderEditLine } from "./order-admin.service.js";
+import { POS_SERVICE, type PosService } from "../pos/pos.service.js";
 import { StoreSettingsService } from "./store-settings.service.js";
 import { rotateStoreLinkToken, revokeStoreLink } from "./store-settings.service.js";
 import { VoucherAdminService } from "./voucher-admin.service.js";
@@ -73,6 +78,7 @@ export class AdminController {
   constructor(
     @Inject(AUTH_SERVICE) private readonly auth: AuthService,
     @Inject(NOTIFICATIONS_SERVICE) notifications: NotificationsService,
+    @Inject(POS_SERVICE) private readonly pos: PosService,
   ) {
     this.ordersAdmin = new OrderAdminService(notifications);
   }
@@ -426,6 +432,10 @@ export class AdminController {
                         id: true, orderNumber: true, status: true, totalMinor: true, currencyCode: true,
                         customerName: true, customerPhone: true, createdAt: true, paymentStatus: true, source: true,
                         deliveryType: true, deliveryAddressLine1: true, fulfillmentType: true,
+                        // SE Corp Hub orders: the channel, the selling page and the hub's own number (row label).
+                        sourceChannel: true, sourcePage: true, externalRef: true, updatedAt: true,
+                        // What to pack, on the row: name and how many (no money, so it stays small).
+                        items: { select: { productName: true, quantity: true } },
                                                 // signatureData (a picture, often 10+ KB) only comes with one order (GET orders/:id):
                                                 // up to 200 of them made every list load slow and filled the tablet's saved copies.
                                                 paymentMethod: true, signatureAt: true,
@@ -477,6 +487,91 @@ export class AdminController {
                                           await cacheSet(key, counts, 5_000);
                                           return { counts, storeId };
                                         }
+
+  /**
+   * GET /admin/orders/pulse?since=<ISO> — live order updates without refreshing the app. The tablet asks every
+   * few seconds while the screen is on: orders placed or changed after `since` (oldest first, at most 20), and
+   * `at`, the time to ask from next. Without `since` it only answers `at` (where to start). One small query,
+   * kept for 3 s so several screens share it, and dropped by every order write (the "orders" cache namespace).
+   */
+  @Get("orders/pulse")
+  async ordersPulse(@Req() req: Request & { user?: AuthPrincipal }, @Query("since") since?: string, @Headers("x-store-id") headerStoreId?: string) {
+    const user = req.user;
+    requireUser(user);
+    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.VIEW);
+    const from = since && !Number.isNaN(Date.parse(since)) ? new Date(since) : null;
+    const key = cacheKey("orders", storeId, "pulse", from?.toISOString() ?? "");
+    const hit = await cacheGet<{ at: string | null; orders: unknown[] }>(key);
+    if (hit) return { ...hit, storeId };
+    let value: { at: string | null; orders: { updatedAt: Date }[] };
+    if (!from) {
+      const last = await prisma.order.findFirst({ where: { storeId }, orderBy: { updatedAt: "desc" }, select: { updatedAt: true } });
+      value = { at: (last?.updatedAt ?? new Date()).toISOString(), orders: [] };
+    } else {
+      const orders = await prisma.order.findMany({
+        where: { storeId, updatedAt: { gt: from } },
+        orderBy: { updatedAt: "asc" },
+        take: 20,
+        select: {
+          id: true, orderNumber: true, status: true, source: true, sourceChannel: true, sourcePage: true, externalRef: true,
+          customerName: true, totalMinor: true, deliveryType: true, createdAt: true, updatedAt: true,
+        },
+      });
+      value = { at: (orders.at(-1)?.updatedAt ?? from).toISOString(), orders };
+    }
+    await cacheSet(key, value, 3_000);
+    return { ...value, storeId };
+  }
+
+  /**
+   * GET /admin/orders/items — "Items in orders": every product in the matching orders, counted per stage
+   * (to receive, in progress, out for delivery, done, cancelled/failed) with the orders that hold it.
+   * Same filters as the list. `openAnyDay=1` (the "Today" view): orders still in progress count from every
+   * day, done and cancelled ones only for the dates given, exactly like the Orders tabs.
+   */
+  @Get("orders/items")
+  async orderItemsSummary(@Req() req: Request & { user?: AuthPrincipal }, @Query("from") from?: string, @Query("to") to?: string, @Query("openAnyDay") openAnyDay?: string, @Query("customer") customer?: string, @Query("source") source?: string, @Query("payment") payment?: string, @Query("fulfillment") fulfillment?: string, @Headers("x-store-id") headerStoreId?: string) {
+    const user = req.user;
+    requireUser(user);
+    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.VIEW);
+    for (const [k, val] of [["from", from], ["to", to]] as const) {
+      if (val !== undefined && Number.isNaN(Date.parse(val))) {
+        throw new HttpException({ type: "validation", errors: [`${k} must be an ISO date`] }, HttpStatus.UNPROCESSABLE_ENTITY);
+      }
+    }
+    const anyDay = openAnyDay === "1" || openAnyDay === "true";
+    const key = cacheKey("orders", storeId, "items", from ?? "", to ?? "", anyDay ? "1" : "", customer ?? "", source ?? "", payment ?? "", fulfillment ?? "");
+    const hit = await cacheGet<unknown>(key);
+    if (hit) return { ...(hit as object), storeId };
+    const and: Record<string, unknown>[] = [{ storeId }];
+    if (customer) {
+      and.push({ OR: [
+        { customerName: { contains: customer, mode: "insensitive" } },
+        { customerPhone: { contains: customer, mode: "insensitive" } },
+        { orderNumber: { contains: customer, mode: "insensitive" } },
+      ] });
+    }
+    if (source) and.push({ source });
+    if (payment) and.push({ paymentMethod: payment });
+    if (fulfillment) and.push({ fulfillmentType: fulfillment === "pickup" ? "PICKUP" : "DELIVERY" });
+    const dates: Record<string, Date> = {};
+    if (from) dates.gte = new Date(from);
+    if (to) dates.lte = new Date(to);
+    if (Object.keys(dates).length > 0) {
+      and.push(anyDay ? { OR: [{ status: { in: OPEN_ITEM_STATUSES } }, { createdAt: dates }] } : { createdAt: dates });
+    }
+    const rows = await prisma.orderItem.findMany({
+      where: { storeId, order: { AND: and } },
+      take: 5000,
+      select: {
+        productId: true, productName: true, quantity: true,
+        order: { select: { id: true, orderNumber: true, customerName: true, status: true, createdAt: true } },
+      },
+    });
+    const value = summarizeOrderItems(rows);
+    await cacheSet(key, value, 5_000);
+    return { ...value, storeId };
+  }
 
           /** GET /admin/orders/:id — full detail (items + history). */
   @Get("orders/:id")
@@ -602,6 +697,32 @@ export class AdminController {
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
     // Staff see price changes, never cost changes.
     return seesCost(role) ? result.value : { rows: result.value.rows.filter((r) => r.field !== "COST") };
+  }
+
+  /** PUT /admin/products/:id/photo — body { dataUrl }: the product's picture (shrunk on the tablet first). */
+  @Put("products/:id/photo")
+  async setProductPhoto(@Req() req: Request & { user?: AuthPrincipal }, @Param("id") id: string, @Body() body: { dataUrl?: string }, @Headers("x-store-id") headerStoreId?: string) {
+    const user = req.user;
+    requireUser(user);
+    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
+    const result = await this.productsAdmin.setPhoto(storeId, id, body?.dataUrl);
+    if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
+    await cacheBust(cacheKey("products", storeId));
+    await cacheBust(cacheKey("inventory", storeId));
+    return result.value;
+  }
+
+  /** DELETE /admin/products/:id/photo — take the picture off. */
+  @Delete("products/:id/photo")
+  async removeProductPhoto(@Req() req: Request & { user?: AuthPrincipal }, @Param("id") id: string, @Headers("x-store-id") headerStoreId?: string) {
+    const user = req.user;
+    requireUser(user);
+    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
+    const result = await this.productsAdmin.removePhoto(storeId, id);
+    if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
+    await cacheBust(cacheKey("products", storeId));
+    await cacheBust(cacheKey("inventory", storeId));
+    return result.value;
   }
 
   /** DELETE /admin/products/:id — soft delete. */
@@ -798,6 +919,61 @@ export class AdminController {
         if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
         await cacheBust(cacheKey("settings", storeId));
         return { ...result.value, storeId };
+  }
+
+  /**
+   * GET /admin/feature-lock — the PIN lock: which screens ask for the lock PIN, for the owner and
+   * for staff, plus the salted hash the tablet checks the PIN against (so it works offline).
+   */
+  @Get("feature-lock")
+  async getFeatureLock(@Req() req: Request & { user?: AuthPrincipal }, @Headers("x-store-id") headerStoreId?: string) {
+    const user = req.user;
+    requireUser(user);
+    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.VIEW);
+    const row = await prisma.storeSettings.findUnique({ where: { storeId }, select: { featureLock: true } });
+    const lock = readFeatureLock(row?.featureLock);
+    return lock ? { storeId, on: true, ...lock } : { storeId, on: false, owner: [], staff: [] };
+  }
+
+  /**
+   * PUT /admin/feature-lock — owner only. Set the lock PIN and the two screen lists, or turn the
+   * lock off. Once a lock exists, every change needs the current lock PIN or the owner's password
+   * (for a forgotten PIN).
+   */
+  @Put("feature-lock")
+  async putFeatureLock(
+    @Req() req: Request & { user?: AuthPrincipal },
+    @Body() body: { current?: unknown; newPin?: unknown; owner?: unknown; staff?: unknown; off?: unknown },
+    @Headers("x-store-id") headerStoreId?: string,
+  ) {
+    const user = req.user;
+    requireUser(user);
+    const { storeId, role } = await resolveTenant(user, headerStoreId, TENANT_ROLES.MANAGE);
+    if (role !== "OWNER" && role !== "PLATFORM_ADMIN") throw new HttpException({ type: "forbidden", message: "Only the owner can change the PIN lock" }, HttpStatus.FORBIDDEN);
+    const row = await prisma.storeSettings.findUnique({ where: { storeId }, select: { featureLock: true } });
+    const existing = readFeatureLock(row?.featureLock);
+    const current = typeof body?.current === "string" ? body.current : "";
+    if (existing && !lockPinMatches(existing, current)) {
+      const me = await prisma.user.findUnique({ where: { id: user!.sub }, select: { passwordHash: true } });
+      const pwOk = !!current && !!me?.passwordHash && (await verifyPassword(current, me.passwordHash));
+      if (!pwOk) throw new HttpException({ type: "unauthorized", message: "The current lock PIN (or your password) is not right" }, HttpStatus.FORBIDDEN);
+    }
+    if (body?.off === true) {
+      await prisma.storeSettings.upsert({ where: { storeId }, update: { featureLock: Prisma.DbNull }, create: { storeId, featureLock: Prisma.DbNull } });
+      return { storeId, on: false, owner: [], staff: [] };
+    }
+    const newPin = typeof body?.newPin === "string" ? body.newPin : "";
+    if (newPin && !/^\d{4}$/.test(newPin)) throw new HttpException({ type: "validation", errors: ["The lock PIN must be 4 digits"] }, HttpStatus.BAD_REQUEST);
+    if (!existing && !newPin) throw new HttpException({ type: "validation", errors: ["Choose a 4-digit lock PIN first"] }, HttpStatus.BAD_REQUEST);
+    const secret = newPin ? newLockSecret(newPin) : { salt: existing!.salt, hash: existing!.hash, iterations: existing!.iterations };
+    const lock = {
+      ...secret,
+      owner: cleanScreenIds(body?.owner) ?? existing?.owner ?? [],
+      staff: cleanScreenIds(body?.staff) ?? existing?.staff ?? [],
+      updatedAt: new Date().toISOString(),
+    };
+    await prisma.storeSettings.upsert({ where: { storeId }, update: { featureLock: lock }, create: { storeId, featureLock: lock } });
+    return { storeId, on: true, ...lock };
   }
 
   /** GET /admin/privacy/retention — dry-run preview. */
@@ -1081,17 +1257,29 @@ export class AdminController {
     return this.cartsRecovery.expireAbandoned(storeId);
   }
 
-  /** PATCH /admin/orders/:id/items — W1: stock-delta item edit (RECEIVED/CONFIRMED/ON_HOLD). */
+  /**
+   * PATCH /admin/orders/:id/items — Orders → Change items: products, how many and the price of each
+   * (a changed price needs its reason). Held counter orders (POS hold, pre-order) are edited the way POS and
+   * Pre-order edit them; every other open order (shop link, SE Corp Hub, agent) by the order edit (W1).
+   */
   @Patch("orders/:id/items")
   async orderItems(
     @Req() req: Request & { user?: AuthPrincipal },
     @Param("id") id: string,
-    @Body() body: { items: { productId: string; quantity: number }[] },
+    @Body() body: { items: OrderEditLine[] },
     @Headers("x-store-id") headerStoreId?: string,
   ) {
     const user = req.user;
     requireUser(user);
     const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.VIEW);
+    const held = await prisma.order.findFirst({ where: { id, storeId, status: "ON_HOLD", source: { in: ["pos", "PRE_ORDER"] } }, select: { source: true } });
+    if (held) {
+      const edited = await this.pos.replaceItems(storeId, user.sub, id, { items: body?.items ?? [] } as PosHoldItemsRequest, { source: held.source as "pos" | "PRE_ORDER" });
+      if (!edited.ok) throw new HttpException(edited.error, statusFor(edited.error));
+      await cacheBust(cacheKey("products", storeId));
+      await cacheBust(cacheKey("orders", storeId));
+      return { id, status: "ON_HOLD", totalMinor: edited.value.totalMinor, storeId };
+    }
     const result = await this.ordersAdmin.replaceOrderItems(storeId, id, body?.items ?? [], user.sub);
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
     return { ...result.value, storeId };

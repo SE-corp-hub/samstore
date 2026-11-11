@@ -17,6 +17,7 @@ import { TeamService } from "../admin/team.service.js";
 import { PeopleService } from "../people/people.service.js";
 import { accountBelongsToStore } from "../auth/account-scope.js";
 import { cacheBust, cacheKey } from "../persistence/ttl-cache.js";
+import { slugify } from "../domain/product-validation.js";
 
 export type ImportFiles = { products?: string; customers?: string; staff?: string; kargadors?: string };
 
@@ -80,7 +81,7 @@ export class RiceImportService {
     if (loaded.products.length) {
       const existing = await prisma.product.findMany({
         where: { storeId, sku: { in: loaded.products.map((p) => p.sku) } },
-        select: { sku: true, name: true, variety: true, priceMinor: true, costMinor: true, soldByWeight: true, stockBaseUnit: true, stockBaseQuantity: true, isActive: true, reviewStatus: true, locationPrices: { select: { warehouseId: true, priceMinor: true } } },
+        select: { sku: true, name: true, variety: true, category: { select: { name: true } }, priceMinor: true, costMinor: true, soldByWeight: true, stockBaseUnit: true, stockBaseQuantity: true, isActive: true, reviewStatus: true, locationPrices: { select: { warehouseId: true, priceMinor: true } } },
       });
       const bySku = new Map(existing.map((p) => [p.sku, p]));
       const names = await prisma.product.findMany({ where: { storeId, name: { in: loaded.products.map((p) => p.name), mode: "insensitive" } }, select: { sku: true, name: true } });
@@ -98,7 +99,8 @@ export class RiceImportService {
         }
         const wantPrices = new Map(Object.entries(row.locationPrices).map(([c, v]) => [loaded.locByCode.get(c)!.id, v]));
         const samePrices = cur.locationPrices.length === wantPrices.size && cur.locationPrices.every((lp) => wantPrices.get(lp.warehouseId) === lp.priceMinor);
-        const same = cur.name === row.name && (cur.variety ?? null) === row.variety && cur.priceMinor === row.priceMinor && cur.costMinor === row.costMinor && cur.isActive && cur.reviewStatus === "ACTIVE" && samePrices;
+        const sameCategory = !row.category || cur.category?.name === row.category;
+        const same = sameCategory && cur.name === row.name && (cur.variety ?? null) === row.variety && cur.priceMinor === row.priceMinor && cur.costMinor === row.costMinor && cur.isActive && cur.reviewStatus === "ACTIVE" && samePrices;
         if (same) out.products.same += 1; else out.products.update += 1;
       }
     }
@@ -183,7 +185,14 @@ export class RiceImportService {
             : row.soldAs === "KILO"
               ? { unit: "kilo", soldByWeight: true, stockBaseUnit: "g", stockBaseQuantity: 1, stockConversionFamily: "Bigas" }
               : { unit: "pc", soldByWeight: false, stockBaseUnit: null, stockBaseQuantity: null, stockConversionFamily: null };
-          const fields = { name: row.name, variety: row.variety, priceMinor: row.priceMinor, costMinor: row.costMinor, isActive: true, reviewStatus: "ACTIVE" as const };
+          // A category named in the file is found (or made) by its slug; a blank one leaves the product's as it is.
+          let categoryId: string | undefined;
+          if (row.category) {
+            const slug = slugify(row.category);
+            const cat = await tx.category.upsert({ where: { storeId_slug: { storeId, slug } }, update: {}, create: { storeId, name: row.category, slug }, select: { id: true } });
+            categoryId = cat.id;
+          }
+          const fields = { name: row.name, variety: row.variety, priceMinor: row.priceMinor, costMinor: row.costMinor, isActive: true, reviewStatus: "ACTIVE" as const, ...(categoryId ? { categoryId } : {}) };
           const before = await tx.product.findUnique({ where: { storeId_sku: { storeId, sku: row.sku } }, select: { id: true, priceMinor: true, costMinor: true } });
           const p = before
             ? await tx.product.update({ where: { id: before.id }, data: fields, select: { id: true } })

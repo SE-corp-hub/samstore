@@ -1,7 +1,8 @@
 "use client";
 
-// "Missing = sold to walk-ins": the owner or manager records a posted count's shortages as one walk-in
-// cash sale at this store's price. The cash joins the open drawer, so closing the drawer checks it.
+// "Missing = sold to walk-ins": whoever closes the store (staff at their own store, or the owner/manager)
+// records a posted count's "Sold but not rung up" shortages as one walk-in cash sale at this store's price.
+// The total and the button come first; the items follow (a full closing can list 20 or more). The cash joins the open drawer, so closing the drawer checks it.
 // At a consignment store the count's charge is replaced by the sale's (the unit price is charged once).
 
 import { useState } from "react";
@@ -53,34 +54,38 @@ export default function CountWalkIn({ countId, info, onDone }: { countId: string
         ))}
         {info.open.length > 0 && (
           <>
-            <h3 id="walkin-title" className="h6 mb-1">Was the missing rice sold to walk-ins?</h3>
-            <p className="small text-muted mb-2">If customers bought it without a receipt, record it as one cash sale at this store&apos;s price. The stock stays as counted.</p>
-            <ul className="list-group mb-2" style={{ fontVariantNumeric: "tabular-nums" }}>
+            <h3 id="walkin-title" className="h5 mb-1">Was the missing rice sold to walk-ins?</h3>
+            <p className="mb-2">If customers bought it without a receipt, record it as one cash sale at this store&apos;s price. The stock stays as counted.</p>
+            <div className="sale-total mt-0 mb-2" style={{ fontVariantNumeric: "tabular-nums" }}>
+              <span className="label">Cash to find · {info.open.length} item{info.open.length === 1 ? "" : "s"}</span>
+              <span className="amount">{pesoText(info.openMinor)}</span>
+            </div>
+            <p className="mb-2">
+              <i className={`bi ${info.drawerOpen ? "bi-cash-stack" : "bi-exclamation-triangle"} me-1`} aria-hidden="true"></i>
+              {info.drawerOpen ? `${pesoText(info.openMinor)} is added to the open drawer, so the drawer count checks it.` : "No drawer is open here. The sale is saved, but the cash is not checked in a drawer."}
+            </p>
+            {error && <div className="alert alert-danger py-2" role="alert">{error}</div>}
+            {!confirm ? (
+              <button type="button" className="btn btn-primary btn-lg w-100 mb-3" onClick={() => setConfirm(true)}>
+                <i className="bi bi-receipt me-1" aria-hidden="true"></i>Record as walk-in sales · {pesoText(info.openMinor)}
+              </button>
+            ) : (
+              <div className="d-flex flex-wrap gap-2 mb-3">
+                <button type="button" className="btn btn-primary btn-lg flex-grow-1" onClick={record} disabled={busy} aria-busy={busy}>
+                  {busy ? "Recording…" : `Yes, record ${pesoText(info.openMinor)} cash`}
+                </button>
+                <button type="button" className="btn btn-outline-dark btn-lg" onClick={() => setConfirm(false)} disabled={busy}>Cancel</button>
+              </div>
+            )}
+            <div className="fw-semibold mb-1">The items</div>
+            <ul className="list-group" style={{ fontVariantNumeric: "tabular-nums" }}>
               {info.open.map((l) => (
                 <li key={l.lineId} className="list-group-item d-flex justify-content-between gap-2">
                   <span>{qty(l.loose, l.quantity)} {l.name}<span className="text-muted small"> · {pesoText(l.priceMinor)}{l.loose ? "/kg" : ""}</span></span>
                   <span className="fw-semibold">{pesoText(l.amountMinor)}</span>
                 </li>
               ))}
-              <li className="list-group-item d-flex justify-content-between fw-bold"><span>Cash to find</span><span>{pesoText(info.openMinor)}</span></li>
             </ul>
-            <p className="small mb-2">
-              <i className={`bi ${info.drawerOpen ? "bi-cash-stack" : "bi-exclamation-triangle"} me-1`} aria-hidden="true"></i>
-              {info.drawerOpen ? `${pesoText(info.openMinor)} is added to the open drawer, so the drawer count checks it.` : "No drawer is open here. The sale is saved, but the cash is not checked in a drawer."}
-            </p>
-            {error && <div className="alert alert-danger py-2" role="alert">{error}</div>}
-            {!confirm ? (
-              <button type="button" className="btn btn-primary btn-lg w-100" onClick={() => setConfirm(true)}>
-                <i className="bi bi-receipt me-1" aria-hidden="true"></i>Record as walk-in sales · {pesoText(info.openMinor)}
-              </button>
-            ) : (
-              <div className="d-flex flex-wrap gap-2">
-                <button type="button" className="btn btn-primary btn-lg flex-grow-1" onClick={record} disabled={busy} aria-busy={busy}>
-                  {busy ? "Recording…" : `Yes, record ${pesoText(info.openMinor)} cash`}
-                </button>
-                <button type="button" className="btn btn-outline-secondary btn-lg" onClick={() => setConfirm(false)} disabled={busy}>Cancel</button>
-              </div>
-            )}
           </>
         )}
       </div>

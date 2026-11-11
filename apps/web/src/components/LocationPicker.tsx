@@ -21,9 +21,11 @@ interface Props {
   labelFor?: (l: PickableLocation) => string;
   allowAdd?: boolean;
   id?: string;
+  /** "md" is the regular box height (44 px) for a tight card; the default is the large one. */
+  size?: "lg" | "md";
 }
 
-export default function LocationPicker({ locations, value, onChange, onAdded, label, labelFor, allowAdd = true, id }: Props) {
+export default function LocationPicker({ locations, value, onChange, onAdded, label, labelFor, allowAdd = true, id, size = "lg" }: Props) {
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
@@ -53,7 +55,7 @@ export default function LocationPicker({ locations, value, onChange, onAdded, la
   return (
     <div>
       {label && <label className="form-label small mb-1" htmlFor={id}>{label}</label>}
-      <select id={id} className="form-select form-select-lg" value={value} onChange={(e) => (e.target.value === "__add" ? setAdding(true) : onChange(e.target.value))}>
+      <select id={id} className={size === "lg" ? "form-select form-select-lg" : "form-select"} value={value} onChange={(e) => (e.target.value === "__add" ? setAdding(true) : onChange(e.target.value))}>
         <option value="">Choose…</option>
         {locations.map((l) => <option key={l.id} value={l.id}>{labelFor ? labelFor(l) : `${l.name}${l.code ? ` (${l.code})` : ""}`}</option>)}
         {allowAdd && <option value="__add">＋ Add a place that is not listed</option>}

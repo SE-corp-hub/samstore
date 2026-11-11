@@ -1,0 +1,575 @@
+/* ───────────── Easy-to-read pass (2026-10-31) ─────────────
+   The owner is 65 and runs the store from a tablet. Loaded after polish.css, on every /admin page
+   (the <html data-text-size> attribute is set only there, so the storefront keeps its own look):
+   - 18 px text by default, with a Text size choice (Normal 16 / Large 18 / Extra large 20) in the
+     Menu; everything built in rem grows with it, small print never drops under 16 px,
+   - ink at the comfortable 7:1 level (WCAG AAA) for helper text, headings and labels,
+   - one meaning per colour: green = go, red = stop, amber = careful, blue = information,
+     dark ink = neutral, terracotta = you are here (never on a button),
+   - screens grouped and coloured by what they are for (Sell, Money, Stock, Reports, Setup),
+     the same way on Home, in the Menu, on the bottom bar and in the top bar. */
+
+/* ── 1. Text size, chosen on this tablet (lib/text-size.ts puts it on <html> before the first paint). */
+html[data-text-size="large"] { font-size: 18px; }
+html[data-text-size="xl"] { font-size: 20px; }
+
+/* The store screens never drop below the 18 px they had, and grow with the setting. */
+.rice-ui { font-size: max(18px, 1rem); }
+.rice-ui input, .rice-ui select, .rice-ui textarea { font-size: max(18px, 1rem); }
+.rice-ui .form-control-lg, .rice-ui .form-select-lg { font-size: max(22px, 1.25rem); }
+
+/* ── 2. Small print never under 16 px; headings, labels and table heads in full ink, sentence case. */
+html[data-text-size] .small, html[data-text-size] small, html[data-text-size] .form-text { font-size: max(16px, 0.9rem); }
+html[data-text-size] .form-label, html[data-text-size] .col-form-label { font-size: 1rem; font-weight: 600; color: var(--sam-text); }
+html[data-text-size] .form-check-label { color: var(--sam-text); }
+.admin-shell .badge { font-size: max(16px, 0.9rem); font-weight: 600; }
+.admin-shell .card-title { font-size: 1rem; }
+.admin-shell .table thead th {
+  font-size: 1rem; font-weight: 700; color: var(--sam-text);
+  text-transform: none; letter-spacing: 0; white-space: normal;
+}
+/* Section titles in capitals read slowest; keep them bold, in sentence case. */
+.admin-shell :is(h1, h2, h3, h4, h5, h6).text-uppercase { text-transform: none !important; letter-spacing: 0; }
+.admin-shell main h1 { font-size: 1.5rem; }
+.admin-shell .nav-link, .admin-shell .dropdown-item, .admin-shell .list-group-item { font-size: 1rem; }
+.admin-shell .btn { font-weight: 600; }
+
+/* ── 3. Darker ink: helper text 7.6:1 on the cream page (was 5.9:1), placeholders readable, fields outlined. */
+:root { --sam-muted: #5a4d42; --sam-sidebar-muted: #c9bcac; }
+.admin-shell .text-muted, .admin-shell .text-body-secondary, .admin-shell .text-secondary { color: var(--sam-muted) !important; }
+.admin-shell .text-opacity-75 { --bs-text-opacity: 1; }
+.admin-shell .text-info { color: #0b4f8a !important; }
+html[data-text-size] ::placeholder { color: #6b5d50 !important; opacity: 1; }
+html[data-text-size] .form-control, html[data-text-size] .form-select { color: var(--sam-text); border-color: #8c857c; }
+html[data-text-size] .form-control:disabled, html[data-text-size] .form-select:disabled { color: #4a4844; background-color: #efebe5; }
+.admin-sidebar .nav-link { color: #f4ede2; }
+
+/* ── 4. Touch: 48 px targets, 18 px text in the "small" variants, roomier table rows. */
+@media (max-width: 767.98px), (pointer: coarse) {
+  html[data-text-size] .btn, html[data-text-size] .btn-sm, html[data-text-size] .btn-group > .btn { min-height: 48px; }
+  html[data-text-size] .form-control, html[data-text-size] .form-control-sm,
+  html[data-text-size] .form-select, html[data-text-size] .form-select-sm,
+  html[data-text-size] .input-group-text { min-height: 48px; }
+  html[data-text-size] .btn-sm, html[data-text-size] .form-control-sm,
+  html[data-text-size] .form-select-sm, html[data-text-size] .input-group-text { font-size: 1rem; }
+  .admin-shell .table-sm > :not(caption) > * > * { padding: 0.5rem; }
+  .admin-shell .list-group-item-action, .admin-shell .dropdown-item { min-height: 48px; }
+  .admin-shell .nav-tabs .nav-link, .admin-shell .nav-pills .nav-link { min-height: 48px; }
+  .admin-shell .form-check-input { width: 1.5em; height: 1.5em; }
+  .admin-shell .form-switch { padding-left: 3.5em; }
+  .admin-shell .form-switch .form-check-input { width: 3em; margin-left: -3.5em; }
+  html[data-text-size] .btn-close { min-width: 48px; min-height: 48px; }
+  .admin-shell .page-link { min-width: 48px; min-height: 48px; display: flex; align-items: center; justify-content: center; }
+}
+
+/* ── 5. One meaning per colour. */
+/* Green = go: the main button of every screen, login included (replaces the terracotta fill). */
+html[data-text-size] .btn-primary {
+  background-color: #1f6f3f; border-color: #1f6f3f; color: #fff;
+  --bs-btn-bg: #1f6f3f; --bs-btn-border-color: #1f6f3f;
+  --bs-btn-hover-bg: #185a33; --bs-btn-hover-border-color: #185a33;
+  --bs-btn-active-bg: #185a33; --bs-btn-active-border-color: #185a33;
+  --bs-btn-disabled-bg: #1f6f3f; --bs-btn-disabled-border-color: #1f6f3f;
+  --bs-btn-focus-shadow-rgb: 31, 111, 63;
+}
+html[data-text-size] .btn-primary:hover, html[data-text-size] .btn-primary:focus,
+html[data-text-size] .btn-primary:active, html[data-text-size] .btn-primary.active { background-color: #185a33; border-color: #185a33; }
+/* Disabled stays grey like every other button (this rule used to keep it green, with grey text on green). */
+html[data-text-size] .btn-primary:disabled, html[data-text-size] .btn-primary.disabled { background-color: #e6e1d9; border-color: #cfc9c0; color: #6b5d50; }
+/* Red = stop, in the deeper red the store screens use (7.6:1). */
+.admin-shell .btn-danger {
+  --bs-btn-bg: #a3201b; --bs-btn-border-color: #a3201b;
+  --bs-btn-hover-bg: #861a16; --bs-btn-hover-border-color: #861a16;
+  --bs-btn-active-bg: #861a16; --bs-btn-active-border-color: #861a16;
+  --bs-btn-disabled-bg: #a3201b; --bs-btn-disabled-border-color: #a3201b;
+}
+/* Amber = careful. */
+.admin-shell .btn-warning {
+  --bs-btn-bg: #8a5a00; --bs-btn-border-color: #8a5a00; --bs-btn-color: #fff;
+  --bs-btn-hover-bg: #6f4800; --bs-btn-hover-border-color: #6f4800; --bs-btn-hover-color: #fff;
+  --bs-btn-active-bg: #6f4800; --bs-btn-active-border-color: #6f4800; --bs-btn-active-color: #fff;
+  --bs-btn-disabled-bg: #8a5a00; --bs-btn-disabled-border-color: #8a5a00; --bs-btn-disabled-color: #fff;
+}
+/* Blue = information: Print, View, Details and other second choices, links, info buttons. */
+.admin-shell .btn-outline-primary, .admin-shell .btn-outline-info {
+  --bs-btn-color: #0b4f8a; --bs-btn-border-color: #0b4f8a;
+  --bs-btn-hover-bg: #0b4f8a; --bs-btn-hover-border-color: #0b4f8a; --bs-btn-hover-color: #fff;
+  --bs-btn-active-bg: #083a66; --bs-btn-active-border-color: #083a66; --bs-btn-active-color: #fff;
+  --bs-btn-disabled-color: #0b4f8a; --bs-btn-disabled-border-color: #0b4f8a;
+  --bs-btn-focus-shadow-rgb: 11, 79, 138;
+}
+.admin-shell .btn-info {
+  --bs-btn-bg: #0b4f8a; --bs-btn-border-color: #0b4f8a; --bs-btn-color: #fff;
+  --bs-btn-hover-bg: #083a66; --bs-btn-hover-border-color: #083a66; --bs-btn-hover-color: #fff;
+  --bs-btn-active-bg: #083a66; --bs-btn-active-border-color: #083a66; --bs-btn-active-color: #fff;
+  --bs-btn-disabled-bg: #0b4f8a; --bs-btn-disabled-border-color: #0b4f8a; --bs-btn-disabled-color: #fff;
+}
+.admin-shell .btn-link { --bs-btn-color: #0b4f8a; --bs-btn-hover-color: #083a66; text-decoration-thickness: 2px; }
+/* Dark ink = neutral. */
+.admin-shell .btn-secondary {
+  --bs-btn-bg: #4a4844; --bs-btn-border-color: #4a4844;
+  --bs-btn-hover-bg: #33261d; --bs-btn-hover-border-color: #33261d;
+  --bs-btn-active-bg: #33261d; --bs-btn-active-border-color: #33261d;
+  --bs-btn-disabled-bg: #4a4844; --bs-btn-disabled-border-color: #4a4844;
+}
+.admin-shell .btn-light {
+  --bs-btn-bg: #fff; --bs-btn-border-color: #8c857c; --bs-btn-color: var(--sam-text);
+  --bs-btn-hover-bg: #f4efe7; --bs-btn-hover-border-color: #4a4844; --bs-btn-hover-color: var(--sam-text);
+  --bs-btn-active-bg: #e9e2d8; --bs-btn-active-border-color: #4a4844; --bs-btn-active-color: var(--sam-text);
+}
+/* A button that cannot be pressed is grey, not a paler green: one look says "not now". */
+.admin-shell .btn:disabled, .admin-shell .btn.disabled {
+  opacity: 1; background-color: #e6e1d9; border-color: #cfc9c0; color: #6b5d50;
+}
+.admin-shell .btn-link:disabled, .admin-shell .btn-link.disabled { background-color: transparent; border-color: transparent; }
+/* On = green (switches and checked boxes), the open list row = dark ink, progress = green. */
+.admin-shell .form-check-input:checked { background-color: #1f6f3f; border-color: #1f6f3f; }
+.admin-shell .list-group-item.active { background-color: #33261d; border-color: #33261d; color: #fff; }
+.admin-shell .progress-bar { background-color: #1f6f3f; }
+
+/* Badges: the same tinted, bordered, dark-text look on every screen (the store screens had it already). */
+.admin-shell .badge.text-bg-success { background: #e4f3ea !important; color: #185a33 !important; border: 1px solid #1f6f3f; }
+.admin-shell .badge.text-bg-danger { background: #fde8e7 !important; color: #861a16 !important; border: 1px solid #a3201b; }
+.admin-shell .badge.text-bg-warning { background: #fff3d6 !important; color: #6f4800 !important; border: 1px solid #8a5a00; }
+.admin-shell .badge.text-bg-info, .admin-shell .badge.text-bg-primary { background: #e3f0fb !important; color: #0b4f8a !important; border: 1px solid #0b4f8a; }
+.admin-shell .badge.text-bg-secondary { background: #eeebe6 !important; color: #4a4844 !important; border: 1px solid #8c857c; }
+.admin-shell .badge.text-bg-light { background: #fff !important; color: var(--sam-text) !important; border: 1px solid #c9c4bc; }
+.admin-shell .badge.text-bg-dark { background: #33261d !important; color: #fff !important; border: 1px solid #33261d; }
+/* The role badge in the top bar is a brand label, not a status. */
+.admin-shell .badge.role-badge { background: var(--sam-primary) !important; color: #fff !important; border: 1px solid var(--sam-primary); }
+
+/* Alerts: a 6 px bar on the left in the meaning colour, dark text on a light tint. */
+.admin-shell .alert { border-left: 6px solid var(--bs-alert-border-color); font-size: 1rem; }
+.admin-shell .alert-success { --bs-alert-bg: #e4f3ea; --bs-alert-border-color: #1f6f3f; --bs-alert-color: #143f24; --bs-alert-link-color: #143f24; }
+.admin-shell .alert-danger { --bs-alert-bg: #fde8e7; --bs-alert-border-color: #a3201b; --bs-alert-color: #5a1210; --bs-alert-link-color: #5a1210; }
+.admin-shell .alert-warning { --bs-alert-bg: #fff3d6; --bs-alert-border-color: #8a5a00; --bs-alert-color: #4a3000; --bs-alert-link-color: #4a3000; }
+.admin-shell .alert-info, .admin-shell .alert-primary { --bs-alert-bg: #e3f0fb; --bs-alert-border-color: #0b4f8a; --bs-alert-color: #0a2f52; --bs-alert-link-color: #0a2f52; }
+.admin-shell .alert-secondary, .admin-shell .alert-light { --bs-alert-bg: #f4efe7; --bs-alert-border-color: #8c857c; --bs-alert-color: var(--sam-text); --bs-alert-link-color: var(--sam-text); }
+
+/* ── 6. Screens grouped and coloured by what they are for (lib/admin.ts NAV_GROUPS). */
+.tone-sell { --tone: #1f6f3f; --tone-bg: #e4f3ea; }
+.tone-money { --tone: #8a5a00; --tone-bg: #fff3d6; }
+.tone-stock { --tone: #0b4f8a; --tone-bg: #e3f0fb; }
+.tone-report { --tone: #563a98; --tone-bg: #ece6f7; }
+.tone-setup { --tone: #4a4844; --tone-bg: #eeebe6; }
+
+/* Top bar: the screen's icon on its group colour, the name, and one line on what the screen is for.
+   The title block gives way first; the pills on the right keep their width. */
+.screen-title { display: flex; align-items: center; gap: 10px; flex: 1 1 0; min-width: 0; margin-right: 0.5rem; }
+.admin-topbar .ms-auto { flex: 0 0 auto; }
+.screen-chip {
+  flex: 0 0 auto; width: 2.5rem; height: 2.5rem; border-radius: 0.6rem;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--tone-bg, #eeebe6); color: var(--tone, #4a4844); font-size: 1.35rem;
+}
+.screen-name { font-weight: 700; font-size: 1.1rem; line-height: 1.2; color: var(--sam-text); }
+.screen-hint { font-size: max(16px, 0.9rem); line-height: 1.25; color: var(--sam-muted); font-weight: 400; }
+/* Phones: no room for the chip and the hint; the name wraps rather than clips, the pills may shrink. */
+@media (max-width: 575.98px) {
+  .screen-hint, .screen-chip { display: none; }
+  .screen-title { min-width: 5rem; }
+  .screen-name { font-size: 1rem; overflow-wrap: anywhere; }
+  .admin-topbar .ms-auto { flex: 0 1 auto; min-width: 0; }
+}
+
+/* Menu: the group name and the icons in the group colour (light tints on the dark drawer); the open screen stays terracotta. */
+.admin-sidebar .nav-group-label {
+  display: flex; align-items: center; gap: 8px; padding-top: 6px; padding-bottom: 4px;
+  font-size: max(16px, 0.9rem); font-weight: 700; letter-spacing: 0; text-transform: none;
+  color: var(--tone-bg, var(--sam-sidebar-muted));
+}
+.admin-sidebar .nav-group-label::before { content: ""; flex: 0 0 auto; width: 10px; height: 10px; border-radius: 3px; background: var(--tone-bg, var(--sam-sidebar-muted)); }
+.admin-sidebar .nav-link { font-size: 1rem; }
+.admin-sidebar .nav-link i { flex: 0 0 auto; width: 1.5rem; text-align: center; font-size: 1.15rem; color: var(--tone-bg, inherit); }
+.admin-sidebar .nav-link.active i { color: #fff; }
+
+/* Bottom bar: each job's icon in its group colour; the open one is dark with white. */
+.staff-bar button i { color: var(--tone, #1f1d1a); }
+.staff-bar button.active i { color: #fff; }
+
+/* Home: one heading per group in the group colour; tiles with a coloured edge and icon. */
+.home-group { margin-bottom: 1.5rem; }
+.home-group-title { display: flex; align-items: center; gap: 10px; margin: 0 0 0.75rem; font-size: 1.15rem; font-weight: 700; color: var(--tone); }
+.home-group-icon {
+  flex: 0 0 auto; width: 2.25rem; height: 2.25rem; border-radius: 0.5rem;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--tone-bg); color: var(--tone); font-size: 1.25rem;
+}
+.staff-tile { border-left: 8px solid var(--tone, #1f1d1a); }
+.staff-tile i { color: var(--tone, #1f1d1a); }
+.staff-tile:hover, .staff-tile:active { background: var(--tone, #1f1d1a); border-color: var(--tone, #1f1d1a); color: #fff; }
+.staff-tile:hover i, .staff-tile:active i { color: #fff; }
+
+/* Text size picker (Menu footer and the bottom of Home): three choices, the chosen one filled. */
+.text-size-picker { display: flex; flex-direction: column; gap: 6px; }
+.text-size-label { font-size: max(16px, 0.9rem); font-weight: 600; }
+.text-size-options { display: flex; gap: 6px; }
+.text-size-option {
+  flex: 1 1 0; min-width: 0; min-height: 60px; padding: 4px 2px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  border: 2px solid currentColor; border-radius: 10px; background: transparent; color: inherit;
+  font-size: max(16px, 0.85rem); font-weight: 600; line-height: 1.1; text-align: center;
+}
+.text-size-option.active { background: var(--sam-primary); border-color: var(--sam-primary); color: #fff; }
+.text-size-option:focus-visible { outline: 3px solid #0b4f8a; outline-offset: 2px; }
+.text-size-sample { font-weight: 700; line-height: 1; }
+.text-size-sample.size-normal { font-size: 16px; }
+.text-size-sample.size-large { font-size: 20px; }
+.text-size-sample.size-xl { font-size: 24px; }
+.admin-sidebar .text-size-picker { color: #f4ede2; }
+.admin-shell .card .text-size-option { color: var(--sam-text); }
+.admin-shell .card .text-size-option.active { color: #fff; }
+
+/* Toasts (saved / not saved) in the same green and red, 18 px, outside the shell so scoped to the page. */
+html[data-text-size] .toast { font-size: 1rem; }
+html[data-text-size] .toast.text-bg-success { background-color: #1f6f3f !important; color: #fff !important; }
+html[data-text-size] .toast.text-bg-danger { background-color: #a3201b !important; color: #fff !important; }
+
+/* ── 7. The tapped or focused control shows a 3 px ring. */
+html[data-text-size] :focus-visible { outline: 3px solid var(--sam-primary); outline-offset: 2px; }
+html[data-text-size] .btn:focus-visible { box-shadow: none; }
+
+/* ── 8. Selling screens: POS and Pre-order (2026-11-01).
+   What is in the sale is green, the total is the biggest number on the screen, every size is in rem
+   (the Text size setting works here too), and the buttons keep the one-meaning colours:
+   green = the one next step, blue outline = a second choice (Print, Change price, New item),
+   dark outline = Back / Cancel / a toggle, red = stop (Delete, Clear this sale), amber = careful. */
+.sell-screen { font-size: max(18px, 1rem); }
+
+/* The product buttons (components/admin/PickTile.tsx). */
+.pick-tile {
+  width: 100%; height: 100%; min-height: 7rem; padding: 0.5rem 0.5rem 0.6rem;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.15rem;
+  text-align: center; line-height: 1.2; font-weight: 600; color: var(--sam-text);
+  background: #fff; border: 2px solid #4a4844; border-radius: 0.75rem;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+.pick-tile:hover { background: #f4efe7; }
+.pick-tile:active { background: #e9e2d8; }
+.pick-tile.in-sale { background: #e4f3ea; border-color: #1f6f3f; box-shadow: inset 0 0 0 1px #1f6f3f; }
+.pick-count {
+  display: inline-flex; align-items: center; gap: 0.3rem; margin-bottom: 0.2rem; padding: 0.1rem 0.6rem;
+  border-radius: 1rem; background: #1f6f3f; color: #fff; font-size: max(16px, 0.9rem); font-weight: 700;
+}
+.pick-name { font-size: 1rem; overflow-wrap: anywhere; }
+.pick-name .badge { margin-left: 0.3rem; vertical-align: middle; }
+.pick-price { font-size: 1.5rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.pick-price-note { margin-left: 2px; font-size: 0.9rem; font-weight: 600; color: var(--sam-muted); }
+.pick-stock { font-size: max(16px, 0.9rem); font-weight: 500; color: var(--sam-muted); font-variant-numeric: tabular-nums; }
+.pick-stock.out {
+  display: inline-block; margin-top: 0.15rem; padding: 0.05rem 0.5rem; border-radius: 0.4rem;
+  background: #fff3d6; color: #6f4800; border: 1px solid #8a5a00; font-weight: 700;
+}
+.pick-tile.in-sale .pick-stock.out { background: #fff; }
+.pick-tile:focus-visible { outline: 3px solid var(--sam-primary); outline-offset: 2px; }
+/* A product picture across the top of the button: a fixed 4.5 rem strip (space kept while it loads),
+   the whole picture shown on white (a rice sack is taller than wide, so "contain", not cropped).
+   The "✓ 2 in sale" pill sits on the picture's corner, so the button is no taller in the sale. */
+.pick-tile.has-photo { position: relative; justify-content: flex-start; padding-top: 0.35rem; }
+.pick-photo { display: block; width: 100%; height: 4.5rem; margin-bottom: 0.15rem; border-radius: 0.5rem; background: #fff; overflow: hidden; flex: 0 0 auto; }
+.pick-photo img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.pick-tile.has-photo .pick-count { position: absolute; top: 0.3rem; right: 0.3rem; margin: 0; box-shadow: 0 0 0 2px #fff; }
+.pick-tile.in-sale .pick-photo { background: #fff; }
+/* The small picture in lists (Products, Inventory): a 3 rem square, a bag icon when there is none. */
+.product-thumb { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; overflow: hidden;
+  background: #f4efe7; border: 1px solid #d9d1c5; border-radius: 0.5rem; color: var(--sam-muted); vertical-align: middle; }
+.product-thumb-thumb { width: 3rem; height: 3rem; font-size: 1.3rem; }
+.product-thumb img { width: 100%; height: 100%; object-fit: contain; background: #fff; }
+
+/* The sale (or the order) on the right / at the bottom: a green frame, a title, the total last and largest. */
+.sale-card { background: #fff; border: 2px solid #1f6f3f; border-radius: 0.75rem; }
+.sale-card > .card-body { padding: 1rem; }
+.sale-card-title { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; font-size: 1rem; font-weight: 700; color: #1f6f3f; }
+.sale-card-title i { font-size: 1.25rem; }
+.sale-line { display: flex; flex-wrap: wrap; align-items: center; column-gap: 0.5rem; row-gap: 0.35rem; padding: 0.4rem 0; border-bottom: 1px solid #e1d6c6; font-variant-numeric: tabular-nums; }
+/* The name keeps at least 9 rem; when the card is narrower, the − + and the amount drop to a second row, on the right. */
+.sale-line .name { flex: 1 1 9rem; min-width: 0; overflow-wrap: anywhere; }
+.sale-line .qty { flex: 0 0 auto; display: flex; align-items: center; gap: 0.4rem; margin-left: auto; }
+.sale-line .amount { flex: 0 0 auto; min-width: 5.5rem; margin-left: auto; text-align: right; font-weight: 600; }
+/* Full sale: "Price" (or "Kg · price") opens the line to change its price or type an exact amount; the same height as − and +. */
+.sale-line .line-edit { flex: 0 0 auto; min-height: 3rem; margin-left: auto; white-space: nowrap; }
+/* − n + and the amount stay together: in a narrow card they drop to a second row as one piece. */
+.sale-line .qty-amount { flex: 0 0 auto; display: flex; align-items: center; column-gap: 0.5rem; margin-left: auto; }
+.sale-total { display: flex; justify-content: space-between; align-items: baseline; gap: 0.5rem; margin-top: 0.5rem; padding-top: 0.5rem; border-top: 2px solid #1f6f3f; font-variant-numeric: tabular-nums; }
+.sale-total .label { font-size: 1.1rem; font-weight: 700; }
+.sale-total .amount { font-size: 2rem; font-weight: 800; line-height: 1.1; }
+.sale-pay { font-size: 1.4rem; }
+
+/* − and + : square, big digits, a wide number between them. */
+.qty-btn { min-width: 3rem; min-height: 3rem; padding: 0; font-size: 1.5rem; font-weight: 700; line-height: 1; }
+.qty-num { min-width: 3.5rem; text-align: center; font-size: 1.25rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+
+/* The one number the person reads out ("Customer pays", change to give back). */
+.big-amount { font-size: 2.25rem; font-weight: 800; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.change-due { font-size: 1.75rem; font-weight: 800; line-height: 1.15; font-variant-numeric: tabular-nums; }
+
+/* The numbered parts of the pre-order screen (1 who · 2 items · 3 check), in the Sell green. */
+.step-num {
+  flex: 0 0 auto; width: 2rem; height: 2rem; margin-right: 0.5rem; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: #1f6f3f; color: #fff; font-size: 1.05rem; font-weight: 700;
+}
+
+/* Product list headings ("Sold most here", one per variety) in full ink, sentence case. */
+.finder-heading { display: flex; align-items: center; gap: 0.4rem; margin: 0.25rem 0 0.5rem; font-size: 1.05rem; font-weight: 700; color: var(--sam-text); }
+.finder-heading.group { padding-bottom: 0.25rem; border-bottom: 2px solid #e1d6c6; }
+.finder-heading .bi-star-fill { color: #8a5a00; }
+
+/* ── 9. Fit the tablet (2026-11-01): POS and Pre-order fill exactly the space between the top bar and
+   the bottom bar (lib/use-fit-height.ts sets the height), so nothing needs scrolling to be seen or
+   tapped, upright (800 × 1200) or sideways (1280 × 720). Only the product list (.fit-scroll) and the
+   lines of a long sale (.sale-lines) scroll, each inside its own box; the store chips, the search,
+   the total and the green button stay where they are. A phone (< 600 px) keeps the flowing page. */
+.sell-fit { display: flex; flex-direction: column; min-height: 0; }
+.sell-fit > * { flex: 0 0 auto; }
+.fit-row { display: flex; flex: 1 1 auto; min-height: 0; gap: 1rem; align-items: stretch; }
+.fit-col { display: flex; flex-direction: column; min-height: 0; }
+.fit-col > * { flex: 0 0 auto; }
+.sell-fit > .fit-col { flex: 1 1 auto; }
+.fit-main { flex: 1 1 0; min-width: 0; }
+.fit-side { flex: 0 0 40%; max-width: 32rem; min-width: 0; }
+.fit-col > .fit-scroll { flex: 1 1 auto; min-height: 4rem; }
+.fit-scroll { overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; padding-right: 2px; }
+/* The sale card never grows past its column: its lines scroll, the total and the button stay. */
+.fit-col > .fit-card { display: flex; flex-direction: column; flex: 0 1 auto; min-height: 0; }
+/* Upright: the sale card takes at most 60 % of the fitted screen (a share of the screen's own height, not of the
+   window, so an on-screen keyboard that shrinks the window cannot squeeze it). */
+.fit-col > .fit-bottom { flex: 0 0 auto; max-height: 60%; }
+.sell-fit .fit-card > .card-body { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.sell-fit .fit-card > .card-body > * { flex: 0 0 auto; }
+.sell-fit .fit-card .sale-lines { flex: 0 1 auto; min-height: 3.5rem; overflow-y: auto; overscroll-behavior: contain; }
+/* Back / Add to sale / Save / Finish sale stay in view at the bottom when a card has to scroll (Extra large text):
+   inside a .fit-card its body scrolls; the pay card (.fit-pay) scrolls with the column's .fit-scroll box. */
+.sell-fit .fit-card .pos-actions, .sell-fit .fit-scroll > .fit-pay .pos-actions { position: sticky; bottom: 0; background: #fff; padding: 0.5rem 0 0; margin-bottom: -0.25rem; }
+/* A little more room: the page padding above and below the selling screens is smaller. */
+main:has(> * > .rice-ui > .sell-fit), main:has(> .rice-ui > .sell-fit) { padding-top: 0.75rem !important; }
+.rice-ui:has(> .sell-fit) { padding-bottom: 0 !important; }
+
+/* The product bar: search box and variety buttons in one row (and a heading before them on Pre-order). */
+.finder-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; }
+.finder-bar .finder-search { position: relative; flex: 1 1 11rem; min-width: 0; }
+.finder-bar .finder-groups { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+/* 25kg / 5kg buttons sit right after the search box, on its line. */
+.finder-bar .finder-sizes { display: flex; gap: 0.4rem; flex: 0 0 auto; }
+/* On the fitted tablet screen the variety buttons stay on ONE line (a second line would take the
+   product list's room). Tighter buttons fit 8 kinds sideways; with more (or Extra large text) the
+   line slides sideways instead of wrapping. */
+.sell-fit .finder-bar .finder-groups { flex-wrap: nowrap; overflow-x: auto; max-width: 100%; scrollbar-width: thin; }
+.sell-fit .finder-bar .finder-groups .btn { flex: 0 0 auto; padding-inline: 0.55rem; }
+
+/* Product buttons: four to a row on the tablet, 6 rem tall (the name, the price, what is left). */
+.sell-fit .pick-tile { min-height: 6rem; }
+
+/* The number pad: 64 px keys; 48 px when the screen is short (the tablet sideways), so the whole pad,
+   the amount and Back / Add to sale fit beside the product list. The keys are exactly their minimum
+   height: a tight line box, so the digit's line does not push them taller. */
+.numpad-display { min-height: 64px; padding-top: 0.4rem; padding-bottom: 0.4rem; font-size: 2rem; line-height: 1.2; font-variant-numeric: tabular-nums; }
+.numpad-keys { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.5rem; }
+.rice-ui .numpad-key, html[data-text-size] .numpad-key, .numpad-key { min-height: 64px; padding-top: 0.25rem; padding-bottom: 0.25rem; font-size: 1.5rem; line-height: 1.2; font-variant-numeric: tabular-nums; }
+/* The Kilos / Pesos switch beside the amount: as tall as the amount box, never under 44 px. */
+.mode-toggle .btn { min-height: 44px; padding-left: 0.9rem; padding-right: 0.9rem; font-weight: 600; }
+/* Drop-downs and typing boxes on the selling screens are at least finger-sized (44 px). */
+.sell-fit .form-select, .sell-fit .form-control { min-height: 44px; }
+@media (max-height: 760px) {
+  .numpad-display { min-height: 48px; padding-top: 0.2rem; padding-bottom: 0.2rem; font-size: 1.75rem; }
+  .numpad-keys { gap: 0.3rem; }
+  .rice-ui .numpad-key, html[data-text-size] .numpad-key, .numpad-key { min-height: 48px; font-size: 1.35rem; }
+  .sell-fit .sale-card > .card-body { padding: 0.5rem 0.75rem; }
+  .sell-fit .big-amount { font-size: 1.85rem; }
+  .sell-fit .change-due { font-size: 1.5rem; }
+  .sell-fit .steps { margin-bottom: 0.25rem; }
+  /* The "How many?" card with Change price open, for a kilo item too: tighter heading and button row. */
+  .sell-fit .fit-card h2 { margin-bottom: 0.15rem !important; }
+  .sell-fit .fit-card .pos-actions { margin-top: 0.35rem !important; padding-top: 0.35rem; }
+}
+.sell-fit .steps { margin-bottom: 0.5rem; }
+.sell-fit > .fit-scroll { flex: 1 1 auto; min-height: 4rem; }
+/* The Complete sale pop-up: wide enough for its two columns on the tablet either way (Bootstrap's modal-lg only widens from 992 px). */
+.admin-shell .modal-dialog.modal-fit { max-width: min(56rem, calc(100vw - 2rem)); }
+
+/* §10 Count and "Close the store" (Stock = blue group; the one main button stays green). */
+/* The steps of closing: Count · Check · Walk-ins · Cash · Done. Done steps get a tick, the current one is filled. */
+.close-steps { display: flex; flex-wrap: wrap; gap: 0.35rem 0.5rem; list-style: none; padding: 0; margin: 0 0 0.75rem; }
+.close-steps li { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.25rem 0.7rem 0.25rem 0.3rem; border-radius: 2rem; border: 1px solid #c9c4bc; background: #fff; color: var(--sam-muted); font-weight: 600; font-size: 1rem; }
+.close-steps li .n { width: 1.75rem; height: 1.75rem; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: #eeebe6; color: #4a4844; font-size: 0.95rem; }
+.close-steps li.done { color: #0b4f8a; border-color: #9fc3e6; }
+.close-steps li.done .n { background: #e3f0fb; color: #0b4f8a; }
+.close-steps li[aria-current="step"] { color: #fff; background: #0b4f8a; border-color: #0b4f8a; }
+.close-steps li[aria-current="step"] .n { background: #fff; color: #0b4f8a; }
+/* The big "Close the store" card at the top of Count. */
+.close-card { border: 2px solid #1f6f3f; border-radius: 0.75rem; background: #f1f8f3; padding: 1rem; margin-bottom: 1rem; }
+.close-card h2 { font-size: 1.3rem; font-weight: 800; margin: 0 0 0.25rem; }
+/* One line of the count sheet: the name, then − [number] + (sacks) or [kilos] kg. */
+.count-line { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem 0.75rem; padding: 0.5rem 0.75rem; }
+.count-line .name { flex: 1 1 12rem; min-width: 0; overflow-wrap: anywhere; font-weight: 600; }
+.count-line.counted { background: #f1f8f3; }
+.count-line .stepper { display: flex; align-items: center; gap: 0.4rem; margin-left: auto; }
+.count-line .stepper .form-control { width: 5rem; min-height: 3rem; text-align: center; font-size: 1.35rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.count-line .stepper .unit { min-width: 3.25rem; color: var(--sam-muted); font-weight: 600; }
+.count-line .kilo .form-control { width: 7rem; }
+/* The bar under the count list: how far along, and the next step; it stays above the bottom bar. */
+.count-bar { position: sticky; bottom: 0; z-index: 5; background: #fff; border-top: 2px solid #c9c4bc; padding: 0.6rem 0.75rem; margin: 0.75rem -0.75rem 0; display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; box-shadow: 0 -4px 10px rgba(0,0,0,0.06); }
+.count-bar .progress-text { flex: 1 1 10rem; font-weight: 600; }
+.count-bar .progress { height: 0.6rem; margin-top: 0.25rem; }
+/* The cash check: the number to find, and the difference. */
+.cash-row { display: flex; justify-content: space-between; gap: 0.75rem; padding: 0.4rem 0; border-bottom: 1px solid #e1d6c6; font-variant-numeric: tabular-nums; }
+.cash-row.total { border-bottom: 0; border-top: 2px solid #1f1d1a; font-weight: 800; font-size: 1.25rem; padding-top: 0.5rem; }
+.cash-input { max-width: 16rem; min-height: 3.5rem; font-size: 1.75rem !important; font-weight: 800; text-align: right; font-variant-numeric: tabular-nums; }
+.cash-result { border-radius: 0.5rem; padding: 0.6rem 0.9rem; font-weight: 700; font-size: 1.2rem; }
+.cash-result.ok { background: #e4f3ea; color: #1f6f3f; border: 1px solid #1f6f3f; }
+.cash-result.short { background: #fbe9e7; color: #a3201b; border: 1px solid #a3201b; }
+.cash-result.over { background: #fff3d6; color: #6f4800; border: 1px solid #8a5a00; }
+/* The Home reminder: a store not counted for a while. */
+.count-reminder { border: 1px solid #8a5a00; background: #fff3d6; color: #6f4800; border-radius: 0.75rem; padding: 0.75rem 1rem; margin-bottom: 1rem; }
+.count-reminder .row-store { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem; padding: 0.35rem 0; }
+.count-reminder .row-store + .row-store { border-top: 1px solid #e8d3a6; }
+.count-reminder strong { color: #1f1d1a; }
+/* The count sheet: one column on the tablet upright; two columns sideways, so twice as many items show at once. */
+.count-sheet { max-width: 760px; }
+@media (min-width: 1100px) {
+  .count-sheet { max-width: 1240px; }
+  .count-sheet .list-group { display: grid; grid-template-columns: 1fr 1fr; column-gap: 0.75rem; row-gap: 0.4rem; }
+  .count-sheet .list-group > .list-group-item { border-width: 1px !important; border-radius: 0.5rem !important; }
+}
+
+/* The product form's Picture field (components/admin/PhotoPicker.tsx): a 7.5 rem preview beside
+   big Take photo / Choose picture buttons. */
+.photo-picker legend { font-size: 1rem; font-weight: 600; float: none; width: auto; }
+.photo-preview { width: 7.5rem; height: 7.5rem; display: flex; align-items: center; justify-content: center; flex: 0 0 auto;
+  border: 2px dashed #b9ae9f; border-radius: 0.75rem; background: #fff; overflow: hidden; }
+.photo-preview img { width: 100%; height: 100%; object-fit: contain; }
+.photo-picker .btn { min-height: 44px; text-align: start; }
+/* In the Products list the small picture is a button that opens the product (to add or change it). */
+.product-thumb-btn { padding: 0; border: 0; background: none; border-radius: 0.5rem; min-width: 44px; min-height: 44px; }
+.product-thumb-btn:focus-visible { outline: 3px solid var(--sam-primary); outline-offset: 2px; }
+/* The tablet sideways (short screen): a lower picture strip, so more buttons fit beside the sale. */
+@media (max-height: 760px) {
+  .sell-fit .pick-photo { height: 3.5rem; }
+}
+
+/* PIN lock (components/admin/LockScreen.tsx, PinLockSettings.tsx): a locked screen shows one card
+   with four dots and the big number pad; amber = careful, the lock is a "wait" not a "stop". */
+.lock-screen { display: flex; justify-content: center; padding: 1rem 0; }
+.lock-card { width: 100%; max-width: 26rem; background: #fff; border: 1px solid #ddd5c8; border-radius: 1rem; padding: 1.25rem; text-align: center; box-shadow: 0 2px 8px rgba(0,0,0,.06); }
+.lock-icon { width: 4rem; height: 4rem; margin: 0 auto 0.75rem; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  background: #fff3d6; color: #6f4800; font-size: 2rem; border: 2px solid #8a5a00; }
+.lock-help { color: #3d3934; }
+.lock-dots { display: flex; justify-content: center; gap: 1rem; margin: 0.5rem 0; }
+.lock-dot { width: 1.4rem; height: 1.4rem; border-radius: 50%; border: 3px solid #1f1d1a; background: #fff; }
+.lock-dot.is-filled { background: #1f1d1a; }
+.lock-message { min-height: 1.6em; margin-bottom: 0.5rem; }
+.lock-keys .numpad-key:disabled { background: #e6e1d9; color: #6b5d50; opacity: 1; }
+.lock-back-side { display: none; }
+/* Sideways (wider than tall): words on the left, the pad on the right, so it fits with no page scroll. */
+@media (orientation: landscape) and (min-width: 700px) {
+  .lock-screen { padding: 0; }
+  .lock-card { max-width: 52rem; display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; align-items: center; padding: 1rem 1.25rem; }
+  .lock-icon { width: 3rem; height: 3rem; font-size: 1.5rem; margin-bottom: 0.4rem; }
+  .lock-back-side { display: block; }
+  .lock-back-up { display: none; }
+}
+/* Locks shown next to a screen's name: menu, Home tiles, bottom bar. */
+.admin-sidebar .nav-link .nav-lock { width: auto; font-size: 1rem; color: #ffd98a; }
+.staff-tile .tile-lock { position: absolute; top: 0.5rem; right: 0.6rem; font-size: 1.1rem; color: #6f4800; }
+.staff-tile:hover .tile-lock, .staff-tile:active .tile-lock { color: #fff; }
+.staff-bar .bar-lock { font-size: 0.8em; color: #6f4800 !important; }
+.staff-bar button.active .bar-lock { color: #ffd98a !important; }
+.lock-now { min-height: 44px; }
+/* Settings → PIN lock: big PIN boxes and the screen picker. */
+.pin-box { max-width: 10rem; letter-spacing: 0.5em; }
+.lock-pick-group { border: 0; padding: 0; }
+.lock-pick-group legend { float: none; width: auto; margin-bottom: 0.5rem; }
+.lock-pick-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr)); gap: 0.5rem; }
+.lock-pick { display: flex; align-items: center; gap: 0.6rem; min-height: 52px; padding: 0.5rem 0.75rem; border: 2px solid #cfc6b8; border-radius: 0.6rem; background: #fff; cursor: pointer; }
+.lock-pick .form-check-input { width: 1.5rem; height: 1.5rem; margin: 0; flex: 0 0 auto; }
+.lock-pick > .bi:first-of-type { color: var(--tone, #4a4844); font-size: 1.2rem; }
+.lock-pick.is-on { border-color: #8a5a00; background: #fff3d6; }
+.lock-pick.is-on .bi-lock-fill { color: #6f4800; }
+.lock-pick:focus-within { outline: 3px solid var(--sam-primary); outline-offset: 2px; }
+
+/* §12 Orders live: new-order alerts, the Live pill, freshly changed rows, and Change items.
+   Alerts float (position: fixed) so they never push the fitted POS / Pre-order screens (§9). */
+.order-alerts {
+  position: fixed; top: .5rem; left: 50%; transform: translateX(-50%); z-index: 1045; /* under open pop-ups (1050+) */
+  width: min(26rem, calc(100vw - 2rem)); display: flex; flex-direction: column; gap: .5rem;
+}
+.order-alerts.is-folded { width: auto; align-items: center; }
+.order-alert-pill {
+  min-height: 3rem; padding: .5rem 1.25rem; border-radius: 999px; font-weight: 700;
+  background: #1F6F3F; color: #fff; border: 2px solid #fff; box-shadow: 0 .25rem 1rem rgba(0, 0, 0, .25);
+}
+.order-alert-pill:hover, .order-alert-pill:focus-visible { background: #185832; color: #fff; }
+.order-alert {
+  background: #fff; color: #1f1d1a; border: 2px solid #1F6F3F; border-left-width: .5rem;
+  border-radius: .75rem; padding: .75rem; box-shadow: 0 .5rem 1.5rem rgba(0, 0, 0, .18);
+}
+.order-alert .btn { min-height: 3rem; min-width: 3rem; }
+.order-alert-icon { color: #1F6F3F; font-size: 1.5rem; line-height: 1.2; }
+.order-alert-meta { color: #4a4036; }
+.order-alert-foot { background: #fff; border-radius: .5rem; padding: 0 .5rem; box-shadow: 0 .25rem .75rem rgba(0, 0, 0, .12); }
+.order-alert-foot .btn-link { min-height: 2.75rem; color: #0B4F8A; }
+.order-note { background: #E8F1FA; color: #0B4F8A; border: 1px solid #0B4F8A; border-radius: .5rem; padding: .5rem .75rem; font-weight: 600; }
+@media (prefers-reduced-motion: no-preference) {
+  .order-alert { animation: order-alert-in .25s ease-out; }
+  @keyframes order-alert-in { from { opacity: 0; transform: translateY(-.5rem); } to { opacity: 1; transform: none; } }
+}
+.live-pill {
+  display: inline-flex; align-items: center; gap: .375rem; padding: .125rem .625rem; border-radius: 999px;
+  background: #E6F2EA; color: #1F6F3F; font-weight: 700; font-size: .875rem; border: 1px solid #1F6F3F;
+}
+.live-dot { width: .5rem; height: .5rem; border-radius: 50%; background: #1F6F3F; }
+@media (prefers-reduced-motion: no-preference) {
+  .live-dot { animation: live-dot 2s ease-in-out infinite; }
+  @keyframes live-dot { 50% { opacity: .35; } }
+}
+.order-row.is-fresh { background: #E6F2EA; box-shadow: inset .3rem 0 0 #1F6F3F; }
+.order-edit .order-edit-close { min-width: 3rem; min-height: 3rem; }
+@media (min-width: 576px) { .modal-dialog.order-edit { max-width: min(46rem, calc(100vw - 2rem)); } }
+.order-edit-list { max-height: 40vh; overflow-y: auto; display: flex; flex-direction: column; gap: .375rem; }
+.order-edit-add { min-height: 3.5rem; }
+.order-edit .modal-footer .btn { min-height: 3rem; }
+/* Two-pane Orders (sideways): the row's buttons keep their full size; the name side gives way instead. */
+/* The row's buttons sit beside the order while there is room for its name and items (26rem); when there
+   isn't (upright with Reprint + Receive, the narrow list beside an open order, bigger text) they drop to a
+   line of their own on the right instead of squeezing the name into a thin column. */
+.order-row { flex-wrap: wrap; }
+.order-row > .order-main { flex: 1 1 0; min-width: min(26rem, calc(100% - 52px)); }
+.order-acts { display: flex; gap: 8px; align-items: center; margin-left: auto; flex: 0 0 auto; }
+.order-acts > .btn { flex-shrink: 0; }
+@media (max-width: 575.98px) { .order-acts { flex: 1 1 100%; } .order-acts > .btn { flex: 1 0 auto; } }
+.order-main > .text-end { flex-shrink: 0; }
+/* Orders flow: "Needs you" / "Done" headings on All, what to pack on each row, the order's steps. */
+.order-group { display: flex; align-items: center; gap: .5rem; font-size: 1.125rem; font-weight: 700; margin: .25rem 0 .5rem; }
+.order-items { color: #1f1d1a; font-weight: 600; margin-top: .125rem; overflow-wrap: anywhere; }
+.older-open { min-height: 3rem; color: #6F4800; background: #FFF3D6; border-color: #8A5A00; font-weight: 600; }
+.older-open:hover, .older-open:focus-visible { color: #6F4800; background: #ffe9b3; border-color: #8A5A00; }
+.order-refresh { min-width: 3rem; min-height: 2.75rem; }
+.order-steps { justify-content: flex-start !important; gap: .75rem !important; }
+.order-detail .price-changed { color: #6F4800; }
+
+/* Orders → Items: every product per order step in one table (OrderItemsTable.tsx). */
+.order-items-modal { max-width: min(62rem, calc(100vw - 1rem)); }
+.items-show { display: flex; flex-wrap: wrap; gap: .5rem; }
+.items-show-btn { display: flex; flex-direction: column; align-items: flex-start; min-height: 3.75rem; min-width: 7.5rem; padding: .375rem .75rem; text-align: left; line-height: 1.2; }
+.items-show-label { font-weight: 600; }
+.items-show-num { font-size: 1.375rem; font-weight: 700; }
+.items-show-btn.is-main:not(.btn-dark) { border-color: #1F6F3F; color: #1F6F3F; border-width: 2px; }
+.items-table-wrap { border: 1px solid #c9c4bc; border-radius: 10px; max-height: none; }
+.items-table { font-size: 1rem; }
+.items-table thead th { position: sticky; top: 0; z-index: 1; background: #F4F1EC; font-size: .9375rem; line-height: 1.2; vertical-align: bottom; white-space: normal; min-width: 5.5rem; }
+.items-table thead th:first-child { min-width: 9rem; }
+.items-table td, .items-table th { padding: .5rem .625rem; }
+.items-table .is-give { background: #EEF6F0; }
+.items-table thead .is-give { background: #DCEFE2; color: #14532D; }
+.items-table td.is-give .num { color: #14532D; font-size: 1.125rem; }
+.items-table tfoot th, .items-table tfoot td { border-top: 2px solid #1f1d1a; border-bottom: 0; font-weight: 700; background: #FAF8F5; }
+.items-table tfoot .is-give { background: #DCEFE2; }
+.items-name { display: flex; align-items: flex-start; gap: .375rem; width: 100%; min-height: 44px; padding: 0; background: none; border: 0; text-align: left; color: inherit; font-weight: 700; }
+.items-name .bi { flex-shrink: 0; margin-top: .2em; }
+.items-orders { font-weight: 400; color: #5c5248; font-size: .9375rem; }
+.items-row.is-open > * { background: #FFFBEF; }
+.items-orders-row > td { background: #FFFBEF; padding-top: 0; }
+.items-order-list { list-style: none; margin: 0; padding: 0 0 0 1.5rem; display: grid; gap: .375rem; }
+.items-order-list li { display: flex; align-items: center; gap: .75rem; padding: .25rem 0; border-top: 1px dashed #d9d3ca; }
+.items-order-list li:first-child { border-top: 0; }
+.items-order-list .btn { min-height: 44px; min-width: 5rem; }

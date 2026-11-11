@@ -100,6 +100,12 @@ export interface OrderRecord {
   orderNumber: string;
   storeId: string;
   status: string;
+  /** Where the order was taken: online (shop link, the default) | pos | hub. */
+  source?: string;
+  /** Hub door only: the channel, the selling page's name, and the hub's own reference. */
+  sourceChannel?: string | null;
+  sourcePage?: string | null;
+  externalRef?: string | null;
   currencyCode: string;
   deliveryType?: string;
   subtotalMinor: number;
