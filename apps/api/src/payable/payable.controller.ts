@@ -102,6 +102,13 @@ export class PayableController {
     return unwrap(await this.payable.chargeDamage(storeId, actor, id));
   }
 
+  /** POST /admin/payable/extras/:lineId/undo — a count found extra rice after a charge for missing rice: take it off. */
+  @Post("extras/:lineId/undo")
+  async undoForExtra(@Req() req: Req_, @Param("lineId") lineId: string, @Headers("x-store-id") h?: string) {
+    const { storeId, actor } = await this.ctx(req, h);
+    return unwrap(await this.payable.undoForExtra(storeId, actor, lineId));
+  }
+
   /** POST /admin/payable/entries/:id/reverse — { reason } */
   @Post("entries/:id/reverse")
   async reverse(@Req() req: Req_, @Param("id") id: string, @Body() body: Record<string, unknown>, @Headers("x-store-id") h?: string) {
