@@ -179,9 +179,10 @@ export class PaymentsController {
     const user = req.user;
     requireUser(user);
     const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.OWNER_MANAGER);
-    await cacheBust(cacheKey("orders", storeId));
     const result = await this.paymentsSvc.voidOrder(id, storeId, user.sub, body.reason);
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
+    await cacheBust(cacheKey("orders", storeId));
+    await cacheBust(cacheKey("products", storeId));
     return result.value;
   }
 
@@ -196,9 +197,10 @@ export class PaymentsController {
     const user = req.user;
     requireUser(user);
     const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.OWNER_MANAGER);
-    await cacheBust(cacheKey("orders", storeId));
     const result = await this.paymentsSvc.refundOrder(id, storeId, user.sub, body.amountMinor, body.reason);
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
+    await cacheBust(cacheKey("orders", storeId));
+    await cacheBust(cacheKey("products", storeId));
     return result.value;
   }
 }

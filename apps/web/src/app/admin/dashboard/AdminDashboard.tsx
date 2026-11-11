@@ -23,6 +23,8 @@ import QueueBadge, { SyncBar } from "../../../components/admin/QueueBadge";
 import StaffHome from "../../../components/admin/StaffHome";
 import TextSizePicker from "../../../components/admin/TextSizePicker";
 import LockScreen from "../../../components/admin/LockScreen";
+import OrderAlerts from "../../../components/admin/OrderAlerts";
+import { OPEN_ORDER_EVENT, OPEN_ORDER_KEY } from "../../../lib/order-pulse";
 import { isScreenLocked, lockAgain, lockListFor, useFeatureLock } from "../../../lib/feature-lock";
 
 /** Rice Ops M10: the store screens get the large, high-contrast look (globals.css .rice-ui). */
@@ -505,6 +507,16 @@ export default function AdminDashboard() {
           </div>
         </nav>
         <SyncBar />
+        {/* Live new-order alerts on every screen (not for sales agents or couriers). */}
+        {allowed.includes("orders") && role !== "SALES_AGENT" && role !== "DELIVERY" && (
+          <OrderAlerts onOpen={(id) => {
+            userNavigated.current = true;
+            try { sessionStorage.setItem(OPEN_ORDER_KEY, id); } catch { /* the event below still opens it */ }
+            setTab("orders");
+            setMobileNav(false);
+            window.dispatchEvent(new CustomEvent(OPEN_ORDER_EVENT, { detail: id }));
+          }} />
+        )}
 
         <main className={`container-fluid py-4 flex-grow-1${BAR_ROLES.includes(role) ? " has-staff-bar" : ""}`} style={{ background: "#faf7f2" }}>
           {showPinPad && pinLock.lock ? (

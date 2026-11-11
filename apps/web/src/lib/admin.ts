@@ -99,7 +99,10 @@ export interface AdminOrder {
   subtotalMinor?: number;
   deliveryFeeMinor?: number;
   discountMinor?: number;
-  items?: { productName: string; quantity: number; lineTotalMinor: number }[];
+  /** The list sends name + quantity only; the order's own page adds the money columns. */
+  items?: { productName: string; quantity: number; lineTotalMinor?: number; unitPriceMinor?: number; priceOverridden?: boolean; priceOverrideReason?: string | null }[];
+  /** M3: the explicit DELIVERY | PICKUP (deliveryType defaults to "delivery" even for counter holds). */
+  fulfillmentType?: string | null;
   statusHistory?: { fromStatus: string | null; toStatus: string; createdAt: string; reason?: string | null; actorType?: string }[];
   claimTokens?: { token: string; usedAt: string | null }[];
 }

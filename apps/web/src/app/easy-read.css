@@ -486,3 +486,90 @@ main:has(> * > .rice-ui > .sell-fit), main:has(> .rice-ui > .sell-fit) { padding
 .lock-pick.is-on { border-color: #8a5a00; background: #fff3d6; }
 .lock-pick.is-on .bi-lock-fill { color: #6f4800; }
 .lock-pick:focus-within { outline: 3px solid var(--sam-primary); outline-offset: 2px; }
+
+/* §12 Orders live: new-order alerts, the Live pill, freshly changed rows, and Change items.
+   Alerts float (position: fixed) so they never push the fitted POS / Pre-order screens (§9). */
+.order-alerts {
+  position: fixed; top: .5rem; left: 50%; transform: translateX(-50%); z-index: 1045; /* under open pop-ups (1050+) */
+  width: min(26rem, calc(100vw - 2rem)); display: flex; flex-direction: column; gap: .5rem;
+}
+.order-alerts.is-folded { width: auto; align-items: center; }
+.order-alert-pill {
+  min-height: 3rem; padding: .5rem 1.25rem; border-radius: 999px; font-weight: 700;
+  background: #1F6F3F; color: #fff; border: 2px solid #fff; box-shadow: 0 .25rem 1rem rgba(0, 0, 0, .25);
+}
+.order-alert-pill:hover, .order-alert-pill:focus-visible { background: #185832; color: #fff; }
+.order-alert {
+  background: #fff; color: #1f1d1a; border: 2px solid #1F6F3F; border-left-width: .5rem;
+  border-radius: .75rem; padding: .75rem; box-shadow: 0 .5rem 1.5rem rgba(0, 0, 0, .18);
+}
+.order-alert .btn { min-height: 3rem; min-width: 3rem; }
+.order-alert-icon { color: #1F6F3F; font-size: 1.5rem; line-height: 1.2; }
+.order-alert-meta { color: #4a4036; }
+.order-alert-foot { background: #fff; border-radius: .5rem; padding: 0 .5rem; box-shadow: 0 .25rem .75rem rgba(0, 0, 0, .12); }
+.order-alert-foot .btn-link { min-height: 2.75rem; color: #0B4F8A; }
+.order-note { background: #E8F1FA; color: #0B4F8A; border: 1px solid #0B4F8A; border-radius: .5rem; padding: .5rem .75rem; font-weight: 600; }
+@media (prefers-reduced-motion: no-preference) {
+  .order-alert { animation: order-alert-in .25s ease-out; }
+  @keyframes order-alert-in { from { opacity: 0; transform: translateY(-.5rem); } to { opacity: 1; transform: none; } }
+}
+.live-pill {
+  display: inline-flex; align-items: center; gap: .375rem; padding: .125rem .625rem; border-radius: 999px;
+  background: #E6F2EA; color: #1F6F3F; font-weight: 700; font-size: .875rem; border: 1px solid #1F6F3F;
+}
+.live-dot { width: .5rem; height: .5rem; border-radius: 50%; background: #1F6F3F; }
+@media (prefers-reduced-motion: no-preference) {
+  .live-dot { animation: live-dot 2s ease-in-out infinite; }
+  @keyframes live-dot { 50% { opacity: .35; } }
+}
+.order-row.is-fresh { background: #E6F2EA; box-shadow: inset .3rem 0 0 #1F6F3F; }
+.order-edit .order-edit-close { min-width: 3rem; min-height: 3rem; }
+@media (min-width: 576px) { .modal-dialog.order-edit { max-width: min(46rem, calc(100vw - 2rem)); } }
+.order-edit-list { max-height: 40vh; overflow-y: auto; display: flex; flex-direction: column; gap: .375rem; }
+.order-edit-add { min-height: 3.5rem; }
+.order-edit .modal-footer .btn { min-height: 3rem; }
+/* Two-pane Orders (sideways): the row's buttons keep their full size; the name side gives way instead. */
+/* The row's buttons sit beside the order while there is room for its name and items (26rem); when there
+   isn't (upright with Reprint + Receive, the narrow list beside an open order, bigger text) they drop to a
+   line of their own on the right instead of squeezing the name into a thin column. */
+.order-row { flex-wrap: wrap; }
+.order-row > .order-main { flex: 1 1 0; min-width: min(26rem, calc(100% - 52px)); }
+.order-acts { display: flex; gap: 8px; align-items: center; margin-left: auto; flex: 0 0 auto; }
+.order-acts > .btn { flex-shrink: 0; }
+@media (max-width: 575.98px) { .order-acts { flex: 1 1 100%; } .order-acts > .btn { flex: 1 0 auto; } }
+.order-main > .text-end { flex-shrink: 0; }
+/* Orders flow: "Needs you" / "Done" headings on All, what to pack on each row, the order's steps. */
+.order-group { display: flex; align-items: center; gap: .5rem; font-size: 1.125rem; font-weight: 700; margin: .25rem 0 .5rem; }
+.order-items { color: #1f1d1a; font-weight: 600; margin-top: .125rem; overflow-wrap: anywhere; }
+.older-open { min-height: 3rem; color: #6F4800; background: #FFF3D6; border-color: #8A5A00; font-weight: 600; }
+.older-open:hover, .older-open:focus-visible { color: #6F4800; background: #ffe9b3; border-color: #8A5A00; }
+.order-refresh { min-width: 3rem; min-height: 2.75rem; }
+.order-steps { justify-content: flex-start !important; gap: .75rem !important; }
+.order-detail .price-changed { color: #6F4800; }
+
+/* Orders → Items: every product per order step in one table (OrderItemsTable.tsx). */
+.order-items-modal { max-width: min(62rem, calc(100vw - 1rem)); }
+.items-show { display: flex; flex-wrap: wrap; gap: .5rem; }
+.items-show-btn { display: flex; flex-direction: column; align-items: flex-start; min-height: 3.75rem; min-width: 7.5rem; padding: .375rem .75rem; text-align: left; line-height: 1.2; }
+.items-show-label { font-weight: 600; }
+.items-show-num { font-size: 1.375rem; font-weight: 700; }
+.items-show-btn.is-main:not(.btn-dark) { border-color: #1F6F3F; color: #1F6F3F; border-width: 2px; }
+.items-table-wrap { border: 1px solid #c9c4bc; border-radius: 10px; max-height: none; }
+.items-table { font-size: 1rem; }
+.items-table thead th { position: sticky; top: 0; z-index: 1; background: #F4F1EC; font-size: .9375rem; line-height: 1.2; vertical-align: bottom; white-space: normal; min-width: 5.5rem; }
+.items-table thead th:first-child { min-width: 9rem; }
+.items-table td, .items-table th { padding: .5rem .625rem; }
+.items-table .is-give { background: #EEF6F0; }
+.items-table thead .is-give { background: #DCEFE2; color: #14532D; }
+.items-table td.is-give .num { color: #14532D; font-size: 1.125rem; }
+.items-table tfoot th, .items-table tfoot td { border-top: 2px solid #1f1d1a; border-bottom: 0; font-weight: 700; background: #FAF8F5; }
+.items-table tfoot .is-give { background: #DCEFE2; }
+.items-name { display: flex; align-items: flex-start; gap: .375rem; width: 100%; min-height: 44px; padding: 0; background: none; border: 0; text-align: left; color: inherit; font-weight: 700; }
+.items-name .bi { flex-shrink: 0; margin-top: .2em; }
+.items-orders { font-weight: 400; color: #5c5248; font-size: .9375rem; }
+.items-row.is-open > * { background: #FFFBEF; }
+.items-orders-row > td { background: #FFFBEF; padding-top: 0; }
+.items-order-list { list-style: none; margin: 0; padding: 0 0 0 1.5rem; display: grid; gap: .375rem; }
+.items-order-list li { display: flex; align-items: center; gap: .75rem; padding: .25rem 0; border-top: 1px dashed #d9d3ca; }
+.items-order-list li:first-child { border-top: 0; }
+.items-order-list .btn { min-height: 44px; min-width: 5rem; }
