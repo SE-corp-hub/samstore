@@ -33,6 +33,19 @@ export interface HubOrderRequest {
   deliveryFeeMinor?: number;
 }
 
+/** Where a hub order stands in Sam Store now: the hub follows it, since orders are changed here, not there. */
+export interface HubOrderUpdate {
+  orderNumber: string;
+  status: string;
+  deliveryType: string;
+  totalMinor: number;
+  deliveryFeeMinor: number;
+  discountMinor: number;
+  items: { name: string; quantity: number; unitPriceMinor: number }[];
+}
+/** The store's hub orders placed or changed since a time, newest changes included. */
+export type RecentHubOrders = (storeId: string, since: Date) => Promise<HubOrderUpdate[]>;
+
 export type HubOrderResult = { ok: true; value: CheckoutResponse } | { ok: false; error: ApiError };
 
 /** True only for the configured secret, compared in constant time. An unset or short secret keeps the door shut. */
@@ -53,7 +66,14 @@ export class HubOrderService {
     private readonly catalog: CatalogRepository,
     private readonly carts: CartRepository,
     private readonly checkout: CheckoutService,
+    private readonly recent: RecentHubOrders = async () => [],
   ) {}
+
+  /** The store's hub orders from the last few days as they are now, for the hub to follow. */
+  async updates(storeSlug: string, now = Date.now()): Promise<HubOrderUpdate[]> {
+    const store = await this.stores.findBySlug(storeSlug);
+    return store ? this.recent(store.id, new Date(now - 3 * 86_400_000)) : [];
+  }
 
   /** The store's active items with what can still be sold, for the hub to copy: Sam Store owns names and prices. */
   async products(storeSlug: string): Promise<{ sku: string; name: string; category: string | null; priceMinor: number; available: number }[] | null> {
@@ -138,7 +158,8 @@ export class HubOrderService {
 /**
  * Sam Store calls the hub, never the other way: Render's guard (Cloudflare) answers the hub's calls with 429, and
  * calls out of Render are not blocked. Each beat fetches the hub's waiting orders, places them (the same key gives
- * the same order back, so a lost answer is safe), says what became of each, and sends the linked stores' items.
+ * the same order back, so a lost answer is safe), says what became of each, and sends the linked stores' items and
+ * how their hub orders stand now (step, items, total), so an order changed here shows changed in the hub too.
  */
 export async function syncWithHub(hub: HubOrderService, hubUrl: string, secret: string, send = fetch): Promise<void> {
   const door = `${hubUrl.replace(/\/+$/, "")}/api/samstore`;
@@ -166,8 +187,15 @@ export async function syncWithHub(hub: HubOrderService, hubUrl: string, secret: 
     }
   }
   const products = [];
+  const updates = [];
   for (const store of Array.isArray(got.stores) ? got.stores.filter((s): s is string => typeof s === "string").slice(0, 20) : []) {
     products.push({ store, products: (await hub.products(store)) ?? [] });
+    updates.push(...(await hub.updates(store)).map((u) => ({ store, ...u })));
   }
-  await send(door, { method: "POST", headers, body: JSON.stringify({ results, products }), signal: AbortSignal.timeout(20_000) });
+  await send(door, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ results, products, updates: updates.slice(0, 200) }),
+    signal: AbortSignal.timeout(20_000),
+  });
 }

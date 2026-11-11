@@ -73,6 +73,7 @@ import {
   PrismaCartRepository,
   PrismaOrderRepository,
   PrismaOrderSequenceRepository,
+  prisma,
 } from "./persistence/prisma-repositories.js";
 
 const CLAIM_SECRET = claimSecret(); // M11: no committed fallback (see security/secrets.ts)
@@ -235,7 +236,30 @@ const CLAIM_SECRET = claimSecret(); // M11: no committed fallback (see security/
       provide: HUB_ORDER_SERVICE,
       inject: [CHECKOUT_SERVICE],
       useFactory: (checkout: CheckoutService) =>
-        new HubOrderService(new PrismaStoreRepository(), new PrismaCatalogRepository(), new PrismaCartRepository(), checkout),
+        new HubOrderService(
+          new PrismaStoreRepository(),
+          new PrismaCatalogRepository(),
+          new PrismaCartRepository(),
+          checkout,
+          // Placed in the last week or changed lately: an order edited here shows edited in the hub.
+          async (storeId, since) =>
+            (
+              await prisma.order.findMany({
+                where: { storeId, source: "hub", OR: [{ updatedAt: { gte: since } }, { createdAt: { gte: new Date(since.getTime() - 4 * 86_400_000) } }] },
+                include: { items: true },
+                orderBy: { createdAt: "desc" },
+                take: 200,
+              })
+            ).map((o) => ({
+              orderNumber: o.orderNumber,
+              status: o.status,
+              deliveryType: o.deliveryType,
+              totalMinor: o.totalMinor,
+              deliveryFeeMinor: o.deliveryFeeMinor,
+              discountMinor: o.discountMinor,
+              items: o.items.map((i) => ({ name: i.productName, quantity: i.quantity, unitPriceMinor: i.unitPriceMinor })),
+            })),
+        ),
     },
   ],
   exports: [CHECKOUT_SERVICE, "MESSENGER_SERVICE"],
