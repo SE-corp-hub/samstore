@@ -215,6 +215,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { id: "ulat", label: "Reports & closing", icon: "bi-bar-chart-line", hint: "Close the day and see reports" },
       { id: "reports", label: "Reports", icon: "bi-file-bar-graph", hint: "Sales, credit and stock by date" },
       { id: "analytics", label: "Analytics", icon: "bi-graph-up-arrow", hint: "Trends across the platform" },
+      { id: "export", label: "Export data", icon: "bi-download", hint: "Excel file of sales, stock and money" },
     ],
   },
   {
@@ -266,7 +267,7 @@ export function toneFor(id: string): NavTone {
   return navGroupFor(id)?.tone ?? "setup";
 }
 
-const OWNER_TABS = ["overview", "pos", "preorders", "orders", "utang", "products", "inventory", "expenses", "purchases", "team", "customers", "analytics", "reports", "settings", "storelink", "warehouses", "approvals", "moves", "returns", "resack", "drafts", "kargadors", "pasok", "purchaseorders", "utangrice", "agentorders", "bilangin", "storereport", "payable", "ulat"];
+const OWNER_TABS = ["overview", "pos", "preorders", "orders", "utang", "products", "inventory", "expenses", "purchases", "team", "customers", "analytics", "reports", "settings", "storelink", "warehouses", "approvals", "moves", "returns", "resack", "drafts", "kargadors", "pasok", "purchaseorders", "utangrice", "agentorders", "bilangin", "storereport", "payable", "ulat", "export"];
 
 /** Tab visibility per staff role (GET-level permissions from live API probes). */
 export const TABS_BY_ROLE: Record<string, string[]> = {
@@ -276,7 +277,7 @@ export const TABS_BY_ROLE: Record<string, string[]> = {
   OWNER: OWNER_TABS,
   // Platform operators manage tenants/access and monitor the platform; daily POS/catalog tabs belong to store roles.
   PLATFORM_ADMIN: ["overview", "stores", "useraccess", "maintenance", "analytics", "reports", "settings"],
-  MANAGER: OWNER_TABS.filter((t) => t !== "storelink"),
+  MANAGER: OWNER_TABS.filter((t) => t !== "storelink" && t !== "export"), // export carries costs + every customer: owner only
   STAFF: ["overview", "pos", "preorders", "orders", "utang", "products", "inventory", "expenses", "purchases", "customers", "reports", "countersettings", "moves", "returns", "resack", "drafts", "kargadors", "pasok", "utangrice", "agentorders", "bilangin", "storereport", "ulat"],
   SALES_AGENT: ["agent", "overview", "orders", "customers", "reports"],
   DELIVERY: [],
