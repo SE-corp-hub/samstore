@@ -95,13 +95,13 @@ const owes = async (fx: Fx, w: string) => (await prisma.storePayableEntry.aggreg
 const salesAt = async (fx: Fx, w: string) => (await prisma.order.aggregate({ where: { storeId: fx.storeId, sellingLocationId: w, status: "COMPLETED" }, _sum: { totalMinor: true } }))._sum.totalMinor ?? 0;
 
 /** A closing count where every line is counted as given (product id → counted). */
-async function closing(fx: Fx, staff: Actor, locationId: string, counted: Record<string, number | string>) {
+async function closing(fx: Fx, staff: Actor, locationId: string, counted: Record<string, number | string>, reasons: Record<string, string> = {}) {
   const c = await counts.start(fx.storeId, staff, { locationId, productIds: Object.keys(counted) });
   assert.equal(c.ok, true, msg(c));
   if (!c.ok) throw new Error("no count");
   assert.equal((await counts.record(fx.storeId, staff, c.value.id, Object.entries(counted).map(([productId, n]) => ({ productId, counted: n })))).ok, true);
   const lines = await prisma.stockCountLine.findMany({ where: { countId: c.value.id }, select: { productId: true } });
-  assert.equal((await counts.setReasons(fx.storeId, staff, c.value.id, lines.map((l) => ({ productId: l.productId, reason: "UNRINGED" })))).ok, true);
+  assert.equal((await counts.setReasons(fx.storeId, staff, c.value.id, lines.map((l) => ({ productId: l.productId, reason: reasons[l.productId] ?? "UNRINGED" })))).ok, true);
   const sub = await counts.submit(fx.storeId, staff, c.value.id, staffSig);
   assert.equal(sub.ok && sub.value.status, "APPROVED", msg(sub));
   return c.value.id;
@@ -127,9 +127,10 @@ test("Phase 2: the worked week at Store 2 — 5 sold + 1 missing = ₱6,900 owed
   assert.equal(rep.value.walkIn?.open.length, 1);
   assert.equal(rep.value.walkIn?.openMinor, 135_000);
   assert.equal(rep.value.walkIn?.drawerOpen, false);
-  // Staff never see it (a manager or owner decides).
+  // The staff who closes Store 2 sees it too (staff at another store cannot open the count).
   const staffRep = await counts.report(fx.storeId, fx.staff2, countId);
-  assert.equal(staffRep.ok && staffRep.value.walkIn, null);
+  assert.equal(staffRep.ok && staffRep.value.walkIn?.openMinor, 135_000, msg(staffRep));
+  assert.equal((await counts.report(fx.storeId, fx.staff1, countId)).ok, false);
 
   // No drawer open: the sale is still kept (it is the past day's cash), without a drawer.
   const r = await benta.sellCountShorts(fx.storeId, fx.owner, countId);
@@ -174,4 +175,73 @@ test("Phase 2: Store 1 (not consignment) — missing sacks and loose kilos becom
   assert.equal(await onHand(fx, fx.loose.id, fx.s1), 18_500);
   assert.equal(await owes(fx, fx.s1), 0);
   assert.equal(await prisma.storePayableEntry.count({ where: { storeId: fx.storeId } }), 0);
+});
+
+test("Close the store: only 'Sold but not rung up' shortages become walk-in sales; staff record them at their own store", async () => {
+  const fx = await fixture();
+  // Store 1: 4 sacks + 20 kg loose. Counted 3 sacks (sold) and 18 kg (2 kg spilled: not a sale).
+  const countId = await closing(fx, fx.staff1, fx.s1, { [fx.jasmine.id]: 3, [fx.loose.id]: "18" }, { [fx.loose.id]: "SPILLED" });
+  const rep = await counts.report(fx.storeId, fx.staff1, countId);
+  assert.equal(rep.ok, true, msg(rep));
+  if (!rep.ok) return;
+  assert.deepEqual(rep.value.walkIn?.open.map((l) => l.name), ["Jasmine 25 kg"]);
+  assert.equal(rep.value.walkIn?.openMinor, 135_000);
+
+  // The spilled line cannot be sold, even when asked for by id.
+  const spilled = await prisma.stockCountLine.findFirstOrThrow({ where: { countId, productId: fx.loose.id }, select: { id: true } });
+  assert.equal((await benta.sellCountShorts(fx.storeId, fx.staff1, countId, [spilled.id])).ok, false);
+
+  // Staff at Store 2 cannot record Store 1's count; Store 1's staff can.
+  assert.equal((await benta.sellCountShorts(fx.storeId, fx.staff2, countId)).ok, false);
+  await prisma.storeSettings.update({ where: { storeId: fx.storeId }, data: { requireOpenShift: false } });
+  const r = await benta.sellCountShorts(fx.storeId, fx.staff1, countId);
+  assert.equal(r.ok, true, msg(r));
+  if (!r.ok) return;
+  assert.equal(r.value.totalMinor, 135_000);
+  assert.equal(await onHand(fx, fx.jasmine.id, fx.s1), 3);
+  assert.equal(await onHand(fx, fx.loose.id, fx.s1), 18_000, "the spilled rice stays a loss");
+
+  // The cash check: one rung-up cash sale today at Store 1 (₱5,600) + the walk-ins (₱1,350).
+  const sold = await benta.sell(fx.storeId, fx.staff1, { idempotencyKey: key(), lines: [{ productId: fx.loose.id, kilos: "1" }], payment: { method: "cash" } });
+  assert.equal(sold.ok, true, msg(sold));
+  const cash = await counts.cashCheck(fx.storeId, fx.staff1, countId);
+  assert.equal(cash.ok, true, msg(cash));
+  if (!cash.ok) return;
+  assert.equal(cash.value.walkInMinor, 135_000);
+  assert.equal(cash.value.salesMinor, 5_600);
+  assert.equal(cash.value.expectedMinor, 140_600);
+  assert.equal(cash.value.saved, null);
+  assert.equal((await counts.saveCashCheck(fx.storeId, fx.staff1, countId, { countedMinor: -5 })).ok, false);
+  const saved = await counts.saveCashCheck(fx.storeId, fx.staff1, countId, { countedMinor: 140_000, note: "  short ₱6  " });
+  assert.equal(saved.ok && saved.value.saved?.diffMinor, -600, msg(saved));
+  const again = await counts.cashCheck(fx.storeId, fx.owner, countId);
+  assert.equal(again.ok && again.value.saved?.countedMinor, 140_000);
+  assert.equal(again.ok && again.value.saved?.note, "short ₱6");
+  assert.equal((await counts.cashCheck(fx.storeId, fx.staff2, countId)).ok, false, "staff see only their own store");
+});
+
+test("Close the store: the Home reminder shows when everything was last counted, per store", async () => {
+  const fx = await fixture();
+  const before = await counts.closingStatus(fx.storeId, fx.owner);
+  assert.equal(before.ok, true, msg(before));
+  if (!before.ok) return;
+  assert.deepEqual(before.value.stores.map((s) => [s.name, s.daysSince]), [["Store 1", null], ["Store 2", null]]);
+  // Staff see only their own store.
+  const mine = await counts.closingStatus(fx.storeId, fx.staff2);
+  assert.deepEqual(mine.ok && mine.value.stores.map((s) => s.name), ["Store 2"]);
+
+  const c = await counts.start(fx.storeId, fx.staff2, { locationId: fx.s2, note: "Close the store" });
+  assert.equal(c.ok, true, msg(c));
+  if (!c.ok) return;
+  const open = await counts.closingStatus(fx.storeId, fx.staff2);
+  assert.equal(open.ok && open.value.stores[0]?.openCountId, c.value.id);
+  assert.equal(open.ok && open.value.stores[0]?.openIsMine, true);
+  assert.equal((await counts.record(fx.storeId, fx.staff2, c.value.id, [{ productId: fx.jasmine.id, counted: 30 }, { productId: fx.loose.id, counted: "0" }])).ok, true);
+  const sub = await counts.submit(fx.storeId, fx.staff2, c.value.id, staffSig);
+  assert.equal(sub.ok, true, msg(sub));
+  const done = await counts.closingStatus(fx.storeId, fx.owner);
+  assert.equal(done.ok && done.value.stores.find((s) => s.name === "Store 2")?.daysSince, 0);
+  assert.equal(done.ok && done.value.stores.find((s) => s.name === "Store 2")?.openCountId, null);
+  const list = await counts.list(fx.storeId, fx.owner, { locationId: fx.s2 });
+  assert.equal(list[0]?.closing, true);
 });

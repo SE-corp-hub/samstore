@@ -15,6 +15,7 @@ import { RegisterService } from "../registers/register.service.js";
 import { PrismaOrderSequenceRepository } from "../persistence/prisma-repositories.js";
 import { computeOrderTotals } from "../domain/pricing.js";
 import { resolveLinePrice } from "../domain/price-override.js";
+import { settleForStatus } from "../domain/stock-settlement.js";
 import { taxColumnsFor } from "../domain/tax-store.js";
 import { saleKey, SellingError } from "../domain/selling.js";
 import { Prisma } from "@prisma/client";
@@ -939,6 +940,9 @@ export class PosService {
         },
       });
       await tx.orderStatusHistory.create({ data: { orderId: holdId, storeId, fromStatus: hold.status, toStatus: finalStatus, reason: input.sendForDelivery === true && isDelivery ? "paid at counter → send for delivery" : null, actorType: "pos", actorId: actorId } });
+      // A shop-link / SE Corp Hub order still HOLDS its stock: paid and handed over here, the held units leave
+      // the shelf now (sent for delivery, they leave when it is delivered). No-op for POS holds and pre-orders.
+      await settleForStatus(tx, { id: holdId, storeId }, finalStatus);
     }, txOptions());
 
     // v4: record loyalty redemption after the order exists (checkout pattern).

@@ -17,3 +17,5 @@ export function useMediaQuery(query: string): boolean {
 
 /** Bootstrap's lg breakpoint: a tablet held sideways (MatePad SE 11 is 1280 px wide) or a PC. */
 export const WIDE = "(min-width: 992px)";
+/** A tablet either way (800 px upright) or a PC: the selling screens fit the screen with no page scroll (lib/use-fit-height.ts). A phone keeps the flowing layout. */
+export const FIT = "(min-width: 600px)";

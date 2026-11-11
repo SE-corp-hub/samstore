@@ -76,7 +76,7 @@ export class WeeklySummaryService {
     if (consignStores.length > 0) {
       const ids = consignStores.map((c) => c.id);
       const weekStart = new Date(`${w.thisFrom}T00:00:00+08:00`);
-      const mainName = (await prisma.warehouse.findFirst({ where: { storeId, isDefault: true }, select: { name: true } }))?.name ?? "Store 1";
+      const mainName = (await prisma.warehouse.findFirst({ where: { storeId, isDefault: true }, select: { name: true } }))?.name ?? "The main store";
       const owes = await prisma.storePayableEntry.groupBy({ by: ["locationId"], where: { storeId, locationId: { in: ids } }, _sum: { amountMinor: true } });
       // A payment by the store is below 0; the main store paying the store its profit share is above 0.
       const pay = (toStore: boolean) => ({ storeId, locationId: { in: ids }, kind: "PAYMENT", amountMinor: toStore ? { gt: 0 } : { lt: 0 } });

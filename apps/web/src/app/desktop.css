@@ -1,0 +1,104 @@
+/* ───────────── Desktop (PC with a mouse) polish — UI/UX Pro Max pass, 2026-11-09 ─────────────
+   Loaded last. EVERY rule sits inside a "(hover: hover) and (pointer: fine)" block, so a touch
+   screen (the MatePad upright or sideways, phones) never matches any of it: the tablet keeps the
+   bottom bar, the drawer and the fitted POS / Pre-order exactly as before. The sidebar rules
+   also target only `aside.admin-sidebar`, which touch screens hide (globals.css), never the drawer.
+   What it fixes on a PC:
+   - the sidebar was squeezed to ~210 px on the store screens, so menu names and the email wrapped
+     and the Text size buttons were cut ("Normal" clipped); now it keeps one width,
+   - Switch user / Log out looked switched off (dark outline on the dark sidebar, ~2.5:1),
+   - the menu footer took a third of the sidebar, leaving the open screen's item out of view,
+   - on wide monitors pages ran edge to edge (lines and tables 1,600 px wide); now they stop at a
+     comfortable width and sit in the middle,
+   - mouse feedback: rows and clickable lists show where the pointer is. */
+
+@media (hover: hover) and (pointer: fine) and (min-width: 992px) {
+  /* ── Sidebar: one fixed width, never squeezed by a wide screen next to it. */
+  .admin-shell aside.admin-sidebar {
+    width: 248px !important;
+    flex: 0 0 248px;
+    border-right: 1px solid rgba(0, 0, 0, 0.25);
+  }
+  .admin-shell aside.admin-sidebar nav {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(244, 237, 226, 0.35) transparent;
+    overscroll-behavior: contain;
+  }
+  .admin-shell aside.admin-sidebar .nav-link { min-height: 44px; }
+  .admin-shell aside.admin-sidebar .nav-link:focus-visible { outline: 3px solid #ffd98a; outline-offset: -3px; }
+  .admin-shell aside.admin-sidebar .nav-group-label { margin-top: 0.25rem; }
+
+  /* ── Sidebar footer: Text size, who is signed in, and the two account buttons, compact. */
+  .admin-shell aside.admin-sidebar .side-foot {
+    display: flex; flex-direction: column; gap: 10px;
+    padding: 12px 12px 14px;
+    background: rgba(0, 0, 0, 0.18);
+  }
+  .admin-shell aside.admin-sidebar .text-size-option { min-height: 48px; border-width: 2px; }
+  .admin-shell aside.admin-sidebar .text-size-option:not(.active):hover { background: rgba(255, 255, 255, 0.1); }
+  .admin-shell aside.admin-sidebar .text-size-sample.size-normal { font-size: 14px; }
+  .admin-shell aside.admin-sidebar .text-size-sample.size-large { font-size: 17px; }
+  .admin-shell aside.admin-sidebar .text-size-sample.size-xl { font-size: 20px; }
+  .admin-shell aside.admin-sidebar .side-who { display: flex; align-items: center; gap: 10px; min-width: 0; padding-inline: 4px; }
+  .admin-shell aside.admin-sidebar .side-who > div { flex: 1 1 auto; min-width: 0; }
+  .admin-shell aside.admin-sidebar .side-who > i { font-size: 1.75rem; color: var(--sam-sidebar-muted); line-height: 1; }
+  .admin-shell aside.admin-sidebar .side-email {
+    font-weight: 600; color: #f4ede2; font-size: 1rem;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .admin-shell aside.admin-sidebar .side-role {
+    font-size: max(16px, 0.875rem); color: #d9ccbc;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .admin-shell aside.admin-sidebar .side-actions { display: grid; grid-template-columns: 1.35fr 1fr; gap: 6px; }
+  /* Readable on the dark sidebar: cream text and border 11:1, the red one a light coral 7:1. */
+  .admin-shell aside.admin-sidebar .side-btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+    min-height: 44px; padding: 6px 4px; white-space: nowrap;
+    font-size: max(16px, 0.875rem); font-weight: 600; line-height: 1.15;
+    color: #f4ede2; background: transparent; border: 2px solid rgba(244, 237, 226, 0.6); border-radius: 10px;
+    transition: background-color 150ms ease-out, border-color 150ms ease-out, color 150ms ease-out;
+  }
+  .admin-shell aside.admin-sidebar .side-btn:hover { background: rgba(255, 255, 255, 0.12); border-color: #f4ede2; color: #fff; }
+  .admin-shell aside.admin-sidebar .side-btn-out { color: #ffb4a8; border-color: rgba(255, 180, 168, 0.7); }
+  .admin-shell aside.admin-sidebar .side-btn-out:hover { background: #a3201b; border-color: #a3201b; color: #fff; }
+  .admin-shell aside.admin-sidebar .side-btn:focus-visible { outline: 3px solid #ffd98a; outline-offset: 2px; box-shadow: none; }
+
+  /* ── POS / Pre-order on a small PC screen: the sale panel never narrower than 300 px, so the
+     line prices and the Pay button are not cut. (Tablets keep their own sizes.) */
+  .admin-shell .sell-screen .fit-side { min-width: 300px; }
+
+  /* ── Mouse feedback. */
+  .admin-shell main .table > tbody > tr { transition: background-color 120ms ease-out; }
+  .admin-shell main .table > tbody > tr:hover > * { --bs-table-bg-state: rgba(43, 33, 24, 0.045); }
+  .admin-shell main .list-group-item-action { transition: background-color 120ms ease-out; }
+  .admin-shell main .list-group-item-action:hover { background-color: #f4efe7; }
+  .admin-shell main button:not(:disabled), .admin-shell main [role="button"], .admin-shell main label.form-check-label { cursor: pointer; }
+  .admin-shell .admin-topbar .btn { min-height: 40px; }
+}
+
+/* ── POS / Pre-order on a PC 1,280 px or wider: the sale panel a little narrower (40 % → 37 %), so
+   "Selling at" and the four store buttons stay on one line next to the fixed-width menu. */
+@media (hover: hover) and (pointer: fine) and (min-width: 1280px) {
+  .admin-shell .sell-screen .fit-side { flex-basis: 37%; }
+}
+
+/* ── Wide monitors: pages stop at a comfortable width and sit in the middle (only past ~1,700 px
+   of screen; a 1,366 / 1,440 / 1,600 px screen keeps using its full width). POS and Pre-order are
+   left as they are: their product list and sale panel are made to use the whole screen. */
+@media (hover: hover) and (pointer: fine) and (min-width: 1700px) {
+  .admin-shell main > fieldset,
+  .admin-shell main > .alert {
+    max-width: 1560px;
+    margin-inline: auto !important;
+    width: 100%;
+  }
+  .admin-shell main > fieldset:has(.sell-screen) { max-width: none; }
+  .admin-shell .admin-topbar > .container-fluid { max-width: calc(1560px + 2 * var(--bs-gutter-x, 1.5rem)); }
+}
+
+@media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: reduce) {
+  .admin-shell aside.admin-sidebar .side-btn,
+  .admin-shell main .table > tbody > tr,
+  .admin-shell main .list-group-item-action { transition: none; }
+}

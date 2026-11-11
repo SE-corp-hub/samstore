@@ -17,11 +17,32 @@ export function matchesSearch(name: string, query: string): boolean {
   return words(q).every((t) => nameWords.some((w) => w.startsWith(t)));
 }
 
-/** The variety a product belongs to: its name without the size ("Brown Rice 25 kg" and
-    "Brown Rice (tingi)" → "Brown Rice"). */
+/** Kinds of rice that many brands share. A product whose name has one of these words goes under
+    that kind, so "Riz Dinorado 25kg", "Crystal Dinorado 5kg" and "White Aroma dinorado" are all
+    under Dinorado. The first word found in this order wins ("White Aroma dinorado" → Dinorado). */
+const KINDS = ["Dinorado", "Jasmine", "Sinandomeng", "Malagkit", "Japonica", "Aroma", "Blue"];
+
+/** The group a product belongs to: its kind of rice when the name has one (see KINDS), otherwise its
+    name without the size ("Brown Rice 25 kg" and "Brown Rice (tingi)" → "Brown Rice"). */
 export function groupOf(name: string): string {
+  const kind = KINDS.find((k) => new RegExp(`\\b${k}\\b`, "i").test(name));
+  if (kind) return kind;
   const v = name.replace(/\(.*?\)/g, " ").replace(/\b\d+(\.\d+)?\s*(kg|kilos?|g|grams?|l|ml|pcs?|sacks?)\b/gi, " ").replace(/\s+/g, " ").trim();
   return v ? v.replace(/\b\w/g, (c) => c.toUpperCase()) : "Other";
+}
+
+/** The pack size in a product's name, written the same way every time ("25kg", "5 kg" → "25kg"),
+    or null when the name has none (loose rice, "(tingi)", other goods). */
+export function sizeOf(name: string): string | null {
+  const m = /\b(\d+(?:\.\d+)?)\s*kg\b/i.exec(name);
+  return m ? `${Number(m[1])}kg` : null;
+}
+
+/** The sizes worth a button: at least two different ones, biggest first, at most four. */
+export function sizesFor(names: string[]): string[] {
+  const set = [...new Set(names.map(sizeOf).filter((x): x is string => !!x))];
+  set.sort((a, b) => parseFloat(b) - parseFloat(a));
+  return set.length > 1 ? set.slice(0, 4) : [];
 }
 
 /** Varieties with only one product go together under "Other", so the filter buttons stay few. */

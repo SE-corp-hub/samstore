@@ -1,11 +1,13 @@
 "use client";
 
+import ProductPhoto from "./ProductPhoto";
 import { useCallback, useEffect, useState } from "react";
 import { API_URL } from "../../config";
 import { adminHeaders } from "../../lib/admin";
 import { peso } from "../../lib/number-format";
 
 interface InvItem {
+  photoKey?: string | null;
   id: string; name: string; sku: string; category: string | null;
   quantityOnHand: number; quantityReserved: number; availableQuantity: number;
   reorderThreshold: number; costMinor: number; valueMinor: number; status: "in" | "low" | "out";
@@ -325,10 +327,10 @@ export default function InventoryPanel() {
             <i className="bi bi-arrow-left-right me-1"></i>Convert stock
           </button>
           <div className="btn-group btn-group-sm" role="group" aria-label="Inventory view">
-            <button type="button" className={`btn ${view === "stock" ? "btn-primary" : "btn-outline-primary"}`} onClick={() => setView("stock")}>
+            <button type="button" className={`btn ${view === "stock" ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setView("stock")}>
               <i className="bi bi-boxes me-1"></i>Stock
             </button>
-            <button type="button" className={`btn ${view === "history" ? "btn-primary" : "btn-outline-primary"}`} onClick={() => setView("history")}>
+            <button type="button" className={`btn ${view === "history" ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setView("history")}>
               <i className="bi bi-clock-history me-1"></i>Stock flow
             </button>
           </div>
@@ -401,7 +403,7 @@ export default function InventoryPanel() {
             <tbody>
               {items.map((r) => (
                 <tr key={r.id}>
-                  <td className="fw-semibold">{r.name}<div className="small text-muted fw-normal d-lg-none">{r.sku}{r.quantityReserved > 0 ? ` · ${r.quantityReserved} reserved` : ""}</div></td>
+                  <td className="fw-semibold"><div className="d-flex align-items-center gap-2"><ProductPhoto photoKey={r.photoKey} size="thumb" /><div>{r.name}<div className="small text-muted fw-normal d-lg-none">{r.sku}{r.quantityReserved > 0 ? ` · ${r.quantityReserved} reserved` : ""}</div></div></div></td>
                   <td className="small text-muted col-wide">{r.sku}</td>
                   <td className="small text-muted col-wide">{r.category ?? "—"}</td>
                   <td className="text-end">{r.quantityOnHand}</td>
@@ -438,10 +440,10 @@ export default function InventoryPanel() {
                     Current stock: <strong>{adjust.quantityOnHand}</strong> on hand · {adjust.quantityReserved} reserved · {adjust.availableQuantity} available
                   </p>
                   <div className="btn-group btn-group-sm w-100 mb-2" role="group" aria-label="Adjustment mode">
-                    <button type="button" className={`btn ${adjustMode === "delta" ? "btn-primary" : "btn-outline-primary"}`} onClick={() => setAdjustMode("delta")}>
+                    <button type="button" className={`btn ${adjustMode === "delta" ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setAdjustMode("delta")}>
                       Add / remove
                     </button>
-                    <button type="button" className={`btn ${adjustMode === "setTo" ? "btn-primary" : "btn-outline-primary"}`} onClick={() => setAdjustMode("setTo")}>
+                    <button type="button" className={`btn ${adjustMode === "setTo" ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setAdjustMode("setTo")}>
                       Counted total
                     </button>
                   </div>

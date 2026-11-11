@@ -5,16 +5,21 @@
 // paying (cash w/ tendered / utang w/ dates), or voiding — plus the existing transitions
 // for delivery-flow statuses. Role-gated via roleCan.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { API_URL } from "../../config";
 import { adminHeaders, type AdminOrder, getAdminRole, roleCan } from "../../lib/admin";
 import ReceiptModal from "./ReceiptModal";
+import OrderEditor from "./OrderEditor";
+import Steps from "./Steps";
+import { markOwnOrderChange, onOrderChanges, OPEN_ORDER_EVENT, OPEN_ORDER_KEY } from "../../lib/order-pulse";
 import SignaturePad from "./SignaturePad";
 import PaymentReview from "./PaymentReview";
 import ChatPanel from "./ChatPanel";
+import OrderItemsTable from "./OrderItemsTable";
 import { toast } from "../../lib/toast";
 import { useMediaQuery, WIDE } from "../../lib/use-media-query";
 import { peso } from "../../lib/number-format";
+import { cachedGet, savedThenFresh, useOffline } from "../../lib/offlineCache";
 
 const STATUS_BADGE: Record<string, string> = {
   RECEIVED: "text-bg-secondary",
@@ -38,9 +43,9 @@ const STATUS_LABEL: Record<string, string> = {
 
 const TABS: { id: string; label: string; status?: string[]; hint: string }[] = [
   { id: "today", label: "All", status: undefined, hint: "Every order for the day you picked. Tap an order to see its items and what to do next." },
-  { id: "pending", label: "To receive", status: ["RECEIVED"], hint: "New orders, oldest first. Receive them, or cancel with a reason." },
-  { id: "onprocess", label: "In progress", status: ["CONFIRMED", "PREPARING", "READY", "ON_HOLD"], hint: "Received or held orders. Send for delivery, mark ready for pickup, or take payment." },
-  { id: "fordelivery", label: "Out for delivery", status: ["OUT_FOR_DELIVERY"], hint: "With the courier. Mark delivered when the customer has it." },
+  { id: "pending", label: "To receive", status: ["RECEIVED"], hint: "New orders from every day, oldest first. Receive them, or cancel with a reason." },
+  { id: "onprocess", label: "In progress", status: ["CONFIRMED", "PREPARING", "READY", "ON_HOLD"], hint: "Received or held orders from every day, oldest first. Send for delivery, mark ready for pickup, or take payment." },
+  { id: "fordelivery", label: "Out for delivery", status: ["OUT_FOR_DELIVERY"], hint: "With the courier, from every day. Mark delivered when the customer has it." },
   { id: "delivered", label: "Delivered", status: ["DELIVERED"], hint: "Delivered and paid on delivery." },
   { id: "completed", label: "Completed", status: ["COMPLETED"], hint: "Paid and done. Reprint receipts here." },
   { id: "void", label: "Void", status: ["CANCELLED", "FAILED_DELIVERY"], hint: "Cancelled orders and failed deliveries. A failed delivery can be sent again." },
@@ -49,9 +54,15 @@ const TABS: { id: string; label: string; status?: string[]; hint: string }[] = [
 /** One thing a user can do with an order. "main" is the next step (one per order, shown on its row). */
 interface OrderAction { key: string; label: string; icon: string; tone: "main" | "plain" | "danger"; run: () => void }
 
-interface EditLine { productId: string; productName: string; quantity: number; unitPriceMinor: number }
-interface ProductOption { id: string; name: string; sku: string }
 
+/** Statuses that still need someone. With "Today" picked, their tabs show them from EVERY day: an order that
+ *  came in last night must not drop out of sight at midnight. */
+const OPEN_STATUSES = ["RECEIVED", "CONFIRMED", "PREPARING", "READY", "ON_HOLD", "OUT_FOR_DELIVERY", "FAILED_DELIVERY"];
+const OPEN_TABS = ["pending", "onprocess", "fordelivery"];
+/** "2× Alsa 25kg · 1× Planters 25kg": what to pack, readable on the row without opening the order. */
+const itemsLine = (o: AdminOrder) => (o.items ?? []).map((i) => `${i.quantity}× ${i.productName}`).join(" · ");
+
+const HUB_CHANNEL: Record<string, string> = { messenger: "Messenger chat", order_form: "Order form", comment: "Comment", live: "Live", agent: "Agent", counter: "Counter" };
 const toPesos = (m: number) => peso(m);
 const dayRange = (d: Date) => ({ from: new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0).toISOString(), to: new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59).toISOString() });
 
@@ -68,7 +79,8 @@ export default function OrdersPanel() {
   const [paymentFilter, setPaymentFilter] = useState(""); // "" | cod | credit
   const [fulfillmentFilter, setFulfillmentFilter] = useState(""); // "" | delivery | pickup
   const [selected, setSelected] = useState<Set<string>>(new Set()); // batch mode
-  const [autoRefresh, setAutoRefresh] = useState(false);
+  // Orders that just came in or changed somewhere else: their rows glow for a short while.
+  const [fresh, setFresh] = useState<Set<string>>(new Set());
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [lastLoaded, setLastLoaded] = useState("");
   const wide = useMediaQuery(WIDE);
@@ -76,22 +88,24 @@ export default function OrdersPanel() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [transitioning, setTransitioning] = useState<string | null>(null);
+  const offline = useOffline();
   const [pendingReason, setPendingReason] = useState<{ orderId: string; to: string } | null>(null);
   const [reason, setReason] = useState("");
   const [receiptOrder, setReceiptOrder] = useState<string | null>(null);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
+  const [itemsOpen, setItemsOpen] = useState(false);
   const [confirmAction, setConfirmAction] = useState<{ orderId: string; kind: "void" | "refund" | "voidHold" } | null>(null);
   const [orderDetail, setOrderDetail] = useState<AdminOrder | null>(null);
   const [detailSignature, setDetailSignature] = useState<string | null>(null);
-  const [detailItems, setDetailItems] = useState<{ productName: string; quantity: number; lineTotalMinor: number }[] | null>(null);
+  const [detailItems, setDetailItems] = useState<{ productName: string; quantity: number; lineTotalMinor: number; unitPriceMinor?: number; priceOverridden?: boolean; priceOverrideReason?: string | null }[] | null>(null);
   const [detailReceived, setDetailReceived] = useState<{ signerName: string; imagePng: string; createdAt: string }[]>([]);
   const [detailHistory, setDetailHistory] = useState<{ fromStatus: string | null; toStatus: string; createdAt: string; reason?: string | null; actorType?: string }[] | null>(null);
   const [detailToken, setDetailToken] = useState<string | null>(null);
   const [counts, setCounts] = useState<Record<string, number>>({});
+  const [openCounts, setOpenCounts] = useState<Record<string, number> | null>(null);
   // On-process editing
-  const [editHold, setEditHold] = useState<{ id: string; orderNumber: string; status: string; lines: EditLine[] } | null>(null);
-  const [products, setProducts] = useState<ProductOption[]>([]);
+  const [editing, setEditing] = useState<{ id: string; orderNumber: string; customerName: string } | null>(null);
   const [payHold, setPayHold] = useState<{ id: string; orderNumber: string; totalMinor: number; isDelivery: boolean } | null>(null);
   const [payMethod, setPayMethod] = useState<"cash" | "credit">("cash");
   const [tendered, setTendered] = useState("");
@@ -132,7 +146,7 @@ export default function OrdersPanel() {
     else if (deliveryConfirm) setDeliveryConfirm(null);
     else if (pendingReason) setPendingReason(null);
     else if (confirmAction) setConfirmAction(null);
-    else if (editHold) setEditHold(null);
+    else if (editing) setEditing(null);
     else if (orderDetail) setOrderDetail(null);
   };
   useEffect(() => {
@@ -148,60 +162,87 @@ export default function OrdersPanel() {
       const q = new URLSearchParams();
       const cur = TABS.find((t) => t.id === tab)!;
       if (cur.status) q.set("status", cur.status.join(","));
-      if (tab === "today" || range !== "custom") {
+      const anyDay = OPEN_TABS.includes(tab) && range === "today";
+      if (range === "custom") {
+        if (customFrom) q.set("from", new Date(customFrom).toISOString());
+        if (customTo) q.set("to", new Date(new Date(customTo).getTime() + 86_399_000).toISOString());
+      } else if (!anyDay) {
         const base = range === "today" ? new Date() : range === "yesterday" ? new Date(Date.now() - 86_400_000) : new Date(Date.now() + 86_400_000);
         const d = dayRange(base);
         q.set("from", d.from);
         q.set("to", d.to);
-      } else {
-        if (customFrom) q.set("from", new Date(customFrom).toISOString());
-        if (customTo) q.set("to", new Date(new Date(customTo).getTime() + 86_399_000).toISOString());
       }
       if (customer.trim()) q.set("customer", customer.trim());
       if (sourceFilter) q.set("source", sourceFilter);
       if (paymentFilter) q.set("payment", paymentFilter);
       if (fulfillmentFilter) q.set("fulfillment", fulfillmentFilter);
-            const res = await fetch(`${API_URL}/admin/orders?${q.toString()}`, { headers: adminHeaders() });
-                        if (!res.ok) throw new Error("Failed to load orders");
-                        const data = await res.json();
+            // Offline in the store: the last list saved on this tablet for the same day and filters.
+            const data = await cachedGet<{ orders?: AdminOrder[] }>(`/admin/orders?${q.toString()}`);
+                        if (!data) throw new Error("Failed to load orders");
                         let list = data.orders ?? [];
                         // Oldest-first in Pending (FIFO: the longest-waiting order is the most urgent).
-                        if (tab === "pending") list = list.sort((a: AdminOrder, b: AdminOrder) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0));
+                        if (OPEN_TABS.includes(tab)) list = list.sort((a: AdminOrder, b: AdminOrder) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0));
                         setOrders(list);
                         setLastLoaded(new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }));
             // Per-tab counts (for badges) — same filters as the list, fire-and-forget, never blocks.
                         const cq = new URLSearchParams();
-                                                for (const [k, v] of [["from", q.get("from")], ["to", q.get("to")], ["customer", q.get("customer")], ["source", q.get("source")], ["payment", q.get("payment")], ["fulfillment", q.get("fulfillment")]] as const) {
-                                                  if (v) cq.set(k, v);
-                                                }
-                        fetch(`${API_URL}/admin/orders/counts?${cq.toString()}`, { headers: adminHeaders() })
-                          .then((r) => r.json())
+                        const oq = new URLSearchParams(); // the same filters, every day: counts for the open tabs
+                        const day = range === "custom"
+                          ? { from: q.get("from"), to: q.get("to") }
+                          : dayRange(range === "today" ? new Date() : range === "yesterday" ? new Date(Date.now() - 86_400_000) : new Date(Date.now() + 86_400_000));
+                        for (const [k, v] of [["from", day.from], ["to", day.to], ["customer", q.get("customer")], ["source", q.get("source")], ["payment", q.get("payment")], ["fulfillment", q.get("fulfillment")]] as const) {
+                          if (v) cq.set(k, v);
+                          if (v && k !== "from" && k !== "to") oq.set(k, v);
+                        }
+                        cachedGet<{ counts?: typeof counts }>(`/admin/orders/counts?${cq.toString()}`)
                           .then((d) => d?.counts && setCounts(d.counts))
                           .catch(() => {});
-      if (canWrite) {
-        const p = await fetch(`${API_URL}/admin/products`, { headers: adminHeaders() }).then((r) => r.json());
-        const c = await fetch(`${API_URL}/admin/customers`, { headers: adminHeaders() }).then((r) => r.json());
-        setProducts((p.products ?? []).map((x: any) => ({ id: x.id, name: x.name, sku: x.sku })));
-        setCustomers((c.customers ?? []).map((x: any) => ({ id: x.id, name: x.name ?? x.email ?? x.phone ?? "Customer" })));
-      }
+                        if (range === "today") {
+                          cachedGet<{ counts?: typeof counts }>(`/admin/orders/counts?${oq.toString()}`)
+                            .then((d) => d?.counts && setOpenCounts(d.counts))
+                            .catch(() => {});
+                        } else setOpenCounts(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Load failed");
     } finally {
       setLoading(false);
     }
-  }, [tab, range, customFrom, customTo, customer, canWrite, sourceFilter, paymentFilter, fulfillmentFilter]);
+  }, [tab, range, customFrom, customTo, sourceFilter, paymentFilter, fulfillmentFilter, customer]);
 
     useEffect(() => { load(); }, [load]);
+    // The new-order form's product and customer lists: once per visit, both at once, from the copy
+    // saved on this tablet first (they used to be fetched one after the other on every list refresh).
+    useEffect(() => {
+      if (!canWrite) return;
+      void savedThenFresh<{ customers?: { id: string; name: string | null; email?: string | null; phone?: string | null }[] }>("/admin/customers", (c) => setCustomers((c.customers ?? []).map((x) => ({ id: x.id, name: x.name ?? x.email ?? x.phone ?? "Customer" }))));
+    }, [canWrite]);
 
-    // Auto-refresh (30s) — persisted per browser, like Overview.
+    // "Open order" on a new-order alert: open that order's details here (whatever day or tab is showing).
     useEffect(() => {
-      try { setAutoRefresh(localStorage.getItem("orders.autoRefresh") === "1"); } catch { /* ignore */ }
-    }, []);
-    useEffect(() => {
-      if (!autoRefresh) return;
-      const id = setInterval(() => { void load(); }, 30_000);
-      return () => clearInterval(id);
-    }, [autoRefresh, load]);
+      const open = (id: string) => {
+        try { sessionStorage.removeItem(OPEN_ORDER_KEY); } catch { /* ignore */ }
+        cachedGet<AdminOrder>(`/admin/orders/${id}`).then((d) => { if (d?.id) openDetail(d); }).catch(() => setError("Could not open that order. Tap Refresh and try again."));
+      };
+      let waiting: string | null = null;
+      try { waiting = sessionStorage.getItem(OPEN_ORDER_KEY); } catch { /* ignore */ }
+      if (waiting) open(waiting);
+      const onOpen = (e: Event) => { const id = (e as CustomEvent<string>).detail; if (id) open(id); };
+      window.addEventListener(OPEN_ORDER_EVENT, onOpen);
+      return () => window.removeEventListener(OPEN_ORDER_EVENT, onOpen);
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+    // Live: new and changed orders show by themselves (lib/order-pulse.ts asks the server every few seconds),
+    // so nobody has to tap Refresh. Replaces the old "check every 30 seconds" switch.
+    const detailRef = useRef<AdminOrder | null>(null);
+    detailRef.current = orderDetail;
+    useEffect(() => onOrderChanges((changes) => {
+      void load();
+      const ids = new Set(changes.orders.map((c) => c.id));
+      setFresh((cur) => new Set([...cur, ...ids]));
+      setTimeout(() => setFresh((cur) => { const n = new Set(cur); ids.forEach((id) => n.delete(id)); return n; }), 12_000);
+      const open = detailRef.current;
+      if (open && ids.has(open.id)) loadDetail(open);
+    }), [load]); // eslint-disable-line react-hooks/exhaustive-deps
 
     const toggleSelect = (id: string) => {
       const next = new Set(selected);
@@ -223,6 +264,7 @@ export default function OrdersPanel() {
       setTransitioning("batch");
       setError(null);
       try {
+        s.forEach((o) => markOwnOrderChange(o.id));
         await Promise.all(s.map(fn));
         toast(`${label} · ${s.length} order${s.length > 1 ? "s" : ""}`);
         setSelected(new Set());
@@ -244,6 +286,7 @@ export default function OrdersPanel() {
 
   const doTransition = async (orderId: string, toStatus: string, reasonText?: string) => {
     setTransitioning(orderId);
+    markOwnOrderChange(orderId);
     setError(null);
     try {
       const res = await fetch(`${API_URL}/admin/orders/${orderId}/status`, {
@@ -264,10 +307,12 @@ export default function OrdersPanel() {
 
   const doVoidRefund = async (orderId: string, kind: "void" | "refund" | "voidHold", reasonText?: string) => {
       setTransitioning(orderId);
+      markOwnOrderChange(orderId);
       setError(null);
       try {
         const url = kind === "voidHold" ? `${API_URL}/admin/pos/holds/${orderId}/void` : `${API_URL}/admin/orders/${orderId}/${kind}`;
-                const res = await fetch(url, { method: "PATCH", headers: { "Content-Type": "application/json", ...adminHeaders() }, body: JSON.stringify({ reason: reasonText }) });
+                // The held-order void is a POST on the server; void and refund of a sale are PATCH.
+                const res = await fetch(url, { method: kind === "voidHold" ? "POST" : "PATCH", headers: { "Content-Type": "application/json", ...adminHeaders() }, body: JSON.stringify({ reason: reasonText }) });
         const data = await res.json();
         if (!res.ok) { setError(data?.message ?? `${kind} failed`); return; }
         setConfirmAction(null);
@@ -282,6 +327,7 @@ export default function OrdersPanel() {
       // ── W1/W2: routing + order edit ──
       const sendForDelivery = async (orderId: string) => {
         setTransitioning(orderId);
+        markOwnOrderChange(orderId);
         setError(null);
         try {
           const res = await fetch(`${API_URL}/admin/orders/${orderId}/send-for-delivery`, { method: "POST", headers: { "Content-Type": "application/json", ...adminHeaders() } });
@@ -296,6 +342,7 @@ export default function OrdersPanel() {
 
       const completeNow = async (orderId: string) => {
         setTransitioning(orderId);
+        markOwnOrderChange(orderId);
         setError(null);
         try {
           const res = await fetch(`${API_URL}/admin/orders/${orderId}/complete-now`, { method: "POST", headers: { "Content-Type": "application/json", ...adminHeaders() } });
@@ -307,53 +354,6 @@ export default function OrdersPanel() {
           setError(e instanceof Error ? e.message : "Failed");
         } finally { setTransitioning(null); }
       };
-
-      /** Save order item edits (RECEIVED/CONFIRMED/ON_HOLD) via W1 stock-delta endpoint. */
-      const saveOrderEdit = async () => {
-        if (!editHold) return;
-        setError(null);
-        const res = await fetch(`${API_URL}/admin/orders/${editHold.id}/items`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json", ...adminHeaders() },
-          body: JSON.stringify({ items: editHold.lines.map((l) => ({ productId: l.productId, quantity: l.quantity })) }),
-        });
-        const d = await res.json();
-        if (!res.ok) { setError(d?.message ?? "Edit failed"); return; }
-        setEditHold(null);
-        toast(`Order updated · ${toPesos(d.totalMinor)} (stock adjusted)`);
-        void load();
-      };
-
-      // ── On-process: edit held items ──
-  const saveHoldEdit = async () => {
-    if (!editHold) return;
-    setError(null);
-    const res = await fetch(`${API_URL}/admin/pos/holds/${editHold.id}/items`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json", ...adminHeaders() },
-      body: JSON.stringify({ items: editHold.lines.map((l) => ({ productId: l.productId, quantity: l.quantity })) }),
-    });
-    const d = await res.json();
-    if (!res.ok) { setError(d?.message ?? "Edit failed"); return; }
-    setEditHold(null);
-    toast(`Held order updated · ${toPesos(d.totalMinor)}`);
-    await load();
-    setPayHold({ id: d.id, orderNumber: editHold.orderNumber, totalMinor: d.totalMinor, isDelivery: (editHold.status === "ON_HOLD" ? false : true) });
-  };
-
-  const addHoldLine = (productId: string) => {
-    if (!editHold) return;
-    const prod = products.find((p) => p.id === productId);
-    if (!prod) return;
-    const existing = editHold.lines.find((l) => l.productId === productId);
-    if (existing) setEditHold({ ...editHold, lines: editHold.lines.map((l) => (l.productId === productId ? { ...l, quantity: l.quantity + 1 } : l)) });
-    else setEditHold({ ...editHold, lines: [...editHold.lines, { productId, productName: prod.name, quantity: 1, unitPriceMinor: 0 }] });
-  };
-
-  const setHoldLineQty = (productId: string, qty: number) => {
-    if (!editHold) return;
-    setEditHold({ ...editHold, lines: qty <= 0 ? editHold.lines.filter((l) => l.productId !== productId) : editHold.lines.map((l) => (l.productId === productId ? { ...l, quantity: qty } : l)) });
-  };
 
   // ── On-process: pay a held order ──
     /** Validate payment inputs (cash cover / credit customer + signature). Returns true when good. */
@@ -393,6 +393,7 @@ export default function OrdersPanel() {
     const completeHold = async (target: "COMPLETED" | "OUT_FOR_DELIVERY") => {
       if (!payHold || !payValidated()) return;
       setError(null);
+      markOwnOrderChange(payHold.id);
       const tenderedMinor = Math.round(parseFloat(tendered || "0") * 100);
       // M1: in split mode the tender rows ARE the payment (multi-method, one request).
       const splitRows = tenderRows
@@ -449,8 +450,10 @@ export default function OrdersPanel() {
       }
     };
 
-  const isDeliv = (o: AdminOrder) => (o.deliveryType ?? "delivery") === "delivery"; // legacy/online = delivery
-  const busy = (o: AdminOrder) => transitioning === o.id;
+  // The explicit fulfilment type first (POS holds are PICKUP even though deliveryType defaults to "delivery").
+  const isDeliv = (o: AdminOrder) => (o.fulfillmentType ? o.fulfillmentType === "DELIVERY" : (o.deliveryType ?? "delivery") === "delivery");
+  // Offline: orders open from the saved copy, but changing one needs the internet.
+  const busy = (o: AdminOrder) => offline || transitioning === o.id;
   const openPay = (o: AdminOrder, method: "cash" | "credit") => {
     setPayHold({ id: o.id, orderNumber: o.orderNumber, totalMinor: o.totalMinor, isDelivery: Boolean(o.deliveryAddressLine1?.trim()) });
     setPayMethod(method); setPaySig(null); setPaySigError(false); setTendered("");
@@ -470,6 +473,7 @@ export default function OrdersPanel() {
       }
       if (s === "RECEIVED") {
         a.push({ key: "receive", label: "Receive", icon: "bi-check-lg", tone: "main", run: () => void transition(o.id, "CONFIRMED") });
+        a.push({ key: "edit", label: "Change items", icon: "bi-pencil", tone: "plain", run: () => openEdit(o) });
         a.push({ key: "cancel", label: "Cancel order", icon: "bi-x-lg", tone: "danger", run: () => void transition(o.id, "CANCELLED") });
       }
       if (live && isDeliv(o)) a.push({ key: "send", label: "Send for delivery", icon: "bi-truck", tone: "main", run: () => void sendForDelivery(o.id) });
@@ -496,16 +500,19 @@ export default function OrdersPanel() {
     return a;
   };
 
-  const openEdit = (o: AdminOrder) => {
-    fetch(`${API_URL}/admin/orders/${o.id}`, { headers: adminHeaders() })
-      .then((r) => r.json())
-      .then((d) => setEditHold({
-        id: o.id,
-        orderNumber: o.orderNumber,
-        status: o.status,
-        lines: (d?.items ?? []).map((i: any) => ({ productId: i.productId ?? "", productName: i.productName, quantity: i.quantity, unitPriceMinor: i.unitPriceMinor })),
-      }))
-      .catch(() => setError("Could not load held order"));
+  const openEdit = (o: AdminOrder) => setEditing({ id: o.id, orderNumber: o.orderNumber, customerName: o.customerName });
+
+  /** The steps an order goes through, and which one it is on (null = no journey to show: cancelled). */
+  const stepsFor = (o: AdminOrder): { items: string[]; current: number } | null => {
+    const s = o.status;
+    if (s === "CANCELLED") return null;
+    if (s === "ON_HOLD") return { items: ["On hold", "Paid"], current: 0 };
+    if (isDeliv(o)) {
+      const at = s === "RECEIVED" ? 0 : ["CONFIRMED", "PREPARING", "READY"].includes(s) ? 1 : ["OUT_FOR_DELIVERY", "FAILED_DELIVERY"].includes(s) ? 2 : 4;
+      return { items: ["To receive", "Received", "Out for delivery", "Delivered"], current: at };
+    }
+    const at = s === "RECEIVED" ? 0 : ["CONFIRMED", "PREPARING"].includes(s) ? 1 : s === "READY" ? 2 : 4;
+    return { items: ["To receive", "Received", "Ready", "Picked up"], current: at };
   };
 
   /** How long an active order has waited, in words. Over 1 h amber, over 3 h red. */
@@ -537,20 +544,19 @@ export default function OrdersPanel() {
     setDetailReceived([]);
     setDetailToken(null);
     // Courier hand-over: who received the order, signed on the courier page.
-    fetch(`${API_URL}/admin/signatures?documentType=ORDER&documentId=${o.id}`, { headers: adminHeaders() })
-      .then((r) => (r.ok ? r.json() : null))
+    cachedGet<{ signatures?: unknown }>(`/admin/signatures?documentType=ORDER&documentId=${o.id}`)
       .then((d) => setDetailReceived(Array.isArray(d?.signatures) ? d.signatures : []))
       .catch(() => setDetailReceived([]));
     loadDetail(o);
   };
   const loadDetail = (o: AdminOrder) => {
-    fetch(`${API_URL}/admin/orders/${o.id}`, { headers: adminHeaders() })
-      .then((r) => r.json())
+    cachedGet<any>(`/admin/orders/${o.id}`) // eslint-disable-line @typescript-eslint/no-explicit-any
       .then((d) => {
+        if (!d) { setDetailSignature(""); setDetailItems([]); setDetailHistory([]); return; }
         // Merge full detail into the row so the pane has address/notes/breakdown.
         setOrderDetail((cur) => (cur && cur.id === o.id ? { ...o, ...(d as AdminOrder) } : cur));
         setDetailSignature(typeof d?.signatureData === "string" ? (d.signatureData as string) : "");
-        setDetailItems(Array.isArray(d?.items) ? (d.items as { productName: string; quantity: number; lineTotalMinor: number }[]) : []);
+        setDetailItems(Array.isArray(d?.items) ? (d.items as { productName: string; quantity: number; lineTotalMinor: number; unitPriceMinor?: number; priceOverridden?: boolean; priceOverrideReason?: string | null }[]) : []);
         setDetailHistory(Array.isArray(d?.statusHistory) ? (d.statusHistory as { fromStatus: string | null; toStatus: string; createdAt: string; reason?: string | null; actorType?: string }[]) : []);
         const t = Array.isArray(d?.claimTokens) ? (d.claimTokens as { token: string; usedAt: string | null }[]).find((c) => !c.usedAt)?.token : null;
         setDetailToken(t ?? null);
@@ -567,10 +573,36 @@ export default function OrdersPanel() {
   }, [orders]);
 
   const curTab = TABS.find((t) => t.id === tab)!;
-  const countFor = (t: (typeof TABS)[number]) => (t.status ? t.status.reduce((s, st) => s + (counts[st] ?? 0), 0) : Object.values(counts).reduce((s, c) => s + c, 0));
+  const countFor = (t: (typeof TABS)[number]) => {
+    const from = openCounts && OPEN_TABS.includes(t.id) ? openCounts : counts;
+    return t.status ? t.status.reduce((s, st) => s + (from[st] ?? 0), 0) : Object.values(counts).reduce((s, c) => s + c, 0);
+  };
+  /** Open orders placed on earlier days (only when "Today" is picked): a nudge on the All list. */
+  const olderOf = (st: string) => Math.max(0, (openCounts?.[st] ?? 0) - (counts[st] ?? 0));
+  /** Where "Show" goes: the earliest step that has older orders waiting. */
+  const olderTab = olderOf("RECEIVED") > 0 ? "pending" : ["CONFIRMED", "PREPARING", "READY", "ON_HOLD"].some((st) => olderOf(st) > 0) ? "onprocess" : "fordelivery";
+  const olderOpen = openCounts ? OPEN_STATUSES.filter((st) => st !== "FAILED_DELIVERY").reduce((sum, st) => sum + olderOf(st), 0) : 0;
   const extraFilters = [sourceFilter, paymentFilter, fulfillmentFilter].filter(Boolean).length;
   const clearFilters = () => { setSourceFilter(""); setPaymentFilter(""); setFulfillmentFilter(""); setCustomer(""); };
   const dayWords = range === "today" ? "today" : range === "yesterday" ? "yesterday" : range === "tomorrow" ? "tomorrow" : "in these dates";
+  /** The list's day and filters for "Items in orders" (with Today, orders in progress count from every day). */
+  const itemsQuery = () => {
+    const q = new URLSearchParams();
+    if (range === "custom") {
+      if (customFrom) q.set("from", new Date(customFrom).toISOString());
+      if (customTo) q.set("to", new Date(new Date(customTo).getTime() + 86_399_000).toISOString());
+    } else {
+      const d = dayRange(range === "today" ? new Date() : range === "yesterday" ? new Date(Date.now() - 86_400_000) : new Date(Date.now() + 86_400_000));
+      q.set("from", d.from);
+      q.set("to", d.to);
+      if (range === "today") q.set("openAnyDay", "1");
+    }
+    if (customer.trim()) q.set("customer", customer.trim());
+    if (sourceFilter) q.set("source", sourceFilter);
+    if (paymentFilter) q.set("payment", paymentFilter);
+    if (fulfillmentFilter) q.set("fulfillment", fulfillmentFilter);
+    return q.toString();
+  };
 
   const orderRow = (o: AdminOrder) => {
     const acts = actionsFor(o);
@@ -579,7 +611,7 @@ export default function OrdersPanel() {
     const age = ageOf(o);
     const open = orderDetail?.id === o.id;
     return (
-      <li key={o.id} className={`order-row ${open ? "is-open" : ""} ${selected.has(o.id) ? "is-picked" : ""}`}>
+      <li key={o.id} className={`order-row ${open ? "is-open" : ""} ${selected.has(o.id) ? "is-picked" : ""} ${fresh.has(o.id) ? "is-fresh" : ""}`}>
         <label className="order-pick" title="Select for a batch action">
           <input className="form-check-input m-0" type="checkbox" checked={selected.has(o.id)} onChange={() => toggleSelect(o.id)} aria-label={`Select ${o.orderNumber}`} />
         </label>
@@ -589,8 +621,10 @@ export default function OrdersPanel() {
             <span className="d-block small text-muted">
               {o.orderNumber} · {isDeliv(o) ? <><i className="bi bi-truck" aria-hidden="true"></i> Delivery</> : <><i className="bi bi-shop" aria-hidden="true"></i> Pickup</>}
               {o.paymentMethod === "credit" && <> · <i className="bi bi-journal-text" aria-hidden="true"></i> Credit</>}
+              {o.source === "hub" && <> · <i className="bi bi-chat-dots" aria-hidden="true"></i> {[o.sourcePage, HUB_CHANNEL[o.sourceChannel ?? ""]].filter(Boolean).join(" ") || "SE Corp Hub"}</>}
               {" · "}{placedAt(o.createdAt)}
             </span>
+            {itemsLine(o) && <span className="d-block order-items">{itemsLine(o)}</span>}
           </span>
           <span className="text-end flex-shrink-0">
             <span className="d-block fw-bold num">{toPesos(o.totalMinor)}</span>
@@ -600,6 +634,7 @@ export default function OrdersPanel() {
             </span>
           </span>
         </button>
+        {(reprint || main) && <span className="order-acts">
         {reprint && (
           <button type="button" className="btn btn-outline-dark order-reprint" onClick={reprint.run} aria-label={`Reprint receipt for ${o.orderNumber}`}>
             <i className="bi bi-printer me-1" aria-hidden="true"></i>Reprint
@@ -611,6 +646,7 @@ export default function OrdersPanel() {
             {main.label}
           </button>
         )}
+        </span>}
       </li>
     );
   };
@@ -632,10 +668,18 @@ export default function OrdersPanel() {
         <div className="d-flex justify-content-between align-items-end gap-2 mb-2">
           <div className="min-w-0">
             <div className="fw-bold fs-5 text-truncate">{o.customerName}</div>
-            <div className="small text-muted">{isDeliv(o) ? "Delivery" : "Pickup"} · {o.source === "PRE_ORDER" ? "Pre-order" : o.source === "pos" ? "POS" : "Online"} · {placedAt(o.createdAt)}</div>
+            <div className="small text-muted">{isDeliv(o) ? "Delivery" : "Pickup"} · {o.source === "PRE_ORDER" ? "Pre-order" : o.source === "pos" ? "POS" : o.source === "hub" ? [o.sourcePage, HUB_CHANNEL[o.sourceChannel ?? ""], o.externalRef && `hub ${o.externalRef}`].filter(Boolean).join(" · ") || "SE Corp Hub" : "Online"} · {placedAt(o.createdAt)}</div>
           </div>
-          <div className="fs-4 fw-bold num">{toPesos(o.totalMinor)}</div>
+          <div className="fs-4 fw-bold num text-nowrap flex-shrink-0">{toPesos(o.totalMinor)}</div>
         </div>
+
+        {/* Where the order is in its journey: done steps ticked, this step filled. */}
+        {(() => {
+          const st = stepsFor(o);
+          return st ? <Steps items={st.items} current={st.current} className="order-steps mb-3" /> : null;
+        })()}
+        {o.status === "FAILED_DELIVERY" && <div className="alert alert-danger py-2 mb-2" role="status"><i className="bi bi-exclamation-triangle me-1" aria-hidden="true"></i>Delivery failed. Send it again or cancel it.</div>}
+        {o.status === "CANCELLED" && <div className="alert alert-secondary py-2 mb-2" role="status"><i className="bi bi-x-circle me-1" aria-hidden="true"></i>This order was cancelled.</div>}
 
         {/* Next step first, then the other things you can do, then the risky ones apart at the bottom. */}
         {main.map((x) => (
@@ -646,7 +690,7 @@ export default function OrdersPanel() {
         {plain.length > 0 && (
           <div className="d-grid gap-2 mb-3" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))" }}>
             {plain.map((x) => (
-              <button key={x.key} type="button" className="btn btn-outline-dark" disabled={busy(o)} onClick={x.run}>
+              <button key={x.key} type="button" className="btn btn-outline-dark" disabled={x.key === "receipt" ? transitioning === o.id : busy(o)} onClick={x.run}>
                 <i className={`bi ${x.icon} me-1`} aria-hidden="true"></i>{x.label}
               </button>
             ))}
@@ -682,8 +726,11 @@ export default function OrdersPanel() {
             <tbody>
               {detailItems.map((i, idx) => (
                 <tr key={idx}>
-                  <td>{i.productName}</td>
-                  <td className="text-end text-nowrap">× {i.quantity}</td>
+                  <td>
+                    {i.productName}
+                    {i.priceOverridden && <span className="d-block small price-changed"><i className="bi bi-pencil-square me-1" aria-hidden="true"></i>Price changed{i.priceOverrideReason ? `: ${i.priceOverrideReason}` : ""}</span>}
+                  </td>
+                  <td className="text-end text-nowrap">{i.quantity} × {typeof i.unitPriceMinor === "number" ? <span className="num">{toPesos(i.unitPriceMinor)}</span> : null}</td>
                   <td className="text-end text-nowrap num">{toPesos(i.lineTotalMinor)}</td>
                 </tr>
               ))}
@@ -692,7 +739,7 @@ export default function OrdersPanel() {
               <tfoot>
                 {o.deliveryFeeMinor ? <tr><td colSpan={2}>Delivery fee</td><td className="text-end num">{toPesos(o.deliveryFeeMinor)}</td></tr> : null}
                 {o.discountMinor ? <tr><td colSpan={2}>Discount</td><td className="text-end num">−{toPesos(o.discountMinor)}</td></tr> : null}
-                <tr className="fw-bold"><td colSpan={2}>Total</td><td className="text-end num">{toPesos(o.totalMinor)}</td></tr>
+                <tr className="fw-bold"><td colSpan={2}>Total</td><td className="text-end text-nowrap num">{toPesos(o.totalMinor)}</td></tr>
               </tfoot>
             )}
           </table>
@@ -760,6 +807,26 @@ export default function OrdersPanel() {
         {tab !== "today" && <button type="button" className="btn btn-outline-dark" onClick={() => setTab("today")}>Show all orders</button>}
       </div>
     </div>
+  ) : tab === "today" ? (
+    // All: what still needs someone first (oldest first), then what is done, each under its own heading.
+    (() => {
+      const todo = orders.filter((o) => OPEN_STATUSES.includes(o.status)).sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1));
+      const done = orders.filter((o) => !OPEN_STATUSES.includes(o.status));
+      return (
+        <>
+          {olderOpen > 0 && (
+            <button type="button" className="btn btn-outline-warning w-100 text-start mb-2 older-open" onClick={() => setTab(olderTab)}>
+              <i className="bi bi-exclamation-circle me-2" aria-hidden="true"></i>
+              {olderOpen} order{olderOpen === 1 ? "" : "s"} from earlier days still waiting. <span className="fw-bold text-decoration-underline">Show</span>
+            </button>
+          )}
+          {todo.length > 0 && <h2 className="order-group"><span>Needs you</span><span className="badge rounded-pill text-bg-warning">{todo.length}</span></h2>}
+          {todo.length > 0 && <ul className="order-list mb-3" aria-busy={loading}>{todo.map(orderRow)}</ul>}
+          {done.length > 0 && <h2 className="order-group"><span>Done</span><span className="badge rounded-pill text-bg-secondary">{done.length}</span></h2>}
+          {done.length > 0 && <ul className="order-list" aria-busy={loading}>{done.map(orderRow)}</ul>}
+        </>
+      );
+    })()
   ) : (
     <ul className="order-list" aria-busy={loading}>{orders.map(orderRow)}</ul>
   );
@@ -769,14 +836,19 @@ export default function OrdersPanel() {
   return (
       <div className="orders-screen">
         <div className="d-flex flex-wrap align-items-center gap-2 mb-2">
-          <h1 className="h4 mb-0 me-auto"><i className="bi bi-receipt me-2" aria-hidden="true"></i>Orders</h1>
-          <button type="button" className="btn btn-outline-dark" onClick={() => setReviewOpen(true)}><i className="bi bi-inboxes me-1" aria-hidden="true"></i>Payment review</button>
-          <button type="button" className="btn btn-outline-dark" onClick={() => setChatOpen(true)}><i className="bi bi-chat-dots me-1" aria-hidden="true"></i>Chat inbox</button>
-          <button type="button" className="btn btn-outline-dark" onClick={() => void load()} disabled={loading} aria-label="Refresh orders">
+          <h1 className="h4 mb-0"><i className="bi bi-receipt me-2" aria-hidden="true"></i>Orders</h1>
+          {!offline && <span className="live-pill me-auto" title="New and changed orders show by themselves"><span className="live-dot" aria-hidden="true"></span>Live</span>}
+          {offline && <span className="me-auto"></span>}
+          <button type="button" className="btn btn-outline-primary fw-bold" onClick={() => setItemsOpen(true)}><i className="bi bi-table me-1" aria-hidden="true"></i>Items</button>
+          <button type="button" className="btn btn-outline-dark" disabled={offline} onClick={() => setReviewOpen(true)}><i className="bi bi-inboxes me-1" aria-hidden="true"></i>Payment review</button>
+          <button type="button" className="btn btn-outline-dark" disabled={offline} onClick={() => setChatOpen(true)}><i className="bi bi-chat-dots me-1" aria-hidden="true"></i>Chat inbox</button>
+          <button type="button" className="btn btn-outline-dark order-refresh" onClick={() => void load()} disabled={loading} aria-label={lastLoaded ? `Refresh orders (updated ${lastLoaded})` : "Refresh orders"} title={lastLoaded ? `Updated ${lastLoaded}` : "Refresh"}>
             <i className={`bi bi-arrow-clockwise ${loading ? "spin" : ""}`} aria-hidden="true"></i>
-            <span className="ms-1 d-none d-md-inline">{lastLoaded ? `Updated ${lastLoaded}` : "Refresh"}</span>
           </button>
         </div>
+        {offline && (
+          <div className="alert alert-secondary py-2" role="status"><i className="bi bi-wifi-off me-1"></i>Offline: showing the orders last saved on this tablet. Changing an order needs the internet.</div>
+        )}
         {error && (
           <div className="alert alert-danger d-flex align-items-start gap-2 py-2" role="alert">
             <span className="flex-grow-1">{error}</span>
@@ -812,7 +884,7 @@ export default function OrdersPanel() {
               <div className="col-12 col-md-4">
                 <label className="form-label small mb-0" htmlFor="ordSource">Where from</label>
                 <select id="ordSource" className="form-select" value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)}>
-                  <option value="">All</option><option value="online">Online</option><option value="pos">POS</option><option value="PRE_ORDER">Pre-order</option>
+                  <option value="">All</option><option value="hub">SE Corp Hub (Facebook pages)</option><option value="online">Online</option><option value="pos">POS</option><option value="PRE_ORDER">Pre-order</option>
                 </select>
               </div>
               <div className="col-6 col-md-4">
@@ -829,10 +901,6 @@ export default function OrdersPanel() {
               </div>
             </div>
             <div className="d-flex flex-wrap align-items-center gap-3 mt-2">
-              <div className="form-check form-switch mb-0">
-                <input className="form-check-input" type="checkbox" role="switch" id="ordAuto" checked={autoRefresh} onChange={(e) => { setAutoRefresh(e.target.checked); try { localStorage.setItem("orders.autoRefresh", e.target.checked ? "1" : "0"); } catch { /* ignore */ } }} />
-                <label className="form-check-label" htmlFor="ordAuto">Check for new orders every 30 seconds</label>
-              </div>
               {(extraFilters > 0 || customer) && <button type="button" className="btn btn-link ms-auto" onClick={clearFilters}>Clear filters</button>}
             </div>
           </div>
@@ -865,31 +933,31 @@ export default function OrdersPanel() {
             <span className="fw-bold me-1">{selected.size} ticked</span>
             {selected.size < orders.length && <button type="button" className="btn btn-outline-dark" onClick={() => setSelected(new Set(orders.map((x) => x.id)))}>Tick all {orders.length}</button>}
             {canWrite && canBatchReceive && (
-              <button className="btn btn-success" disabled={transitioning === "batch"} onClick={() => runBatch("Received", async (o) => doTransition(o.id, "CONFIRMED"))}>
+              <button className="btn btn-success" disabled={offline || transitioning === "batch"} onClick={() => runBatch("Received", async (o) => doTransition(o.id, "CONFIRMED"))}>
                 <i className="bi bi-check-lg me-1" aria-hidden="true"></i>Receive
               </button>
             )}
             {canWrite && canBatchSend && (
-              <button className="btn btn-success" disabled={transitioning === "batch"} onClick={() => runBatch("Sent for delivery", async (o) => sendForDelivery(o.id))}>
+              <button className="btn btn-success" disabled={offline || transitioning === "batch"} onClick={() => runBatch("Sent for delivery", async (o) => sendForDelivery(o.id))}>
                 <i className="bi bi-truck me-1" aria-hidden="true"></i>Send for delivery
               </button>
             )}
             {canWrite && canBatchPickup && (
-              <button className="btn btn-success" disabled={transitioning === "batch"} onClick={() => runBatch("Completed (pickup)", async (o) => completeNow(o.id))}>
+              <button className="btn btn-success" disabled={offline || transitioning === "batch"} onClick={() => runBatch("Completed (pickup)", async (o) => completeNow(o.id))}>
                 <i className="bi bi-bag-check me-1" aria-hidden="true"></i>Complete pickup
               </button>
             )}
             {canWrite && canBatchDelivered && (
-              <button className="btn btn-success" disabled={transitioning === "batch"} onClick={() => runBatch("Marked delivered", async (o) => doTransition(o.id, "DELIVERED"))}>
+              <button className="btn btn-success" disabled={offline || transitioning === "batch"} onClick={() => runBatch("Marked delivered", async (o) => doTransition(o.id, "DELIVERED"))}>
                 <i className="bi bi-check2-circle me-1" aria-hidden="true"></i>Mark delivered
               </button>
             )}
             {canWrite && canBatchCancel && (
-              <button className="btn btn-outline-danger" disabled={transitioning === "batch"} onClick={() => setPendingReason({ orderId: "__BATCH__", to: "CANCELLED" })}>
+              <button className="btn btn-outline-danger" disabled={offline || transitioning === "batch"} onClick={() => setPendingReason({ orderId: "__BATCH__", to: "CANCELLED" })}>
                 <i className="bi bi-x-lg me-1" aria-hidden="true"></i>Cancel
               </button>
             )}
-            <button className="btn btn-outline-dark ms-auto" disabled={transitioning === "batch"} onClick={clearSelection}>Untick</button>
+            <button className="btn btn-outline-dark ms-auto" disabled={offline || transitioning === "batch"} onClick={clearSelection}>Untick</button>
           </div>
         )}
 
@@ -972,46 +1040,23 @@ export default function OrdersPanel() {
         </>
       )}
 
-      {/* Edit held order modal */}
-      {editHold && (
-        <>
-          <div className="modal fade show d-block" tabIndex={-1}>
-            <div className="modal-dialog modal-dialog-centered">
-              <div className="modal-content">
-                <div className="modal-header">
-                                  <h5 className="modal-title">Edit order — {editHold.orderNumber}</h5>
-                                  <button type="button" className="btn-close" onClick={() => setEditHold(null)}></button>
-                                </div>
-                <div className="modal-body">
-                  <select className="form-select form-select-sm mb-2" value="" onChange={(e) => e.target.value && addHoldLine(e.target.value)}>
-                    <option value="" disabled>+ Add product…</option>
-                    {products.map((p) => <option key={p.id} value={p.id}>{p.name} ({p.sku})</option>)}
-                  </select>
-                  {editHold.lines.length === 0 ? (
-                    <p className="text-muted small">No lines — sale will be voided if saved without items.</p>
-                  ) : (
-                    editHold.lines.map((l) => (
-                      <div key={l.productId} className="d-flex align-items-center gap-2 mb-1">
-                        <span className="flex-grow-1 small">{l.productName}</span>
-                        <div className="input-group input-group-sm" style={{ width: 96 }}>
-                          <button className="btn btn-outline-secondary" onClick={() => setHoldLineQty(l.productId, l.quantity - 1)}>-</button>
-                          <input className="form-control text-center" value={l.quantity} readOnly />
-                          <button className="btn btn-outline-secondary" onClick={() => setHoldLineQty(l.productId, l.quantity + 1)}>+</button>
-                        </div>
-                        <button className="btn btn-sm btn-outline-danger py-0" onClick={() => setHoldLineQty(l.productId, 0)}><i className="bi bi-x"></i></button>
-                      </div>
-                    ))
-                  )}
-                </div>
-                <div className="modal-footer">
-                                  <button className="btn btn-outline-secondary" onClick={() => setEditHold(null)}>Cancel</button>
-                                  <button className="btn btn-primary" onClick={() => (editHold.status === "ON_HOLD" ? saveHoldEdit() : saveOrderEdit())}>Save changes</button>
-                                </div>
-              </div>
-            </div>
-          </div>
-          <div className="modal-backdrop fade show"></div>
-        </>
+      {/* Change items: products, how many and the price of each (OrderEditor) */}
+      {editing && (
+        <OrderEditor
+          orderId={editing.id}
+          orderNumber={editing.orderNumber}
+          customerName={editing.customerName}
+          onClose={() => setEditing(null)}
+          onSaved={(totalMinor) => {
+            markOwnOrderChange(editing.id);
+            const changedId = editing.id;
+            setEditing(null);
+            toast(`${editing.orderNumber} updated · ${toPesos(totalMinor)}`);
+            void load();
+            const open = orderDetail?.id === changedId ? orderDetail : null;
+            if (open) loadDetail(open);
+          }}
+        />
       )}
 
       {/* Pay held order modal */}
@@ -1137,6 +1182,17 @@ export default function OrdersPanel() {
 
       {receiptOrder && <ReceiptModal orderId={receiptOrder} onClose={() => setReceiptOrder(null)} />}
       {reviewOpen && <PaymentReview onClose={() => setReviewOpen(false)} onChanged={() => void load()} />}
+      {itemsOpen && (
+        <OrderItemsTable
+          query={itemsQuery()}
+          scopeWords={range === "today" ? "orders in progress from every day, done today" : range === "custom" ? "orders in the dates you picked" : `orders ${dayWords}`}
+          onClose={() => setItemsOpen(false)}
+          onOpenOrder={(id) => {
+            setItemsOpen(false);
+            cachedGet<AdminOrder>(`/admin/orders/${id}`).then((d) => { if (d?.id) openDetail(d); }).catch(() => setError("Could not open that order. Tap Refresh and try again."));
+          }}
+        />
+      )}
       {chatOpen && <ChatPanel onClose={() => setChatOpen(false)} onChanged={() => void load()} />}
 
             {/* Delivery confirm — payment collected on a delivery order: ask "for delivery?" then confirm */}

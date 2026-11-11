@@ -10,6 +10,8 @@
   "scripts": {
     "build": "npm run build --workspaces --if-present",
     "build:web": "npm run build -w @sam-store/web",
+    "build:api": "node scripts/build-api.mjs",
+    "postinstall": "node scripts/build-api.mjs",
     "start:api": "cd apps/api && node --import tsx src/main.ts",
     "start:web": "npm run start -w @sam-store/web",
     "dev:api": "cd apps/api && npx tsx src/main.ts",
@@ -46,6 +48,7 @@
     "@types/node": "^22.10.0",
     "@typescript-eslint/eslint-plugin": "^8.70.0",
     "@typescript-eslint/parser": "^8.70.0",
+    "esbuild": "^0.28.2",
     "eslint": "^9.39.5",
     "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-react-hooks": "^7.1.1",

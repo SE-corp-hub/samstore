@@ -124,11 +124,11 @@ export class TransferFlowController {
     return unwrap(await this.flow.undoMove(storeId, actor, id));
   }
 
-  /** GET /admin/moves?locationId= — recent moves. */
+  /** GET /admin/moves?locationId=&from=&to= — recent moves, or the moves between two times (ISO). */
   @Get("moves")
-  async moves(@Req() req: Req_, @Query("locationId") locationId?: string, @Headers("x-store-id") h?: string) {
+  async moves(@Req() req: Req_, @Query("locationId") locationId?: string, @Query("from") from?: string, @Query("to") to?: string, @Headers("x-store-id") h?: string) {
     const { storeId, actor } = await this.ctx(req, h, TENANT_ROLES.ADMIN);
-    return { moves: await this.flow.recentMoves(storeId, actor, locationId) };
+    return { moves: await this.flow.recentMoves(storeId, actor, locationId, { from, to }) };
   }
 
   /** GET /admin/returns/sales?locationId=&productId= — recent sales at that store that include the product (to tie a return to its sale). */

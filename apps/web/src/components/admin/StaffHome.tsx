@@ -1,71 +1,56 @@
 "use client";
 
-// Home (the bottom bar's "More" for staff, manager and owner) — big buttons instead of a long
-// menu. The daily jobs come first; every other screen the role may open (owner screens such as
-// Team and Settings too) is one tap away under "Other screens". It only changes what
-// is easy to reach: the server still decides what each role may do (allowedTabs mirrors it).
+// Home (the bottom bar's "More" for staff, manager and owner): every screen the role may open,
+// grouped by what it is for (Sell, Money, Stock, Reports, People & settings) in the same order
+// and colours as the Menu and the top bar, as big tiles, nothing hidden behind a second tap.
+// It only changes what is easy to reach: the server still decides what each role may do
+// (allowedTabs mirrors it). The Text size choice sits at the bottom so every role can find it.
 
-import { allowedTabs, navItemFor } from "../../lib/admin";
-
-const DAILY = ["pos", "preorders", "resack", "utang", "orders", "moves", "returns", "approvals"];
-// Stock screens are always in view (not hidden under "Other screens").
-const STOCK = ["pasok", "bilangin", "storereport", "inventory", "products"];
-const OTHER = ["agentorders", "drafts", "kargadors", "ulat", "customers", "expenses", "purchases", "reports", "countersettings", "overview"];
+import { allowedTabs, NAV_GROUPS } from "../../lib/admin";
+import TextSizePicker from "./TextSizePicker";
+import CountReminder from "./CountReminder";
 
 interface Props {
   role: string;
   onNavigate: (tab: string) => void;
   /** The menu's own wording for a screen (so names match the drawer). */
   labelFor?: (id: string, fallback: string) => string;
+  /** PIN lock: screens that ask for the lock PIN get a lock on their tile. */
+  isLocked?: (id: string) => boolean;
 }
 
-export default function StaffHome({ role, onNavigate, labelFor }: Props) {
+export default function StaffHome({ role, onNavigate, labelFor, isLocked }: Props) {
   const allowed = new Set(allowedTabs(role));
-  const items = (ids: string[]) =>
-    ids
-      .filter((id) => allowed.has(id))
-      .map((id) => {
-        const n = navItemFor(id === "utang" ? "utangrice" : id);
-        return n ? { id, icon: n.icon, label: labelFor ? labelFor(id, n.label) : n.label } : null;
-      })
-      .filter((x): x is { id: string; icon: string; label: string } => x !== null);
-
-  const daily = items(DAILY);
-  const stock = items(STOCK);
-  const listed = new Set([...DAILY, ...STOCK, ...OTHER, "utangrice"]);
-  const other = items([...OTHER, ...allowedTabs(role).filter((id) => !listed.has(id))]);
-
-  const Tile = ({ id, icon, label }: { id: string; icon: string; label: string }) => (
-    <div className="col-6 col-md-4 col-xl-3">
-      <button type="button" className="staff-tile w-100" onClick={() => onNavigate(id)}>
-        <i className={`bi ${icon}`}></i>
-        <span>{label}</span>
-      </button>
-    </div>
-  );
+  const groups = NAV_GROUPS
+    .map((g) => ({ ...g, items: g.items.filter((i) => allowed.has(i.id)) }))
+    .filter((g) => g.items.length > 0);
 
   return (
     <div className="rice-ui">
       <h1 className="h4 mb-3">What do you need to do?</h1>
-      <div className="row g-3 mb-4">
-        {daily.map((d) => <Tile key={d.id} {...d} />)}
-      </div>
-      {stock.length > 0 && (
-        <>
-          <h2 className="h6 text-uppercase text-muted mb-2">Stock</h2>
-          <div className="row g-3 mb-4">
-            {stock.map((d) => <Tile key={d.id} {...d} />)}
+      {allowed.has("bilangin") && <CountReminder onNavigate={onNavigate} />}
+      {groups.map((g) => (
+        <section key={g.group} className={`home-group tone-${g.tone}`} aria-labelledby={`home-group-${g.group}`}>
+          <h2 id={`home-group-${g.group}`} className="home-group-title">
+            <span className="home-group-icon" aria-hidden="true"><i className={`bi ${g.icon}`}></i></span>
+            {g.label}
+          </h2>
+          <div className="row g-3">
+            {g.items.map((it) => (
+              <div key={it.id} className="col-6 col-md-4 col-xl-3">
+                <button type="button" className="staff-tile w-100 position-relative" onClick={() => onNavigate(it.id)}>
+                  <i className={`bi ${it.icon}`} aria-hidden="true"></i>
+                  <span>{labelFor ? labelFor(it.id, it.label) : it.label}</span>
+                  {isLocked?.(it.id) && <i className="bi bi-lock-fill tile-lock" role="img" aria-label="Needs the lock PIN"></i>}
+                </button>
+              </div>
+            ))}
           </div>
-        </>
-      )}
-      {other.length > 0 && (
-        <details className="staff-other">
-          <summary className="btn btn-outline-dark w-100 py-3 fs-5">Other screens ({other.length})</summary>
-          <div className="row g-3 mt-1">
-            {other.map((d) => <Tile key={d.id} {...d} />)}
-          </div>
-        </details>
-      )}
+        </section>
+      ))}
+      <section className="card p-3" aria-label="Text size">
+        <TextSizePicker />
+      </section>
     </div>
   );
 }
