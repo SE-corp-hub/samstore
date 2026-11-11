@@ -5,10 +5,12 @@
 // paying (cash w/ tendered / utang w/ dates), or voiding — plus the existing transitions
 // for delivery-flow statuses. Role-gated via roleCan.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { API_URL } from "../../config";
 import { adminHeaders, type AdminOrder, getAdminRole, roleCan } from "../../lib/admin";
 import ReceiptModal from "./ReceiptModal";
+import OrderEditor from "./OrderEditor";
+import { markOwnOrderChange, onOrderChanges, OPEN_ORDER_EVENT, OPEN_ORDER_KEY } from "../../lib/order-pulse";
 import SignaturePad from "./SignaturePad";
 import PaymentReview from "./PaymentReview";
 import ChatPanel from "./ChatPanel";
@@ -50,8 +52,6 @@ const TABS: { id: string; label: string; status?: string[]; hint: string }[] = [
 /** One thing a user can do with an order. "main" is the next step (one per order, shown on its row). */
 interface OrderAction { key: string; label: string; icon: string; tone: "main" | "plain" | "danger"; run: () => void }
 
-interface EditLine { productId: string; productName: string; quantity: number; unitPriceMinor: number }
-interface ProductOption { id: string; name: string; sku: string }
 
 const HUB_CHANNEL: Record<string, string> = { messenger: "Messenger chat", order_form: "Order form", comment: "Comment", live: "Live", agent: "Agent", counter: "Counter" };
 const toPesos = (m: number) => peso(m);
@@ -70,7 +70,8 @@ export default function OrdersPanel() {
   const [paymentFilter, setPaymentFilter] = useState(""); // "" | cod | credit
   const [fulfillmentFilter, setFulfillmentFilter] = useState(""); // "" | delivery | pickup
   const [selected, setSelected] = useState<Set<string>>(new Set()); // batch mode
-  const [autoRefresh, setAutoRefresh] = useState(false);
+  // Orders that just came in or changed somewhere else: their rows glow for a short while.
+  const [fresh, setFresh] = useState<Set<string>>(new Set());
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [lastLoaded, setLastLoaded] = useState("");
   const wide = useMediaQuery(WIDE);
@@ -93,8 +94,7 @@ export default function OrdersPanel() {
   const [detailToken, setDetailToken] = useState<string | null>(null);
   const [counts, setCounts] = useState<Record<string, number>>({});
   // On-process editing
-  const [editHold, setEditHold] = useState<{ id: string; orderNumber: string; status: string; lines: EditLine[] } | null>(null);
-  const [products, setProducts] = useState<ProductOption[]>([]);
+  const [editing, setEditing] = useState<{ id: string; orderNumber: string; customerName: string } | null>(null);
   const [payHold, setPayHold] = useState<{ id: string; orderNumber: string; totalMinor: number; isDelivery: boolean } | null>(null);
   const [payMethod, setPayMethod] = useState<"cash" | "credit">("cash");
   const [tendered, setTendered] = useState("");
@@ -135,7 +135,7 @@ export default function OrdersPanel() {
     else if (deliveryConfirm) setDeliveryConfirm(null);
     else if (pendingReason) setPendingReason(null);
     else if (confirmAction) setConfirmAction(null);
-    else if (editHold) setEditHold(null);
+    else if (editing) setEditing(null);
     else if (orderDetail) setOrderDetail(null);
   };
   useEffect(() => {
@@ -192,19 +192,35 @@ export default function OrdersPanel() {
     // saved on this tablet first (they used to be fetched one after the other on every list refresh).
     useEffect(() => {
       if (!canWrite) return;
-      void savedThenFresh<{ products?: ProductOption[] }>("/admin/products", (p) => setProducts((p.products ?? []).map((x) => ({ id: x.id, name: x.name, sku: x.sku }))));
       void savedThenFresh<{ customers?: { id: string; name: string | null; email?: string | null; phone?: string | null }[] }>("/admin/customers", (c) => setCustomers((c.customers ?? []).map((x) => ({ id: x.id, name: x.name ?? x.email ?? x.phone ?? "Customer" }))));
     }, [canWrite]);
 
-    // Auto-refresh (30s) — persisted per browser, like Overview.
+    // "Open order" on a new-order alert: open that order's details here (whatever day or tab is showing).
     useEffect(() => {
-      try { setAutoRefresh(localStorage.getItem("orders.autoRefresh") === "1"); } catch { /* ignore */ }
-    }, []);
-    useEffect(() => {
-      if (!autoRefresh) return;
-      const id = setInterval(() => { void load(); }, 30_000);
-      return () => clearInterval(id);
-    }, [autoRefresh, load]);
+      const open = (id: string) => {
+        try { sessionStorage.removeItem(OPEN_ORDER_KEY); } catch { /* ignore */ }
+        cachedGet<AdminOrder>(`/admin/orders/${id}`).then((d) => { if (d?.id) openDetail(d); }).catch(() => setError("Could not open that order. Tap Refresh and try again."));
+      };
+      let waiting: string | null = null;
+      try { waiting = sessionStorage.getItem(OPEN_ORDER_KEY); } catch { /* ignore */ }
+      if (waiting) open(waiting);
+      const onOpen = (e: Event) => { const id = (e as CustomEvent<string>).detail; if (id) open(id); };
+      window.addEventListener(OPEN_ORDER_EVENT, onOpen);
+      return () => window.removeEventListener(OPEN_ORDER_EVENT, onOpen);
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+    // Live: new and changed orders show by themselves (lib/order-pulse.ts asks the server every few seconds),
+    // so nobody has to tap Refresh. Replaces the old "check every 30 seconds" switch.
+    const detailRef = useRef<AdminOrder | null>(null);
+    detailRef.current = orderDetail;
+    useEffect(() => onOrderChanges((changes) => {
+      void load();
+      const ids = new Set(changes.orders.map((c) => c.id));
+      setFresh((cur) => new Set([...cur, ...ids]));
+      setTimeout(() => setFresh((cur) => { const n = new Set(cur); ids.forEach((id) => n.delete(id)); return n; }), 12_000);
+      const open = detailRef.current;
+      if (open && ids.has(open.id)) loadDetail(open);
+    }), [load]); // eslint-disable-line react-hooks/exhaustive-deps
 
     const toggleSelect = (id: string) => {
       const next = new Set(selected);
@@ -226,6 +242,7 @@ export default function OrdersPanel() {
       setTransitioning("batch");
       setError(null);
       try {
+        s.forEach((o) => markOwnOrderChange(o.id));
         await Promise.all(s.map(fn));
         toast(`${label} · ${s.length} order${s.length > 1 ? "s" : ""}`);
         setSelected(new Set());
@@ -247,6 +264,7 @@ export default function OrdersPanel() {
 
   const doTransition = async (orderId: string, toStatus: string, reasonText?: string) => {
     setTransitioning(orderId);
+    markOwnOrderChange(orderId);
     setError(null);
     try {
       const res = await fetch(`${API_URL}/admin/orders/${orderId}/status`, {
@@ -267,10 +285,12 @@ export default function OrdersPanel() {
 
   const doVoidRefund = async (orderId: string, kind: "void" | "refund" | "voidHold", reasonText?: string) => {
       setTransitioning(orderId);
+      markOwnOrderChange(orderId);
       setError(null);
       try {
         const url = kind === "voidHold" ? `${API_URL}/admin/pos/holds/${orderId}/void` : `${API_URL}/admin/orders/${orderId}/${kind}`;
-                const res = await fetch(url, { method: "PATCH", headers: { "Content-Type": "application/json", ...adminHeaders() }, body: JSON.stringify({ reason: reasonText }) });
+                // The held-order void is a POST on the server; void and refund of a sale are PATCH.
+                const res = await fetch(url, { method: kind === "voidHold" ? "POST" : "PATCH", headers: { "Content-Type": "application/json", ...adminHeaders() }, body: JSON.stringify({ reason: reasonText }) });
         const data = await res.json();
         if (!res.ok) { setError(data?.message ?? `${kind} failed`); return; }
         setConfirmAction(null);
@@ -285,6 +305,7 @@ export default function OrdersPanel() {
       // ── W1/W2: routing + order edit ──
       const sendForDelivery = async (orderId: string) => {
         setTransitioning(orderId);
+        markOwnOrderChange(orderId);
         setError(null);
         try {
           const res = await fetch(`${API_URL}/admin/orders/${orderId}/send-for-delivery`, { method: "POST", headers: { "Content-Type": "application/json", ...adminHeaders() } });
@@ -299,6 +320,7 @@ export default function OrdersPanel() {
 
       const completeNow = async (orderId: string) => {
         setTransitioning(orderId);
+        markOwnOrderChange(orderId);
         setError(null);
         try {
           const res = await fetch(`${API_URL}/admin/orders/${orderId}/complete-now`, { method: "POST", headers: { "Content-Type": "application/json", ...adminHeaders() } });
@@ -310,53 +332,6 @@ export default function OrdersPanel() {
           setError(e instanceof Error ? e.message : "Failed");
         } finally { setTransitioning(null); }
       };
-
-      /** Save order item edits (RECEIVED/CONFIRMED/ON_HOLD) via W1 stock-delta endpoint. */
-      const saveOrderEdit = async () => {
-        if (!editHold) return;
-        setError(null);
-        const res = await fetch(`${API_URL}/admin/orders/${editHold.id}/items`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json", ...adminHeaders() },
-          body: JSON.stringify({ items: editHold.lines.map((l) => ({ productId: l.productId, quantity: l.quantity })) }),
-        });
-        const d = await res.json();
-        if (!res.ok) { setError(d?.message ?? "Edit failed"); return; }
-        setEditHold(null);
-        toast(`Order updated · ${toPesos(d.totalMinor)} (stock adjusted)`);
-        void load();
-      };
-
-      // ── On-process: edit held items ──
-  const saveHoldEdit = async () => {
-    if (!editHold) return;
-    setError(null);
-    const res = await fetch(`${API_URL}/admin/pos/holds/${editHold.id}/items`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json", ...adminHeaders() },
-      body: JSON.stringify({ items: editHold.lines.map((l) => ({ productId: l.productId, quantity: l.quantity })) }),
-    });
-    const d = await res.json();
-    if (!res.ok) { setError(d?.message ?? "Edit failed"); return; }
-    setEditHold(null);
-    toast(`Held order updated · ${toPesos(d.totalMinor)}`);
-    await load();
-    setPayHold({ id: d.id, orderNumber: editHold.orderNumber, totalMinor: d.totalMinor, isDelivery: (editHold.status === "ON_HOLD" ? false : true) });
-  };
-
-  const addHoldLine = (productId: string) => {
-    if (!editHold) return;
-    const prod = products.find((p) => p.id === productId);
-    if (!prod) return;
-    const existing = editHold.lines.find((l) => l.productId === productId);
-    if (existing) setEditHold({ ...editHold, lines: editHold.lines.map((l) => (l.productId === productId ? { ...l, quantity: l.quantity + 1 } : l)) });
-    else setEditHold({ ...editHold, lines: [...editHold.lines, { productId, productName: prod.name, quantity: 1, unitPriceMinor: 0 }] });
-  };
-
-  const setHoldLineQty = (productId: string, qty: number) => {
-    if (!editHold) return;
-    setEditHold({ ...editHold, lines: qty <= 0 ? editHold.lines.filter((l) => l.productId !== productId) : editHold.lines.map((l) => (l.productId === productId ? { ...l, quantity: qty } : l)) });
-  };
 
   // ── On-process: pay a held order ──
     /** Validate payment inputs (cash cover / credit customer + signature). Returns true when good. */
@@ -396,6 +371,7 @@ export default function OrdersPanel() {
     const completeHold = async (target: "COMPLETED" | "OUT_FOR_DELIVERY") => {
       if (!payHold || !payValidated()) return;
       setError(null);
+      markOwnOrderChange(payHold.id);
       const tenderedMinor = Math.round(parseFloat(tendered || "0") * 100);
       // M1: in split mode the tender rows ARE the payment (multi-method, one request).
       const splitRows = tenderRows
@@ -474,6 +450,7 @@ export default function OrdersPanel() {
       }
       if (s === "RECEIVED") {
         a.push({ key: "receive", label: "Receive", icon: "bi-check-lg", tone: "main", run: () => void transition(o.id, "CONFIRMED") });
+        a.push({ key: "edit", label: "Change items", icon: "bi-pencil", tone: "plain", run: () => openEdit(o) });
         a.push({ key: "cancel", label: "Cancel order", icon: "bi-x-lg", tone: "danger", run: () => void transition(o.id, "CANCELLED") });
       }
       if (live && isDeliv(o)) a.push({ key: "send", label: "Send for delivery", icon: "bi-truck", tone: "main", run: () => void sendForDelivery(o.id) });
@@ -500,17 +477,7 @@ export default function OrdersPanel() {
     return a;
   };
 
-  const openEdit = (o: AdminOrder) => {
-    fetch(`${API_URL}/admin/orders/${o.id}`, { headers: adminHeaders() })
-      .then((r) => r.json())
-      .then((d) => setEditHold({
-        id: o.id,
-        orderNumber: o.orderNumber,
-        status: o.status,
-        lines: (d?.items ?? []).map((i: any) => ({ productId: i.productId ?? "", productName: i.productName, quantity: i.quantity, unitPriceMinor: i.unitPriceMinor })),
-      }))
-      .catch(() => setError("Could not load held order"));
-  };
+  const openEdit = (o: AdminOrder) => setEditing({ id: o.id, orderNumber: o.orderNumber, customerName: o.customerName });
 
   /** How long an active order has waited, in words. Over 1 h amber, over 3 h red. */
   const ageOf = (o: AdminOrder): { mins: number; label: string; tone: string } | null => {
@@ -582,7 +549,7 @@ export default function OrdersPanel() {
     const age = ageOf(o);
     const open = orderDetail?.id === o.id;
     return (
-      <li key={o.id} className={`order-row ${open ? "is-open" : ""} ${selected.has(o.id) ? "is-picked" : ""}`}>
+      <li key={o.id} className={`order-row ${open ? "is-open" : ""} ${selected.has(o.id) ? "is-picked" : ""} ${fresh.has(o.id) ? "is-fresh" : ""}`}>
         <label className="order-pick" title="Select for a batch action">
           <input className="form-check-input m-0" type="checkbox" checked={selected.has(o.id)} onChange={() => toggleSelect(o.id)} aria-label={`Select ${o.orderNumber}`} />
         </label>
@@ -592,6 +559,7 @@ export default function OrdersPanel() {
             <span className="d-block small text-muted">
               {o.orderNumber} · {isDeliv(o) ? <><i className="bi bi-truck" aria-hidden="true"></i> Delivery</> : <><i className="bi bi-shop" aria-hidden="true"></i> Pickup</>}
               {o.paymentMethod === "credit" && <> · <i className="bi bi-journal-text" aria-hidden="true"></i> Credit</>}
+              {o.source === "hub" && <> · <i className="bi bi-chat-dots" aria-hidden="true"></i> {[o.sourcePage, HUB_CHANNEL[o.sourceChannel ?? ""]].filter(Boolean).join(" ") || "SE Corp Hub"}</>}
               {" · "}{placedAt(o.createdAt)}
             </span>
           </span>
@@ -772,7 +740,9 @@ export default function OrdersPanel() {
   return (
       <div className="orders-screen">
         <div className="d-flex flex-wrap align-items-center gap-2 mb-2">
-          <h1 className="h4 mb-0 me-auto"><i className="bi bi-receipt me-2" aria-hidden="true"></i>Orders</h1>
+          <h1 className="h4 mb-0"><i className="bi bi-receipt me-2" aria-hidden="true"></i>Orders</h1>
+          {!offline && <span className="live-pill me-auto" title="New and changed orders show by themselves"><span className="live-dot" aria-hidden="true"></span>Live</span>}
+          {offline && <span className="me-auto"></span>}
           <button type="button" className="btn btn-outline-dark" disabled={offline} onClick={() => setReviewOpen(true)}><i className="bi bi-inboxes me-1" aria-hidden="true"></i>Payment review</button>
           <button type="button" className="btn btn-outline-dark" disabled={offline} onClick={() => setChatOpen(true)}><i className="bi bi-chat-dots me-1" aria-hidden="true"></i>Chat inbox</button>
           <button type="button" className="btn btn-outline-dark" onClick={() => void load()} disabled={loading} aria-label="Refresh orders">
@@ -818,7 +788,7 @@ export default function OrdersPanel() {
               <div className="col-12 col-md-4">
                 <label className="form-label small mb-0" htmlFor="ordSource">Where from</label>
                 <select id="ordSource" className="form-select" value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)}>
-                  <option value="">All</option><option value="online">Online</option><option value="pos">POS</option><option value="PRE_ORDER">Pre-order</option>
+                  <option value="">All</option><option value="hub">SE Corp Hub (Facebook pages)</option><option value="online">Online</option><option value="pos">POS</option><option value="PRE_ORDER">Pre-order</option>
                 </select>
               </div>
               <div className="col-6 col-md-4">
@@ -835,10 +805,6 @@ export default function OrdersPanel() {
               </div>
             </div>
             <div className="d-flex flex-wrap align-items-center gap-3 mt-2">
-              <div className="form-check form-switch mb-0">
-                <input className="form-check-input" type="checkbox" role="switch" id="ordAuto" checked={autoRefresh} onChange={(e) => { setAutoRefresh(e.target.checked); try { localStorage.setItem("orders.autoRefresh", e.target.checked ? "1" : "0"); } catch { /* ignore */ } }} />
-                <label className="form-check-label" htmlFor="ordAuto">Check for new orders every 30 seconds</label>
-              </div>
               {(extraFilters > 0 || customer) && <button type="button" className="btn btn-link ms-auto" onClick={clearFilters}>Clear filters</button>}
             </div>
           </div>
@@ -978,46 +944,23 @@ export default function OrdersPanel() {
         </>
       )}
 
-      {/* Edit held order modal */}
-      {editHold && (
-        <>
-          <div className="modal fade show d-block" tabIndex={-1}>
-            <div className="modal-dialog modal-dialog-centered">
-              <div className="modal-content">
-                <div className="modal-header">
-                                  <h5 className="modal-title">Edit order — {editHold.orderNumber}</h5>
-                                  <button type="button" className="btn-close" onClick={() => setEditHold(null)}></button>
-                                </div>
-                <div className="modal-body">
-                  <select className="form-select form-select-sm mb-2" value="" onChange={(e) => e.target.value && addHoldLine(e.target.value)}>
-                    <option value="" disabled>+ Add product…</option>
-                    {products.map((p) => <option key={p.id} value={p.id}>{p.name} ({p.sku})</option>)}
-                  </select>
-                  {editHold.lines.length === 0 ? (
-                    <p className="text-muted small">No lines — sale will be voided if saved without items.</p>
-                  ) : (
-                    editHold.lines.map((l) => (
-                      <div key={l.productId} className="d-flex align-items-center gap-2 mb-1">
-                        <span className="flex-grow-1 small">{l.productName}</span>
-                        <div className="input-group input-group-sm" style={{ width: 96 }}>
-                          <button className="btn btn-outline-secondary" onClick={() => setHoldLineQty(l.productId, l.quantity - 1)}>-</button>
-                          <input className="form-control text-center" value={l.quantity} readOnly />
-                          <button className="btn btn-outline-secondary" onClick={() => setHoldLineQty(l.productId, l.quantity + 1)}>+</button>
-                        </div>
-                        <button className="btn btn-sm btn-outline-danger py-0" onClick={() => setHoldLineQty(l.productId, 0)}><i className="bi bi-x"></i></button>
-                      </div>
-                    ))
-                  )}
-                </div>
-                <div className="modal-footer">
-                                  <button className="btn btn-outline-secondary" onClick={() => setEditHold(null)}>Cancel</button>
-                                  <button className="btn btn-primary" onClick={() => (editHold.status === "ON_HOLD" ? saveHoldEdit() : saveOrderEdit())}>Save changes</button>
-                                </div>
-              </div>
-            </div>
-          </div>
-          <div className="modal-backdrop fade show"></div>
-        </>
+      {/* Change items: products, how many and the price of each (OrderEditor) */}
+      {editing && (
+        <OrderEditor
+          orderId={editing.id}
+          orderNumber={editing.orderNumber}
+          customerName={editing.customerName}
+          onClose={() => setEditing(null)}
+          onSaved={(totalMinor) => {
+            markOwnOrderChange(editing.id);
+            const changedId = editing.id;
+            setEditing(null);
+            toast(`${editing.orderNumber} updated · ${toPesos(totalMinor)}`);
+            void load();
+            const open = orderDetail?.id === changedId ? orderDetail : null;
+            if (open) loadDetail(open);
+          }}
+        />
       )}
 
       {/* Pay held order modal */}

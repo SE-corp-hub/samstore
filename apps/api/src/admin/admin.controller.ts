@@ -21,14 +21,15 @@ import { redactCost, seesCost } from "../domain/cost-redact.js";
 import { cleanScreenIds, lockPinMatches, newLockSecret, readFeatureLock } from "../domain/feature-lock.js";
 import { verifyPassword } from "../auth/auth.domain.js";
 import { Prisma } from "@prisma/client";
-import type { ApiError } from "@sam-store/contracts";
+import type { ApiError, PosHoldItemsRequest } from "@sam-store/contracts";
 import { JwtAuthGuard, type AuthPrincipal } from "../auth/auth.guard.js";
 import { requireUser, resolveTenant, TENANT_ROLES } from "../auth/tenant-context.js";
 import { prisma } from "../persistence/prisma-repositories.js";
 import { cacheGet, cacheSet, cacheBust, cacheKey } from "../persistence/ttl-cache.js";
 import { AUTH_SERVICE, AuthService } from "../auth/auth.service.js";
 import { ProductAdminService } from "./product-admin.service.js";
-import { OrderAdminService } from "./order-admin.service.js";
+import { OrderAdminService, type OrderEditLine } from "./order-admin.service.js";
+import { POS_SERVICE, type PosService } from "../pos/pos.service.js";
 import { StoreSettingsService } from "./store-settings.service.js";
 import { rotateStoreLinkToken, revokeStoreLink } from "./store-settings.service.js";
 import { VoucherAdminService } from "./voucher-admin.service.js";
@@ -76,6 +77,7 @@ export class AdminController {
   constructor(
     @Inject(AUTH_SERVICE) private readonly auth: AuthService,
     @Inject(NOTIFICATIONS_SERVICE) notifications: NotificationsService,
+    @Inject(POS_SERVICE) private readonly pos: PosService,
   ) {
     this.ordersAdmin = new OrderAdminService(notifications);
   }
@@ -429,6 +431,8 @@ export class AdminController {
                         id: true, orderNumber: true, status: true, totalMinor: true, currencyCode: true,
                         customerName: true, customerPhone: true, createdAt: true, paymentStatus: true, source: true,
                         deliveryType: true, deliveryAddressLine1: true, fulfillmentType: true,
+                        // SE Corp Hub orders: the channel, the selling page and the hub's own number (row label).
+                        sourceChannel: true, sourcePage: true, externalRef: true, updatedAt: true,
                                                 // signatureData (a picture, often 10+ KB) only comes with one order (GET orders/:id):
                                                 // up to 200 of them made every list load slow and filled the tablet's saved copies.
                                                 paymentMethod: true, signatureAt: true,
@@ -480,6 +484,41 @@ export class AdminController {
                                           await cacheSet(key, counts, 5_000);
                                           return { counts, storeId };
                                         }
+
+  /**
+   * GET /admin/orders/pulse?since=<ISO> — live order updates without refreshing the app. The tablet asks every
+   * few seconds while the screen is on: orders placed or changed after `since` (oldest first, at most 20), and
+   * `at`, the time to ask from next. Without `since` it only answers `at` (where to start). One small query,
+   * kept for 3 s so several screens share it, and dropped by every order write (the "orders" cache namespace).
+   */
+  @Get("orders/pulse")
+  async ordersPulse(@Req() req: Request & { user?: AuthPrincipal }, @Query("since") since?: string, @Headers("x-store-id") headerStoreId?: string) {
+    const user = req.user;
+    requireUser(user);
+    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.VIEW);
+    const from = since && !Number.isNaN(Date.parse(since)) ? new Date(since) : null;
+    const key = cacheKey("orders", storeId, "pulse", from?.toISOString() ?? "");
+    const hit = await cacheGet<{ at: string | null; orders: unknown[] }>(key);
+    if (hit) return { ...hit, storeId };
+    let value: { at: string | null; orders: { updatedAt: Date }[] };
+    if (!from) {
+      const last = await prisma.order.findFirst({ where: { storeId }, orderBy: { updatedAt: "desc" }, select: { updatedAt: true } });
+      value = { at: (last?.updatedAt ?? new Date()).toISOString(), orders: [] };
+    } else {
+      const orders = await prisma.order.findMany({
+        where: { storeId, updatedAt: { gt: from } },
+        orderBy: { updatedAt: "asc" },
+        take: 20,
+        select: {
+          id: true, orderNumber: true, status: true, source: true, sourceChannel: true, sourcePage: true, externalRef: true,
+          customerName: true, totalMinor: true, deliveryType: true, createdAt: true, updatedAt: true,
+        },
+      });
+      value = { at: (orders.at(-1)?.updatedAt ?? from).toISOString(), orders };
+    }
+    await cacheSet(key, value, 3_000);
+    return { ...value, storeId };
+  }
 
           /** GET /admin/orders/:id — full detail (items + history). */
   @Get("orders/:id")
@@ -1165,17 +1204,29 @@ export class AdminController {
     return this.cartsRecovery.expireAbandoned(storeId);
   }
 
-  /** PATCH /admin/orders/:id/items — W1: stock-delta item edit (RECEIVED/CONFIRMED/ON_HOLD). */
+  /**
+   * PATCH /admin/orders/:id/items — Orders → Change items: products, how many and the price of each
+   * (a changed price needs its reason). Held counter orders (POS hold, pre-order) are edited the way POS and
+   * Pre-order edit them; every other open order (shop link, SE Corp Hub, agent) by the order edit (W1).
+   */
   @Patch("orders/:id/items")
   async orderItems(
     @Req() req: Request & { user?: AuthPrincipal },
     @Param("id") id: string,
-    @Body() body: { items: { productId: string; quantity: number }[] },
+    @Body() body: { items: OrderEditLine[] },
     @Headers("x-store-id") headerStoreId?: string,
   ) {
     const user = req.user;
     requireUser(user);
     const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.VIEW);
+    const held = await prisma.order.findFirst({ where: { id, storeId, status: "ON_HOLD", source: { in: ["pos", "PRE_ORDER"] } }, select: { source: true } });
+    if (held) {
+      const edited = await this.pos.replaceItems(storeId, user.sub, id, { items: body?.items ?? [] } as PosHoldItemsRequest, { source: held.source as "pos" | "PRE_ORDER" });
+      if (!edited.ok) throw new HttpException(edited.error, statusFor(edited.error));
+      await cacheBust(cacheKey("products", storeId));
+      await cacheBust(cacheKey("orders", storeId));
+      return { id, status: "ON_HOLD", totalMinor: edited.value.totalMinor, storeId };
+    }
     const result = await this.ordersAdmin.replaceOrderItems(storeId, id, body?.items ?? [], user.sub);
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
     return { ...result.value, storeId };

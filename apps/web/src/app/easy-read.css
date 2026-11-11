@@ -486,3 +486,48 @@ main:has(> * > .rice-ui > .sell-fit), main:has(> .rice-ui > .sell-fit) { padding
 .lock-pick.is-on { border-color: #8a5a00; background: #fff3d6; }
 .lock-pick.is-on .bi-lock-fill { color: #6f4800; }
 .lock-pick:focus-within { outline: 3px solid var(--sam-primary); outline-offset: 2px; }
+
+/* §12 Orders live: new-order alerts, the Live pill, freshly changed rows, and Change items.
+   Alerts float (position: fixed) so they never push the fitted POS / Pre-order screens (§9). */
+.order-alerts {
+  position: fixed; top: .5rem; left: 50%; transform: translateX(-50%); z-index: 1045; /* under open pop-ups (1050+) */
+  width: min(26rem, calc(100vw - 2rem)); display: flex; flex-direction: column; gap: .5rem;
+}
+.order-alerts.is-folded { width: auto; align-items: center; }
+.order-alert-pill {
+  min-height: 3rem; padding: .5rem 1.25rem; border-radius: 999px; font-weight: 700;
+  background: #1F6F3F; color: #fff; border: 2px solid #fff; box-shadow: 0 .25rem 1rem rgba(0, 0, 0, .25);
+}
+.order-alert-pill:hover, .order-alert-pill:focus-visible { background: #185832; color: #fff; }
+.order-alert {
+  background: #fff; color: #1f1d1a; border: 2px solid #1F6F3F; border-left-width: .5rem;
+  border-radius: .75rem; padding: .75rem; box-shadow: 0 .5rem 1.5rem rgba(0, 0, 0, .18);
+}
+.order-alert .btn { min-height: 3rem; min-width: 3rem; }
+.order-alert-icon { color: #1F6F3F; font-size: 1.5rem; line-height: 1.2; }
+.order-alert-meta { color: #4a4036; }
+.order-alert-foot { background: #fff; border-radius: .5rem; padding: 0 .5rem; box-shadow: 0 .25rem .75rem rgba(0, 0, 0, .12); }
+.order-alert-foot .btn-link { min-height: 2.75rem; color: #0B4F8A; }
+.order-note { background: #E8F1FA; color: #0B4F8A; border: 1px solid #0B4F8A; border-radius: .5rem; padding: .5rem .75rem; font-weight: 600; }
+@media (prefers-reduced-motion: no-preference) {
+  .order-alert { animation: order-alert-in .25s ease-out; }
+  @keyframes order-alert-in { from { opacity: 0; transform: translateY(-.5rem); } to { opacity: 1; transform: none; } }
+}
+.live-pill {
+  display: inline-flex; align-items: center; gap: .375rem; padding: .125rem .625rem; border-radius: 999px;
+  background: #E6F2EA; color: #1F6F3F; font-weight: 700; font-size: .875rem; border: 1px solid #1F6F3F;
+}
+.live-dot { width: .5rem; height: .5rem; border-radius: 50%; background: #1F6F3F; }
+@media (prefers-reduced-motion: no-preference) {
+  .live-dot { animation: live-dot 2s ease-in-out infinite; }
+  @keyframes live-dot { 50% { opacity: .35; } }
+}
+.order-row.is-fresh { background: #E6F2EA; box-shadow: inset .3rem 0 0 #1F6F3F; }
+.order-edit .order-edit-close { min-width: 3rem; min-height: 3rem; }
+@media (min-width: 576px) { .modal-dialog.order-edit { max-width: min(46rem, calc(100vw - 2rem)); } }
+.order-edit-list { max-height: 40vh; overflow-y: auto; display: flex; flex-direction: column; gap: .375rem; }
+.order-edit-add { min-height: 3.5rem; }
+.order-edit .modal-footer .btn { min-height: 3rem; }
+/* Two-pane Orders (sideways): the row's buttons keep their full size; the name side gives way instead. */
+.order-row > .order-go, .order-row > .order-reprint { flex-shrink: 0; }
+.order-main > .text-end { flex-shrink: 0; }
