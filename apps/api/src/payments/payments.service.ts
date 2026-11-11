@@ -149,7 +149,8 @@ export class PaymentsService {
       return { ok: false, error: { type: "conflict", message: "Only received payments can be reviewed" } };
     }
     await prisma.$transaction(async (tx) => {
-      await tx.order.update({ where: { id: orderId }, data: { paymentStatus: "REVIEWED" } });
+      // A delivered order whose GCash is confirmed afterwards is simply paid.
+      await tx.order.update({ where: { id: orderId }, data: { paymentStatus: order.status === "DELIVERED" || order.status === "COMPLETED" ? "COLLECTED" : "REVIEWED" } });
       await tx.paymentStatusHistory.create({
         data: { storeId, orderId, paymentId: null, fromStatus: "RECEIVED", toStatus: "REVIEWED", reason: null, actorType: "admin", actorId },
       });
@@ -168,8 +169,9 @@ export class PaymentsService {
   /** P4b: review queue — orders awaiting operator review of a bank-transfer proof (RECEIVED). */
   async reviewQueue(storeId: string) {
     const orders = await prisma.order.findMany({
-      where: { storeId, paymentStatus: "RECEIVED" },
-      orderBy: { createdAt: "desc" },
+      // Open orders only: a cancelled order has nothing left to confirm. Oldest first, the one waiting longest.
+      where: { storeId, paymentStatus: "RECEIVED", status: { notIn: ["CANCELLED"] } },
+      orderBy: { createdAt: "asc" },
       take: 100,
       select: {
         id: true,
@@ -178,6 +180,12 @@ export class PaymentsService {
         customerName: true,
         paymentMethod: true,
         createdAt: true,
+        status: true,
+        deliveryType: true,
+        source: true,
+        sourcePage: true,
+        externalRef: true,
+        customerPhone: true,
         payments: { where: { type: "payment" }, orderBy: { receivedAt: "desc" }, take: 1 },
       },
     });
@@ -188,6 +196,12 @@ export class PaymentsService {
       customerName: o.customerName,
       paymentMethod: o.paymentMethod,
       createdAt: o.createdAt.toISOString(),
+      status: o.status,
+      deliveryType: o.deliveryType,
+      source: o.source,
+      sourcePage: o.sourcePage,
+      externalRef: o.externalRef,
+      customerPhone: o.customerPhone,
       payment: o.payments[0],
     }));
   }

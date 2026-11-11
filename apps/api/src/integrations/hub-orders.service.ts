@@ -173,7 +173,7 @@ export class HubOrderService {
       }
     }
 
-    const notes = [req.paymentMethod === "gcash" ? "Pays by GCash (check the payment before sending)." : "", req.notes ?? "", ...told]
+    const notes = [req.notes ?? "", ...told]
       .filter(Boolean)
       .join(" ")
       .slice(0, 500);
@@ -200,6 +200,7 @@ export class HubOrderService {
         ...(req.deliveryFeeMinor !== undefined ? { deliveryFeeMinor: req.deliveryFeeMinor } : {}),
         ...(sellingLocationId ? { sellingLocationId } : {}),
         unitPrices: Object.fromEntries(lines.map((l) => [l.productId, l.unitPriceMinor])),
+        ...(req.paymentMethod === "gcash" ? { gcash: true } : {}),
       },
     );
   }

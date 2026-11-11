@@ -94,6 +94,14 @@ export default function OrdersPanel() {
   const [reason, setReason] = useState("");
   const [receiptOrder, setReceiptOrder] = useState<string | null>(null);
   const [reviewOpen, setReviewOpen] = useState(false);
+  // GCash payments still to check (Payment review): the count on its button, asked again whenever the list loads.
+  const [toCheck, setToCheck] = useState(0);
+  const countToCheck = useCallback(() => {
+    void fetch(`${API_URL}/admin/payments/review-queue`, { headers: adminHeaders() })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (d) setToCheck(Array.isArray(d.items) ? d.items.length : 0); })
+      .catch(() => { /* offline: keep the last count */ });
+  }, []);
   const [chatOpen, setChatOpen] = useState(false);
   const [itemsOpen, setItemsOpen] = useState(false);
   const [confirmAction, setConfirmAction] = useState<{ orderId: string; kind: "void" | "refund" | "voidHold" } | null>(null);
@@ -236,6 +244,7 @@ export default function OrdersPanel() {
     // so nobody has to tap Refresh. Replaces the old "check every 30 seconds" switch.
     const detailRef = useRef<AdminOrder | null>(null);
     detailRef.current = orderDetail;
+    useEffect(() => { if (!offline) countToCheck(); }, [orders, offline, countToCheck]);
     useEffect(() => onOrderChanges((changes) => {
       void load();
       const ids = new Set(changes.orders.map((c) => c.id));
@@ -327,6 +336,9 @@ export default function OrdersPanel() {
 
       // ── W1/W2: routing + order edit ──
       const sendForDelivery = async (orderId: string) => {
+        // GCash not confirmed yet: ask before the rice leaves. Sending anyway keeps it in Payment review.
+        const o = orders.find((x) => x.id === orderId);
+        if (o?.paymentStatus === "RECEIVED" && !window.confirm(`${o.customerName}'s GCash payment is not confirmed yet.\n\nCheck Payment review first.\n\nSend the order out anyway?`)) return;
         setTransitioning(orderId);
         markOwnOrderChange(orderId);
         setError(null);
@@ -623,6 +635,7 @@ export default function OrdersPanel() {
             <span className="d-block small text-muted">
               {o.orderNumber} · {isDeliv(o) ? <><i className="bi bi-truck" aria-hidden="true"></i> Delivery</> : <><i className="bi bi-shop" aria-hidden="true"></i> Pickup</>}
               {o.paymentMethod === "credit" && <> · <i className="bi bi-journal-text" aria-hidden="true"></i> Credit</>}
+              {o.paymentMethod === "gcash" && <> · <i className="bi bi-phone" aria-hidden="true"></i> GCash</>}
               {o.source === "hub" && <> · <i className="bi bi-chat-dots" aria-hidden="true"></i> {[o.sourcePage, HUB_CHANNEL[o.sourceChannel ?? ""]].filter(Boolean).join(" ") || "SE Corp Hub"}</>}
               {" · "}{placedAt(o.createdAt)}
             </span>
@@ -632,6 +645,7 @@ export default function OrdersPanel() {
             <span className="d-block fw-bold num">{toPesos(o.totalMinor)}</span>
             <span className="d-inline-flex flex-wrap justify-content-end gap-1">
               {statusBadge(o.status)}
+              {o.paymentStatus === "RECEIVED" && <span className="badge text-bg-warning"><i className="bi bi-phone me-1" aria-hidden="true"></i>GCash to check</span>}
               {age && <span className={`badge ${age.tone}`} title={`Placed ${age.mins} min ago`}>{age.label}</span>}
             </span>
           </span>
@@ -747,7 +761,7 @@ export default function OrdersPanel() {
           </table>
         )}
         {(o.paymentStatus || o.paymentMethod) && (
-          <p className="mb-2">Payment: {o.paymentMethod === "credit" ? "Credit" : o.paymentMethod === "cod" ? "Cash on delivery" : o.paymentMethod}{o.paymentStatus ? ` · ${o.paymentStatus === "COLLECTED" ? "paid" : o.paymentStatus === "PENDING" ? "not paid yet" : o.paymentStatus.toLowerCase().replace(/_/g, " ")}` : ""}</p>
+          <p className="mb-2">Payment: {o.paymentMethod === "credit" ? "Credit" : o.paymentMethod === "cod" ? "Cash on delivery" : o.paymentMethod === "gcash" ? "GCash" : o.paymentMethod}{o.paymentStatus ? ` · ${o.paymentStatus === "COLLECTED" ? "paid" : o.paymentStatus === "PENDING" ? "not paid yet" : o.paymentStatus === "RECEIVED" ? "to check in Payment review" : o.paymentStatus === "REVIEWED" ? "money received" : o.paymentStatus.toLowerCase().replace(/_/g, " ")}` : ""}</p>
         )}
 
         {detailHistory && detailHistory.length > 0 && (
@@ -842,7 +856,9 @@ export default function OrdersPanel() {
           {!offline && <span className="live-pill me-auto" title="New and changed orders show by themselves"><span className="live-dot" aria-hidden="true"></span>Live</span>}
           {offline && <span className="me-auto"></span>}
           <button type="button" className="btn btn-outline-primary fw-bold" onClick={() => setItemsOpen(true)}><i className="bi bi-table me-1" aria-hidden="true"></i>Items</button>
-          <button type="button" className="btn btn-outline-dark" disabled={offline} onClick={() => setReviewOpen(true)}><i className="bi bi-inboxes me-1" aria-hidden="true"></i>Payment review</button>
+          <button type="button" className={`btn ${toCheck > 0 ? "btn-warning fw-bold" : "btn-outline-dark"}`} disabled={offline} onClick={() => setReviewOpen(true)}>
+            <i className="bi bi-phone me-1" aria-hidden="true"></i>Payment review{toCheck > 0 && <span className="badge rounded-pill text-bg-dark ms-2" aria-label={`${toCheck} to check`}>{toCheck}</span>}
+          </button>
           <button type="button" className="btn btn-outline-dark" disabled={offline} onClick={() => setChatOpen(true)}><i className="bi bi-chat-dots me-1" aria-hidden="true"></i>Chat inbox</button>
           <button type="button" className="btn btn-outline-dark order-refresh" onClick={() => void load()} disabled={loading} aria-label={lastLoaded ? `Refresh orders (updated ${lastLoaded})` : "Refresh orders"} title={lastLoaded ? `Updated ${lastLoaded}` : "Refresh"}>
             <i className={`bi bi-arrow-clockwise ${loading ? "spin" : ""}`} aria-hidden="true"></i>
@@ -1184,7 +1200,7 @@ export default function OrdersPanel() {
       )}
 
       {receiptOrder && <ReceiptModal orderId={receiptOrder} onClose={() => setReceiptOrder(null)} />}
-      {reviewOpen && <PaymentReview onClose={() => setReviewOpen(false)} onChanged={() => void load()} />}
+      {reviewOpen && <PaymentReview onClose={() => setReviewOpen(false)} onChanged={() => { void load(); countToCheck(); }} />}
       {itemsOpen && (
         <OrderItemsTable
           query={itemsQuery()}

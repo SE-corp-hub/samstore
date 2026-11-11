@@ -279,15 +279,19 @@ test("an order already placed comes back the same even when the stock it holds l
   assert.equal(orders.exportedForTests().orders.length, 1);
 });
 
-test("the hub's location code picks the selling location, and GCash is written on the order for staff", async () => {
+test("the hub's location code picks the selling location, and a GCash order waits in Payment review", async () => {
   const { svc, orders } = build({ locate: async (storeId, code) => (storeId === "store-1" && code === "S2" ? "wh-s2" : null) });
   const r = await svc.place(req({ locationCode: "S2", paymentMethod: "gcash", notes: "Gate is blue" }));
   assert.ok(r.ok);
   const saved = orders.exportedForTests().orders.find((o) => r.ok && o.id === r.value.orderId);
   assert.equal(saved?.sellingLocationId, "wh-s2");
-  assert.match(saved?.notes ?? "", /^Pays by GCash.*Gate is blue$/);
+  assert.equal(saved?.notes, "Gate is blue");
+  assert.equal(saved?.paymentMethod, "gcash");
+  assert.equal(saved?.paymentStatus, "RECEIVED", "GCash waits in Payment review until staff confirm it");
   const other = await svc.place(req({ idempotencyKey: "hub-order-2002", locationCode: "S9" }));
   assert.ok(other.ok, "an unknown code still takes the order");
+  const cod = orders.exportedForTests().orders.find((o) => other.ok && o.id === other.value.orderId);
+  assert.deepEqual([cod?.paymentMethod, cod?.paymentStatus], ["cod", "PENDING"], "cash on delivery is as before");
   assert.equal(orders.exportedForTests().orders.find((o) => other.ok && o.id === other.value.orderId)?.sellingLocationId ?? null, null);
 });
 

@@ -92,6 +92,9 @@ export interface TrustedOrderExtras {
   /** Price each by product id, already settled by the caller (the selling location's price, or the price the
    *  customer was told on the Page). A product not listed keeps the store's price. */
   unitPrices?: Record<string, number>;
+  /** The customer said on the Page they pay by GCash: the order is marked GCash and waits in Payment review
+   *  until staff confirm the money came in. */
+  gcash?: boolean;
 }
 
 /** DI token — explicit, so dependency resolution doesn't rely on emitDecoratorMetadata. */
@@ -489,15 +492,16 @@ export class CheckoutService {
         ...(revalidated.addonPriceChanges.length > 0 ? { addonPriceChanges: revalidated.addonPriceChanges } : {}),
         ...(revalidated.removedAddonOptionIds.length > 0 ? { removedAddonOptionIds: revalidated.removedAddonOptionIds } : {}),
         store: { slug: store.slug, name: store.name },
-        paymentMethod,
+        paymentMethod: trusted?.gcash ? "gcash" : paymentMethod,
         deliveryType,
         ...(phAddress ? { phAddress } : {}),
         ...(statutory ? { statutory: { type: statutory.type, id: statutory.id, name: statutory.name } } : {}),
         ...(request.voucherCode ? { voucherCode: request.voucherCode.toUpperCase(), discountMinor } : {}),
         ...(loyaltyPoints > 0 ? { loyaltyPointsRedeemed: loyaltyPoints } : {}),
       },
-      paymentMethod,
-      paymentStatus: "PENDING",
+      paymentMethod: trusted?.gcash ? "gcash" : paymentMethod,
+      // RECEIVED = "said paid, to be checked": it shows in Payment review until staff confirm it.
+      paymentStatus: trusted?.gcash ? "RECEIVED" : "PENDING",
       idempotencyKey: canonicalKey,
       cartToken: cart.token,
       customerName: request.customerName.trim(),
