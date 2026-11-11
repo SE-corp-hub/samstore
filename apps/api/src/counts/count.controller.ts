@@ -85,6 +85,27 @@ export class CountController {
     return unwrap(await this.counts.startClosing(storeId, actor, { locationId: str(body?.locationId) }));
   }
 
+  /** GET /admin/counts/closing-status — each store this person counts: last "everything" count and an unfinished "Close the store". */
+  @Get("counts/closing-status")
+  async closingStatus(@Req() req: Req_, @Headers("x-store-id") h?: string) {
+    const { storeId, actor } = await this.ctx(req, h);
+    return unwrap(await this.counts.closingStatus(storeId, actor));
+  }
+
+  /** GET /admin/counts/:id/cash — the cash check of a posted count: cash from the day's sales at its store + its walk-in sale. */
+  @Get("counts/:id/cash")
+  async cash(@Req() req: Req_, @Param("id") id: string, @Headers("x-store-id") h?: string) {
+    const { storeId, actor } = await this.ctx(req, h);
+    return unwrap(await this.counts.cashCheck(storeId, actor, id));
+  }
+
+  /** POST /admin/counts/:id/cash — { countedMinor, note? }: record the cash counted at closing (nothing moves). */
+  @Post("counts/:id/cash")
+  async saveCash(@Req() req: Req_, @Param("id") id: string, @Body() body: Record<string, unknown>, @Headers("x-store-id") h?: string) {
+    const { storeId, actor } = await this.ctx(req, h);
+    return unwrap(await this.counts.saveCashCheck(storeId, actor, id, { countedMinor: body?.countedMinor, note: body?.note }));
+  }
+
   /** GET /admin/counts/report?locationId=&from=&to= — counts posted in a period, totals, shortages by reason, every difference. */
   @Get("counts/report")
   async reportList(@Req() req: Req_, @Query("locationId") locationId?: string, @Query("from") from?: string, @Query("to") to?: string, @Headers("x-store-id") h?: string) {

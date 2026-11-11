@@ -17,6 +17,7 @@
 import { chargeCountShort, consignmentMain } from "../payable/charges.js";
 import { autoResackFromCount } from "../payable/count-resack.js";
 import { walkInLines, type WalkInLine } from "./count-walk-in.js";
+import { dayRange, manilaDate } from "../domain/reports.js";
 import type { ApiError } from "@sam-store/contracts";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../persistence/prisma-repositories.js";
@@ -48,6 +49,20 @@ const forbidden = (m: string) => ({ ok: false as const, error: { type: "forbidde
 const notFound = (m = "Count not found") => ({ ok: false as const, error: { type: "not_found" as const, message: m } });
 
 const OWNERS = ["OWNER", "MANAGER", "STORE_OWNER", "PLATFORM_ADMIN"];
+/** The note on a count started with "Close the store" (every item at the store, at closing time). */
+export const CLOSE_STORE_NOTE = "Close the store";
+/** Most cash a person may type at the cash check (₱10,000,000). */
+const MAX_CASH_MINOR = 1_000_000_000;
+
+export interface CashCheck {
+  countId: string; docNumber: string; location: string; day: string;
+  /** Cash from sales rung up at this store that day (POS, Walk-in, paid pre-orders), without the walk-ins below. */
+  salesMinor: number; salesCount: number;
+  /** The walk-in sale(s) made from this count's shortages. */
+  walkInMinor: number;
+  expectedMinor: number;
+  saved: { countedMinor: number; expectedMinor: number; diffMinor: number; note: string | null; at: Date } | null;
+}
 const productSelect = { id: true, name: true, stockBaseUnit: true, stockBaseQuantity: true, costMinor: true, variety: true } as const;
 type P = Prisma.ProductGetPayload<{ select: typeof productSelect }>;
 
@@ -217,7 +232,7 @@ export class CountService {
       include: { location: { select: { name: true } }, _count: { select: { lines: true } } },
       orderBy: { startedAt: "desc" }, take: 50,
     });
-    return rows.map((c) => ({ id: c.id, docNumber: c.docNumber, kind: c.kind, status: c.status, location: c.location.name, locationId: c.locationId, lines: c._count.lines, startedAt: c.startedAt, kulangValueMinor: c.kulangValueMinor, sobraValueMinor: c.sobraValueMinor, approvalId: c.approvalId, mine: c.startedById === actor.userId }));
+    return rows.map((c) => ({ id: c.id, docNumber: c.docNumber, kind: c.kind, closing: c.note === CLOSE_STORE_NOTE, status: c.status, location: c.location.name, locationId: c.locationId, lines: c._count.lines, startedAt: c.startedAt, kulangValueMinor: c.kulangValueMinor, sobraValueMinor: c.sobraValueMinor, approvalId: c.approvalId, mine: c.startedById === actor.userId }));
   }
 
   /** One count. Staff never see the system's numbers on a blind count that is still open. */
@@ -235,7 +250,7 @@ export class CountService {
       ok: true as const,
       value: {
         id: c.id, docNumber: c.docNumber, kind: c.kind, status: c.status, location: c.location.name, locationId: c.locationId, startedAt: c.startedAt,
-        kulangValueMinor: c.kulangValueMinor, sobraValueMinor: c.sobraValueMinor, blindHidden: hide, mine: c.startedById === actor.userId,
+        kulangValueMinor: c.kulangValueMinor, sobraValueMinor: c.sobraValueMinor, blindHidden: hide, mine: c.startedById === actor.userId, closing: c.note === CLOSE_STORE_NOTE,
         lines: c.lines.map((l) => ({
           productId: l.productId, name: l.product.name, loose: isLooseP(l.product), variety: varietyOf(l.product), unitGrams: gramsIn(l.product, 1), countedQty: l.countedQty, countedAt: l.countedAt,
           reason: l.reason, reasonLabel: l.reason ? REASON_LABEL[l.reason as CountReason] ?? null : null, note: l.note, firstCountedQty: l.firstCountedQty,
@@ -467,9 +482,9 @@ export class CountService {
         }
       }
 
-      // "Missing = sold to walk-ins" (owner/manager): what can still be recorded, and the sales already made from this count.
+      // "Missing = sold to walk-ins" (anyone who may open this count: staff only at their own store): what can still be recorded, and the sales already made from this count.
       let walkIn: { open: WalkInLine[]; openMinor: number; drawerOpen: boolean; sales: { orderId: string; orderNumber: string; totalMinor: number; lines: number; inDrawer: boolean }[] } | null = null;
-      if (owner && c.status === "APPROVED") {
+      if (c.status === "APPROVED") {
         const open = await walkInLines(prisma, storeId, c.id);
         const orderIds = [...new Set(c.lines.map((l) => l.walkInOrderId).filter((x): x is string => !!x))];
         const orders = orderIds.length ? await prisma.order.findMany({ where: { storeId, id: { in: orderIds } }, select: { id: true, orderNumber: true, totalMinor: true, registerSessionId: true, _count: { select: { items: true } } }, orderBy: { createdAt: "asc" } }) : [];
@@ -488,7 +503,7 @@ export class CountService {
         return { variety: a.variety ?? "", sacks: a.sacksOpened ?? 0, kg: (a.grams ?? 0) / 1000, unexplainedKg: (a.unexplainedGrams ?? 0) / 1000, automatic: a.automatic === true };
       });
       return {
-        count: { id: c.id, docNumber: c.docNumber, kind: c.kind, status: c.status, location: c.location.name, locationId: c.locationId, startedAt: c.startedAt, postedAt: c.decidedAt ?? c.submittedAt, countedBy: Array.from(new Set(counted.map((x) => names.get(x.countedById ?? "")).filter(Boolean))).join(", ") || names.get(c.startedById) || null },
+        count: { id: c.id, docNumber: c.docNumber, kind: c.kind, closing: c.note === CLOSE_STORE_NOTE, status: c.status, location: c.location.name, locationId: c.locationId, startedAt: c.startedAt, postedAt: c.decidedAt ?? c.submittedAt, countedBy: Array.from(new Set(counted.map((x) => names.get(x.countedById ?? "")).filter(Boolean))).join(", ") || names.get(c.startedById) || null },
         summary: {
           counted: counted.length, correct: correct.length, short: differing.filter((x) => x.leftoverQty < 0).length, over: differing.filter((x) => x.leftoverQty > 0).length,
           explained: differing.filter((x) => x.leftoverQty === 0).length, kulangValueMinor: c.kulangValueMinor, sobraValueMinor: c.sobraValueMinor,
@@ -801,6 +816,86 @@ export class CountService {
       }, txOptions());
       await cacheBust(cacheKey("products", storeId));
       return out;
+    });
+  }
+
+  /**
+   * The cash check at closing (nothing moves; it is recorded for the owner): the cash from the sales
+   * rung up at the count's store on the count's day, plus the walk-in sale made from this count,
+   * against the cash the person counted. Credit payments and the change money are not in it.
+   */
+  async cashCheck(storeId: string, actor: Actor, id: string): Promise<CountResult<CashCheck>> {
+    return this.run(() => this.cashFigures(storeId, actor, id));
+  }
+
+  async saveCashCheck(storeId: string, actor: Actor, id: string, input: { countedMinor?: unknown; note?: unknown }): Promise<CountResult<CashCheck>> {
+    return this.run(async () => {
+      const counted = input.countedMinor;
+      if (typeof counted !== "number" || !Number.isInteger(counted) || counted < 0 || counted > MAX_CASH_MINOR) throw new CountError("Type the cash you counted");
+      const figures = await this.cashFigures(storeId, actor, id);
+      const note = cleanNote(input.note);
+      const after = { countedMinor: counted, expectedMinor: figures.expectedMinor, diffMinor: counted - figures.expectedMinor, note };
+      await prisma.auditLog.create({ data: { storeId, actorType: "USER", actorId: actor.userId, action: "count.cash_check", entityType: "StockCount", entityId: id, after } });
+      return { ...figures, saved: { ...after, at: new Date() } };
+    });
+  }
+
+  private async cashFigures(storeId: string, actor: Actor, id: string): Promise<CashCheck> {
+    const c = await prisma.stockCount.findFirst({ where: { id, storeId }, select: { id: true, docNumber: true, status: true, locationId: true, startedAt: true, submittedAt: true, decidedAt: true, location: { select: { name: true } }, lines: { select: { walkInOrderId: true } } } });
+    if (!c) throw new StepError(notFound());
+    const refusal = locationRefusal(actor, c.locationId);
+    if (refusal) throw new StepError(forbidden(refusal));
+    if (c.status !== "APPROVED") throw new StepError(conflict("Finish the count first"));
+    const day = manilaDate(c.decidedAt ?? c.submittedAt ?? c.startedAt);
+    const { from, to } = dayRange(day);
+    const walkInIds = [...new Set(c.lines.map((l) => l.walkInOrderId).filter((x): x is string => !!x))];
+    const cash = { storeId, method: "cash", type: { not: "void" } } as const;
+    const [sales, walkIns, savedRow] = await Promise.all([
+      prisma.payment.findMany({
+        where: { ...cash, receivedAt: { gte: from, lt: to }, order: { sellingLocationId: c.locationId, status: { not: "CANCELLED" } }, ...(walkInIds.length ? { orderId: { notIn: walkInIds } } : {}) },
+        select: { amountMinor: true, orderId: true },
+      }),
+      walkInIds.length ? prisma.payment.findMany({ where: { ...cash, orderId: { in: walkInIds } }, select: { amountMinor: true } }) : Promise.resolve([]),
+      prisma.auditLog.findFirst({ where: { storeId, action: "count.cash_check", entityType: "StockCount", entityId: c.id }, orderBy: { createdAt: "desc" }, select: { after: true, createdAt: true } }),
+    ]);
+    const salesMinor = sales.reduce((s, p) => s + p.amountMinor, 0);
+    const walkInMinor = walkIns.reduce((s, p) => s + p.amountMinor, 0);
+    const a = (savedRow?.after ?? null) as { countedMinor?: number; expectedMinor?: number; diffMinor?: number; note?: string | null } | null;
+    return {
+      countId: c.id, docNumber: c.docNumber, location: c.location.name, day,
+      salesMinor, salesCount: new Set(sales.filter((p) => p.amountMinor > 0).map((p) => p.orderId)).size, walkInMinor, expectedMinor: salesMinor + walkInMinor,
+      saved: a && typeof a.countedMinor === "number" ? { countedMinor: a.countedMinor, expectedMinor: a.expectedMinor ?? 0, diffMinor: a.diffMinor ?? 0, note: a.note ?? null, at: savedRow!.createdAt } : null,
+    };
+  }
+
+  /**
+   * For the reminder on Home: each selling store this person may count, when everything there was
+   * last counted (a posted "everything" count), and an unfinished "Close the store" count, if any.
+   */
+  async closingStatus(storeId: string, actor: Actor) {
+    return this.run(async () => {
+      const mineOnly = !OWNERS.includes(actor.role);
+      if (mineOnly && !actor.homeLocationId) return { today: manilaDate(new Date()), stores: [] };
+      const locs = await prisma.warehouse.findMany({
+        where: { storeId, isActive: true, type: "STORE", ...(mineOnly ? { id: actor.homeLocationId! } : {}) },
+        select: { id: true, name: true, code: true }, orderBy: [{ isDefault: "desc" }, { name: "asc" }],
+      });
+      const ids = locs.map((l) => l.id);
+      const [last, open] = await Promise.all([
+        prisma.stockCount.groupBy({ by: ["locationId"], where: { storeId, locationId: { in: ids }, kind: "FULL", status: "APPROVED" }, _max: { decidedAt: true } }),
+        prisma.stockCount.findMany({ where: { storeId, locationId: { in: ids }, status: "OPEN", note: CLOSE_STORE_NOTE }, select: { id: true, locationId: true, startedById: true }, orderBy: { startedAt: "desc" } }),
+      ]);
+      const lastBy = new Map(last.map((g) => [g.locationId, g._max.decidedAt]));
+      const today = manilaDate(new Date());
+      const daysBetween = (a: string, b: string) => Math.round((new Date(`${b}T00:00:00Z`).getTime() - new Date(`${a}T00:00:00Z`).getTime()) / 86_400_000);
+      return {
+        today,
+        stores: locs.map((l) => {
+          const at = lastBy.get(l.id) ?? null;
+          const o = open.find((x) => x.locationId === l.id);
+          return { locationId: l.id, name: l.name, code: l.code, lastFullAt: at, daysSince: at ? daysBetween(manilaDate(at), today) : null, openCountId: o?.id ?? null, openIsMine: !!o && o.startedById === actor.userId };
+        }),
+      };
     });
   }
 

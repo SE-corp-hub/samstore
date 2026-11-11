@@ -181,7 +181,7 @@ export default function StoreReportPanel({ role, onNavigate }: { role?: string; 
   return (
     <div className="container-fluid py-3" style={{ maxWidth: 900 }}>
       <h5 className="mb-2">Store report</h5>
-      <ul className="nav nav-tabs mb-3 flex-nowrap overflow-auto">
+      <ul className="nav nav-tabs mb-3">
         {tabs.map(([k, label]) => <li key={k} className="nav-item"><button className={`nav-link text-nowrap ${tab === k ? "active" : ""}`} onClick={() => setTab(k)}>{label}</button></li>)}
       </ul>
       {single && <StoreBar label="Store" locations={places} value={locationId} homeLocationId={home} onPick={setLocationId} />}
@@ -191,7 +191,7 @@ export default function StoreReportPanel({ role, onNavigate }: { role?: string; 
             {([["all", "Everything"], ["sales", "Sales"], ["stock", "Stock"], ["money", "Money in"]] as const).map(([k, label]) => (
               <button key={k} type="button" className={`btn ${kind === k ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setKind(k)}>{label}</button>
             ))}
-            {owner && <button type="button" className={`btn ${allStores ? "btn-primary" : "btn-outline-primary"}`} onClick={() => setAllStores(!allStores)}>{allStores ? "All stores" : "One store"}</button>}
+            {owner && <button type="button" className={`btn ${allStores ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setAllStores(!allStores)}>{allStores ? "All stores" : "One store"}</button>}
           </div>
           <select className="form-select" aria-label="Item" value={productId} onChange={(e) => setProductId(e.target.value)}>
             <option value="">All items</option>

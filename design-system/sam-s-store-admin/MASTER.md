@@ -30,11 +30,24 @@
 
 **Color rules:** text on cream/cards must hold 4.5:1 contrast (the text/muted values above do); never gray-on-gray; status colors carry a text label or icon, never color alone.
 
+**Easy-to-read pass (2026-10-31, `apps/web/src/app/easy-read.css`):** the owner is 65, so the admin console now aims at the comfortable 7:1 level for helper text (`--sam-muted` is `#5A4D42`, 7.6:1 on cream) and gives every colour ONE meaning on every screen:
+
+| Colour | Means | Used for |
+|--------|-------|----------|
+| Green `#1F6F3F` | go, done, paid, money in | `.btn-primary` and `.btn-success` (the main button of a screen), success badges/alerts, switches that are on |
+| Red `#A3201B` | stop, problem, owed, remove | `.btn-danger`, danger badges/alerts |
+| Amber `#8A5A00` (text `#6F4800` on `#FFF3D6`) | careful, waiting, check | warning badges/alerts, `.btn-warning` |
+| Blue `#0B4F8A` | information, print, view | links, `.btn-outline-primary`, `.btn-info`, info/primary badges |
+| Dark ink `#33261D` / `#4A4844` | neutral choice | `.btn-outline-dark`, `.btn-secondary`, secondary badges, toggles (`btn-dark` / `btn-outline-dark`) |
+| Terracotta `#C0421F` | you are here (brand) | active menu item, focus ring, role badge, headings — never a button fill |
+
+Screens are grouped by what they are for (`NAV_GROUPS` in `lib/admin.ts`: Sell green, Money amber, Stock blue, Reports purple `#563A98`, People & settings dark ink) and the group colour is repeated on Home tiles, the Menu, the bottom bar and the top-bar chip (`.tone-*` classes).
+
 ### Typography
 
 - **Body/UI:** system-ui stack (system-ui, -apple-system, "Segoe UI", Roboto) — already in use; no webfont dependency (admin works offline; the storefront stays consistent).
 - Numbers in tables, KPIs and reports: `font-variant-numeric: tabular-nums` (`.register-report` already does this; apply to `.admin-shell .table` and KPI values).
-- Base 16px; line-height 1.5; body text never below 12px; small text ≥ 12px.
+- Base **18px** on every `/admin` page (Text size setting: Normal 16 / Large 18 (default) / Extra large 20, saved per tablet as `data-text-size` on `<html>`, see `lib/text-size.ts`); line-height 1.5; small print (`small`, `.form-text`, badges) never below **16px**; table headings 1rem bold sentence case in `--sam-text`; form labels 1rem bold. Use rem, never px, for anything that should grow with the setting. Store screens (`.rice-ui`) never drop below their 18px.
 
 ### Spacing & Density
 
@@ -53,8 +66,9 @@ Dense dashboard density: cards pad `1rem 1.25rem`; table cells `0.5rem 0.75rem`;
 ## Component Specs
 
 ### Buttons
-- Primary: terracotta (`--sam-primary`), white text, hover darkens (`--sam-primary-dark`), radius `.5rem`, `cursor: pointer`.
-- Secondary/outline: warm-neutral borders (`--sam-border`-family), text `--sam-text`.
+- Primary (the ONE main action of a screen): green `#1F6F3F`, white text, hover `#185A33`, radius `.5rem`, `cursor: pointer`, bold label. (Was terracotta until 2026-10-31; terracotta now only marks "you are here".)
+- Secondary: blue outline (`.btn-outline-primary`, information actions such as Print, View, Edit) or dark outline (`.btn-outline-dark` / `.btn-outline-secondary` for Back, Close, Cancel). Toggle groups use `btn-dark` / `btn-outline-dark`, never two colours.
+- Touch (`(pointer: coarse)` or < 768px): every button, field, tab and list row ≥ 48px tall, labels 1rem.
 - One transition speed for all interactive states: `150ms ease-out` (background-color, border-color, color, box-shadow). No instant state changes.
 - Icon buttons: keep a `title` and an aria-label where the icon carries the meaning alone.
 
@@ -64,7 +78,7 @@ Dense dashboard density: cards pad `1rem 1.25rem`; table cells `0.5rem 0.75rem`;
 - KPI cards: label small muted, value bold `tabular-nums`.
 
 ### Tables (admin console)
-- `thead` th: small, uppercase, `letter-spacing .04em`, muted, background warm neutral.
+- `thead` th: 1rem, bold, sentence case, `--sam-text`, background warm neutral (the 12px uppercase muted heading was retired on 2026-10-31: capitals in small grey type are the slowest text to read).
 - Row borders `var(--sam-border)`; hover row background warm tint.
 - Never rely on color alone for status (badge + text).
 
@@ -76,6 +90,14 @@ Dense dashboard density: cards pad `1rem 1.25rem`; table cells `0.5rem 0.75rem`;
 ### Modals
 - Radius `var(--sam-radius)`, border `var(--sam-border)`, header bottom-border warm neutral.
 - Backdrop `rgba(43,33,24,.5)`.
+
+### Selling screens (POS Walk-in, Full sale, Pre-order) — `easy-read.css` §8
+- Product buttons are one component, `components/admin/PickTile.tsx` (`.pick-tile`): white, 2px dark border, name 1rem, price 1.5rem bold `tabular-nums`, stock line ≥ 16px. **In the sale = green**: `#E4F3EA` face, `#1F6F3F` border and a `✓ 2 in sale` pill (never a black tile). Out of stock = amber `.pick-stock.out` badge ("None left here"): careful, not stop — the counter may still sell.
+- The sale / order lives in a `.sale-card` (2px green frame) with a `.sale-card-title` ("This sale · 3 items"), lines in `.sale-line` (name · − qty + · amount, wrapping to two rows in narrow columns), and a `.sale-total` row whose amount (2rem, 800) is the largest number on the screen. "Customer pays" uses `.big-amount` (2.25rem); change due uses `.change-due` (1.75rem, green; "Short …" red).
+- − / + are `.qty-btn` (3rem square, 1.5rem sign) around a `.qty-num`.
+- Button meanings on these screens: green = the one next step (Cash exact, Pay, Finish sale, Complete sale, Save pre-order, Open the cash drawer); blue outline = second choices (Print, Receipt, Change price, Take from another store, New item, Text customer); dark outline = Back, Cancel, Keep it, Close and toggles (Cash / GCash / Credit, Waiting / Done); red = Delete, Clear this sale. Each pay method carries an icon.
+- Sizes are rem inside `.sell-screen` (`max(18px, 1rem)`), so the Text size setting applies; never `style={{ fontSize: 18 }}` or px prices on a selling screen.
+- **They fit the tablet with no page scroll (easy-read.css §9, 2026-11-01).** The screen wrapper is `.sell-screen.sell-fit` and `lib/use-fit-height.ts` sets its height to exactly the space between the top bar and the bottom bar (measured, so any text size and either orientation work; off on a phone, `FIT` = `(min-width: 600px)`). Inside it only two things scroll, each in its own box: the product list (`.fit-scroll`, rendered by `ProductFinder` with `fit`) and the lines of a long sale (`.sale-lines` inside a `.fit-card`). Everything else stays put: the Walk-in / Full sale switch (one line each on a tablet), the store chips (`StoreBar inline size="md"`), the search bar (`.finder-bar`: search box + variety buttons, and the "2 Tap items" heading on Pre-order), the total and the green button. Sideways = `.fit-row` with `.fit-main` (products) and `.fit-side` (the sale, 40 %, from the very top); upright = one `.fit-col` with the sale card last (`.fit-bottom`, at most 60 % of the fitted height, never a window unit, so the keyboard cannot squeeze it). The pay step and the Complete sale pop-up (`.modal-fit`) are two columns on a tablet: what and how on the left; the number pad, the signature, the new-customer form or the parts of a split on the right. The number pad keys are exactly 64 px, 48 px when the screen is under 760 px tall (sideways); for loose rice the Kilos / Pesos switch shares the amount row (`NumPad lead`). In the "How many?" card the new price and the Why drop-down share one row (`PriceReason short`), so the card with Change price open still fits sideways for a kilo item. Drop-downs and typing boxes on these screens are at least 44 px tall. The on-screen keyboard: `use-fit-height` keeps the fitted height while a box or drop-down has focus and the window only gets shorter, so the screen never re-fits and jumps mid-typing. Four product buttons to a row (`col-6 col-md-3`), 6 rem tall. Check with `/tmp`-style Playwright runs at 1280×720, 800×1200 and 800×1100 (and with the window shrunk while a box has focus): page overflow 0 and every key control fully visible, not clipped by a scrolling box, above the bottom bar.
 
 ### Sidebar (admin shell)
 - Background `var(--sam-sidebar)`, light cream text, muted group labels (uppercase, letter-spacing).

@@ -4,7 +4,11 @@
 // Naming: camelCase fields (Prisma), no @map; revisit with a dedicated mapping pass.
 
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  // One SQL query per read, nested relations included (LATERAL joins), instead of one
+  // query per relation level. Each query is a round trip to the database, and the beta's
+  // API and database sit in different regions (~0.18 s each), see PERF.md.
+  previewFeatures = ["relationJoins"]
 }
 
 datasource db {
@@ -309,6 +313,9 @@ model StoreSettings {
   orderNumberPrefix         String?
   // P10a: 0 = disabled; otherwise old Messenger conversation/message data is purgeable.
   privacyRetentionDays      Int            @default(0)
+  // PIN lock (2026-11-07): screens that ask for the owner's lock PIN, per sign-in kind. NULL = no lock.
+  // { salt, hash, iterations, owner: string[], staff: string[], updatedAt }; checked on the tablet so it works offline.
+  featureLock               Json?
   createdAt                 DateTime       @default(now())
   updatedAt                 DateTime       @updatedAt
 }
@@ -380,6 +387,9 @@ model Product {
   // P3d: merchandising — featured flag + free-form display tags (store-scoped via the row).
   featured              Boolean   @default(false)
   tags                  String[]  @default([])
+  // The product's picture on POS / Pre-order / Products (ProductPhoto.id). A new picture gets a new key,
+  // so its address never changes content and the tablet may keep it for good (works offline).
+  photoKey              String?
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
 
@@ -417,6 +427,19 @@ model ProductImage {
   product   Product @relation(fields: [storeId, productId], references: [storeId, id]) // M3: tenant-consistent
   url       String
   sortOrder Int     @default(0)
+}
+
+// The product's own picture, kept small (the tablet shrinks it before upload). Separate from Product so
+// product lists never read the bytes; served at GET /public/product-photo/:id (the id is random).
+model ProductPhoto {
+  id        String   @id
+  storeId   String
+  productId String
+  mime      String
+  data      Bytes
+  createdAt DateTime @default(now())
+
+  @@index([storeId, productId])
 }
 
 // ─────────────────────────────── Variants (P2a) ───────────────────────────────
@@ -1345,7 +1368,11 @@ model Order {
   /// Guarded claim marker for the reservation lifecycle (single source of truth
   /// for "this order's reservation was already settled") — see OrderStockDisposition.
   stockDisposition     OrderStockDisposition?
-  source               String               @default("online") // online | pos
+  source               String               @default("online") // online | pos | hub
+  // Hub door: where an order from SE Corp Hub was taken (all null for the shop link and the counter).
+  sourceChannel        String? // messenger | order_form | comment | live | agent
+  sourcePage           String? // the selling page's name, e.g. "Samrice"
+  externalRef          String? // the hub's own order reference, e.g. "#1001"
   deliveryType         String               @default("delivery") // delivery | pickup (UI U5)
   fulfillmentType      OrderFulfillmentType @default(DELIVERY) // M3: explicit; backfilled from address
   currencyCode         String
@@ -1428,6 +1455,8 @@ model Order {
   @@index([storeId, sellingLocationId, createdAt])
   @@index([storeId, agentUserId, createdAt])
   @@index([storeId, source, status])
+  @@index([storeId, createdAt]) // date ranges over every status (Orders list, reports)
+  @@index([storeId, storeCustomerId, createdAt]) // one customer's sales (Credit, customer history)
 }
 
 model OrderItem {
@@ -1460,6 +1489,11 @@ model OrderItem {
   enteredAmountMinor Int? // by peso: what the customer asked for (= the line total)
   sourceLocationId   String? // served from another location (Kunin sa ibang tindahan)
   unitCostMinor      Int? // Rice Ops M9: cost frozen with the sale (per piece, or per kilo for loose rice)
+
+  // A sale's lines were found by reading every line of the store (no index at all), on each
+  // receipt, order, pre-order and the counter's most-sold count: slower with every sale.
+  @@index([storeId, orderId])
+  @@index([storeId, productId])
 }
 
 model OrderStatusHistory {

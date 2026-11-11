@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { wakeFetch } from "./wake-fetch";
+import { notFromApi, WAKE_EVERY_MS, wakeApi, wakeFetch } from "./wake-fetch";
 
 // A number is an answer from the API (it carries X-Request-Id); "proxy500" is the web
 // proxy giving up on a sleeping API (plain text, no X-Request-Id).
@@ -45,4 +45,19 @@ test("gives up after the last try", async () => {
   assert.equal(res.status, 502);
   answers(["down"]);
   await assert.rejects(wakeFetch("/x", undefined, () => {}, { ...noWait, tries: 2 }));
+});
+
+test("Render's 429 for a sleeping API (no X-Request-Id) is waking; the API's own 429 is a real answer", () => {
+  assert.equal(notFromApi(new Response("Too Many Requests", { status: 429, headers: { "x-render-routing": "hibernate-rate-limited" } })), true);
+  assert.equal(notFromApi(new Response("{}", { status: 429, headers: { "X-Request-Id": "r1" } })), false);
+});
+
+test("wakes the API at its own address, at most every 20 s, and never without one", () => {
+  const urls: string[] = [];
+  globalThis.fetch = (async (u: string, init?: RequestInit) => { urls.push(`${String(u).split("?")[0]} ${init?.mode}`); return new Response(null); }) as typeof fetch;
+  wakeApi(1_000_000, "");
+  wakeApi(1_000_000, "https://api.example");
+  wakeApi(1_000_000 + WAKE_EVERY_MS - 1, "https://api.example");
+  wakeApi(1_000_000 + WAKE_EVERY_MS, "https://api.example");
+  assert.deepEqual(urls, ["https://api.example/health no-cors", "https://api.example/health no-cors"]);
 });

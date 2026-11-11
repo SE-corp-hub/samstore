@@ -10,7 +10,7 @@ import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { prisma, PrismaOrderRepository } from "../persistence/prisma-repositories.js";
 import { randomId } from "../persistence/repositories.js";
-import { settleOrderReservations, dispositionForOrderStatus } from "./stock-settlement.js";
+import { settleOrderReservations, dispositionForOrderStatus, reservationLegsForOrder } from "./stock-settlement.js";
 import { OrderAdminService } from "../admin/order-admin.service.js";
 import { DeliveryService } from "../delivery/delivery.service.js";
 import { PaymentsService } from "../payments/payments.service.js";
@@ -302,16 +302,21 @@ test("voiding an online order releases the reservation instead of inflating on-h
   assert.deepEqual(await counters(level.id), { onHand: 5, reserved: 0 }, "a void must not create phantom stock");
 });
 
-test("an online item edit is refused while the reservation is active; POS holds stay editable", async () => {
+test("an online item edit moves the order's hold to the new lines; POS holds stay editable", async () => {
   const store = await makeStore();
   const { product, level } = await makeProduct(store.id, 9);
   const order = await reservedOnlineOrder({ storeId: store.id, productId: product.id, quantity: 2 });
 
   const admin = new OrderAdminService();
-  const refused = await admin.replaceOrderItems(store.id, order.id, [{ productId: product.id, quantity: 3 }]);
-  assert.equal(refused.ok, false);
-  if (!refused.ok) assert.equal(refused.error.type, "conflict");
+  const tooMany = await admin.replaceOrderItems(store.id, order.id, [{ productId: product.id, quantity: 12 }]);
+  assert.equal(tooMany.ok, false, "more than the shelf has is refused");
   assert.deepEqual(await counters(level.id), { onHand: 9, reserved: 2 }, "the refused edit changed nothing");
+
+  const moved = await admin.replaceOrderItems(store.id, order.id, [{ productId: product.id, quantity: 3 }]);
+  assert.equal(moved.ok, true);
+  assert.deepEqual(await counters(level.id), { onHand: 9, reserved: 3 }, "the units stay on the shelf; the order now holds 3");
+  const legs = await prisma.$transaction((tx) => reservationLegsForOrder(tx, store.id, order.id));
+  assert.equal(legs.reduce((s, l) => s + l.quantity, 0), 3, "what the order holds nets to the edited quantity");
 
   // A POS hold consumes on-hand at hold time and carries no reservation — the
   // existing net-delta edit path still works for it.
@@ -338,7 +343,11 @@ test("an online item edit is refused while the reservation is active; POS holds 
   assert.equal(edited.ok, true, "POS hold editing is unchanged");
   // The hold already consumed 2 units at hold time (7 on hand); editing to 3 nets
   // −1. The online order's reservation on the same level is untouched.
-  assert.deepEqual(await counters(level.id), { onHand: 6, reserved: 2 });
+  assert.deepEqual(await counters(level.id), { onHand: 6, reserved: 3 });
+
+  // Cancelling the edited online order gives back exactly what it holds now.
+  await prisma.$transaction(async (tx) => settleOrderReservations(tx, { id: order.id, storeId: store.id }, "RELEASED"));
+  assert.deepEqual(await counters(level.id), { onHand: 6, reserved: 0 });
 });
 
 test("the stock ledger still reconciles to the balance after a settlement", async () => {
