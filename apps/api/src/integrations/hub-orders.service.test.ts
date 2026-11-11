@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { CheckoutService } from "../checkout/checkout.service.js";
-import { HubOrderService, hubSecretOk, type HubOrderRequest } from "./hub-orders.service.js";
+import { HubOrderService, hubSecretOk, syncWithHub, type HubOrderRequest } from "./hub-orders.service.js";
 import {
   InMemoryStoreRepository,
   InMemoryCatalogRepository,
@@ -160,4 +160,49 @@ test("the product list for the hub: this store's items only, with what can still
     ].sort(),
   );
   assert.equal(await svc.products("no-such-store"), null);
+});
+
+test("each beat fetches the hub's waiting orders, places them, and reports each result with the store's items", async () => {
+  const { svc, orders } = build();
+  const calls: { url: string; method: string; secret: string | null; body?: unknown }[] = [];
+  const hub = (async (url: string, init: RequestInit = {}) => {
+    calls.push({
+      url,
+      method: init.method ?? "GET",
+      secret: new Headers(init.headers).get("x-hub-secret"),
+      body: init.body ? JSON.parse(String(init.body)) : undefined,
+    });
+    return init.method === "POST"
+      ? Response.json({ ok: true })
+      : Response.json({
+          stores: ["sam-store"],
+          orders: [req(), req({ idempotencyKey: "hub-order-1002", items: [{ name: "Unknown Rice", quantity: 1 }] }), { idempotencyKey: "hub-order-1003" }],
+        });
+  }) as unknown as typeof fetch;
+  await syncWithHub(svc, "https://hub.example/", "h".repeat(40), hub);
+  await syncWithHub(svc, "https://hub.example/", "h".repeat(40), hub);
+  assert.deepEqual(calls.map((c) => `${c.method} ${c.url} ${c.secret === "h".repeat(40)}`), [
+    "GET https://hub.example/api/samstore true",
+    "POST https://hub.example/api/samstore true",
+    "GET https://hub.example/api/samstore true",
+    "POST https://hub.example/api/samstore true",
+  ]);
+  assert.equal(orders.exportedForTests().orders.length, 1, "the same order fetched twice is placed once");
+  const sent = calls[3]!.body as { results: { key: string; orderNumber?: string; totalMinor?: number; error?: string }[]; products: { store: string; products: { name: string }[] }[] };
+  const [placed, refused, malformed] = sent.results;
+  assert.equal(placed?.key, "hub-order-1001");
+  assert.match(placed?.orderNumber ?? "", /-\d{6}$/);
+  assert.equal(placed?.totalMinor, 2 * 150000 + 5000);
+  assert.equal(refused?.key, "hub-order-1002");
+  assert.match(refused?.error ?? "", /Unknown Rice/);
+  assert.equal(malformed?.key, "hub-order-1003");
+  assert.ok(malformed?.error, "a malformed order is refused with a reason, not a crash");
+  assert.deepEqual(sent.products[0]?.products.map((p) => p.name), ["Samrice Dinorado 25kg", "Samrice Jasmine 25kg"]);
+});
+
+test("a hub that refuses the secret stops the beat before anything is placed", async () => {
+  const { svc, orders } = build();
+  const refuse = (async () => Response.json({ message: "Wrong hub secret" }, { status: 401 })) as unknown as typeof fetch;
+  await assert.rejects(syncWithHub(svc, "https://hub.example", "h".repeat(40), refuse), /401/);
+  assert.equal(orders.exportedForTests().orders.length, 0);
 });
