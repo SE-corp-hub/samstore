@@ -433,6 +433,8 @@ export class AdminController {
                         deliveryType: true, deliveryAddressLine1: true, fulfillmentType: true,
                         // SE Corp Hub orders: the channel, the selling page and the hub's own number (row label).
                         sourceChannel: true, sourcePage: true, externalRef: true, updatedAt: true,
+                        // What to pack, on the row: name and how many (no money, so it stays small).
+                        items: { select: { productName: true, quantity: true } },
                                                 // signatureData (a picture, often 10+ KB) only comes with one order (GET orders/:id):
                                                 // up to 200 of them made every list load slow and filled the tablet's saved copies.
                                                 paymentMethod: true, signatureAt: true,

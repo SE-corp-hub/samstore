@@ -230,3 +230,18 @@ test("each beat also sends how the store's hub orders stand now, so an edit here
   assert.equal(asked[0]?.storeId, "store-1");
   assert.ok(Date.now() - asked[0]!.since.getTime() >= 3 * 86_400_000 - 1000, "the last 3 days of changes");
 });
+
+test("a quick beat with nothing waiting only asks; with an order waiting it answers in full", async () => {
+  const { svc } = build();
+  const calls: string[] = [];
+  let waiting: unknown[] = [];
+  const hub = (async (_url: string, init: RequestInit = {}) => {
+    calls.push(init.method ?? "GET");
+    return Response.json(init.method === "POST" ? { ok: true } : { stores: ["sam-store"], orders: waiting });
+  }) as unknown as typeof fetch;
+  await syncWithHub(svc, "https://hub.example", "h".repeat(40), hub, { full: false });
+  assert.deepEqual(calls, ["GET"], "nothing waiting: the hub's copy is left alone");
+  waiting = [{ storeSlug: "sam-store", idempotencyKey: "quick-1", channel: "messenger", pageName: "Samrice", customerName: "Ana Cruz", customerPhone: "09171234567", deliveryType: "pickup", items: [{ name: "Samrice Dinorado 25kg", quantity: 1 }] }];
+  await syncWithHub(svc, "https://hub.example", "h".repeat(40), hub, { full: false });
+  assert.deepEqual(calls, ["GET", "GET", "POST"], "an order came: place it and answer at once");
+});

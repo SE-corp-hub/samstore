@@ -161,12 +161,21 @@ export class HubOrderService {
  * the same order back, so a lost answer is safe), says what became of each, and sends the linked stores' items and
  * how their hub orders stand now (step, items, total), so an order changed here shows changed in the hub too.
  */
-export async function syncWithHub(hub: HubOrderService, hubUrl: string, secret: string, send = fetch): Promise<void> {
+export async function syncWithHub(
+  hub: HubOrderService,
+  hubUrl: string,
+  secret: string,
+  send = fetch,
+  /** full: false = a quick beat — only ask for waiting orders, and answer the hub only when some came. */
+  opts: { full?: boolean } = {},
+): Promise<void> {
   const door = `${hubUrl.replace(/\/+$/, "")}/api/samstore`;
   const headers = { "x-hub-secret": secret, "content-type": "application/json" };
   const res = await send(door, { headers, signal: AbortSignal.timeout(20_000) });
   if (!res.ok) throw new Error(`hub answered ${res.status}`);
   const got = (await res.json()) as { stores?: unknown; orders?: unknown };
+  // Quick beat with nothing waiting: no answer, so the hub's copy of items and orders is not rewritten every 15 s.
+  if (opts.full === false && !(Array.isArray(got.orders) && got.orders.length > 0)) return;
   const results: { key: string; orderNumber?: string; totalMinor?: number; error?: string }[] = [];
   for (const o of Array.isArray(got.orders) ? got.orders.slice(0, 50) : []) {
     const key = String((o as { idempotencyKey?: unknown })?.idempotencyKey ?? "").slice(0, 60);

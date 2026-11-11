@@ -10,6 +10,7 @@ import { API_URL } from "../../config";
 import { adminHeaders, type AdminOrder, getAdminRole, roleCan } from "../../lib/admin";
 import ReceiptModal from "./ReceiptModal";
 import OrderEditor from "./OrderEditor";
+import Steps from "./Steps";
 import { markOwnOrderChange, onOrderChanges, OPEN_ORDER_EVENT, OPEN_ORDER_KEY } from "../../lib/order-pulse";
 import SignaturePad from "./SignaturePad";
 import PaymentReview from "./PaymentReview";
@@ -41,9 +42,9 @@ const STATUS_LABEL: Record<string, string> = {
 
 const TABS: { id: string; label: string; status?: string[]; hint: string }[] = [
   { id: "today", label: "All", status: undefined, hint: "Every order for the day you picked. Tap an order to see its items and what to do next." },
-  { id: "pending", label: "To receive", status: ["RECEIVED"], hint: "New orders, oldest first. Receive them, or cancel with a reason." },
-  { id: "onprocess", label: "In progress", status: ["CONFIRMED", "PREPARING", "READY", "ON_HOLD"], hint: "Received or held orders. Send for delivery, mark ready for pickup, or take payment." },
-  { id: "fordelivery", label: "Out for delivery", status: ["OUT_FOR_DELIVERY"], hint: "With the courier. Mark delivered when the customer has it." },
+  { id: "pending", label: "To receive", status: ["RECEIVED"], hint: "New orders from every day, oldest first. Receive them, or cancel with a reason." },
+  { id: "onprocess", label: "In progress", status: ["CONFIRMED", "PREPARING", "READY", "ON_HOLD"], hint: "Received or held orders from every day, oldest first. Send for delivery, mark ready for pickup, or take payment." },
+  { id: "fordelivery", label: "Out for delivery", status: ["OUT_FOR_DELIVERY"], hint: "With the courier, from every day. Mark delivered when the customer has it." },
   { id: "delivered", label: "Delivered", status: ["DELIVERED"], hint: "Delivered and paid on delivery." },
   { id: "completed", label: "Completed", status: ["COMPLETED"], hint: "Paid and done. Reprint receipts here." },
   { id: "void", label: "Void", status: ["CANCELLED", "FAILED_DELIVERY"], hint: "Cancelled orders and failed deliveries. A failed delivery can be sent again." },
@@ -52,6 +53,13 @@ const TABS: { id: string; label: string; status?: string[]; hint: string }[] = [
 /** One thing a user can do with an order. "main" is the next step (one per order, shown on its row). */
 interface OrderAction { key: string; label: string; icon: string; tone: "main" | "plain" | "danger"; run: () => void }
 
+
+/** Statuses that still need someone. With "Today" picked, their tabs show them from EVERY day: an order that
+ *  came in last night must not drop out of sight at midnight. */
+const OPEN_STATUSES = ["RECEIVED", "CONFIRMED", "PREPARING", "READY", "ON_HOLD", "OUT_FOR_DELIVERY", "FAILED_DELIVERY"];
+const OPEN_TABS = ["pending", "onprocess", "fordelivery"];
+/** "2× Alsa 25kg · 1× Planters 25kg": what to pack, readable on the row without opening the order. */
+const itemsLine = (o: AdminOrder) => (o.items ?? []).map((i) => `${i.quantity}× ${i.productName}`).join(" · ");
 
 const HUB_CHANNEL: Record<string, string> = { messenger: "Messenger chat", order_form: "Order form", comment: "Comment", live: "Live", agent: "Agent", counter: "Counter" };
 const toPesos = (m: number) => peso(m);
@@ -88,11 +96,12 @@ export default function OrdersPanel() {
   const [confirmAction, setConfirmAction] = useState<{ orderId: string; kind: "void" | "refund" | "voidHold" } | null>(null);
   const [orderDetail, setOrderDetail] = useState<AdminOrder | null>(null);
   const [detailSignature, setDetailSignature] = useState<string | null>(null);
-  const [detailItems, setDetailItems] = useState<{ productName: string; quantity: number; lineTotalMinor: number }[] | null>(null);
+  const [detailItems, setDetailItems] = useState<{ productName: string; quantity: number; lineTotalMinor: number; unitPriceMinor?: number; priceOverridden?: boolean; priceOverrideReason?: string | null }[] | null>(null);
   const [detailReceived, setDetailReceived] = useState<{ signerName: string; imagePng: string; createdAt: string }[]>([]);
   const [detailHistory, setDetailHistory] = useState<{ fromStatus: string | null; toStatus: string; createdAt: string; reason?: string | null; actorType?: string }[] | null>(null);
   const [detailToken, setDetailToken] = useState<string | null>(null);
   const [counts, setCounts] = useState<Record<string, number>>({});
+  const [openCounts, setOpenCounts] = useState<Record<string, number> | null>(null);
   // On-process editing
   const [editing, setEditing] = useState<{ id: string; orderNumber: string; customerName: string } | null>(null);
   const [payHold, setPayHold] = useState<{ id: string; orderNumber: string; totalMinor: number; isDelivery: boolean } | null>(null);
@@ -151,14 +160,15 @@ export default function OrdersPanel() {
       const q = new URLSearchParams();
       const cur = TABS.find((t) => t.id === tab)!;
       if (cur.status) q.set("status", cur.status.join(","));
-      if (tab === "today" || range !== "custom") {
+      const anyDay = OPEN_TABS.includes(tab) && range === "today";
+      if (range === "custom") {
+        if (customFrom) q.set("from", new Date(customFrom).toISOString());
+        if (customTo) q.set("to", new Date(new Date(customTo).getTime() + 86_399_000).toISOString());
+      } else if (!anyDay) {
         const base = range === "today" ? new Date() : range === "yesterday" ? new Date(Date.now() - 86_400_000) : new Date(Date.now() + 86_400_000);
         const d = dayRange(base);
         q.set("from", d.from);
         q.set("to", d.to);
-      } else {
-        if (customFrom) q.set("from", new Date(customFrom).toISOString());
-        if (customTo) q.set("to", new Date(new Date(customTo).getTime() + 86_399_000).toISOString());
       }
       if (customer.trim()) q.set("customer", customer.trim());
       if (sourceFilter) q.set("source", sourceFilter);
@@ -169,17 +179,27 @@ export default function OrdersPanel() {
                         if (!data) throw new Error("Failed to load orders");
                         let list = data.orders ?? [];
                         // Oldest-first in Pending (FIFO: the longest-waiting order is the most urgent).
-                        if (tab === "pending") list = list.sort((a: AdminOrder, b: AdminOrder) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0));
+                        if (OPEN_TABS.includes(tab)) list = list.sort((a: AdminOrder, b: AdminOrder) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0));
                         setOrders(list);
                         setLastLoaded(new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }));
             // Per-tab counts (for badges) — same filters as the list, fire-and-forget, never blocks.
                         const cq = new URLSearchParams();
-                                                for (const [k, v] of [["from", q.get("from")], ["to", q.get("to")], ["customer", q.get("customer")], ["source", q.get("source")], ["payment", q.get("payment")], ["fulfillment", q.get("fulfillment")]] as const) {
-                                                  if (v) cq.set(k, v);
-                                                }
+                        const oq = new URLSearchParams(); // the same filters, every day: counts for the open tabs
+                        const day = range === "custom"
+                          ? { from: q.get("from"), to: q.get("to") }
+                          : dayRange(range === "today" ? new Date() : range === "yesterday" ? new Date(Date.now() - 86_400_000) : new Date(Date.now() + 86_400_000));
+                        for (const [k, v] of [["from", day.from], ["to", day.to], ["customer", q.get("customer")], ["source", q.get("source")], ["payment", q.get("payment")], ["fulfillment", q.get("fulfillment")]] as const) {
+                          if (v) cq.set(k, v);
+                          if (v && k !== "from" && k !== "to") oq.set(k, v);
+                        }
                         cachedGet<{ counts?: typeof counts }>(`/admin/orders/counts?${cq.toString()}`)
                           .then((d) => d?.counts && setCounts(d.counts))
                           .catch(() => {});
+                        if (range === "today") {
+                          cachedGet<{ counts?: typeof counts }>(`/admin/orders/counts?${oq.toString()}`)
+                            .then((d) => d?.counts && setOpenCounts(d.counts))
+                            .catch(() => {});
+                        } else setOpenCounts(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Load failed");
     } finally {
@@ -428,7 +448,8 @@ export default function OrdersPanel() {
       }
     };
 
-  const isDeliv = (o: AdminOrder) => (o.deliveryType ?? "delivery") === "delivery"; // legacy/online = delivery
+  // The explicit fulfilment type first (POS holds are PICKUP even though deliveryType defaults to "delivery").
+  const isDeliv = (o: AdminOrder) => (o.fulfillmentType ? o.fulfillmentType === "DELIVERY" : (o.deliveryType ?? "delivery") === "delivery");
   // Offline: orders open from the saved copy, but changing one needs the internet.
   const busy = (o: AdminOrder) => offline || transitioning === o.id;
   const openPay = (o: AdminOrder, method: "cash" | "credit") => {
@@ -479,6 +500,19 @@ export default function OrdersPanel() {
 
   const openEdit = (o: AdminOrder) => setEditing({ id: o.id, orderNumber: o.orderNumber, customerName: o.customerName });
 
+  /** The steps an order goes through, and which one it is on (null = no journey to show: cancelled). */
+  const stepsFor = (o: AdminOrder): { items: string[]; current: number } | null => {
+    const s = o.status;
+    if (s === "CANCELLED") return null;
+    if (s === "ON_HOLD") return { items: ["On hold", "Paid"], current: 0 };
+    if (isDeliv(o)) {
+      const at = s === "RECEIVED" ? 0 : ["CONFIRMED", "PREPARING", "READY"].includes(s) ? 1 : ["OUT_FOR_DELIVERY", "FAILED_DELIVERY"].includes(s) ? 2 : 4;
+      return { items: ["To receive", "Received", "Out for delivery", "Delivered"], current: at };
+    }
+    const at = s === "RECEIVED" ? 0 : ["CONFIRMED", "PREPARING"].includes(s) ? 1 : s === "READY" ? 2 : 4;
+    return { items: ["To receive", "Received", "Ready", "Picked up"], current: at };
+  };
+
   /** How long an active order has waited, in words. Over 1 h amber, over 3 h red. */
   const ageOf = (o: AdminOrder): { mins: number; label: string; tone: string } | null => {
     if (["COMPLETED", "DELIVERED", "CANCELLED", "FAILED_DELIVERY"].includes(o.status)) return null;
@@ -520,7 +554,7 @@ export default function OrdersPanel() {
         // Merge full detail into the row so the pane has address/notes/breakdown.
         setOrderDetail((cur) => (cur && cur.id === o.id ? { ...o, ...(d as AdminOrder) } : cur));
         setDetailSignature(typeof d?.signatureData === "string" ? (d.signatureData as string) : "");
-        setDetailItems(Array.isArray(d?.items) ? (d.items as { productName: string; quantity: number; lineTotalMinor: number }[]) : []);
+        setDetailItems(Array.isArray(d?.items) ? (d.items as { productName: string; quantity: number; lineTotalMinor: number; unitPriceMinor?: number; priceOverridden?: boolean; priceOverrideReason?: string | null }[]) : []);
         setDetailHistory(Array.isArray(d?.statusHistory) ? (d.statusHistory as { fromStatus: string | null; toStatus: string; createdAt: string; reason?: string | null; actorType?: string }[]) : []);
         const t = Array.isArray(d?.claimTokens) ? (d.claimTokens as { token: string; usedAt: string | null }[]).find((c) => !c.usedAt)?.token : null;
         setDetailToken(t ?? null);
@@ -537,7 +571,15 @@ export default function OrdersPanel() {
   }, [orders]);
 
   const curTab = TABS.find((t) => t.id === tab)!;
-  const countFor = (t: (typeof TABS)[number]) => (t.status ? t.status.reduce((s, st) => s + (counts[st] ?? 0), 0) : Object.values(counts).reduce((s, c) => s + c, 0));
+  const countFor = (t: (typeof TABS)[number]) => {
+    const from = openCounts && OPEN_TABS.includes(t.id) ? openCounts : counts;
+    return t.status ? t.status.reduce((s, st) => s + (from[st] ?? 0), 0) : Object.values(counts).reduce((s, c) => s + c, 0);
+  };
+  /** Open orders placed on earlier days (only when "Today" is picked): a nudge on the All list. */
+  const olderOf = (st: string) => Math.max(0, (openCounts?.[st] ?? 0) - (counts[st] ?? 0));
+  /** Where "Show" goes: the earliest step that has older orders waiting. */
+  const olderTab = olderOf("RECEIVED") > 0 ? "pending" : ["CONFIRMED", "PREPARING", "READY", "ON_HOLD"].some((st) => olderOf(st) > 0) ? "onprocess" : "fordelivery";
+  const olderOpen = openCounts ? OPEN_STATUSES.filter((st) => st !== "FAILED_DELIVERY").reduce((sum, st) => sum + olderOf(st), 0) : 0;
   const extraFilters = [sourceFilter, paymentFilter, fulfillmentFilter].filter(Boolean).length;
   const clearFilters = () => { setSourceFilter(""); setPaymentFilter(""); setFulfillmentFilter(""); setCustomer(""); };
   const dayWords = range === "today" ? "today" : range === "yesterday" ? "yesterday" : range === "tomorrow" ? "tomorrow" : "in these dates";
@@ -562,6 +604,7 @@ export default function OrdersPanel() {
               {o.source === "hub" && <> · <i className="bi bi-chat-dots" aria-hidden="true"></i> {[o.sourcePage, HUB_CHANNEL[o.sourceChannel ?? ""]].filter(Boolean).join(" ") || "SE Corp Hub"}</>}
               {" · "}{placedAt(o.createdAt)}
             </span>
+            {itemsLine(o) && <span className="d-block order-items">{itemsLine(o)}</span>}
           </span>
           <span className="text-end flex-shrink-0">
             <span className="d-block fw-bold num">{toPesos(o.totalMinor)}</span>
@@ -571,6 +614,7 @@ export default function OrdersPanel() {
             </span>
           </span>
         </button>
+        {(reprint || main) && <span className="order-acts">
         {reprint && (
           <button type="button" className="btn btn-outline-dark order-reprint" onClick={reprint.run} aria-label={`Reprint receipt for ${o.orderNumber}`}>
             <i className="bi bi-printer me-1" aria-hidden="true"></i>Reprint
@@ -582,6 +626,7 @@ export default function OrdersPanel() {
             {main.label}
           </button>
         )}
+        </span>}
       </li>
     );
   };
@@ -605,8 +650,16 @@ export default function OrdersPanel() {
             <div className="fw-bold fs-5 text-truncate">{o.customerName}</div>
             <div className="small text-muted">{isDeliv(o) ? "Delivery" : "Pickup"} · {o.source === "PRE_ORDER" ? "Pre-order" : o.source === "pos" ? "POS" : o.source === "hub" ? [o.sourcePage, HUB_CHANNEL[o.sourceChannel ?? ""], o.externalRef && `hub ${o.externalRef}`].filter(Boolean).join(" · ") || "SE Corp Hub" : "Online"} · {placedAt(o.createdAt)}</div>
           </div>
-          <div className="fs-4 fw-bold num">{toPesos(o.totalMinor)}</div>
+          <div className="fs-4 fw-bold num text-nowrap flex-shrink-0">{toPesos(o.totalMinor)}</div>
         </div>
+
+        {/* Where the order is in its journey: done steps ticked, this step filled. */}
+        {(() => {
+          const st = stepsFor(o);
+          return st ? <Steps items={st.items} current={st.current} className="order-steps mb-3" /> : null;
+        })()}
+        {o.status === "FAILED_DELIVERY" && <div className="alert alert-danger py-2 mb-2" role="status"><i className="bi bi-exclamation-triangle me-1" aria-hidden="true"></i>Delivery failed. Send it again or cancel it.</div>}
+        {o.status === "CANCELLED" && <div className="alert alert-secondary py-2 mb-2" role="status"><i className="bi bi-x-circle me-1" aria-hidden="true"></i>This order was cancelled.</div>}
 
         {/* Next step first, then the other things you can do, then the risky ones apart at the bottom. */}
         {main.map((x) => (
@@ -653,8 +706,11 @@ export default function OrdersPanel() {
             <tbody>
               {detailItems.map((i, idx) => (
                 <tr key={idx}>
-                  <td>{i.productName}</td>
-                  <td className="text-end text-nowrap">× {i.quantity}</td>
+                  <td>
+                    {i.productName}
+                    {i.priceOverridden && <span className="d-block small price-changed"><i className="bi bi-pencil-square me-1" aria-hidden="true"></i>Price changed{i.priceOverrideReason ? `: ${i.priceOverrideReason}` : ""}</span>}
+                  </td>
+                  <td className="text-end text-nowrap">{i.quantity} × {typeof i.unitPriceMinor === "number" ? <span className="num">{toPesos(i.unitPriceMinor)}</span> : null}</td>
                   <td className="text-end text-nowrap num">{toPesos(i.lineTotalMinor)}</td>
                 </tr>
               ))}
@@ -663,7 +719,7 @@ export default function OrdersPanel() {
               <tfoot>
                 {o.deliveryFeeMinor ? <tr><td colSpan={2}>Delivery fee</td><td className="text-end num">{toPesos(o.deliveryFeeMinor)}</td></tr> : null}
                 {o.discountMinor ? <tr><td colSpan={2}>Discount</td><td className="text-end num">−{toPesos(o.discountMinor)}</td></tr> : null}
-                <tr className="fw-bold"><td colSpan={2}>Total</td><td className="text-end num">{toPesos(o.totalMinor)}</td></tr>
+                <tr className="fw-bold"><td colSpan={2}>Total</td><td className="text-end text-nowrap num">{toPesos(o.totalMinor)}</td></tr>
               </tfoot>
             )}
           </table>
@@ -731,6 +787,26 @@ export default function OrdersPanel() {
         {tab !== "today" && <button type="button" className="btn btn-outline-dark" onClick={() => setTab("today")}>Show all orders</button>}
       </div>
     </div>
+  ) : tab === "today" ? (
+    // All: what still needs someone first (oldest first), then what is done, each under its own heading.
+    (() => {
+      const todo = orders.filter((o) => OPEN_STATUSES.includes(o.status)).sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1));
+      const done = orders.filter((o) => !OPEN_STATUSES.includes(o.status));
+      return (
+        <>
+          {olderOpen > 0 && (
+            <button type="button" className="btn btn-outline-warning w-100 text-start mb-2 older-open" onClick={() => setTab(olderTab)}>
+              <i className="bi bi-exclamation-circle me-2" aria-hidden="true"></i>
+              {olderOpen} order{olderOpen === 1 ? "" : "s"} from earlier days still waiting. <span className="fw-bold text-decoration-underline">Show</span>
+            </button>
+          )}
+          {todo.length > 0 && <h2 className="order-group"><span>Needs you</span><span className="badge rounded-pill text-bg-warning">{todo.length}</span></h2>}
+          {todo.length > 0 && <ul className="order-list mb-3" aria-busy={loading}>{todo.map(orderRow)}</ul>}
+          {done.length > 0 && <h2 className="order-group"><span>Done</span><span className="badge rounded-pill text-bg-secondary">{done.length}</span></h2>}
+          {done.length > 0 && <ul className="order-list" aria-busy={loading}>{done.map(orderRow)}</ul>}
+        </>
+      );
+    })()
   ) : (
     <ul className="order-list" aria-busy={loading}>{orders.map(orderRow)}</ul>
   );
@@ -745,9 +821,8 @@ export default function OrdersPanel() {
           {offline && <span className="me-auto"></span>}
           <button type="button" className="btn btn-outline-dark" disabled={offline} onClick={() => setReviewOpen(true)}><i className="bi bi-inboxes me-1" aria-hidden="true"></i>Payment review</button>
           <button type="button" className="btn btn-outline-dark" disabled={offline} onClick={() => setChatOpen(true)}><i className="bi bi-chat-dots me-1" aria-hidden="true"></i>Chat inbox</button>
-          <button type="button" className="btn btn-outline-dark" onClick={() => void load()} disabled={loading} aria-label="Refresh orders">
+          <button type="button" className="btn btn-outline-dark order-refresh" onClick={() => void load()} disabled={loading} aria-label={lastLoaded ? `Refresh orders (updated ${lastLoaded})` : "Refresh orders"} title={lastLoaded ? `Updated ${lastLoaded}` : "Refresh"}>
             <i className={`bi bi-arrow-clockwise ${loading ? "spin" : ""}`} aria-hidden="true"></i>
-            <span className="ms-1 d-none d-md-inline">{lastLoaded ? `Updated ${lastLoaded}` : "Refresh"}</span>
           </button>
         </div>
         {offline && (

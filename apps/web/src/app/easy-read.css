@@ -529,5 +529,20 @@ main:has(> * > .rice-ui > .sell-fit), main:has(> .rice-ui > .sell-fit) { padding
 .order-edit-add { min-height: 3.5rem; }
 .order-edit .modal-footer .btn { min-height: 3rem; }
 /* Two-pane Orders (sideways): the row's buttons keep their full size; the name side gives way instead. */
-.order-row > .order-go, .order-row > .order-reprint { flex-shrink: 0; }
+/* The row's buttons sit beside the order while there is room for its name and items (26rem); when there
+   isn't (upright with Reprint + Receive, the narrow list beside an open order, bigger text) they drop to a
+   line of their own on the right instead of squeezing the name into a thin column. */
+.order-row { flex-wrap: wrap; }
+.order-row > .order-main { flex: 1 1 0; min-width: min(26rem, calc(100% - 52px)); }
+.order-acts { display: flex; gap: 8px; align-items: center; margin-left: auto; flex: 0 0 auto; }
+.order-acts > .btn { flex-shrink: 0; }
+@media (max-width: 575.98px) { .order-acts { flex: 1 1 100%; } .order-acts > .btn { flex: 1 0 auto; } }
 .order-main > .text-end { flex-shrink: 0; }
+/* Orders flow: "Needs you" / "Done" headings on All, what to pack on each row, the order's steps. */
+.order-group { display: flex; align-items: center; gap: .5rem; font-size: 1.125rem; font-weight: 700; margin: .25rem 0 .5rem; }
+.order-items { color: #1f1d1a; font-weight: 600; margin-top: .125rem; overflow-wrap: anywhere; }
+.older-open { min-height: 3rem; color: #6F4800; background: #FFF3D6; border-color: #8A5A00; font-weight: 600; }
+.older-open:hover, .older-open:focus-visible { color: #6F4800; background: #ffe9b3; border-color: #8A5A00; }
+.order-refresh { min-width: 3rem; min-height: 2.75rem; }
+.order-steps { justify-content: flex-start !important; gap: .75rem !important; }
+.order-detail .price-changed { color: #6F4800; }
