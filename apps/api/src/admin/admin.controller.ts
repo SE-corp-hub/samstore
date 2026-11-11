@@ -1,3 +1,4 @@
+import { summarizeOrderItems, OPEN_ITEM_STATUSES } from "../domain/order-items-summary.js";
 import {
   Body,
   Controller,
@@ -519,6 +520,56 @@ export class AdminController {
       value = { at: (orders.at(-1)?.updatedAt ?? from).toISOString(), orders };
     }
     await cacheSet(key, value, 3_000);
+    return { ...value, storeId };
+  }
+
+  /**
+   * GET /admin/orders/items — "Items in orders": every product in the matching orders, counted per stage
+   * (to receive, in progress, out for delivery, done, cancelled/failed) with the orders that hold it.
+   * Same filters as the list. `openAnyDay=1` (the "Today" view): orders still in progress count from every
+   * day, done and cancelled ones only for the dates given, exactly like the Orders tabs.
+   */
+  @Get("orders/items")
+  async orderItemsSummary(@Req() req: Request & { user?: AuthPrincipal }, @Query("from") from?: string, @Query("to") to?: string, @Query("openAnyDay") openAnyDay?: string, @Query("customer") customer?: string, @Query("source") source?: string, @Query("payment") payment?: string, @Query("fulfillment") fulfillment?: string, @Headers("x-store-id") headerStoreId?: string) {
+    const user = req.user;
+    requireUser(user);
+    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.VIEW);
+    for (const [k, val] of [["from", from], ["to", to]] as const) {
+      if (val !== undefined && Number.isNaN(Date.parse(val))) {
+        throw new HttpException({ type: "validation", errors: [`${k} must be an ISO date`] }, HttpStatus.UNPROCESSABLE_ENTITY);
+      }
+    }
+    const anyDay = openAnyDay === "1" || openAnyDay === "true";
+    const key = cacheKey("orders", storeId, "items", from ?? "", to ?? "", anyDay ? "1" : "", customer ?? "", source ?? "", payment ?? "", fulfillment ?? "");
+    const hit = await cacheGet<unknown>(key);
+    if (hit) return { ...(hit as object), storeId };
+    const and: Record<string, unknown>[] = [{ storeId }];
+    if (customer) {
+      and.push({ OR: [
+        { customerName: { contains: customer, mode: "insensitive" } },
+        { customerPhone: { contains: customer, mode: "insensitive" } },
+        { orderNumber: { contains: customer, mode: "insensitive" } },
+      ] });
+    }
+    if (source) and.push({ source });
+    if (payment) and.push({ paymentMethod: payment });
+    if (fulfillment) and.push({ fulfillmentType: fulfillment === "pickup" ? "PICKUP" : "DELIVERY" });
+    const dates: Record<string, Date> = {};
+    if (from) dates.gte = new Date(from);
+    if (to) dates.lte = new Date(to);
+    if (Object.keys(dates).length > 0) {
+      and.push(anyDay ? { OR: [{ status: { in: OPEN_ITEM_STATUSES } }, { createdAt: dates }] } : { createdAt: dates });
+    }
+    const rows = await prisma.orderItem.findMany({
+      where: { storeId, order: { AND: and } },
+      take: 5000,
+      select: {
+        productId: true, productName: true, quantity: true,
+        order: { select: { id: true, orderNumber: true, customerName: true, status: true, createdAt: true } },
+      },
+    });
+    const value = summarizeOrderItems(rows);
+    await cacheSet(key, value, 5_000);
     return { ...value, storeId };
   }
 

@@ -15,6 +15,7 @@ import { markOwnOrderChange, onOrderChanges, OPEN_ORDER_EVENT, OPEN_ORDER_KEY } 
 import SignaturePad from "./SignaturePad";
 import PaymentReview from "./PaymentReview";
 import ChatPanel from "./ChatPanel";
+import OrderItemsTable from "./OrderItemsTable";
 import { toast } from "../../lib/toast";
 import { useMediaQuery, WIDE } from "../../lib/use-media-query";
 import { peso } from "../../lib/number-format";
@@ -93,6 +94,7 @@ export default function OrdersPanel() {
   const [receiptOrder, setReceiptOrder] = useState<string | null>(null);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
+  const [itemsOpen, setItemsOpen] = useState(false);
   const [confirmAction, setConfirmAction] = useState<{ orderId: string; kind: "void" | "refund" | "voidHold" } | null>(null);
   const [orderDetail, setOrderDetail] = useState<AdminOrder | null>(null);
   const [detailSignature, setDetailSignature] = useState<string | null>(null);
@@ -583,6 +585,24 @@ export default function OrdersPanel() {
   const extraFilters = [sourceFilter, paymentFilter, fulfillmentFilter].filter(Boolean).length;
   const clearFilters = () => { setSourceFilter(""); setPaymentFilter(""); setFulfillmentFilter(""); setCustomer(""); };
   const dayWords = range === "today" ? "today" : range === "yesterday" ? "yesterday" : range === "tomorrow" ? "tomorrow" : "in these dates";
+  /** The list's day and filters for "Items in orders" (with Today, orders in progress count from every day). */
+  const itemsQuery = () => {
+    const q = new URLSearchParams();
+    if (range === "custom") {
+      if (customFrom) q.set("from", new Date(customFrom).toISOString());
+      if (customTo) q.set("to", new Date(new Date(customTo).getTime() + 86_399_000).toISOString());
+    } else {
+      const d = dayRange(range === "today" ? new Date() : range === "yesterday" ? new Date(Date.now() - 86_400_000) : new Date(Date.now() + 86_400_000));
+      q.set("from", d.from);
+      q.set("to", d.to);
+      if (range === "today") q.set("openAnyDay", "1");
+    }
+    if (customer.trim()) q.set("customer", customer.trim());
+    if (sourceFilter) q.set("source", sourceFilter);
+    if (paymentFilter) q.set("payment", paymentFilter);
+    if (fulfillmentFilter) q.set("fulfillment", fulfillmentFilter);
+    return q.toString();
+  };
 
   const orderRow = (o: AdminOrder) => {
     const acts = actionsFor(o);
@@ -819,6 +839,7 @@ export default function OrdersPanel() {
           <h1 className="h4 mb-0"><i className="bi bi-receipt me-2" aria-hidden="true"></i>Orders</h1>
           {!offline && <span className="live-pill me-auto" title="New and changed orders show by themselves"><span className="live-dot" aria-hidden="true"></span>Live</span>}
           {offline && <span className="me-auto"></span>}
+          <button type="button" className="btn btn-outline-primary fw-bold" onClick={() => setItemsOpen(true)}><i className="bi bi-table me-1" aria-hidden="true"></i>Items</button>
           <button type="button" className="btn btn-outline-dark" disabled={offline} onClick={() => setReviewOpen(true)}><i className="bi bi-inboxes me-1" aria-hidden="true"></i>Payment review</button>
           <button type="button" className="btn btn-outline-dark" disabled={offline} onClick={() => setChatOpen(true)}><i className="bi bi-chat-dots me-1" aria-hidden="true"></i>Chat inbox</button>
           <button type="button" className="btn btn-outline-dark order-refresh" onClick={() => void load()} disabled={loading} aria-label={lastLoaded ? `Refresh orders (updated ${lastLoaded})` : "Refresh orders"} title={lastLoaded ? `Updated ${lastLoaded}` : "Refresh"}>
@@ -1161,6 +1182,17 @@ export default function OrdersPanel() {
 
       {receiptOrder && <ReceiptModal orderId={receiptOrder} onClose={() => setReceiptOrder(null)} />}
       {reviewOpen && <PaymentReview onClose={() => setReviewOpen(false)} onChanged={() => void load()} />}
+      {itemsOpen && (
+        <OrderItemsTable
+          query={itemsQuery()}
+          scopeWords={range === "today" ? "orders in progress from every day, done today" : range === "custom" ? "orders in the dates you picked" : `orders ${dayWords}`}
+          onClose={() => setItemsOpen(false)}
+          onOpenOrder={(id) => {
+            setItemsOpen(false);
+            cachedGet<AdminOrder>(`/admin/orders/${id}`).then((d) => { if (d?.id) openDetail(d); }).catch(() => setError("Could not open that order. Tap Refresh and try again."));
+          }}
+        />
+      )}
       {chatOpen && <ChatPanel onClose={() => setChatOpen(false)} onChanged={() => void load()} />}
 
             {/* Delivery confirm — payment collected on a delivery order: ask "for delivery?" then confirm */}

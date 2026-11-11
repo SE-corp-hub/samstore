@@ -546,3 +546,30 @@ main:has(> * > .rice-ui > .sell-fit), main:has(> .rice-ui > .sell-fit) { padding
 .order-refresh { min-width: 3rem; min-height: 2.75rem; }
 .order-steps { justify-content: flex-start !important; gap: .75rem !important; }
 .order-detail .price-changed { color: #6F4800; }
+
+/* Orders → Items: every product per order step in one table (OrderItemsTable.tsx). */
+.order-items-modal { max-width: min(62rem, calc(100vw - 1rem)); }
+.items-show { display: flex; flex-wrap: wrap; gap: .5rem; }
+.items-show-btn { display: flex; flex-direction: column; align-items: flex-start; min-height: 3.75rem; min-width: 7.5rem; padding: .375rem .75rem; text-align: left; line-height: 1.2; }
+.items-show-label { font-weight: 600; }
+.items-show-num { font-size: 1.375rem; font-weight: 700; }
+.items-show-btn.is-main:not(.btn-dark) { border-color: #1F6F3F; color: #1F6F3F; border-width: 2px; }
+.items-table-wrap { border: 1px solid #c9c4bc; border-radius: 10px; max-height: none; }
+.items-table { font-size: 1rem; }
+.items-table thead th { position: sticky; top: 0; z-index: 1; background: #F4F1EC; font-size: .9375rem; line-height: 1.2; vertical-align: bottom; white-space: normal; min-width: 5.5rem; }
+.items-table thead th:first-child { min-width: 9rem; }
+.items-table td, .items-table th { padding: .5rem .625rem; }
+.items-table .is-give { background: #EEF6F0; }
+.items-table thead .is-give { background: #DCEFE2; color: #14532D; }
+.items-table td.is-give .num { color: #14532D; font-size: 1.125rem; }
+.items-table tfoot th, .items-table tfoot td { border-top: 2px solid #1f1d1a; border-bottom: 0; font-weight: 700; background: #FAF8F5; }
+.items-table tfoot .is-give { background: #DCEFE2; }
+.items-name { display: flex; align-items: flex-start; gap: .375rem; width: 100%; min-height: 44px; padding: 0; background: none; border: 0; text-align: left; color: inherit; font-weight: 700; }
+.items-name .bi { flex-shrink: 0; margin-top: .2em; }
+.items-orders { font-weight: 400; color: #5c5248; font-size: .9375rem; }
+.items-row.is-open > * { background: #FFFBEF; }
+.items-orders-row > td { background: #FFFBEF; padding-top: 0; }
+.items-order-list { list-style: none; margin: 0; padding: 0 0 0 1.5rem; display: grid; gap: .375rem; }
+.items-order-list li { display: flex; align-items: center; gap: .75rem; padding: .25rem 0; border-top: 1px dashed #d9d3ca; }
+.items-order-list li:first-child { border-top: 0; }
+.items-order-list .btn { min-height: 44px; min-width: 5rem; }
