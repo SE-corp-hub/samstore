@@ -8,6 +8,7 @@ import type { ApiError, CheckoutResponse } from "@sam-store/contracts";
 import type { CheckoutService } from "../checkout/checkout.service.js";
 import type { CartRepository, CatalogRepository, StoreRepository } from "../persistence/repositories.js";
 import { randomId } from "../persistence/repositories.js";
+import { checkDto, HUB_ORDER_DTO } from "../security/validate.js";
 
 export const HUB_CHANNELS = ["messenger", "order_form", "comment", "live", "agent", "counter"] as const;
 
@@ -130,4 +131,41 @@ export class HubOrderService {
       },
     );
   }
+}
+
+/**
+ * Sam Store calls the hub, never the other way: Render's guard (Cloudflare) answers the hub's calls with 429, and
+ * calls out of Render are not blocked. Each beat fetches the hub's waiting orders, places them (the same key gives
+ * the same order back, so a lost answer is safe), says what became of each, and sends the linked stores' items.
+ */
+export async function syncWithHub(hub: HubOrderService, hubUrl: string, secret: string, send = fetch): Promise<void> {
+  const door = `${hubUrl.replace(/\/+$/, "")}/api/samstore`;
+  const headers = { "x-hub-secret": secret, "content-type": "application/json" };
+  const res = await send(door, { headers, signal: AbortSignal.timeout(20_000) });
+  if (!res.ok) throw new Error(`hub answered ${res.status}`);
+  const got = (await res.json()) as { stores?: unknown; orders?: unknown };
+  const results: { key: string; orderNumber?: string; totalMinor?: number; error?: string }[] = [];
+  for (const o of Array.isArray(got.orders) ? got.orders.slice(0, 50) : []) {
+    const key = String((o as { idempotencyKey?: unknown })?.idempotencyKey ?? "").slice(0, 60);
+    const dto = checkDto<HubOrderRequest>(o, HUB_ORDER_DTO);
+    if (!dto.ok) {
+      results.push({ key, error: dto.errors.join("; ") });
+      continue;
+    }
+    try {
+      const r = await hub.place(dto.value);
+      results.push(
+        r.ok
+          ? { key, orderNumber: r.value.orderNumber, totalMinor: r.value.totalMinor }
+          : { key, error: "errors" in r.error ? r.error.errors.join("; ") : r.error.message },
+      );
+    } catch (e) {
+      results.push({ key, error: e instanceof Error ? e.message : "Sam Store couldn't place it" });
+    }
+  }
+  const products = [];
+  for (const store of Array.isArray(got.stores) ? got.stores.filter((s): s is string => typeof s === "string").slice(0, 20) : []) {
+    products.push({ store, products: (await hub.products(store)) ?? [] });
+  }
+  await send(door, { method: "POST", headers, body: JSON.stringify({ results, products }), signal: AbortSignal.timeout(20_000) });
 }
