@@ -1368,3 +1368,15 @@ Commits: `32dce58` (loop 2).
 - `store-report.service.ts` `compare()`: each row gains `expensesMinor` and `netProfitMinor`; the answer gains `business.expensesMinor` and `total.expensesMinor` / `total.netProfitMinor`. Cancelled expenses are left out. No database change.
 - The stores added together, less the whole-business expenses, equal the old Reports screen's profit and the month report's net profit for the same dates.
 - Tests: 1 more in `reports/sales-book.test.ts` (5). Screen checked at 1280x720, 800x1200 and 615x985.
+
+## 2026-11-12 — Per-store build, step 6: the wall
+
+- Who is behind the wall: a login that is not the owner or a manager and has a home store. The owner, a manager and a login with no home store see everything, as before.
+- `auth/wall.ts` holds the wall and its rules in one table (`WALL_RULES`); `auth/wall.interceptor.ts` (registered once for the whole app) works the wall out for every signed-in `/admin` request, applies the table, and runs the request inside it. Code that lists orders adds `AND: [orderWall()]`; outside a request (jobs, tests) there is no wall.
+- Refused behind the wall (403, "this is for the owner"): the old Reports screen, business numbers, Purchases and suppliers, Supplier orders, the customer list download, customer messages, Export data, the weekly summary, and changing products or main prices.
+- Another store's order is "not found" (404) on every route that names an order: open, change status, pay, void, refund, receipt, held sales, pre-orders.
+- Own store only: the Orders list, its counts, the new-order alerts, Items in orders, held sales, payment review, the Home numbers, and the sales shown on a customer's page. The main store also owns the old orders that name no store. Saved answers are kept per store.
+- Already walled before this step: pre-orders (1a), expenses (3), cash (4), and the rice screens that take the login (counts, moves, resack, stock in, Store report, daily report).
+- Shared on purpose (decision 7 and 9): the customer and credit list with its balances, and the sack counts of other places.
+- Menu: a store login no longer gets Purchases, Supplier orders, Reports, Analytics and Export data.
+- Tests: `auth/wall.test.ts` (2), one of them reads every controller and fails if a route that names an order has no wall rule. Checked through the running API with a store login. No database change.

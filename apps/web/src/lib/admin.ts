@@ -31,6 +31,7 @@ export const SAVED_COPY_PREFIX = "rice-cache-v1:";
 
 /** Forget the sign-in, the chosen store and the screens' saved copies on this phone. */
 export function clearAdminSession() {
+  setHomeLocation(null); // the next login may belong to another store
   removeAuthItem("samstore.admin.token");
   removeAuthItem("samstore.admin.storeId");
   try {
@@ -310,8 +311,31 @@ export function defaultTabFor(role: string): string {
   return tabs[0] ?? "orders";
 }
 
+// Per-store build, step 6 (the wall): a login tied to one store does not get the screens that show
+// the whole business. The server refuses them too; this only keeps them out of the menu.
+const WHOLE_BUSINESS_TABS = ["purchases", "purchaseorders", "reports", "analytics", "export"];
+const HOME_KEY = "sam.homeLocationId";
+let homeLocationId: string | null | undefined;
+
+/** Remember the login's home store (from GET /admin/me/rice). Saved, so the menu is right before the server answers next time. */
+export function setHomeLocation(id: string | null): void {
+  homeLocationId = id;
+  try { if (id) window.localStorage.setItem(HOME_KEY, id); else window.localStorage.removeItem(HOME_KEY); } catch { /* private window: the menu is right once the server answers */ }
+}
+function homeLocation(): string | null {
+  if (homeLocationId === undefined) {
+    try { homeLocationId = typeof window === "undefined" ? null : window.localStorage.getItem(HOME_KEY); } catch { homeLocationId = null; }
+  }
+  return homeLocationId ?? null;
+}
+/** Is this login tied to one store (and not the owner or a manager)? */
+export function isStoreLogin(role: string): boolean {
+  return !isOwnerRole(role) && role !== "MANAGER" && role !== "PLATFORM_ADMIN" && !!homeLocation();
+}
+
 export function allowedTabs(role: string): string[] {
-  return TABS_BY_ROLE[role] ?? [];
+  const tabs = TABS_BY_ROLE[role] ?? [];
+  return isStoreLogin(role) ? tabs.filter((t) => !WHOLE_BUSINESS_TABS.includes(t)) : tabs;
 }
 
 /** Fetches orders for the admin dashboard (demo: reads from API; auth via token). */
