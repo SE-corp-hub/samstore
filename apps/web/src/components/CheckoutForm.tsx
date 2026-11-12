@@ -91,11 +91,13 @@ export default function CheckoutForm({ cartToken, store, subtotalMinor, delivery
   const [barangay, setBarangay] = useState<{ code: string; name: string }>(EMPTY_PH);
   const [addrLoading, setAddrLoading] = useState(false);
 
+  // The address list came back empty: say so, instead of four empty lists and a Continue button that never wakes up.
+  const [noAddressList, setNoAddressList] = useState(false);
   useEffect(() => {
     let alive = true;
     if (deliveryType === "delivery" && regions.length === 0) {
       fetchRegions().then((r) => {
-        if (alive) setRegions(r);
+        if (alive) { setRegions(r); setNoAddressList(r.length === 0); }
       });
     }
     return () => {
@@ -312,6 +314,12 @@ export default function CheckoutForm({ cartToken, store, subtotalMinor, delivery
 
           {delivery ? (
             <>
+              {noAddressList && !addrLoading && (
+                <div className="alert alert-warning py-2" role="alert">
+                  <strong>We cannot take a delivery address right now.</strong> The list of places did not load.
+                  Please message or call the store to order.
+                </div>
+              )}
               <div className="mb-2">
                 <label className="form-label small" htmlFor="checkoutRegion">Region *</label>
                 <select

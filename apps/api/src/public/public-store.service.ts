@@ -95,6 +95,11 @@ export class PublicStoreService {
       list.push({ kind: r.kind, productId: r.targetProductId });
       linksByProduct.set(r.sourceProductId, list);
     }
+    // Pictures taken in the store app (Products, Take photo) show in the shop too.
+    const photoKeys = new Map(
+      (await prisma.product.findMany({ where: { storeId: store.id, id: { in: products.map((p) => p.id) } }, select: { id: true, photoKey: true } }))
+        .map((p) => [p.id, p.photoKey]),
+    );
     const targetSummary = (id: string) => {
       const t = activeTargets.get(id)!;
       return { id: t.id, name: t.name, priceMinor: t.priceMinor, image: t.images[0] ?? null };
@@ -118,6 +123,7 @@ export class PublicStoreService {
           upsell: links.filter((l) => l.kind === "upsell").map((l) => l.summary),
           category: p.categoryName ? { id: "", name: p.categoryName, slug: "", sortOrder: 0 } : null,
           images: p.images.map((url, i) => ({ url, sortOrder: i })),
+          photoKey: photoKeys.get(p.id) ?? null,
           availableQuantity: p.quantityOnHand - p.quantityReserved,
           variants: pv.map((v) => ({
             id: v.id,

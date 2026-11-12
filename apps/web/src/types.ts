@@ -40,6 +40,8 @@ export interface ProductDTO {
   upsell: ProductRelationDTO[];
   category: CategoryDTO | null;
   images: { url: string; sortOrder: number }[];
+  /** The picture taken in the store app (Products, Take photo); served by /public/product-photo/:key. */
+  photoKey?: string | null;
   /** quantityOnHand minus quantityReserved; null when unlimited */
   availableQuantity: number | null;
   variants: ProductVariantDTO[];

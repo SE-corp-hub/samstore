@@ -1040,6 +1040,8 @@ export class AdminController {
     const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.MANAGE);
     const result = await this.settingsAdmin.updateLink(storeId, body);
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
+    // The Store Link screen reads GET /admin/settings, kept for a minute: without this it went on showing the old link.
+    await cacheBust(cacheKey("settings", storeId));
     return { ...result.value, storeId };
   }
 
@@ -1051,6 +1053,8 @@ export class AdminController {
     const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.MANAGE);
     const result = await rotateStoreLinkToken(storeId);
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
+    // The Store Link screen reads GET /admin/settings, kept for a minute: without this it went on showing the old link.
+    await cacheBust(cacheKey("settings", storeId));
     return { ...result.value, storeId };
   }
 
@@ -1062,6 +1066,8 @@ export class AdminController {
     const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.MANAGE);
     const result = await revokeStoreLink(storeId);
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
+    // The Store Link screen reads GET /admin/settings, kept for a minute: without this it went on showing the old link.
+    await cacheBust(cacheKey("settings", storeId));
     return { ...result.value, storeId };
   }
 
