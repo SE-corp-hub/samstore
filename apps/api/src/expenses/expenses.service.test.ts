@@ -3,21 +3,22 @@ import assert from "node:assert/strict";
 import { ExpensesService } from "./expenses.service.js";
 
 const svc = new ExpensesService();
+const a = { userId: "a", role: "OWNER", homeLocationId: null };
 
 test("create rejects invalid category", async () => {
-  const r = await svc.create("s1", "a", { category: "bribery", amountMinor: 100 });
+  const r = await svc.create("s1", a, { category: "bribery", amountMinor: 100 });
   assert.equal(r.ok, false);
   if (!r.ok) assert.equal(r.error.type, "validation");
 });
 
 test("create rejects non-positive amount", async () => {
-  const r = await svc.create("s1", "a", { category: "rent", amountMinor: 0 });
+  const r = await svc.create("s1", a, { category: "rent", amountMinor: 0 });
   assert.equal(r.ok, false);
   if (!r.ok) assert.equal(r.error.type, "validation");
 });
 
 test("remove unknown expense → not_found", async () => {
-  const r = await svc.remove("s1", "nope");
+  const r = await svc.remove("s1", a, "nope");
   assert.equal(r.ok, false);
   if (!r.ok) assert.equal(r.error.type, "not_found");
 });

@@ -1339,3 +1339,15 @@ Commits: `32dce58` (loop 2).
 - An order with no store follows the main store's rule.
 - After merging, the owner sets three rules on the Locations screen: Bogs and Lucy = Bahay Tindahan, then Bodega; Bahay Tindahan = Bodega; Lipa = its own shelf only. Until then nothing changes.
 - Tests: 3 more in `selling/order-store.test.ts` (9 in all). Screens checked at 1280x720, 800x1200 and 615x985.
+
+## 2026-11-12 — Per-store build, step 3: expenses per store
+
+- Five fields from migration `20261114100000_per_store_plan` are now in `schema.prisma`: `Expense.locationId`, `paidFromDrawer`, `voidedAt`, `voidedById`, `voidReason`. No new migration.
+- An expense belongs to one store, or to the whole business (no store). A login tied to a store adds expenses for that store only and sees only that store's; the owner and manager choose the store or "Whole business" (`expenses/expenses.service.ts`).
+- Old copies of the app send no store: the expense goes to the login's own store, else the whole business (owner) or the main store (staff with no store). Nothing answers an old request with a 400.
+- A wrong expense is cancelled with a reason by the owner or manager (`POST /admin/expenses/:id/cancel`), never deleted. The old `DELETE` now cancels too, and refuses staff. A cancelled expense stays on the list, crossed out, and counts in no report: daily report, month report, old Reports (profit summary, Income & Loss), and the totals. The Export sheet lists every expense with its store and a "Cancelled" column.
+- Daily report: with one store chosen, the expenses are that store's; with all stores, every expense that counts.
+- "Paid with cash from the store drawer" is saved now and read by step 4 (cash at each store).
+- Ledger backfill (`erp/journal.service.ts`): a cancelled expense is not posted; one posted before it was cancelled is posted back (`EXPENSE-CANCEL:<id>`).
+- Expenses screen rebuilt in the store look: store and kind as big buttons, amount, note, drawer tick, one green Save; list with Dates and Store choices, a total, and Cancel (owner) that asks why.
+- Tests: `expenses/expenses-store.test.ts` (3). Screens checked at 1280x720, 800x1200 and 615x985.

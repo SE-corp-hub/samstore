@@ -834,6 +834,7 @@ model Warehouse {
   // as before). A saved rule always starts with the place itself, so "its own shelf only" is a list of one.
   sourceLocationIds String[] @default([])
   facebookPageUrl   String? // the Facebook Page that sells for this store
+  expenses          Expense[]
   createdAt DateTime     @default(now())
   updatedAt DateTime     @updatedAt
 
@@ -1236,7 +1237,16 @@ model Expense {
   createdBy   String?
   createdAt   DateTime @default(now())
 
+  // Per-store build, step 3.
+  locationId     String? // the place this expense belongs to (empty = the whole business)
+  location       Warehouse? @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  paidFromDrawer Boolean    @default(false) // cash taken out of that store's drawer
+  voidedAt       DateTime? // a wrong expense is cancelled, never deleted
+  voidedById     String?
+  voidReason     String?
+
   @@index([storeId, spentAt])
+  @@index([storeId, locationId, spentAt])
 }
 
 // ─────────────────────────────── Purchases / replenishment ───────────────────────────────

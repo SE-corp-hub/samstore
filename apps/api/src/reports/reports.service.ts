@@ -45,7 +45,7 @@ export class ReportsService {
   /** Profit summary: sales − sales taken back − cost of what was sold − expenses. */
   async profitSummary(storeId: string, from: Date, to: Date) {
     const s = await this.sold(storeId, from, to);
-    const expensesRows = await prisma.expense.findMany({ where: { storeId, spentAt: { gte: from, lte: to } } });
+    const expensesRows = await prisma.expense.findMany({ where: { storeId, voidedAt: null, spentAt: { gte: from, lte: to } } });
     const expenses = expensesRows.reduce((a, e) => a + e.amountMinor, 0);
     const netRevenue = s.revenue - s.refunds;
     return {
@@ -144,7 +144,7 @@ export class ReportsService {
     const s = await this.sold(storeId, from, to);
     const netRevenue = s.revenue - s.refunds;
 
-    const expensesRows = await prisma.expense.findMany({ where: { storeId, spentAt: { gte: from, lte: to } }, select: { category: true, amountMinor: true, note: true } });
+    const expensesRows = await prisma.expense.findMany({ where: { storeId, voidedAt: null, spentAt: { gte: from, lte: to } }, select: { category: true, amountMinor: true, note: true } });
     const byCategory: Record<string, number> = {};
     for (const e of expensesRows) byCategory[e.category] = (byCategory[e.category] ?? 0) + e.amountMinor;
     const expenseTotal = expensesRows.reduce((a, e) => a + e.amountMinor, 0);
