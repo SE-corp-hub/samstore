@@ -69,22 +69,18 @@ async function bootstrap() {
   const hubUrl = process.env.HUB_URL;
   const hubSecret = process.env.HUB_ORDER_SECRET;
   if (hubUrl && hubSecret && hubSecret.length >= 32) {
-    const { HUB_ORDER_SERVICE, syncWithHub } = await import("./integrations/hub-orders.service.js");
-    const hub = app.get(HUB_ORDER_SERVICE);
+    const { HUB_ORDER_SERVICE, startHubSync, hubNudge } = await import("./integrations/hub-orders.service.js");
     const everyMs = Math.max(5_000, Number(process.env.HUB_SYNC_SECONDS ?? 15) * 1000 || 15_000);
-    const fullEvery = Math.max(1, Math.round(60_000 / everyMs));
-    let n = 0;
-    let busy = false; // a slow hub never stacks beats on top of each other
-    const beat = () => {
-      if (busy) return;
-      busy = true;
-      const full = n++ % fullEvery === 0;
-      void syncWithHub(hub, hubUrl, hubSecret, fetch, { full })
-        .catch((e: Error) => console.warn(`[sam-store] hub sync: ${e.message}`))
-        .finally(() => { busy = false; });
-    };
-    setTimeout(beat, 5_000).unref?.();
-    setInterval(beat, everyMs).unref?.();
+    startHubSync(app.get(HUB_ORDER_SERVICE), hubUrl, hubSecret, everyMs);
+    // A selling price, stock or an order changed here: tell the hub in a few seconds, not at the next minute.
+    // Any saved change on these screens counts; the hub writes nothing when what it gets is what it has.
+    const copied = /\/(products?|prices?|locations?|warehouses?|stock|inventory|imports?|resack|transfers?|counts?|pos|orders?|benta|delivery|purchases?)(\/|\?|$)/i;
+    app.use((req: Request, res: Response, next: () => void) => {
+      if (req.method !== "GET" && req.method !== "OPTIONS" && !req.originalUrl.startsWith("/integrations/")) {
+        res.on("finish", () => { if (res.statusCode < 400 && copied.test(req.originalUrl)) hubNudge(); });
+      }
+      next();
+    });
   }
 
   app.use(express.json({ limit: "5mb" }));

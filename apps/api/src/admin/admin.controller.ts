@@ -45,6 +45,7 @@ import { CartRecoveryService } from "../cart/recovery.service.js";
 import { PrivacyRetentionService } from "../privacy/retention.service.js";
 import { NOTIFICATIONS_SERVICE, type NotificationsService } from "../notifications/notifications.service.js";
 import { type OrderState, ORDER_STATES } from "../domain/order-state.js";
+import { hubLinkStatus, hubSyncNow } from "../integrations/hub-orders.service.js";
 
 function statusFor(error: ApiError): HttpStatus {
   switch (error.type) {
@@ -487,6 +488,32 @@ export class AdminController {
                                           await cacheSet(key, counts, 5_000);
                                           return { counts, storeId };
                                         }
+
+  /**
+   * GET /admin/hub/status — how the SE Corp Hub link stands for this store: on or off, when it last worked, why
+   * it failed, and the Facebook orders the hub offered that this store could not take (with the reason), so staff
+   * can fix them here (add stock, fix an item's name) instead of finding out from the hub.
+   */
+  @Get("hub/status")
+  async hubStatus(@Req() req: Request & { user?: AuthPrincipal }, @Headers("x-store-id") headerStoreId?: string) {
+    const user = req.user;
+    requireUser(user);
+    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.VIEW);
+    const store = await prisma.store.findUnique({ where: { id: storeId }, select: { slug: true } });
+    return hubLinkStatus(store?.slug ?? "");
+  }
+
+  /** POST /admin/hub/check — "Check now": one hub beat right away (after a fix), then the fresh status. */
+  @Post("hub/check")
+  @HttpCode(200)
+  async hubCheck(@Req() req: Request & { user?: AuthPrincipal }, @Headers("x-store-id") headerStoreId?: string) {
+    const user = req.user;
+    requireUser(user);
+    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.VIEW);
+    await hubSyncNow();
+    const store = await prisma.store.findUnique({ where: { id: storeId }, select: { slug: true } });
+    return hubLinkStatus(store?.slug ?? "");
+  }
 
   /**
    * GET /admin/orders/pulse?since=<ISO> — live order updates without refreshing the app. The tablet asks every

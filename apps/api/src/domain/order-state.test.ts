@@ -78,3 +78,9 @@ test("COD payment is collected on delivery", () => {
   assert.equal(paymentEffectFor("CANCELLED", "PENDING"), "CANCELLED_REFUND");
   assert.equal(paymentEffectFor("CONFIRMED", "PENDING"), "PENDING");
 });
+test("a GCash payment not yet checked stays to be checked after delivery; a checked one is paid", () => {
+  assert.equal(paymentEffectFor("DELIVERED", "RECEIVED"), "RECEIVED");
+  assert.equal(paymentEffectFor("DELIVERED", "REVIEWED"), "COLLECTED");
+  assert.equal(paymentEffectFor("DELIVERED", "PENDING"), "COLLECTED");
+  assert.equal(paymentEffectFor("CANCELLED", "RECEIVED"), "CANCELLED_REFUND");
+});

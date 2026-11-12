@@ -26,7 +26,7 @@
 // Both reserved-only types are excluded from on-hand reconciliation.
 
 import type { MovementTx } from "./movements.js";
-import { InsufficientStockError, recordMovement } from "./movements.js";
+import { holdAcrossLevels, InsufficientStockError, recordMovement } from "./movements.js";
 
 export type StockDisposition = "CONSUMED" | "RELEASED";
 
@@ -257,39 +257,17 @@ export async function moveOrderReservation(
   const isTracked = new Set(tracked.map((p) => p.id));
   for (const line of lines) {
     if (line.quantity <= 0 || !isTracked.has(line.productId)) continue; // Track stock off — nothing is held
-    const levels = await tx.stockLevel.findMany({ where: { storeId: order.storeId, productId: line.productId } });
-    if (levels.length === 0) continue;
-    const before = old.find((l) => l.productId === line.productId && !l.variantId)?.warehouseId;
-    levels.sort((a, b) => rank(a.warehouseId, before) - rank(b.warehouseId, before));
-    let remaining = line.quantity;
-    for (const lvl of levels) {
-      if (remaining <= 0) break;
-      const rows = await tx.$executeRawUnsafe(
-        'UPDATE "StockLevel" SET "quantityReserved" = "quantityReserved" + $2 WHERE "id" = $1 AND ("quantityOnHand" - "quantityReserved") >= $2',
-        lvl.id,
-        remaining,
-      );
-      if (rows !== 1) continue;
-      const fresh = await tx.stockLevel.findUnique({ where: { id: lvl.id }, select: { quantityReserved: true } });
-      await recordMovement(tx, {
-        storeId: order.storeId,
-        productId: line.productId,
-        warehouseId: lvl.warehouseId,
-        delta: remaining,
-        type: "RESERVE",
-        orderId: order.id,
-        createdBy: actorId,
-        note: "order edited — new lines held",
-        balanceAfter: fresh?.quantityReserved ?? null,
-      });
-      remaining = 0;
-    }
+    const before = old.find((l) => l.productId === line.productId && !l.variantId)?.warehouseId ?? null;
+    const remaining = await holdAcrossLevels(tx, {
+      storeId: order.storeId,
+      productId: line.productId,
+      quantity: line.quantity,
+      prefer: before,
+      orderId: order.id,
+      actorId,
+      note: "order edited — new lines held",
+    });
     if (remaining > 0) throw new InsufficientStockError(line.productId, remaining);
   }
 }
 
-/** Where to hold first: the location the order used before, then any location, then the location-less row. */
-function rank(warehouseId: string | null, before: string | null | undefined): number {
-  if (before && warehouseId === before) return 0;
-  return warehouseId ? 1 : 2;
-}

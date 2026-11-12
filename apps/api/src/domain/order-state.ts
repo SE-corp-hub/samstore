@@ -27,7 +27,7 @@ export const ALLOWED_TRANSITIONS: Record<OrderState, OrderState[]> = {
   ON_HOLD: ["COMPLETED", "CANCELLED"], // POS held — complete or void
   COMPLETED: [], // terminal POS/counter state
   CANCELLED: [],
-  FAILED_DELIVERY: ["OUT_FOR_DELIVERY"], // retry delivery
+  FAILED_DELIVERY: ["OUT_FOR_DELIVERY", "CANCELLED"], // retry delivery, or cancel it (the rice comes back, its hold is given back)
 };
 
 /** States that are terminal — no transitions out. */
@@ -63,7 +63,9 @@ export function assertTransition(from: OrderState, to: OrderState, reason?: stri
 
 /** Payment status side-effect for COD: collecting on delivery. */
 export function paymentEffectFor(to: OrderState, currentPayment: string): string {
-  if (to === "DELIVERED" || to === "COMPLETED") return "COLLECTED";
+  // A GCash payment still to be checked (RECEIVED) stays in Payment review after delivery: handing the rice over
+  // does not prove the money came in. Everything else is paid on delivery.
+  if (to === "DELIVERED" || to === "COMPLETED") return currentPayment === "RECEIVED" ? "RECEIVED" : "COLLECTED";
   if (to === "CANCELLED" || to === "FAILED_DELIVERY") return "CANCELLED_REFUND";
   return currentPayment;
 }

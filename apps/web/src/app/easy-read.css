@@ -522,6 +522,30 @@ main:has(> * > .rice-ui > .sell-fit), main:has(> .rice-ui > .sell-fit) { padding
   .live-dot { animation: live-dot 2s ease-in-out infinite; }
   @keyframes live-dot { 50% { opacity: .35; } }
 }
+/* Facebook orders (hub link) on Orders: a quiet line while it works, an amber card when orders wait. */
+.hub-link-ok { color: #1F6F3F; font-weight: 600; font-size: 1rem; }
+.hub-link-card {
+  background: #FFF4D6; border: 2px solid #8A5A00; border-radius: .75rem; padding: .875rem 1rem; color: #3D2800;
+}
+.hub-link-card .btn { min-height: 3rem; }
+.hub-stuck-list { list-style: none; margin: 0 0 .75rem; padding: 0; display: grid; gap: .5rem; }
+.hub-stuck-list li { background: #fff; border: 1px solid #C9A24A; border-radius: .5rem; padding: .625rem .75rem; overflow-wrap: anywhere; }
+.hub-stuck-why { color: #8A1C1C; font-weight: 600; }
+/* Payment review (GCash to check): one card per order, amount large, one green button. */
+.payrev-close { min-width: 3rem; min-height: 3rem; }
+.payrev-list { list-style: none; margin: 0; padding: 0; display: grid; gap: .75rem; }
+.payrev-list li {
+  display: flex; flex-wrap: wrap; align-items: center; gap: .75rem 1rem;
+  border: 1px solid #C9C2B8; border-radius: .75rem; padding: .875rem 1rem; background: #fff;
+}
+.payrev-list li.is-given { border: 2px solid #8A5A00; background: #FFF4D6; }
+.payrev-who { flex: 1 1 14rem; min-width: 0; overflow-wrap: anywhere; }
+.payrev-amount { display: flex; flex-direction: column; align-items: flex-end; gap: .25rem; margin-left: auto; }
+.payrev-total { font-size: 1.5rem; font-weight: 800; font-variant-numeric: tabular-nums; }
+.payrev-ok { min-height: 3.25rem; padding-inline: 1.25rem; }
+.payrev-warn { color: #8A1C1C; font-weight: 600; }
+.payrev-empty { color: #1F6F3F; font-weight: 600; text-align: center; padding: 1.5rem 0; }
+@media (max-width: 575.98px) { .payrev-ok { flex: 1 1 100%; } }
 .order-row.is-fresh { background: #E6F2EA; box-shadow: inset .3rem 0 0 #1F6F3F; }
 .order-edit .order-edit-close { min-width: 3rem; min-height: 3rem; }
 @media (min-width: 576px) { .modal-dialog.order-edit { max-width: min(46rem, calc(100vw - 2rem)); } }

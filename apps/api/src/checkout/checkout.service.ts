@@ -87,6 +87,14 @@ export interface TrustedOrderExtras {
   externalRef?: string | null;
   discountMinor?: number;
   deliveryFeeMinor?: number;
+  /** The location that sells it: its stock is held first (the hub link names it, e.g. S2). */
+  sellingLocationId?: string | null;
+  /** Price each by product id, already settled by the caller (the selling location's price, or the price the
+   *  customer was told on the Page). A product not listed keeps the store's price. */
+  unitPrices?: Record<string, number>;
+  /** The customer said on the Page they pay by GCash: the order is marked GCash and waits in Payment review
+   *  until staff confirm the money came in. */
+  gcash?: boolean;
 }
 
 /** DI token — explicit, so dependency resolution doesn't rely on emitDecoratorMetadata. */
@@ -164,7 +172,9 @@ export class CheckoutService {
     if (store.status !== "ACTIVE") {
       return { ok: false, error: { type: "conflict", message: "This store is not accepting orders right now" } };
     }
-    if (store.orderingPaused || !store.guestOrderingEnabled) {
+    // The hub's orders come from the store's own Facebook Pages, not the public shop link: switching the shop link
+    // off must not turn them away. Pausing all ordering still does.
+    if (store.orderingPaused || (!store.guestOrderingEnabled && !trusted)) {
       return {
         ok: false,
         error: {
@@ -219,7 +229,7 @@ export class CheckoutService {
       revalidated = revalidateCartLines(
         cart.lines,
         new Map(
-          freshProducts.map((p) => [p.id, { id: p.id, priceMinor: p.priceMinor, isActive: p.isActive }]),
+          freshProducts.map((p) => [p.id, { id: p.id, priceMinor: trusted?.unitPrices?.[p.id] ?? p.priceMinor, isActive: p.isActive }]),
         ),
         freshVariantsMap,
         freshAddonsMap,
@@ -323,7 +333,8 @@ export class CheckoutService {
       throw e;
     }
 
-    if (store.minOrderAmountMinor > 0 && totals.totalMinor < store.minOrderAmountMinor) {
+    // The minimum is for the shop link; the hub's Page already agreed the order with the customer.
+    if (!trusted && store.minOrderAmountMinor > 0 && totals.totalMinor < store.minOrderAmountMinor) {
       return {
         ok: false,
         error: { type: "conflict", message: "Total is below the store's minimum order amount" },
@@ -457,6 +468,7 @@ export class CheckoutService {
             sourceChannel: trusted.sourceChannel ?? null,
             sourcePage: trusted.sourcePage ?? null,
             externalRef: trusted.externalRef ?? null,
+            sellingLocationId: trusted.sellingLocationId ?? null,
           }
         : {}),
       currencyCode: store.currencyCode,
@@ -480,15 +492,16 @@ export class CheckoutService {
         ...(revalidated.addonPriceChanges.length > 0 ? { addonPriceChanges: revalidated.addonPriceChanges } : {}),
         ...(revalidated.removedAddonOptionIds.length > 0 ? { removedAddonOptionIds: revalidated.removedAddonOptionIds } : {}),
         store: { slug: store.slug, name: store.name },
-        paymentMethod,
+        paymentMethod: trusted?.gcash ? "gcash" : paymentMethod,
         deliveryType,
         ...(phAddress ? { phAddress } : {}),
         ...(statutory ? { statutory: { type: statutory.type, id: statutory.id, name: statutory.name } } : {}),
         ...(request.voucherCode ? { voucherCode: request.voucherCode.toUpperCase(), discountMinor } : {}),
         ...(loyaltyPoints > 0 ? { loyaltyPointsRedeemed: loyaltyPoints } : {}),
       },
-      paymentMethod,
-      paymentStatus: "PENDING",
+      paymentMethod: trusted?.gcash ? "gcash" : paymentMethod,
+      // RECEIVED = "said paid, to be checked": it shows in Payment review until staff confirm it.
+      paymentStatus: trusted?.gcash ? "RECEIVED" : "PENDING",
       idempotencyKey: canonicalKey,
       cartToken: cart.token,
       customerName: request.customerName.trim(),
@@ -525,6 +538,7 @@ export class CheckoutService {
         created = await this.orders.createAtomic(order, {
           cart: { token: cart.token, storeId: cart.storeId },
           stockReservations: items.map((i) => ({ productId: i.productId ?? "", variantId: i.variantId ?? null, quantity: i.quantity })),
+          ...(trusted?.sellingLocationId ? { preferWarehouseId: trusted.sellingLocationId } : {}),
           ...(voucherId ? { voucherRedemption: { voucherId, storeCustomerId } } : {}),
           ...(loyaltyPoints > 0 && customerId && storeCustomerId
             ? { loyalty: { customerId, storeCustomerId, points: loyaltyPoints } }
