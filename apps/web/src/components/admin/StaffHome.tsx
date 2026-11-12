@@ -6,7 +6,7 @@
 // It only changes what is easy to reach: the server still decides what each role may do
 // (allowedTabs mirrors it). The Text size choice sits at the bottom so every role can find it.
 
-import { allowedTabs, NAV_GROUPS } from "../../lib/admin";
+import { allowedTabs, MENU_HIDDEN, NAV_GROUPS } from "../../lib/admin";
 import TextSizePicker from "./TextSizePicker";
 import CountReminder from "./CountReminder";
 
@@ -22,7 +22,7 @@ interface Props {
 export default function StaffHome({ role, onNavigate, labelFor, isLocked }: Props) {
   const allowed = new Set(allowedTabs(role));
   const groups = NAV_GROUPS
-    .map((g) => ({ ...g, items: g.items.filter((i) => allowed.has(i.id)) }))
+    .map((g) => ({ ...g, items: g.items.filter((i) => allowed.has(i.id) && !MENU_HIDDEN.has(i.id)) }))
     .filter((g) => g.items.length > 0);
 
   return (

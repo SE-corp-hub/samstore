@@ -151,6 +151,9 @@ html[data-text-size] .btn-primary:disabled, html[data-text-size] .btn-primary.di
 .tone-money { --tone: #8a5a00; --tone-bg: #fff3d6; }
 .tone-stock { --tone: #0b4f8a; --tone-bg: #e3f0fb; }
 .tone-report { --tone: #563a98; --tone-bg: #ece6f7; }
+/* The switch between the report sections (one Reports place): purple outline, filled when open. */
+.report-sections .btn { min-height: 2.75rem; font-size: 1.05rem; color: var(--tone); border: 2px solid var(--tone); background: #fff; }
+.report-sections .btn.active { color: #fff; background: var(--tone); border-color: var(--tone); }
 .tone-setup { --tone: #4a4844; --tone-bg: #eeebe6; }
 
 /* Top bar: the screen's icon on its group colour, the name, and one line on what the screen is for.
