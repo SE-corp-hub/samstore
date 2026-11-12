@@ -145,6 +145,7 @@ test("M6: the utang sale text and the payment text carry the correct balances", 
   assert.equal(paySms.text, "Natanggap: P1,000. Natitirang utang: P2,900. Salamat po!");
   const p = await prisma.payment.findUniqueOrThrow({ where: { id: pay.value.paymentId } });
   assert.deepEqual([p.method, p.amountMinor, p.locationId], ["cash", 100_000, fx.s2], "the money is Store 2's");
+  assert.equal(p.forLocationId, fx.s1, "the cash is in Store 2's drawer, and it is for Store 1's credit sale (step 4)");
   const entry = await prisma.creditEntry.findFirstOrThrow({ where: { paymentId: p.id } });
   assert.equal(entry.amountMinor, -100_000);
 

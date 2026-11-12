@@ -9,6 +9,8 @@
 //     balance is reduced (a cash sale gets a refund row to pay out from the drawer).
 //   * Reminders: a monthly balance text and an overdue text, once per period.
 
+import { storeOwedFirst } from "../cash/cash-book.js";
+import { mainLocationId } from "../reports/sales-book.js";
 import type { ApiError } from "@sam-store/contracts";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../persistence/prisma-repositories.js";
@@ -216,6 +218,11 @@ export class UtangService {
       const tender = prepared.value.prepared[0]!;
       const registerSessionId = await this.registers.sessionAt(storeId, loc.id);
       const hasCustomerSig = (input.signatures ?? []).some((s) => s.signerKind === "CUSTOMER");
+      // Step 4: credit may be paid at any store. The cash stays in THIS store's drawer; when the oldest
+      // unpaid credit sale is another store's, the payment notes which store the money is for.
+      const mainId = await mainLocationId(prisma, storeId);
+      const owedTo = await storeOwedFirst(prisma, storeId, sc.id, mainId);
+      const forLocationId = owedTo && owedTo !== loc.id ? owedTo : null;
       const out = await prisma.$transaction(async (tx) => {
         // ONE guarded write: two payments racing can never take the balance below zero.
         const took = await tx.storeCustomer.updateMany({ where: { id: sc.id, storeId, creditBalanceMinor: { gte: amount } }, data: { creditBalanceMinor: { decrement: amount } } });
@@ -223,7 +230,7 @@ export class UtangService {
         const payment = await tx.payment.create({
           data: {
             storeId, method, amountMinor: amount, tenderedMinor: tender.tenderedMinor, changeMinor: tender.changeMinor, reference: tender.reference,
-            type: "payment", status: "paid", note: `Credit payment (${loc.name})`, createdBy: actor.userId, registerSessionId, locationId: loc.id,
+            type: "payment", status: "paid", note: `Credit payment (${loc.name})`, createdBy: actor.userId, registerSessionId, locationId: loc.id, forLocationId,
           },
           select: { id: true },
         });
@@ -235,7 +242,7 @@ export class UtangService {
           storeId, storeCustomerId: sc.id, template: "utang_payment", text: paymentText({ amountMinor: amount, balanceMinor: after.creditBalanceMinor }),
           documentType: "PAYMENT", documentId: payment.id, createdById: actor.userId,
         });
-        await tx.auditLog.create({ data: { storeId, actorType: "USER", actorId: actor.userId, action: "utang.payment", entityType: "Payment", entityId: payment.id, after: { amountMinor: amount, method, locationId: loc.id, balanceMinor: after.creditBalanceMinor } } });
+        await tx.auditLog.create({ data: { storeId, actorType: "USER", actorId: actor.userId, action: "utang.payment", entityType: "Payment", entityId: payment.id, after: { amountMinor: amount, method, locationId: loc.id, forLocationId, balanceMinor: after.creditBalanceMinor } } });
         return { paymentId: payment.id, amountMinor: amount, balanceMinor: after.creditBalanceMinor, changeMinor: tender.changeMinor, smsId: sms.id, smsStatus: sms.status };
       }, txOptions());
       await bustCredit(storeId);

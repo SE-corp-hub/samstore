@@ -191,7 +191,7 @@ test("M9: the daily totals equal the sum of the day's documents; Pagsasara locks
   const locked = await reports.daily(fx.storeId, fx.owner, { date: today, locationId: fx.s1 });
   assert.equal(locked.ok && locked.value.sections[0]!.locked, true);
   assert.equal(locked.ok && locked.value.sections[0]!.sales.totalMinor, s.sales.totalMinor, "the closed day does not move");
-  assert.deepEqual(locked.ok && locked.value.sections[0]!.afterClose, { count: 1, totalMinor: 130_000, cashMinor: 130_000, takenBack: { count: 0, totalMinor: 0 } }, "a sale after Pagsasara is shown apart, not lost");
+  assert.deepEqual(locked.ok && locked.value.sections[0]!.afterClose, { count: 1, totalMinor: 130_000, cashMinor: 130_000, cashGivenBackMinor: 0, cashPaidOutMinor: 0, cashHandedOverMinor: 0, takenBack: { count: 0, totalMinor: 0 } }, "a sale after Pagsasara is shown apart, not lost");
 });
 
 // Retired: sales from another store no longer create signed releases (stock leaves at once).

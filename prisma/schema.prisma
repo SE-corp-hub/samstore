@@ -243,6 +243,7 @@ model Store {
   payments               Payment[]
   creditEntries          CreditEntry[]
   expenses               Expense[]
+  cashHandovers CashHandover[]
   purchases              Purchase[]
   suppliers              Supplier[] // M6: vendor master per store
   rolePermissions        RolePermission[] // M7: roles × permissions deny matrix
@@ -835,6 +836,8 @@ model Warehouse {
   sourceLocationIds String[] @default([])
   facebookPageUrl   String? // the Facebook Page that sells for this store
   expenses          Expense[]
+  cashHandovers     CashHandover[]
+  paymentsFor       Payment[] @relation("PaymentForLocation")
   createdAt DateTime     @default(now())
   updatedAt DateTime     @updatedAt
 
@@ -1089,6 +1092,9 @@ model Payment {
   registerSession   RegisterSession? @relation(fields: [registerSessionId], references: [id])
   locationId        String? // Rice Ops M6: the location that took the money (Bayad sa utang at any store)
   location          Warehouse?       @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  // Per-store build, step 4: credit paid at one store for another store's sale — the store the money is for.
+  forLocationId     String?
+  forLocation       Warehouse?       @relation("PaymentForLocation", fields: [forLocationId], references: [id], onDelete: SetNull)
 
   @@index([storeId, receivedAt])
   @@index([orderId])
@@ -1247,6 +1253,26 @@ model Expense {
 
   @@index([storeId, spentAt])
   @@index([storeId, locationId, spentAt])
+}
+
+// Per-store build, step 4: cash a store hands over to the owner (lowers that store's expected cash).
+model CashHandover {
+  id           String    @id @default(cuid())
+  storeId      String
+  store        Store     @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  locationId   String
+  location     Warehouse @relation(fields: [locationId], references: [id], onDelete: Restrict)
+  businessDate String // YYYY-MM-DD (Manila)
+  amountMinor  Int
+  note         String?
+  handedById   String
+  receivedById String?
+  voidedAt     DateTime?
+  voidedById   String?
+  voidReason   String?
+  createdAt    DateTime  @default(now())
+
+  @@index([storeId, locationId, businessDate])
 }
 
 // ─────────────────────────────── Purchases / replenishment ───────────────────────────────

@@ -19,6 +19,7 @@ import { profitShareByLocation } from "../payable/charges.js";
 import { aging, dayRange, manilaDate, monthRange, pct, ReportError, stockFlag } from "../domain/reports.js";
 import { varietyOf } from "../domain/resack.js";
 import { bookLines, bookTotals, mainLocationId, ordersOfStore, paymentsOfStore, salesBook } from "./sales-book.js";
+import { cashOfDay } from "../cash/cash-book.js";
 import { costValue, isLooseP } from "../domain/counting.js";
 import { checkChain, periodTotals, type ChainCheck, type LedgerRow } from "../domain/stock-book.js";
 import { buildSummary, type KiloTotals, type SummaryRow } from "../domain/movement-summary.js";
@@ -197,7 +198,8 @@ export class RiceReportsService {
         varieties.set(v, cur);
       }
     }
-    const cashIn = payments.filter((p) => p.method === "cash").reduce((s, p) => s + p.amountMinor, 0);
+    // The cash book (step 4): in, given back, paid out of the drawer, handed over to the owner.
+    const { inByOrder: _byOrder, ...cash } = await cashOfDay(prisma, storeId, locationId, date, { mainId });
     const utangCollected = payments.filter((p) => !p.orderId && p.method !== "credit").reduce((s, p) => s + p.amountMinor, 0);
     const kargadors = new Map<string, { name: string; transactions: number }>();
     const seenDocs = new Set<string>();
@@ -215,7 +217,7 @@ export class RiceReportsService {
       sales: { ...sales, profitShareMinor: share, grossProfitMinor: sales.totalMinor - sales.costMinor + share },
       kilosByVariety: [...varieties.entries()].filter(([, v]) => v.grams !== 0 || v.salesMinor !== 0).map(([variety, v]) => ({ variety, grams: v.grams, salesMinor: v.salesMinor })).sort((a, b) => b.grams - a.grams),
       utang: { givenMinor: credits.reduce((s, c) => s + c.amountMinor, 0), collectedMinor: utangCollected },
-      cash: { expectedMinor: cashIn },
+      cash,
       stockIn: { documents: stockIns.length, units: stockIns.reduce((s, d) => s + d.lines.reduce((x, l) => x + l.quantity, 0), 0) },
       trips: {
         releasedOut: -moves.filter((m) => m.type === "RELEASE_OUT").reduce((s, m) => s + m.delta, 0),
@@ -238,14 +240,11 @@ export class RiceReportsService {
     // and the sales taken back after it.
     const late = book.entries.filter((e) => e.at > closedAt || (e.sign === 1 && e.createdAt > closedAt));
     const money = bookTotals(late, book.splits);
-    const cash = await prisma.payment.findMany({
-      where: { storeId, type: "payment", method: "cash", receivedAt: { gt: closedAt, lt: to }, ...paymentsOfStore(locationId, book.mainId) },
-      select: { amountMinor: true },
-    });
+    const cash = await cashOfDay(prisma, storeId, locationId, date, { mainId: book.mainId, after: closedAt });
     return {
       count: money.count,
       totalMinor: money.totalMinor,
-      cashMinor: cash.reduce((a, p) => a + p.amountMinor, 0),
+      cashMinor: cash.inMinor, cashGivenBackMinor: cash.givenBackMinor, cashPaidOutMinor: cash.paidOutMinor, cashHandedOverMinor: cash.handedOverMinor,
       takenBack: money.takenBack,
     };
   }

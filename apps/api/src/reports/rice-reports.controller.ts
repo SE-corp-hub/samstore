@@ -13,6 +13,7 @@ import { signaturesFrom } from "../people/signature-input.js";
 import { RiceReportsService, watchStock } from "./rice-reports.service.js";
 import { StoreReportService } from "./store-report.service.js";
 import { WeeklySummaryService } from "./weekly-summary.service.js";
+import { CashService } from "../cash/cash.service.js";
 
 function statusFor(error: ApiError): HttpStatus {
   switch (error.type) {
@@ -40,12 +41,43 @@ export class RiceReportsController {
   private readonly reports = new RiceReportsService();
   private readonly storeReports = new StoreReportService();
   private readonly weekly = new WeeklySummaryService();
+  private readonly cash = new CashService();
 
   private async ctx(req: Req_, h: string | undefined) {
     const user = req.user;
     requireUser(user);
     const { storeId, role } = await resolveTenant(user, h, TENANT_ROLES.ADMIN);
     return { storeId, actor: await loadActor(storeId, user.sub, role) };
+  }
+
+  // ── cash at each store (per-store build, step 4) ──
+
+  /** GET /admin/rice/cash?locationId=&date= — a store's cash for the day and its hand-overs. */
+  @Get("cash")
+  async cashDay(@Req() req: Req_, @Query("locationId") locationId?: string, @Query("date") date?: string, @Headers("x-store-id") h?: string) {
+    const { storeId, actor } = await this.ctx(req, h);
+    return unwrap(await this.cash.day(storeId, actor, { locationId: str(locationId), date: str(date) }));
+  }
+
+  /** POST /admin/rice/cash/handover { locationId?, amountMinor, note?, date? } — cash handed over to the owner. */
+  @Post("cash/handover")
+  async cashHandOver(@Req() req: Req_, @Body() body: Record<string, unknown>, @Headers("x-store-id") h?: string) {
+    const { storeId, actor } = await this.ctx(req, h);
+    return unwrap(await this.cash.handOver(storeId, actor, { locationId: str(body?.locationId), amountMinor: body?.amountMinor, note: str(body?.note), date: str(body?.date) }));
+  }
+
+  /** POST /admin/rice/cash/handover/received { id } — the owner received it. */
+  @Post("cash/handover/received")
+  async cashReceived(@Req() req: Req_, @Body() body: Record<string, unknown>, @Headers("x-store-id") h?: string) {
+    const { storeId, actor } = await this.ctx(req, h);
+    return unwrap(await this.cash.receive(storeId, actor, str(body?.id) ?? ""));
+  }
+
+  /** POST /admin/rice/cash/handover/cancel { id, reason } — owner only; it stays on the list, crossed out. */
+  @Post("cash/handover/cancel")
+  async cashCancel(@Req() req: Req_, @Body() body: Record<string, unknown>, @Headers("x-store-id") h?: string) {
+    const { storeId, actor } = await this.ctx(req, h);
+    return unwrap(await this.cash.cancel(storeId, actor, str(body?.id) ?? "", str(body?.reason)));
   }
 
   /** GET /admin/rice/stock-live — every rice product × location, in transit, in resack, totals. */
