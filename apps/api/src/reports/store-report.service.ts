@@ -5,9 +5,10 @@
 import type { ApiError } from "@sam-store/contracts";
 import { prisma } from "../persistence/prisma-repositories.js";
 import { profitShareByLocation } from "../payable/charges.js";
-import { dayRange, lineCost, manilaDate, ReportError, stockFlag } from "../domain/reports.js";
+import { dayRange, manilaDate, ReportError, stockFlag } from "../domain/reports.js";
 import { isLooseP } from "../domain/counting.js";
 import { SOLD_STATES } from "../domain/order-state.js";
+import { bookLines, bookTotals, mainLocationId, ordersOfStore, paymentsOfStore, salesBook } from "./sales-book.js";
 import { locationRefusal, type Actor } from "../people/people.service.js";
 
 export type StoreReportResult<T> = { ok: true; value: T } | { ok: false; error: ApiError };
@@ -26,7 +27,7 @@ function valueOf(loose: boolean, qty: number, unitMinor: number): number {
   return loose ? Math.round((qty * unitMinor) / 1000) : qty * unitMinor;
 }
 
-type SalesTotalsOut = { count: number; totalMinor: number; cashMinor: number; gcashMinor: number; creditMinor: number; otherMinor: number; costMinor?: number; grossProfitMinor?: number; profitShareMinor?: number };
+type SalesTotalsOut = { count: number; totalMinor: number; cashMinor: number; gcashMinor: number; creditMinor: number; otherMinor: number; takenBack: { count: number; totalMinor: number }; costMinor?: number; grossProfitMinor?: number; profitShareMinor?: number };
 type RecordRow = { at: string; kind: "SALE" | "STOCK" | "MONEY"; title: string; detail: string; store: string | null; docNumber: string | null; amountMinor: number | null; qtyText: string | null; balanceText: string | null; by: string | null };
 type CompareRow = {
   location: { id: string; name: string; type: string }; sales: SalesTotalsOut; cashInMinor: number; creditGivenMinor: number; creditCollectedMinor: number;
@@ -114,60 +115,40 @@ export class StoreReportService {
 
   private async salesOf(storeId: string, locationId: string, start: Date, end: Date, owner: boolean) {
     const range = { gte: start, lt: end };
-    const [orders, payments, credits] = await Promise.all([
-      prisma.order.findMany({
-        where: { storeId, sellingLocationId: locationId, status: { in: SOLD_STATES }, OR: [{ occurredAt: range }, { occurredAt: null, createdAt: range }] },
-        select: { id: true, totalMinor: true, paymentMethod: true, occurredAt: true, createdAt: true, items: { select: { productId: true, productName: true, soldBy: true, quantity: true, grams: true, lineTotalMinor: true, unitCostMinor: true } } },
-      }),
+    const mainId = await mainLocationId(prisma, storeId);
+    const [book, payments, credits] = await Promise.all([
+      // The sales book: this store's sales in the dates, and the sales taken back in them.
+      salesBook(prisma, storeId, range, { locationId, mainId }),
       prisma.payment.findMany({
-        where: { storeId, type: "payment", receivedAt: range, OR: [{ locationId }, { locationId: null, order: { sellingLocationId: locationId } }] },
+        where: { storeId, type: "payment", receivedAt: range, ...paymentsOfStore(locationId, mainId) },
         select: { method: true, amountMinor: true, orderId: true },
       }),
-      prisma.creditEntry.findMany({ where: { storeId, createdAt: range, type: "purchase", order: { sellingLocationId: locationId } }, select: { amountMinor: true } }),
+      prisma.creditEntry.findMany({ where: { storeId, createdAt: range, type: "purchase", order: ordersOfStore(locationId, mainId) }, select: { amountMinor: true } }),
     ]);
-    const products = new Map((await prisma.product.findMany({ where: { storeId, id: { in: [...new Set(orders.flatMap((o) => o.items.map((i) => i.productId).filter((x): x is string => !!x)))] } }, select: productSelect })).map((x) => [x.id, x]));
-    const t = { count: orders.length, totalMinor: 0, cashMinor: 0, gcashMinor: 0, creditMinor: 0, otherMinor: 0, costMinor: 0 };
+    const products = new Map((await prisma.product.findMany({ where: { storeId, id: { in: [...new Set(book.entries.flatMap((e) => e.items.map((i) => i.productId).filter((x): x is string => !!x)))] } }, select: productSelect })).map((x) => [x.id, x]));
+    const t = { ...bookTotals(book.entries, book.splits), costMinor: 0 };
     const items = new Map<string, { name: string; loose: boolean; quantity: number; salesMinor: number; costMinor: number }>();
-    const days = new Map<string, { count: number; totalMinor: number }>();
-    // A split sale is counted by what each part actually paid (cash, GCash, or Maya/bank under "other").
-    const splitIds = orders.filter((o) => o.paymentMethod === "split").map((o) => o.id);
-    const splitPays = splitIds.length ? await prisma.payment.findMany({ where: { orderId: { in: splitIds }, type: "payment" }, select: { orderId: true, method: true, amountMinor: true } }) : [];
-    for (const o of orders) {
-      t.totalMinor += o.totalMinor;
-      if (o.paymentMethod === "split") {
-        let rest = o.totalMinor;
-        for (const sp of splitPays.filter((x) => x.orderId === o.id)) {
-          if (sp.method === "cash") t.cashMinor += sp.amountMinor; else if (sp.method === "gcash") t.gcashMinor += sp.amountMinor; else t.otherMinor += sp.amountMinor;
-          rest -= sp.amountMinor;
-        }
-        if (rest > 0) t.otherMinor += rest;
-      } else if (o.paymentMethod === "cash" || o.paymentMethod === "cod") t.cashMinor += o.totalMinor; // cod: cash paid on delivery or pick-up
-      else if (o.paymentMethod === "gcash") t.gcashMinor += o.totalMinor;
-      else if (o.paymentMethod === "credit") t.creditMinor += o.totalMinor;
-      else t.otherMinor += o.totalMinor;
-      const day = manilaDate(o.occurredAt ?? o.createdAt);
-      const d = days.get(day) ?? { count: 0, totalMinor: 0 };
-      d.count++; d.totalMinor += o.totalMinor;
-      days.set(day, d);
-      for (const i of o.items) {
-        const p = i.productId ? products.get(i.productId) : undefined;
-        const loose = p ? isLooseP(p) : i.soldBy === "KILO" || i.soldBy === "PESO";
-        const key = i.productId ?? i.productName;
-        const cur = items.get(key) ?? { name: i.productName, loose, quantity: 0, salesMinor: 0, costMinor: 0 };
-        cur.quantity += loose ? (i.grams ?? i.quantity) : i.quantity;
-        cur.salesMinor += i.lineTotalMinor;
-        items.set(key, cur);
-        if (p) { const c = lineCost(i, p.costMinor, loose); t.costMinor += c; cur.costMinor += c; }
-      }
+    // Day by day: a sale taken back is taken off the day it was taken back, never off the day it was sold.
+    const byDay = new Map<string, typeof book.entries>();
+    for (const e of book.entries) byDay.set(manilaDate(e.at), [...(byDay.get(manilaDate(e.at)) ?? []), e]);
+    const days = new Map([...byDay.entries()].map(([day, list]) => { const d = bookTotals(list, book.splits); return [day, { count: d.count, totalMinor: d.totalMinor }] as const; }));
+    for (const l of bookLines(book.entries, (id) => products.get(id))) {
+      const key = l.line.productId ?? l.line.productName;
+      const cur = items.get(key) ?? { name: l.line.productName, loose: l.loose, quantity: 0, salesMinor: 0, costMinor: 0 };
+      cur.quantity += l.quantity;
+      cur.salesMinor += l.salesMinor;
+      cur.costMinor += l.costMinor;
+      t.costMinor += l.costMinor;
+      items.set(key, cur);
     }
     // Profit share (owner): + at the consignment store for rice the main store took from it, − at the main store.
     const share = owner ? (await profitShareByLocation(prisma, storeId, range)).get(locationId) ?? 0 : 0;
     return {
-      sales: { count: t.count, totalMinor: t.totalMinor, cashMinor: t.cashMinor, gcashMinor: t.gcashMinor, creditMinor: t.creditMinor, otherMinor: t.otherMinor, ...(owner ? { costMinor: t.costMinor, profitShareMinor: share, grossProfitMinor: t.totalMinor - t.costMinor + share } : {}) },
+      sales: { count: t.count, totalMinor: t.totalMinor, cashMinor: t.cashMinor, gcashMinor: t.gcashMinor, creditMinor: t.creditMinor, otherMinor: t.otherMinor, takenBack: t.takenBack, ...(owner ? { costMinor: t.costMinor, profitShareMinor: share, grossProfitMinor: t.totalMinor - t.costMinor + share } : {}) },
       cashInMinor: payments.filter((p) => p.method === "cash").reduce((s, p) => s + p.amountMinor, 0),
       creditGivenMinor: credits.reduce((s, c) => s + c.amountMinor, 0),
       creditCollectedMinor: payments.filter((p) => !p.orderId && p.method !== "credit").reduce((s, p) => s + p.amountMinor, 0),
-      items: [...items.values()].map((v) => ({ name: v.name, unit: v.loose ? "kg" : "pcs", quantity: v.loose ? v.quantity / 1000 : v.quantity, salesMinor: v.salesMinor, ...(owner ? { profitMinor: v.salesMinor - v.costMinor } : {}) })).sort((a, b) => b.salesMinor - a.salesMinor),
+      items: [...items.values()].filter((v) => v.quantity !== 0 || v.salesMinor !== 0).map((v) => ({ name: v.name, unit: v.loose ? "kg" : "pcs", quantity: v.loose ? v.quantity / 1000 : v.quantity, salesMinor: v.salesMinor, ...(owner ? { profitMinor: v.salesMinor - v.costMinor } : {}) })).sort((a, b) => b.salesMinor - a.salesMinor),
       days: [...days.entries()].map(([date, v]) => ({ date, ...v })).sort((a, b) => (a.date < b.date ? 1 : -1)),
     };
   }
@@ -310,12 +291,14 @@ export class StoreReportService {
       const range = { gte: r.start, lt: r.end };
       const kind = input.kind === "sales" || input.kind === "stock" || input.kind === "money" ? input.kind : "all";
       const LIMIT = 250;
+      const mainId = await mainLocationId(prisma, storeId);
 
       const out: RecordRow[] = [];
 
       if (kind === "all" || kind === "sales") {
         const orders = await prisma.order.findMany({
-          where: { storeId, sellingLocationId: { in: ids }, status: { in: [...SOLD_STATES, "CANCELLED"] }, OR: [{ occurredAt: range }, { occurredAt: null, createdAt: range }], ...(input.productId ? { items: { some: { productId: input.productId } } } : {}) },
+          // A sale with no store is the main store's, the same as in every report (the sales book).
+          where: { storeId, status: { in: [...SOLD_STATES, "CANCELLED"] }, AND: [{ OR: ids.map((id) => ordersOfStore(id, mainId)) }, { OR: [{ occurredAt: range }, { occurredAt: null, createdAt: range }] }], ...(input.productId ? { items: { some: { productId: input.productId } } } : {}) },
           orderBy: { createdAt: "desc" }, take: LIMIT,
           select: { id: true, orderNumber: true, status: true, source: true, totalMinor: true, paymentMethod: true, customerName: true, occurredAt: true, createdAt: true, sellingLocationId: true, items: { select: { productName: true, quantity: true, grams: true, soldBy: true } } },
         });
@@ -325,7 +308,7 @@ export class StoreReportService {
           out.push({
             at: (o.occurredAt ?? o.createdAt).toISOString(), kind: "SALE", title: o.status === "CANCELLED" ? "Sale cancelled" : "Sale",
             detail: `${what}${o.customerName && o.customerName !== "Walk-in" ? ` · ${o.customerName}` : ""}${pay ? ` · ${pay}` : ""}`,
-            store: o.sellingLocationId ? names.get(o.sellingLocationId) ?? null : null, docNumber: o.orderNumber, amountMinor: o.totalMinor, qtyText: null, balanceText: null, by: null,
+            store: names.get(o.sellingLocationId ?? mainId ?? "") ?? null, docNumber: o.orderNumber, amountMinor: o.totalMinor, qtyText: null, balanceText: null, by: null,
           });
         }
       }

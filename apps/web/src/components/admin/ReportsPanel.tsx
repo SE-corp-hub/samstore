@@ -17,7 +17,7 @@ interface SalesData {
   utangAging: { currentMinor: number; over30Minor: number; rows: { name: string; balanceMinor: number; daysOld: number; bucket: string }[] };
 }
 interface StockLowRow { id: string; name: string; sku: string; barcode: string | null; unit: string | null; availableQuantity: number; reorderThreshold: number }
-interface SoldStockRow { name: string; sku: string; sold: number }
+interface SoldStockRow { name: string; sku: string; sold: number; unit?: string }
 interface IncomeLossData { income: { revenueMinor: number; refundsMinor: number; netRevenueMinor: number; ordersCount: number }; expenses: { totalMinor: number; byCategory: Record<string, number>; lineItems: { category: string; amountMinor: number; note: string | null }[] }; cogsMinor: number; profitMinor: number }
 interface SalesByPaymentRow { method: string; totalMinor: number; orders: number; avgMinor: number }
 interface CustomerStatementRow { name: string; totalPaidMinor: number; creditBalanceMinor: number; balanceMinor: number; orders: number; firstOrderAt: string | null; lastOrderAt: string | null }
@@ -137,10 +137,10 @@ export default function ReportsPanel() {
         <>
           {activeTab === "profit" && profit && (
             <div className="row g-3 mb-3">
-              <div className="col-6 col-md-3"><div className="card h-100"><div className="card-body text-center"><div className="small text-muted">Revenue (fulfilled)</div><div className="h4 mb-0">{toPesos(profit.netRevenueMinor)}</div><div className="small text-muted">{profit.ordersCount} orders{profit.refundsMinor > 0 ? ` · refunds ${toPesos(profit.refundsMinor)}` : ""}</div></div></div></div>
-              <div className="col-6 col-md-3"><div className="card h-100"><div className="card-body text-center"><div className="small text-muted">COGS (estimate)</div><div className="h4 mb-0">{toPesos(profit.cogsMinor)}</div></div></div></div>
+              <div className="col-6 col-md-3"><div className="card h-100"><div className="card-body text-center"><div className="small text-muted">Sales (all stores)</div><div className="h4 mb-0">{toPesos(profit.netRevenueMinor)}</div><div className="small text-muted">{profit.ordersCount} sales{profit.refundsMinor > 0 ? ` · taken back ${toPesos(profit.refundsMinor)}` : ""}</div></div></div></div>
+              <div className="col-6 col-md-3"><div className="card h-100"><div className="card-body text-center"><div className="small text-muted">Cost of rice sold</div><div className="h4 mb-0">{toPesos(profit.cogsMinor)}</div></div></div></div>
               <div className="col-6 col-md-3"><div className="card h-100"><div className="card-body text-center"><div className="small text-muted">Expenses</div><div className="h4 mb-0">{toPesos(profit.expensesMinor)}</div></div></div></div>
-              <div className="col-6 col-md-3"><div className={`card h-100 ${profit.profitMinor < 0 ? "border-danger" : ""}`}><div className="card-body text-center"><div className="small text-muted">Profit (estimate)</div><div className={`h4 mb-0 ${profit.profitMinor < 0 ? "text-danger" : "text-success"}`}>{toPesos(profit.profitMinor)}</div></div></div></div>
+              <div className="col-6 col-md-3"><div className={`card h-100 ${profit.profitMinor < 0 ? "border-danger" : ""}`}><div className="card-body text-center"><div className="small text-muted">Profit</div><div className={`h4 mb-0 ${profit.profitMinor < 0 ? "text-danger" : "text-success"}`}>{toPesos(profit.profitMinor)}</div></div></div></div>
               <div className="col-12"><p className="small text-muted mb-0"><i className="bi bi-info-circle me-1"></i>{profit.cogsNote}</p></div>
             </div>
           )}
@@ -167,8 +167,8 @@ export default function ReportsPanel() {
               {soldStock && soldStock.rows.length === 0 && <p className="text-muted">No fulfilled orders in this period.</p>}
               {soldStock && soldStock.rows.length > 0 && (
                 <>
-                  <p className="small text-muted mb-2">Total units sold: <strong>{soldStock.totalUnitsSold}</strong></p>
-                  <table className="table table-hover align-middle"><thead><tr><th>Product</th><th>SKU</th><th className="text-end">Units sold</th></tr></thead><tbody>{soldStock.rows.map((r) => (<tr key={`${r.sku}-${r.name}`}><td>{r.name}</td><td className="small text-muted">{r.sku}</td><td className="text-end fw-semibold">{r.sold}</td></tr>))}</tbody></table>
+                  
+                  <table className="table table-hover align-middle"><thead><tr><th>Product</th><th>SKU</th><th className="text-end">Sold</th></tr></thead><tbody>{soldStock.rows.map((r) => (<tr key={`${r.sku}-${r.name}`}><td>{r.name}</td><td className="small text-muted">{r.sku}</td><td className="text-end fw-semibold">{r.sold.toLocaleString("en-PH", { maximumFractionDigits: 3 })} {r.unit ?? ""}</td></tr>))}</tbody></table>
                 </>
               )}
             </div>
@@ -176,9 +176,9 @@ export default function ReportsPanel() {
 
           {activeTab === "income-loss" && incomeLoss && (
             <div className="row g-3">
-              <div className="col-md-6"><div className="card"><div className="card-body"><h6 className="card-title small fw-bold">Income</h6><div className="small">Revenue: <strong>{toPesos(incomeLoss.income.revenueMinor)}</strong></div><div className="small">Refunds: {toPesos(incomeLoss.income.refundsMinor)}</div><div className="small">Net revenue: <strong>{toPesos(incomeLoss.income.netRevenueMinor)}</strong></div><div className="small text-muted">{incomeLoss.income.ordersCount} fulfilled orders</div></div></div></div>
+              <div className="col-md-6"><div className="card"><div className="card-body"><h6 className="card-title small fw-bold">Income</h6><div className="small">Revenue: <strong>{toPesos(incomeLoss.income.revenueMinor)}</strong></div><div className="small">Taken back: {toPesos(incomeLoss.income.refundsMinor)}</div><div className="small">Net revenue: <strong>{toPesos(incomeLoss.income.netRevenueMinor)}</strong></div><div className="small text-muted">{incomeLoss.income.ordersCount} sales</div></div></div></div>
               <div className="col-md-6"><div className="card"><div className="card-body"><h6 className="card-title small fw-bold">Expenses</h6>{Object.entries(incomeLoss.expenses.byCategory).map(([cat, amt]) => (<div key={cat} className="d-flex justify-content-between small"><span className="text-capitalize">{cat}</span><strong>{toPesos(amt)}</strong></div>))}<hr className="my-1" /><div className="d-flex justify-content-between small"><span>Total expenses</span><strong>{toPesos(incomeLoss.expenses.totalMinor)}</strong></div></div></div></div>
-              <div className="col-12"><div className="card"><div className="card-body"><h6 className="card-title small fw-bold">Summary</h6><div className="d-flex justify-content-between"><span>COGS (estimate)</span><span>{toPesos(incomeLoss.cogsMinor)}</span></div><div className="d-flex justify-content-between"><span>Net profit</span><strong className={incomeLoss.profitMinor < 0 ? "text-danger" : "text-success"}>{toPesos(incomeLoss.profitMinor)}</strong></div></div></div></div>
+              <div className="col-12"><div className="card"><div className="card-body"><h6 className="card-title small fw-bold">Summary</h6><div className="d-flex justify-content-between"><span>Cost of rice sold</span><span>{toPesos(incomeLoss.cogsMinor)}</span></div><div className="d-flex justify-content-between"><span>Net profit</span><strong className={incomeLoss.profitMinor < 0 ? "text-danger" : "text-success"}>{toPesos(incomeLoss.profitMinor)}</strong></div></div></div></div>
             </div>
           )}
 

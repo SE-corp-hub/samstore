@@ -16,9 +16,9 @@ import type { ApiError } from "@sam-store/contracts";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../persistence/prisma-repositories.js";
 import { profitShareByLocation } from "../payable/charges.js";
-import { aging, dayRange, lineCost, lineGrams, manilaDate, monthRange, pct, ReportError, stockFlag } from "../domain/reports.js";
+import { aging, dayRange, manilaDate, monthRange, pct, ReportError, stockFlag } from "../domain/reports.js";
 import { varietyOf } from "../domain/resack.js";
-import { SOLD_STATES } from "../domain/order-state.js";
+import { bookLines, bookTotals, mainLocationId, ordersOfStore, paymentsOfStore, salesBook } from "./sales-book.js";
 import { costValue, isLooseP } from "../domain/counting.js";
 import { checkChain, periodTotals, type ChainCheck, type LedgerRow } from "../domain/stock-book.js";
 import { buildSummary, type KiloTotals, type SummaryRow } from "../domain/movement-summary.js";
@@ -158,16 +158,15 @@ export class RiceReportsService {
     const range = { gte: from, lt: to };
     // At most 4 queries at a time: the database pooler gives this app few connections,
     // and 10 at once could wait out the pool timeout on a slow link (M9 verify run).
-    const [orders, payments, credits, stockIns] = await Promise.all([
-      prisma.order.findMany({
-        where: { storeId, sellingLocationId: locationId, status: { in: SOLD_STATES }, OR: [{ occurredAt: range }, { occurredAt: null, createdAt: range }] },
-        select: { id: true, totalMinor: true, paymentMethod: true, encodedLater: true, items: { select: { productId: true, soldBy: true, quantity: true, grams: true, lineTotalMinor: true, unitCostMinor: true } } },
-      }),
+    const mainId = await mainLocationId(prisma, storeId);
+    const [book, payments, credits, stockIns] = await Promise.all([
+      // The sales book: this store's sales of the day, and the sales taken back on this day.
+      salesBook(prisma, storeId, range, { locationId, mainId }),
       prisma.payment.findMany({
-        where: { storeId, type: "payment", receivedAt: range, OR: [{ locationId }, { locationId: null, order: { sellingLocationId: locationId } }] },
+        where: { storeId, type: "payment", receivedAt: range, ...paymentsOfStore(locationId, mainId) },
         select: { method: true, amountMinor: true, orderId: true },
       }),
-      prisma.creditEntry.findMany({ where: { storeId, createdAt: range, type: "purchase", order: { sellingLocationId: locationId } }, select: { amountMinor: true } }),
+      prisma.creditEntry.findMany({ where: { storeId, createdAt: range, type: "purchase", order: ordersOfStore(locationId, mainId) }, select: { amountMinor: true } }),
       prisma.stockIn.findMany({ where: { storeId, locationId, createdAt: range }, select: { id: true, lines: { select: { quantity: true } } } }),
     ]);
     const [moves, resacks, writeOffs, counts] = await Promise.all([
@@ -181,27 +180,21 @@ export class RiceReportsService {
       prisma.product.findMany({ where: { storeId }, select: productSelect }),
     ]);
     const byProduct = new Map(products.map((p) => [p.id, p]));
-    const sales = { count: orders.length, totalMinor: 0, cashMinor: 0, gcashMinor: 0, utangMinor: 0, otherMinor: 0, encodedLater: 0, costMinor: 0 };
+    const money = bookTotals(book.entries, book.splits);
+    const sales = {
+      count: money.count, totalMinor: money.totalMinor, cashMinor: money.cashMinor, gcashMinor: money.gcashMinor, utangMinor: money.creditMinor, otherMinor: money.otherMinor,
+      encodedLater: money.encodedLater, costMinor: 0, takenBack: money.takenBack,
+    };
     const varieties = new Map<string, { grams: number; salesMinor: number }>();
-    for (const o of orders) {
-      sales.totalMinor += o.totalMinor;
-      if (o.encodedLater) sales.encodedLater++;
-      if (o.paymentMethod === "cash" || o.paymentMethod === "cod") sales.cashMinor += o.totalMinor; // cod: cash paid on delivery or pick-up
-      else if (o.paymentMethod === "gcash") sales.gcashMinor += o.totalMinor;
-      else if (o.paymentMethod === "credit") sales.utangMinor += o.totalMinor;
-      else sales.otherMinor += o.totalMinor;
-      for (const i of o.items) {
-        const p = i.productId ? byProduct.get(i.productId) : undefined;
-        if (!p) continue;
-        sales.costMinor += lineCost(i, p.costMinor, isLooseP(p));
-        const g = lineGrams(i, p.stockBaseUnit === "g" ? p.stockBaseQuantity : null);
-        if (g > 0) {
-          const v = varietyOf(p);
-          const cur = varieties.get(v) ?? { grams: 0, salesMinor: 0 };
-          cur.grams += g;
-          cur.salesMinor += i.lineTotalMinor;
-          varieties.set(v, cur);
-        }
+    for (const l of bookLines(book.entries, (id) => byProduct.get(id))) {
+      if (!l.product) continue;
+      sales.costMinor += l.costMinor;
+      if (l.grams !== 0) {
+        const v = varietyOf(l.product);
+        const cur = varieties.get(v) ?? { grams: 0, salesMinor: 0 };
+        cur.grams += l.grams;
+        cur.salesMinor += l.salesMinor;
+        varieties.set(v, cur);
       }
     }
     const cashIn = payments.filter((p) => p.method === "cash").reduce((s, p) => s + p.amountMinor, 0);
@@ -220,7 +213,7 @@ export class RiceReportsService {
     const share = (await profitShareByLocation(prisma, storeId, range)).get(locationId) ?? 0;
     return {
       sales: { ...sales, profitShareMinor: share, grossProfitMinor: sales.totalMinor - sales.costMinor + share },
-      kilosByVariety: [...varieties.entries()].map(([variety, v]) => ({ variety, grams: v.grams, salesMinor: v.salesMinor })).sort((a, b) => b.grams - a.grams),
+      kilosByVariety: [...varieties.entries()].filter(([, v]) => v.grams !== 0 || v.salesMinor !== 0).map(([variety, v]) => ({ variety, grams: v.grams, salesMinor: v.salesMinor })).sort((a, b) => b.grams - a.grams),
       utang: { givenMinor: credits.reduce((s, c) => s + c.amountMinor, 0), collectedMinor: utangCollected },
       cash: { expectedMinor: cashIn },
       stockIn: { documents: stockIns.length, units: stockIns.reduce((s, d) => s + d.lines.reduce((x, l) => x + l.quantity, 0), 0) },
@@ -240,25 +233,20 @@ export class RiceReportsService {
    *  report is frozen on purpose, so these would otherwise be invisible to the owner. */
   private async afterClose(storeId: string, locationId: string, date: string, closedAt: Date) {
     const { from, to } = dayRange(date);
-    const orders = await prisma.order.findMany({
-      where: {
-        storeId, sellingLocationId: locationId, status: { in: SOLD_STATES },
-        // Rung up after the close, or handed over after it (a pre-order or a delivery that was placed earlier).
-        AND: [
-          { OR: [{ createdAt: { gt: closedAt } }, { occurredAt: { gt: closedAt } }] },
-          { OR: [{ occurredAt: { gte: from, lt: to } }, { occurredAt: null, createdAt: { gte: from, lt: to } }] },
-        ],
-      },
-      select: { totalMinor: true, paymentMethod: true },
-    });
+    const book = await salesBook(prisma, storeId, { gte: from, lt: to }, { locationId });
+    // Rung up after the close, or handed over after it (a pre-order or a delivery that was placed earlier),
+    // and the sales taken back after it.
+    const late = book.entries.filter((e) => e.at > closedAt || (e.sign === 1 && e.createdAt > closedAt));
+    const money = bookTotals(late, book.splits);
     const cash = await prisma.payment.findMany({
-      where: { storeId, type: "payment", method: "cash", receivedAt: { gt: closedAt, lt: to }, OR: [{ locationId }, { locationId: null, order: { sellingLocationId: locationId } }] },
+      where: { storeId, type: "payment", method: "cash", receivedAt: { gt: closedAt, lt: to }, ...paymentsOfStore(locationId, book.mainId) },
       select: { amountMinor: true },
     });
     return {
-      count: orders.length,
-      totalMinor: orders.reduce((a, o) => a + o.totalMinor, 0),
+      count: money.count,
+      totalMinor: money.totalMinor,
       cashMinor: cash.reduce((a, p) => a + p.amountMinor, 0),
+      takenBack: money.takenBack,
     };
   }
 
@@ -368,13 +356,10 @@ export class RiceReportsService {
       const m = month || manilaDate(new Date()).slice(0, 7);
       const { from, to } = monthRange(m);
       const range = { gte: from, lt: to };
-      const [locations, products, orders, resacks, shorts, writeOffs, credit, forReview, levels] = await Promise.all([
+      const [locations, products, book, resacks, shorts, writeOffs, credit, forReview, levels] = await Promise.all([
         this.locations(storeId),
         prisma.product.findMany({ where: { storeId }, select: productSelect }),
-        prisma.order.findMany({
-          where: { storeId, status: { in: SOLD_STATES }, OR: [{ occurredAt: range }, { occurredAt: null, createdAt: range }] },
-          select: { sellingLocationId: true, totalMinor: true, items: { select: { productId: true, soldBy: true, quantity: true, grams: true, lineTotalMinor: true, unitCostMinor: true } } },
-        }),
+        salesBook(prisma, storeId, range),
         prisma.resackJob.findMany({ where: { storeId, status: "FINISHED", finishedAt: range }, select: { locationId: true, kargadorId: true, inputGrams: true, lossGrams: true, lossValueMinor: true, kargador: { select: { name: true } } } }),
         prisma.stockTransfer.findMany({ where: { storeId, receivedAt: range, shortQty: { gt: 0 } }, select: { toWarehouseId: true, kargadorId: true, shortQty: true, productId: true, kargador: { select: { name: true } } } }),
         prisma.stockWriteOff.findMany({ where: { storeId, createdAt: range }, select: { locationId: true, valueMinor: true } }),
@@ -386,20 +371,19 @@ export class RiceReportsService {
       const perLoc = new Map(locations.map((l) => [l.id, { location: l, salesMinor: 0, costMinor: 0, grams: 0, orders: 0, resackGramsIn: 0, resackLossGrams: 0, resackLossMinor: 0, transitShortGrams: 0, writeOffMinor: 0 }]));
       const perVariety = new Map<string, { grams: number; salesMinor: number; costMinor: number }>();
       let soldCost = 0;
-      for (const o of orders) {
-        const L = o.sellingLocationId ? perLoc.get(o.sellingLocationId) : undefined;
-        if (L) { L.salesMinor += o.totalMinor; L.orders++; }
-        for (const i of o.items) {
-          const p = i.productId ? byProduct.get(i.productId) : undefined;
-          if (!p) continue;
-          const c = lineCost(i, p.costMinor, isLooseP(p));
-          const g = lineGrams(i, p.stockBaseUnit === "g" ? p.stockBaseQuantity : null);
-          soldCost += c;
-          if (L) { L.costMinor += c; L.grams += g; }
-          const v = perVariety.get(varietyOf(p)) ?? { grams: 0, salesMinor: 0, costMinor: 0 };
-          v.grams += g; v.salesMinor += i.lineTotalMinor; v.costMinor += c;
-          perVariety.set(varietyOf(p), v);
-        }
+      // From the sales book: a sale with no store is the main store's, and a sale taken back this month is taken off.
+      for (const L of perLoc.values()) {
+        const t = bookTotals(book.entries.filter((e) => e.locationId === L.location.id), book.splits);
+        L.salesMinor = t.totalMinor; L.orders = t.count;
+      }
+      for (const l of bookLines(book.entries, (id) => byProduct.get(id))) {
+        if (!l.product) continue;
+        const L = l.entry.locationId ? perLoc.get(l.entry.locationId) : undefined;
+        soldCost += l.costMinor;
+        if (L) { L.costMinor += l.costMinor; L.grams += l.grams; }
+        const v = perVariety.get(varietyOf(l.product)) ?? { grams: 0, salesMinor: 0, costMinor: 0 };
+        v.grams += l.grams; v.salesMinor += l.salesMinor; v.costMinor += l.costMinor;
+        perVariety.set(varietyOf(l.product), v);
       }
       const perKargador = new Map<string, { name: string; resackGramsIn: number; resackLossGrams: number; transitShortGrams: number }>();
       const kg = (id: string | null, name: string | undefined) => {
@@ -656,18 +640,15 @@ export class RiceReportsService {
       }
       // Money, per location: what sold here in these dates (completed sales only), at the cost frozen with each sale,
       // and what the stock left on the shelf is worth at the product's current cost (the main store's cost).
-      const soldLines = await prisma.orderItem.findMany({
-        where: { storeId, productId: product.id, order: { status: { in: SOLD_STATES }, sellingLocationId: input.locationId ? input.locationId : { not: null }, OR: [{ occurredAt: { gte: from, lt: to } }, { occurredAt: null, createdAt: { gte: from, lt: to } }] } },
-        select: { soldBy: true, quantity: true, lineTotalMinor: true, unitCostMinor: true, order: { select: { sellingLocationId: true } } },
-      });
+      const book = await salesBook(prisma, storeId, { gte: from, lt: to }, { productId: product.id, ...(input.locationId ? { locationId: input.locationId } : {}) });
       const money = new Map<string, { salesMinor: number; costOfSoldMinor: number; soldQty: number }>();
-      for (const l of soldLines) {
-        const id = l.order.sellingLocationId;
-        if (!id) continue;
+      for (const l of bookLines(book.entries, () => product)) {
+        const id = l.entry.locationId;
+        if (!id || l.line.productId !== product.id) continue;
         const m = money.get(id) ?? { salesMinor: 0, costOfSoldMinor: 0, soldQty: 0 };
-        if (isLooseP(product) ? true : l.soldBy === "PIECE" || l.soldBy === null) m.soldQty += l.quantity;
-        m.salesMinor += l.lineTotalMinor;
-        m.costOfSoldMinor += lineCost(l, product.costMinor ?? 0, isLooseP(product));
+        if (isLooseP(product) ? true : l.line.soldBy === "PIECE" || l.line.soldBy === null) m.soldQty += l.entry.sign * l.line.quantity;
+        m.salesMinor += l.salesMinor;
+        m.costOfSoldMinor += l.costMinor;
         money.set(id, m);
       }
       const costMode = await costModeOf(prisma, storeId);

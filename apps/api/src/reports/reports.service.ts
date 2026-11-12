@@ -1,73 +1,80 @@
 // Reports — profit summary, sales splits, utang aging, top customers.
 // Decision #9: profit/expense/COGS visible ONLY to OWNER + MANAGER (enforced in controller).
-// COGS uses latest purchase cost (Product.costMinor) — labeled as an estimate.
 // M8: five read-only report screens (Stock low, Sold stock, Income & Loss, Sales by payment, Customer statement).
+//
+// Per-store build, step 1c: this screen reads sales from the SALES BOOK (`sales-book.ts`), the same
+// as the daily report, the month report and Compare stores, so its totals are the stores' totals
+// added up. A sale counts on the day it was sold, a sale taken back counts off on the day it was
+// taken back, and the cost is the cost saved with each sale.
 
 import { prisma } from "../persistence/prisma-repositories.js";
+import { bookLines, bookTotals, salesBook, type BookEntry } from "./sales-book.js";
 
 export const REPORTS_SERVICE = Symbol("REPORTS_SERVICE");
 
+const productSelect = { id: true, name: true, sku: true, costMinor: true, stockBaseUnit: true, stockBaseQuantity: true } as const;
+
 export class ReportsService {
-  /** Fulfilled orders in period (DELIVERED or COMPLETED — excludes CANCELLED/voided). */
-  private async fulfilledOrders(storeId: string, from: Date, to: Date) {
-    return prisma.order.findMany({
-      where: { storeId, status: { in: ["DELIVERED", "COMPLETED"] }, createdAt: { gte: from, lte: to } },
-      include: {
-        items: { include: { product: { select: { name: true, sku: true, costMinor: true } } } },
-        payments: { where: { type: "refund" }, select: { amountMinor: true } },
-      },
-    });
+  /** The whole business in the period, from the sales book: what was sold, what was taken back, and the cost. */
+  private async sold(storeId: string, from: Date, to: Date) {
+    // The screen asks "up to this moment", the book reads "before": one millisecond covers the difference.
+    const book = await salesBook(prisma, storeId, { gte: from, lt: new Date(to.getTime() + 1) });
+    const ids = [...new Set(book.entries.flatMap((e) => e.items.map((i) => i.productId).filter((x): x is string => !!x)))];
+    const products = new Map((ids.length ? await prisma.product.findMany({ where: { storeId, id: { in: ids } }, select: productSelect }) : []).map((p) => [p.id, p]));
+    const lines = bookLines(book.entries, (id) => products.get(id));
+    const money = bookTotals(book.entries, book.splits);
+    const revenue = book.entries.filter((e) => e.sign === 1).reduce((s, e) => s + e.totalMinor, 0);
+    return {
+      book, lines, money,
+      /** Everything sold in the period, before the sales taken back. */
+      revenue,
+      refunds: money.takenBack.totalMinor,
+      cogs: lines.reduce((s, l) => s + l.costMinor, 0),
+      /** Units sold whose product has no cost on record at all (their cost counts as ₱0). */
+      noCostUnits: lines.filter((l) => l.entry.sign === 1 && (l.line.unitCostMinor ?? l.product?.costMinor ?? 0) <= 0).reduce((s, l) => s + l.line.quantity, 0),
+    };
   }
 
-  /** Profit summary: revenue − refunds − COGS − expenses. COGS is an estimate. */
+  /** The book's entries with their sign applied, grouped by a key. */
+  private group<K>(entries: BookEntry[], keyOf: (e: BookEntry) => K) {
+    const by = new Map<K, BookEntry[]>();
+    for (const e of entries) by.set(keyOf(e), [...(by.get(keyOf(e)) ?? []), e]);
+    return by;
+  }
+
+  /** Profit summary: sales − sales taken back − cost of what was sold − expenses. */
   async profitSummary(storeId: string, from: Date, to: Date) {
-    const orders = await this.fulfilledOrders(storeId, from, to);
-    const revenue = orders.reduce((s, o) => s + o.totalMinor, 0);
-    const refunds = orders.reduce((s, o) => s + o.payments.reduce((r, p) => r + Math.abs(p.amountMinor), 0), 0);
-    let cogs = 0;
-    let cogsEstimatedUnits = 0;
-    for (const o of orders) {
-      for (const it of o.items) {
-        const cost = it.product?.costMinor ?? 0;
-        cogs += it.quantity * cost;
-        if (cost <= 0) cogsEstimatedUnits += it.quantity;
-      }
-    }
+    const s = await this.sold(storeId, from, to);
     const expensesRows = await prisma.expense.findMany({ where: { storeId, spentAt: { gte: from, lte: to } } });
-    const expenses = expensesRows.reduce((s, e) => s + e.amountMinor, 0);
-    const netRevenue = revenue - refunds;
+    const expenses = expensesRows.reduce((a, e) => a + e.amountMinor, 0);
+    const netRevenue = s.revenue - s.refunds;
     return {
       from: from.toISOString(),
       to: to.toISOString(),
-      revenueMinor: revenue,
-      refundsMinor: refunds,
+      revenueMinor: s.revenue,
+      refundsMinor: s.refunds,
       netRevenueMinor: netRevenue,
-      cogsMinor: cogs,
-      cogsEstimatedUnits,
+      cogsMinor: s.cogs,
+      cogsEstimatedUnits: s.noCostUnits,
       expensesMinor: expenses,
-      profitMinor: netRevenue - cogs - expenses,
-      ordersCount: orders.length,
-      cogsNote: cogsEstimatedUnits > 0
-        ? `COGS is an estimate: ${cogsEstimatedUnits} unit(s) sold had no purchase cost on record (counted at ₱0).`
-        : "COGS uses the latest purchase cost per product.",
+      profitMinor: netRevenue - s.cogs - expenses,
+      ordersCount: s.money.count,
+      cogsNote: s.noCostUnits > 0
+        ? `${s.noCostUnits} unit(s) sold had no cost on record (counted at ₱0), so the profit shown is too high.`
+        : "Cost is the cost saved with each sale. These numbers are the stores' numbers added up.",
     };
   }
 
   /** Sales split by payment method + top customers + utang aging. */
   async salesReport(storeId: string, from: Date, to: Date) {
-    const orders = await this.fulfilledOrders(storeId, from, to);
+    const { book } = await this.sold(storeId, from, to);
     const byMethod: Record<string, number> = {};
-    for (const o of orders) byMethod[o.paymentMethod] = (byMethod[o.paymentMethod] ?? 0) + o.totalMinor;
+    for (const [method, list] of this.group(book.entries, (e) => e.paymentMethod)) byMethod[method] = bookTotals(list, book.splits).totalMinor;
 
-    const byCustomer = new Map<string, { name: string; totalMinor: number; orders: number }>();
-    for (const o of orders) {
-      const key = o.customerName || "Walk-in";
-      const cur = byCustomer.get(key) ?? { name: key, totalMinor: 0, orders: 0 };
-      cur.totalMinor += o.totalMinor;
-      cur.orders += 1;
-      byCustomer.set(key, cur);
-    }
-    const topCustomers = [...byCustomer.values()].sort((a, b) => b.totalMinor - a.totalMinor).slice(0, 10);
+    const topCustomers = [...this.group(book.entries, (e) => e.customerName || "Walk-in")]
+      .map(([name, list]) => { const t = bookTotals(list, book.splits); return { name, totalMinor: t.totalMinor, orders: t.count }; })
+      .filter((c) => c.orders > 0 || c.totalMinor !== 0)
+      .sort((a, b) => b.totalMinor - a.totalMinor).slice(0, 10);
 
     // Utang aging: per customer with balance, age from their oldest purchase entry.
     const debtors = await prisma.storeCustomer.findMany({
@@ -92,7 +99,7 @@ export class ReportsService {
     return {
       from: from.toISOString(),
       to: to.toISOString(),
-      paymentSplit: Object.entries(byMethod).map(([method, totalMinor]) => ({ method, totalMinor })),
+      paymentSplit: Object.entries(byMethod).filter(([, totalMinor]) => totalMinor !== 0).map(([method, totalMinor]) => ({ method, totalMinor })),
       topCustomers,
       utangAging: aging,
     };
@@ -118,70 +125,48 @@ export class ReportsService {
     return { from: from.toISOString(), to: to.toISOString(), rows, count: rows.length };
   }
 
-  /** Sold stock: quantity sold per product in period. */
+  /** Sold stock: quantity sold per product in period (loose rice in kilos). */
   async soldStock(storeId: string, from: Date, to: Date) {
-    const orders = await this.fulfilledOrders(storeId, from, to);
-    const byProduct = new Map<string, { name: string; sku: string; sold: number }>();
-    for (const o of orders) {
-      for (const it of o.items) {
-        const product = it.product;
-        if (!product) continue;
-        const pid = it.productId;
-        if (!pid) continue;
-        const cur = byProduct.get(pid) ?? { name: product.name, sku: product.sku, sold: 0 };
-        cur.sold += it.quantity;
-        byProduct.set(pid, cur);
-      }
+    const { lines } = await this.sold(storeId, from, to);
+    const byProduct = new Map<string, { name: string; sku: string; unit: string; sold: number }>();
+    for (const l of lines) {
+      if (!l.product || !l.line.productId) continue;
+      const cur = byProduct.get(l.line.productId) ?? { name: l.product.name, sku: l.product.sku, unit: l.loose ? "kg" : "pcs", sold: 0 };
+      cur.sold += l.loose ? l.quantity / 1000 : l.quantity;
+      byProduct.set(l.line.productId, cur);
     }
-    const rows = [...byProduct.values()].sort((a, b) => b.sold - a.sold);
+    const rows = [...byProduct.values()].filter((r) => r.sold !== 0).sort((a, b) => b.sold - a.sold);
     return { from: from.toISOString(), to: to.toISOString(), rows, totalUnitsSold: rows.reduce((s, r) => s + r.sold, 0) };
   }
 
   /** Income & Loss: detailed breakdown — income by source, expense categories, net. */
   async incomeLoss(storeId: string, from: Date, to: Date) {
-    const orders = await this.fulfilledOrders(storeId, from, to);
-    const revenue = orders.reduce((s, o) => s + o.totalMinor, 0);
-    const refunds = orders.reduce((s, o) => s + o.payments.reduce((r, p) => r + Math.abs(p.amountMinor), 0), 0);
-    const netRevenue = revenue - refunds;
+    const s = await this.sold(storeId, from, to);
+    const netRevenue = s.revenue - s.refunds;
 
     const expensesRows = await prisma.expense.findMany({ where: { storeId, spentAt: { gte: from, lte: to } }, select: { category: true, amountMinor: true, note: true } });
     const byCategory: Record<string, number> = {};
     for (const e of expensesRows) byCategory[e.category] = (byCategory[e.category] ?? 0) + e.amountMinor;
-    const expenseTotal = expensesRows.reduce((s, e) => s + e.amountMinor, 0);
-
-    let cogs = 0;
-    for (const o of orders) {
-      for (const it of o.items) {
-        const product = it.product;
-        if (!product) continue;
-        cogs += it.quantity * product.costMinor;
-      }
-    }
-    const profit = netRevenue - cogs - expenseTotal;
+    const expenseTotal = expensesRows.reduce((a, e) => a + e.amountMinor, 0);
 
     return {
       from: from.toISOString(),
       to: to.toISOString(),
-      income: { revenueMinor: revenue, refundsMinor: refunds, netRevenueMinor: netRevenue, ordersCount: orders.length },
+      income: { revenueMinor: s.revenue, refundsMinor: s.refunds, netRevenueMinor: netRevenue, ordersCount: s.money.count },
       expenses: { totalMinor: expenseTotal, byCategory, lineItems: expensesRows.map((e) => ({ category: e.category, amountMinor: e.amountMinor, note: e.note })) },
-      cogsMinor: cogs,
-      profitMinor: profit,
+      cogsMinor: s.cogs,
+      profitMinor: netRevenue - s.cogs - expenseTotal,
     };
   }
 
   /** Sales by payment method — detailed breakdown. */
   async salesByPayment(storeId: string, from: Date, to: Date) {
-    const orders = await this.fulfilledOrders(storeId, from, to);
-    const byMethod = new Map<string, { totalMinor: number; count: number }>();
-    for (const o of orders) {
-      const cur = byMethod.get(o.paymentMethod) ?? { totalMinor: 0, count: 0 };
-      cur.totalMinor += o.totalMinor;
-      cur.count += 1;
-      byMethod.set(o.paymentMethod, cur);
-    }
+    const { book } = await this.sold(storeId, from, to);
     const rows: { method: string; totalMinor: number; orders: number; avgMinor: number }[] = [];
-    for (const [method, v] of byMethod) {
-      rows.push({ method, totalMinor: v.totalMinor, orders: v.count, avgMinor: Math.round(v.totalMinor / v.count) });
+    for (const [method, list] of this.group(book.entries, (e) => e.paymentMethod)) {
+      const t = bookTotals(list, book.splits);
+      if (t.count === 0 && t.totalMinor === 0) continue;
+      rows.push({ method, totalMinor: t.totalMinor, orders: t.count, avgMinor: t.count > 0 ? Math.round(t.totalMinor / t.count) : 0 });
     }
     rows.sort((a, b) => b.totalMinor - a.totalMinor);
     const grandTotal = rows.reduce((s, r) => s + r.totalMinor, 0);
@@ -190,17 +175,13 @@ export class ReportsService {
 
   /** Customer statement: per-customer ledger with orders, payments, credits, balance. */
   async customerStatement(storeId: string, from: Date, to: Date) {
-    const orders = await this.fulfilledOrders(storeId, from, to);
+    const { book } = await this.sold(storeId, from, to);
     const byCustomer = new Map<string, { name: string; totalPaid: number; orders: number; firstOrderAt: Date | null; lastOrderAt: Date | null }>();
-    for (const o of orders) {
-      const key = o.customerName || "Walk-in";
-      const cur = byCustomer.get(key) ?? { name: key, totalPaid: 0, orders: 0, firstOrderAt: null, lastOrderAt: null };
-      cur.totalPaid += o.totalMinor;
-      cur.orders += 1;
-      const created = o.createdAt;
-      if (!cur.firstOrderAt || created < cur.firstOrderAt) cur.firstOrderAt = created;
-      if (!cur.lastOrderAt || created > cur.lastOrderAt) cur.lastOrderAt = created;
-      byCustomer.set(key, cur);
+    for (const [name, list] of this.group(book.entries, (e) => e.customerName || "Walk-in")) {
+      const t = bookTotals(list, book.splits);
+      if (t.count === 0 && t.totalMinor === 0) continue;
+      const at = list.filter((e) => e.sign === 1).map((e) => e.at.getTime());
+      byCustomer.set(name, { name, totalPaid: t.totalMinor, orders: t.count, firstOrderAt: at.length ? new Date(Math.min(...at)) : null, lastOrderAt: at.length ? new Date(Math.max(...at)) : null });
     }
 
     // Credit balances from StoreCustomer.

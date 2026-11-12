@@ -1320,3 +1320,12 @@ Commits: `32dce58` (loop 2).
 - A refund takes back what the store owed for the sale, and the refund line carries the store.
 - Kept as it was: the delivery fee is part of the sale total; which other shelf an order falls back to is not ordered yet (step 2); an agent order delivered in part keeps its ordered quantities on its lines (the charge uses what was delivered).
 - Tests: `selling/order-store.test.ts` (6), one more in `agent/agent-orders-m7.test.ts`. No database change.
+
+## 2026-11-12 — Per-store build, step 1c: one profit calculation for every report
+
+- New `apps/api/src/reports/sales-book.ts`: the one way every report reads "what was sold". The daily report (and the sales after closing), the month report, the stock book, Store report, Compare stores, All records and the old Reports screen (profit, sales, sold stock, income and loss, sales by payment, customer statement) all read it, so their totals agree.
+- Rules: a sale is COMPLETED or DELIVERED; it counts at the moment it was sold (`occurredAt`, old orders `createdAt`); an order that names no store is the main store's sale (payments and credit follow the same rule); the cost is the cost saved with each line, loose rice per kilo (the old Reports screen used today's cost per unit, which was wrong for loose rice); an agent order delivered in part counts for what was delivered; a split sale counts by what each part paid.
+- A sale taken back later (void or refund, the `OrderStatusHistory` row from a sold state to CANCELLED) stays on the day it was sold and is taken off on the day it was taken back, so a day that has passed never changes. Sold and taken back inside the same dates adds up to nothing. Each report now also returns `takenBack { count, totalMinor }`; the daily report, Store report and Compare stores show one line for it. An order cancelled before it was ever sold never counts.
+- Old Reports: labels now say "Sales (all stores)", "Cost of rice sold", "Taken back"; Sold stock shows loose rice in kilos. Its totals equal the stores added up in Compare stores.
+- Not changed here: the BIR and journal screens (`erp/`), the platform data summary, the delivery fee inside sale totals, and expected cash after a cash refund (step 4, cash per store).
+- Tests: `reports/sales-book.test.ts` (4): every report agrees, a refund the next day leaves the first day alone, a same-day void nets to nothing, an agent order delivered in part. `reports-m9.test.ts` updated for the new `takenBack` field. No database change.
