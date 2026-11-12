@@ -9,7 +9,8 @@ import {
 import dynamic from "next/dynamic";
 import { API_URL } from "../../../config";
 import { wakeFetch } from "../../../lib/wake-fetch";
-import { saveCopy, savedCopy, useOffline } from "../../../lib/offlineCache";
+import { cachedGet, saveCopy, savedCopy, useOffline } from "../../../lib/offlineCache";
+import { PLACES_PATH } from "../../../lib/store-identity";
 
 /** Screens that work with no internet; every other screen still opens, but read-only (its buttons are off). */
 // Settings opens offline too: Printer is kept on this tablet, the other groups lock their own buttons.
@@ -126,6 +127,8 @@ export default function AdminDashboard() {
       .then((r) => (r.ok ? r.json() : null))
       .then((me) => { if (!off && me) { setHomeLocation(me.homeLocationId ?? null, !!me.isHead); setHomeSeen(`${me.homeLocationId ?? ""}:${me.isHead ? 1 : 0}`); } })
       .catch(() => { /* offline: the saved answer stays */ });
+    // Step 9: keep the stores' own receipt names and targets on the tablet, for receipts printed offline.
+    void cachedGet(PLACES_PATH).catch(() => null);
     return () => { off = true; };
   }, [authed, activeStore]);
   const [email, setEmail] = useState("");

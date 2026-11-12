@@ -258,6 +258,8 @@ export class PaymentsService {
         items: true,
         payments: { orderBy: { receivedAt: "asc" } },
         store: { select: { name: true, slug: true, currencyCode: true } },
+        // Step 9: the receipt carries the name and text of the store that made the sale.
+        sellingLocation: { select: { id: true, name: true, receiptName: true, receiptHeader: true, receiptFooter: true, receiptContact: true } },
         storeCustomer: { include: { customer: { select: { name: true, phone: true } } } },
       },
     });
@@ -282,7 +284,12 @@ export class PaymentsService {
       orderNumber: order.orderNumber,
       status: order.status,
       source: order.source,
-      storeName: order.store.name,
+      storeName: order.sellingLocation?.receiptName || order.store.name,
+      // The selling store's own receipt text (null = the business's, from Settings).
+      locationId: order.sellingLocation?.id ?? null,
+      receiptHeader: order.sellingLocation?.receiptHeader ?? null,
+      receiptFooter: order.sellingLocation?.receiptFooter ?? null,
+      receiptContact: order.sellingLocation?.receiptContact ?? null,
       currencyCode: order.currencyCode,
       subtotalMinor: order.subtotalMinor,
       deliveryFeeMinor: order.deliveryFeeMinor,

@@ -16,6 +16,7 @@
 // Totals are server-computed. Stock leaves the selling location in the same
 // transaction as the order, its payment and its signatures.
 
+import { orderPrefixAt } from "../domain/store-identity.js";
 import { costModeOf, effectiveCost, recordCostIn, shelfCostFor } from "../domain/shelf-cost.js";
 import type { ApiError } from "@sam-store/contracts";
 import { createHash } from "node:crypto";
@@ -420,7 +421,7 @@ export class BentaService {
       }));
       const taxCols = await taxColumnsFor(storeId, items.map((i) => ({ productId: i.productId, lineTotalMinor: i.lineTotalMinor })), { discountMinor: 0, deliveryFeeMinor: 0 });
       const seq = await this.sequences.nextOrderSequence(storeId);
-      const orderNumber = formatOrderNumber(store.slug, seq, { prefix: store.settings?.orderNumberPrefix ?? undefined });
+      const orderNumber = formatOrderNumber(store.slug, seq, { prefix: await orderPrefixAt(prisma, storeId, loc.id, store.settings?.orderNumberPrefix) });
       const now = new Date();
       const at = paper?.occurredAt ?? offlineSoldAt(input.soldAt, now) ?? now;
       const releases: { id: string; docNumber: string }[] = [];

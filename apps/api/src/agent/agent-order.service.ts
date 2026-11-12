@@ -11,6 +11,7 @@
 // Prices are the preferred store's, frozen when the agent orders. Tenant-scoped; staff
 // act only at their own location.
 
+import { orderPrefixAt } from "../domain/store-identity.js";
 import type { ApiError } from "@sam-store/contracts";
 import { Prisma } from "@prisma/client";
 import { prisma, PrismaOrderSequenceRepository } from "../persistence/prisma-repositories.js";
@@ -152,7 +153,7 @@ export class AgentOrderService {
       const store = await prisma.store.findUnique({ where: { id: storeId }, include: { settings: true } });
       if (!store) throw new StepError(notFound("Store not found"));
       const taxCols = await taxColumnsFor(storeId, priced.map((l) => ({ productId: l.product.id, lineTotalMinor: l.lineTotalMinor })), { discountMinor: 0, deliveryFeeMinor: 0 });
-      const orderNumber = formatOrderNumber(store.slug, await this.sequences.nextOrderSequence(storeId), { prefix: store.settings?.orderNumberPrefix ?? undefined });
+      const orderNumber = formatOrderNumber(store.slug, await this.sequences.nextOrderSequence(storeId), { prefix: await orderPrefixAt(prisma, storeId, loc.id, store.settings?.orderNumberPrefix) });
       const id = randomId();
       try {
         await prisma.$transaction(async (tx) => {

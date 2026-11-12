@@ -5,6 +5,7 @@
 //                     with optional line replacement (resume-edit), void restores stock.
 // Totals are always server-computed; stock mutations are atomic.
 
+import { orderPrefixAt } from "../domain/store-identity.js";
 import { orderWall } from "../auth/wall.js";
 import { coverShortage } from "../domain/buffer.js";
 import { isTracked } from "../domain/stock-tracking.js";
@@ -687,7 +688,7 @@ export class PosService {
     const store = await prisma.store.findUnique({ where: { id: storeId }, include: { settings: true } });
     if (!store) return { ok: false, error: { type: "not_found", message: "Store not found" } };
     const seq = await this.sequences.nextOrderSequence(storeId);
-    const orderNumber = formatOrderNumber(store.slug, seq, { prefix: store.settings?.orderNumberPrefix ?? undefined });
+    const orderNumber = formatOrderNumber(store.slug, seq, { prefix: await orderPrefixAt(prisma, storeId, loc?.id, store.settings?.orderNumberPrefix) });
     const id = randomId();
     const { lines, totals } = loaded.value;
 

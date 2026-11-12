@@ -13,6 +13,7 @@ import { autoApproves } from "../domain/transfer-flow.js";
 import type { ApiError } from "@sam-store/contracts";
 import { consignmentMain } from "../payable/charges.js";
 import { cleanFacebookPageUrl, normalizeSources } from "../domain/sources.js";
+import { cleanIdentityText, MAX_DAILY_TARGET_MINOR } from "../domain/store-identity.js";
 import { costModeOf, effectiveCost } from "../domain/shelf-cost.js";
 import { captureSignatures, locationRefusal, nextDocNumber, requireSignatures, signatureErrorResult, type Actor, type SignatureInput } from "../people/people.service.js";
 
@@ -38,6 +39,13 @@ export interface LocationInput {
   facebookPageUrl?: string | null;
   /** The other places this one may take rice from, in order. [] = its own shelf only; null = no rule (any place). */
   sourceLocationIds?: string[] | null;
+  /** Step 9: the store's own receipt name and text, daily target and order-number start (null or "" = the business's). */
+  receiptName?: string | null;
+  receiptHeader?: string | null;
+  receiptFooter?: string | null;
+  receiptContact?: string | null;
+  dailySalesTargetMinor?: number | null;
+  orderPrefix?: string | null;
 }
 
 function validateLocation(input: LocationInput, creating: boolean): string[] {
@@ -81,6 +89,8 @@ export class WarehouseService {
       needsReview: w.needsReview,
       consignment: w.consignment,
       facebookPageUrl: w.facebookPageUrl,
+      receiptName: w.receiptName, receiptHeader: w.receiptHeader, receiptFooter: w.receiptFooter, receiptContact: w.receiptContact,
+      dailySalesTargetMinor: w.dailySalesTargetMinor, orderPrefix: w.orderPrefix,
       // The rule as the screen shows it: null = none yet; otherwise the OTHER places, in order (may be empty).
       takesFrom: w.sourceLocationIds.length === 0 ? null : w.sourceLocationIds.filter((id) => id !== w.id),
       stockCount: w._count.stockLevels,
@@ -148,6 +158,18 @@ export class WarehouseService {
       const taken = await prisma.warehouse.findFirst({ where: { storeId, facebookPageUrl: pageUrl, NOT: { id: warehouseId } }, select: { name: true } });
       if (taken) return { ok: false, error: { type: "conflict", message: `That Facebook Page is already linked to ${taken.name}` } };
     }
+    const identity: Record<string, string | number | null> = {};
+    for (const field of ["receiptName", "receiptHeader", "receiptFooter", "receiptContact", "orderPrefix"] as const) {
+      if (input[field] === undefined) continue;
+      const clean = cleanIdentityText(field, input[field] ?? null);
+      if (!clean.ok) return { ok: false, error: { type: "validation", errors: [clean.message] } };
+      identity[field] = clean.value;
+    }
+    if (input.dailySalesTargetMinor !== undefined) {
+      const t = input.dailySalesTargetMinor;
+      if (t !== null && (!Number.isInteger(t) || t < 0 || t > MAX_DAILY_TARGET_MINOR)) return { ok: false, error: { type: "validation", errors: ["The daily target must be an amount of ₱0 or more"] } };
+      identity.dailySalesTargetMinor = t || null; // ₱0 = no own target
+    }
     let sources: string[] | undefined;
     if (input.sourceLocationIds !== undefined) {
       const wanted = [...new Set((input.sourceLocationIds ?? []).filter((id) => typeof id === "string" && id !== warehouseId))];
@@ -173,6 +195,7 @@ export class WarehouseService {
           ...(input.isDefault === true ? { isDefault: true } : {}),
           ...(pageUrl !== undefined ? { facebookPageUrl: pageUrl } : {}),
           ...(sources !== undefined ? { sourceLocationIds: sources } : {}),
+          ...identity,
         },
       });
     });

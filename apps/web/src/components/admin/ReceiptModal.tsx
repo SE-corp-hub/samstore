@@ -11,6 +11,11 @@ interface ReceiptData {
   status: string;
   source: string;
   storeName: string;
+  /** Step 9: the selling store and its own receipt text (null = the business's). */
+  locationId?: string | null;
+  receiptHeader?: string | null;
+  receiptFooter?: string | null;
+  receiptContact?: string | null;
   currencyCode: string;
   subtotalMinor: number;
   deliveryFeeMinor: number;
@@ -80,7 +85,7 @@ function receiptSlip(d: ReceiptData, header: string | null | undefined, footer: 
   }
   if (d.tenders && d.tenders.outstandingMinor > 0) totals.push({ label: "Still due", value: pesos(d.tenders.outstandingMinor) });
   return {
-    storeName: d.storeName, title: "RECEIPT", reference: d.orderNumber, when: new Date(d.createdAt).toLocaleString("en-PH"),
+    storeName: d.storeName, locationId: d.locationId, contact: d.receiptContact || undefined, title: "RECEIPT", reference: d.orderNumber, when: new Date(d.createdAt).toLocaleString("en-PH"),
     header: header || (d.vat?.tin ? `TIN ${d.vat.tin}` : null),
     rows: d.items.map((i) => ({ name: i.productName, qty: `${i.quantity} × ${pesos(i.unitPriceMinor)} = ${pesos(i.lineTotalMinor)}` })),
     totals,
@@ -109,11 +114,12 @@ export default function ReceiptModal({ orderId, onClose }: { orderId: string; on
               {!data && !error && <p className="text-muted small">Loading…</p>}
               {data && (
                 <div className="receipt-print">
-                  {settings?.receiptHeader && (
-                    <div className="text-center small text-muted mb-1">{settings.receiptHeader}</div>
+                  {(data.receiptHeader || settings?.receiptHeader) && (
+                    <div className="text-center small text-muted mb-1">{data.receiptHeader || settings?.receiptHeader}</div>
                   )}
                   <div className="text-center mb-2">
                     <div className="fw-bold">{data.storeName}</div>
+                    {data.receiptContact && <div className="small text-muted">{data.receiptContact}</div>}
                     <div className="small text-muted">Order {data.orderNumber}</div>
                     <div className="small text-muted">{new Date(data.createdAt).toLocaleString()}</div>
                   </div>
@@ -213,15 +219,15 @@ export default function ReceiptModal({ orderId, onClose }: { orderId: string; on
                       </div>
                     )}
                   </div>
-                  {settings?.receiptFooter && (
-                    <div className="text-center small text-muted mt-2">{settings.receiptFooter}</div>
+                  {(data.receiptFooter || settings?.receiptFooter) && (
+                    <div className="text-center small text-muted mt-2">{data.receiptFooter || settings?.receiptFooter}</div>
                   )}
                 </div>
               )}
             </div>
             <div className="modal-footer">
               <button className="btn btn-outline-secondary btn-sm" onClick={onClose}>Close</button>
-              <button className="btn btn-primary btn-sm" disabled={!data} onClick={() => data && printSlip(receiptSlip(data, settings?.receiptHeader, settings?.receiptFooter, showVat))}><i className="bi bi-printer me-1"></i>Print (1 copy)</button>
+              <button className="btn btn-primary btn-sm" disabled={!data} onClick={() => data && printSlip(receiptSlip(data, data.receiptHeader || settings?.receiptHeader, data.receiptFooter || settings?.receiptFooter, showVat))}><i className="bi bi-printer me-1"></i>Print (1 copy)</button>
             </div>
           </div>
         </div>

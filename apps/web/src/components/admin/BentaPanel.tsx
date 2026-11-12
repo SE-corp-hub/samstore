@@ -225,7 +225,7 @@ export default function BentaPanel() {
   useEffect(() => { if (pay === "cash") void checkDrawer(); }, [pay, checkDrawer]);
 
   const receiptSlip = (l: NonNullable<typeof last>) => ({
-    storeName: storeName || "SAM STORE", title: "SALES RECEIPT", reference: l.orderNumber, when: new Date().toLocaleString("en-PH"),
+    storeName: storeName || "SAM STORE", locationId, title: "SALES RECEIPT", reference: l.orderNumber, when: new Date().toLocaleString("en-PH"),
     rows: l.lines.map((x) => ({ name: x.name, qty: `${x.soldBy === "PIECE" || !x.grams ? `${x.quantity}` : kg(x.grams)}  ${peso(x.lineTotalMinor)}` })),
     totals: [{ label: "TOTAL", value: peso(l.totalMinor) }, ...(l.changeMinor > 0 ? [{ label: "Change", value: peso(l.changeMinor) }] : [])],
     footer: l.status === "WAITING_OWNER" ? "Waiting for owner approval" : l.offline ? "Saved offline · Salamat po!" : "Salamat po!",

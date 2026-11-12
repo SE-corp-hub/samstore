@@ -3,6 +3,7 @@
 // Overview — KPI landing (U3): today's sales, pending, out-for-delivery, low stock, utang.
 // Numbers come from the live API (analytics/status, analytics/daily, inventory, credit/utang).
 
+import { placeIdentity } from "../../lib/store-identity";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { API_URL } from "../../config";
 import { adminHeaders } from "../../lib/admin";
@@ -101,7 +102,8 @@ export default function OverviewPanel({ onNavigate, storeSlug, storeName }: Over
   useEffect(() => {
     fetch(`${API_URL}/admin/settings`, { headers: adminHeaders() })
       .then((r) => (r.ok ? r.json() : null) as Promise<{ settings?: { dailySalesTargetMinor?: number } } | null>)
-      .then((d) => setDailyTargetMinor(d?.settings?.dailySalesTargetMinor ?? 0))
+      // Step 9: a store login is measured against its own store's target when the owner set one.
+      .then((d) => setDailyTargetMinor(placeIdentity()?.dailySalesTargetMinor || d?.settings?.dailySalesTargetMinor || 0))
       .catch(() => setDailyTargetMinor(0));
   }, [liveRound]);
 
