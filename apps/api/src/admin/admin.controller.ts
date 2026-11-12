@@ -1299,10 +1299,11 @@ export class AdminController {
   ) {
     const user = req.user;
     requireUser(user);
-    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.VIEW);
+    const { storeId, role } = await resolveTenant(user, headerStoreId, TENANT_ROLES.VIEW);
     const held = await prisma.order.findFirst({ where: { id, storeId, status: "ON_HOLD", source: { in: ["pos", "PRE_ORDER"] } }, select: { source: true } });
     if (held) {
-      const edited = await this.pos.replaceItems(storeId, user.sub, id, { items: body?.items ?? [] } as PosHoldItemsRequest, { source: held.source as "pos" | "PRE_ORDER" });
+      // The full login (role + home store): a pre-order is changed only by its own store, or the owner.
+      const edited = await this.pos.replaceItems(storeId, await loadActor(storeId, user.sub, role), id, { items: body?.items ?? [] } as PosHoldItemsRequest, { source: held.source as "pos" | "PRE_ORDER" });
       if (!edited.ok) throw new HttpException(edited.error, statusFor(edited.error));
       await cacheBust(cacheKey("products", storeId));
       await cacheBust(cacheKey("orders", storeId));

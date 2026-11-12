@@ -8,7 +8,7 @@
 // POST /admin/pos/preorder, POST /admin/pos/preorders/:id/finalize,
 // POST /admin/pos/holds/:id/void, GET /admin/orders/:id + PATCH /admin/orders/:id/items.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { API_URL } from "../../config";
 import { adminHeaders } from "../../lib/admin";
 import { toast } from "../../lib/toast";
@@ -25,9 +25,10 @@ import { quickCash } from "../../lib/quick-cash";
 import { peso } from "../../lib/number-format";
 import ProductFinder from "./ProductFinder";
 import PickTile from "./PickTile";
+import StoreBar, { type StoreOption } from "./StoreBar";
 import { noteUse } from "../../lib/product-find";
 import { printSlip, type Slip } from "../../lib/slip-print";
-import { cachedGet, offlineRef, savedThenFresh, useOffline } from "../../lib/offlineCache";
+import { cachedGet, offlineRef, savedCopy, savedThenFresh, useOffline } from "../../lib/offlineCache";
 import { QUEUE_EVENT, queuedSteps, sendStep } from "../../lib/offlineQueue";
 import { PROMO_OFF, PROMO_REASON, promoFrom, promoPrices, promoSacks, type QuotaPromo } from "../../lib/quota-promo";
 import { newSaleKey } from "../../lib/saleKey";
@@ -42,6 +43,8 @@ const doneHere = (): Preorder[] => queuedSteps().filter((s) => FINALIZE_PATH.tes
 interface Preorder {
   id: string; orderNumber: string; customerName: string; storeCustomerId: string | null;
   status: string; totalMinor: number; createdAt: string; dueAt: string | null;
+  /** The store the pre-order belongs to (its price, its shelf, its sale). Old ones have none. */
+  locationId?: string | null; locationName?: string | null;
   items: { productId: string; productName: string; unitPriceMinor: number; quantity: number; lineTotalMinor: number; variantId?: string | null; variantName?: string | null; priceOverridden?: boolean }[];
   /** Completed on this tablet, not uploaded yet: how it was paid. */
   paidBy?: "cash" | "credit"; changeMinor?: number; completedAt?: string;
@@ -186,7 +189,7 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
   const [receiptOrder, setReceiptOrder] = useState<string | null>(null);
   const [lastFinalizedOrderId, setLastFinalizedOrderId] = useState<string | null>(null);
   // Changing a waiting pre-order opens the same screen as a new one, with its lines loaded.
-  const [editingPre, setEditingPre] = useState<{ id: string; orderNumber: string; customerName: string } | null>(null);
+  const [editingPre, setEditingPre] = useState<{ id: string; orderNumber: string; customerName: string; locationName?: string | null } | null>(null);
   // Delete/void modal
   const [confirmVoid, setConfirmVoid] = useState<{ id: string; orderNumber: string } | null>(null);
   const [voidReason, setVoidReason] = useState("");
@@ -206,7 +209,24 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
   const [finalizeError, setFinalizeError] = useState<string | null>(null);
 
   // New / change pre-order screen
-  const [buildProducts, setBuildProducts] = useState<PosProduct[]>([]);
+  const [rawProducts, setRawProducts] = useState<PosProduct[]>([]);
+  // The store this pre-order is taken at: its own prices and its own shelf (the server decides the same way).
+  const [locations, setLocations] = useState<StoreOption[]>([]);
+  const [locationId, setLocationId] = useState("");
+  const [homeLocationId, setHomeLocationId] = useState<string | null>(null);
+  const [isOwner, setIsOwner] = useState(false);
+  const [atStore, setAtStore] = useState<{ price: Map<string, number>; stock: Map<string, number> }>({ price: new Map(), stock: new Map() });
+  const locRef = useRef<string | undefined>(undefined);
+  const catalogAsk = useRef(0); // only the latest store asked for may fill the screen
+  const [moveTarget, setMoveTarget] = useState<Preorder | null>(null);
+  const [moveTo, setMoveTo] = useState("");
+  const [moveBusy, setMoveBusy] = useState(false);
+  const [moveError, setMoveError] = useState<string | null>(null);
+  /** The products at this store's price, with this store's count. */
+  const buildProducts = useMemo(
+    () => rawProducts.map((p) => ({ ...p, priceMinor: atStore.price.get(p.id) ?? p.priceMinor, availableQuantity: atStore.stock.get(p.id) ?? p.availableQuantity })),
+    [rawProducts, atStore],
+  );
   // Unit cost per product (from the counter list, saved for offline) and whether this login may see it.
   const [floors, setFloors] = useState<Map<string, { floorMinor: number; ownShelfCost: boolean; unit: string }>>(new Map());
   const [seesCost, setSeesCost] = useState(false);
@@ -263,29 +283,65 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
     return () => window.removeEventListener(QUEUE_EVENT, refresh);
   }, [loadPreorders]);
 
-  const loadBuilder = useCallback(async () => {
-    // Each list fills in on its own, from the copy saved on this tablet first, then the server's.
+  /**
+   * The lists the builder needs, each from the copy saved on this tablet first, then the server's.
+   * `loc`: the store whose prices and counts to show (left out: the one on screen; none yet: the
+   * login's own store, as the server picks it). Returns that store's prices.
+   */
+  const loadBuilder = useCallback(async (loc: string | undefined = locRef.current): Promise<Map<string, number> | null> => {
+    type Cat = {
+      location?: { id: string }; locations?: StoreOption[]; seesCost?: boolean; quotaPromo?: Parameters<typeof promoFrom>[0];
+      products?: { id: string; priceMinor?: number; tracked?: boolean; stock?: Record<string, number>; floorMinor?: number; ownShelfCost?: boolean; loose?: boolean; gramsPerUnit?: number | null; categoryId?: string | null }[];
+    };
+    const ask = ++catalogAsk.current;
+    let prices: Map<string, number> | null = null;
+    const showCatalog = (cat: Cat) => {
+      if (ask !== catalogAsk.current || !cat?.products) return;
+      const at = cat.location?.id ?? "";
+      locRef.current = at || undefined;
+      setLocationId(at);
+      setLocations((cat.locations ?? []).filter((l) => l.type === "STORE" || l.id === at));
+      prices = new Map(cat.products.filter((x) => typeof x.priceMinor === "number").map((x) => [x.id, x.priceMinor!]));
+      setAtStore({ price: prices, stock: new Map(cat.products.filter((x) => x.tracked && x.stock).map((x) => [x.id, x.stock![at] ?? 0])) });
+      setPromo(promoFrom(cat.quotaPromo));
+      setPromoInfo(new Map(cat.products.map((x) => [x.id, { categoryId: x.categoryId ?? null, isSack: !x.loose && !!x.gramsPerUnit }])));
+      setFloors(new Map(cat.products.map((x) => [x.id, { floorMinor: x.floorMinor ?? 0, ownShelfCost: !!x.ownShelfCost, unit: x.loose ? "kilo" : x.gramsPerUnit ? "sack" : "piece" }])));
+      setSeesCost(cat.seesCost === true);
+    };
     try {
       await Promise.all([
-        savedThenFresh<{ products?: PosProduct[] }>("/admin/products", (p) => setBuildProducts(p?.products ?? [])),
+        savedThenFresh<{ products?: PosProduct[] }>("/admin/products", (p) => setRawProducts(p?.products ?? [])),
         savedThenFresh<{ customers?: PosCustomer[] }>("/admin/customers", (c) => setBuildCustomers(c?.customers ?? [])),
         savedThenFresh<{ settings?: { hidePricePreOrder?: boolean }; name?: string }>("/admin/settings", (s) => {
           setHidePrice(Boolean(s?.settings?.hidePricePreOrder));
           setStoreName(s?.name ?? "");
         }),
-        savedThenFresh<{ products?: { id: string; floorMinor?: number; ownShelfCost?: boolean; loose?: boolean; gramsPerUnit?: number | null; categoryId?: string | null }[]; seesCost?: boolean; quotaPromo?: Parameters<typeof promoFrom>[0] }>("/admin/benta/catalog", (cat) => {
-          setPromo(promoFrom(cat?.quotaPromo));
-          setPromoInfo(new Map((cat?.products ?? []).map((x) => [x.id, { categoryId: x.categoryId ?? null, isSack: !x.loose && !!x.gramsPerUnit }])));
-          setFloors(new Map((cat?.products ?? []).map((x) => [x.id, { floorMinor: x.floorMinor ?? 0, ownShelfCost: !!x.ownShelfCost, unit: x.loose ? "kilo" : x.gramsPerUnit ? "sack" : "piece" }])));
-          setSeesCost(cat?.seesCost === true);
-        }),
+        savedThenFresh<Cat>(`/admin/benta/catalog${loc ? `?locationId=${encodeURIComponent(loc)}` : ""}`, showCatalog),
       ]);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Load failed");
     }
+    return prices;
   }, []);
 
-  useEffect(() => { void loadBuilder(); }, [loadBuilder]);
+  useEffect(() => {
+    (async () => {
+      // Ask for the price list right away, for the home store this tablet saved last time; correct it if that changed.
+      const guess = savedCopy<{ homeLocationId?: string | null }>("/admin/me/rice")?.homeLocationId ?? undefined;
+      const first = loadBuilder(guess);
+      const firstAsk = catalogAsk.current;
+      const me = await cachedGet<{ homeLocationId?: string | null; role?: string }>("/admin/me/rice");
+      setHomeLocationId(me?.homeLocationId ?? null);
+      setIsOwner(["OWNER", "MANAGER", "PLATFORM_ADMIN"].includes(me?.role ?? ""));
+      await first;
+      const want = me?.homeLocationId ?? undefined;
+      if (catalogAsk.current === firstAsk && want && want !== guess) await loadBuilder(want);
+    })().catch(() => setError("Could not load"));
+  }, [loadBuilder]);
+  const storeHere = locations.find((l) => l.id === locationId);
+  /** The owner picks another store for a new pre-order: that store's prices and counts. */
+  const pickStore = (id: string) => { setError(null); void loadBuilder(id); };
+
 
   const inRange = (p: Preorder) => (!preFrom || p.createdAt.slice(0, 10) >= preFrom) && (!preTo || p.createdAt.slice(0, 10) <= preTo);
   const drafts = preorders.filter((p) => p.status === "ON_HOLD" && !doneLocal.some((d) => d.id === p.id));
@@ -310,11 +366,13 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
 
   const openPreEdit = async (p: Preorder) => {
     setError(null);
+    // The pre-order keeps its own store's prices: show that store's list while it is changed.
+    const own = p.locationId && p.locationId !== locRef.current ? await loadBuilder(p.locationId) : null;
     const d = await fetch(`${API_URL}/admin/orders/${p.id}`, { headers: adminHeaders() }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
     if (!d?.items) { setError("Could not load pre-order items"); return; }
     const lines: CartLine[] = (d.items as { productId: string | null; productName: string; quantity: number; unitPriceMinor: number; variantId?: string | null; variantName?: string | null; priceOverrideReason?: string | null }[]).map((i) => {
       const known = buildProducts.find((x) => x.id === i.productId);
-      const list = known ? catalogPriceFor(known.id, i.variantId) : i.unitPriceMinor;
+      const list = known ? (!i.variantId && own?.has(known.id) ? own.get(known.id)! : catalogPriceFor(known.id, i.variantId)) : i.unitPriceMinor;
       const product: PosProduct = {
         ...(known ?? { id: i.productId ?? "", sku: "", availableQuantity: 0, category: null }),
         name: i.variantName ? `${i.productName} · ${i.variantName}` : i.productName,
@@ -326,7 +384,7 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
     });
     clearBuild();
     setBuildCart(lines);
-    setEditingPre({ id: p.id, orderNumber: p.orderNumber, customerName: p.customerName });
+    setEditingPre({ id: p.id, orderNumber: p.orderNumber, customerName: p.customerName, locationName: p.locationName ?? null });
     setSubTab("build");
   };
 
@@ -347,6 +405,25 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
     } catch (e) {
       setError(e instanceof Error ? e.message : "Void failed");
     }
+  };
+
+  /** The owner moves a waiting pre-order to another store: the rice follows, the agreed price stays. */
+  const doMovePre = async () => {
+    if (!moveTarget || !moveTo || moveBusy) return;
+    setMoveBusy(true); setMoveError(null);
+    try {
+      const res = await fetch(`${API_URL}/admin/pos/preorders/${moveTarget.id}/move`, {
+        method: "POST", headers: { "Content-Type": "application/json", ...adminHeaders() },
+        body: JSON.stringify({ locationId: moveTo }),
+      });
+      const d = await res.json().catch(() => null);
+      if (!res.ok) { setMoveError(d?.errors?.join(", ") ?? d?.message ?? "Could not move the pre-order. Try again."); return; }
+      toast(`${moveTarget.orderNumber} moved to ${d?.locationName ?? "the other store"}`);
+      setMoveTarget(null);
+      await Promise.all([loadPreorders(), loadBuilder()]);
+    } catch {
+      setMoveError("Could not move the pre-order. Check the internet and try again.");
+    } finally { setMoveBusy(false); }
   };
 
   const openFinalize = (p: Preorder) => {
@@ -495,11 +572,12 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
         if (!buildCustomerId && !name) { setError("Choose a customer or type a new name."); return; }
         const key = newSaleKey();
         const who = buildCustomerId ? { customerId: buildCustomerId } : { customerName: name, customerPhone: buildNewPhone.trim() || undefined };
-        const body = { items: pricedCart.map((l) => ({ productId: l.product.id, quantity: l.quantity, ...overridePart(l) })), ...who, idempotencyKey: key };
+        const body = { items: pricedCart.map((l) => ({ productId: l.product.id, quantity: l.quantity, ...overridePart(l) })), ...who, idempotencyKey: key, ...(locationId ? { locationId } : {}) };
         const customerName = buildCustomerId ? (buildCustomers.find((c) => c.id === buildCustomerId)?.name ?? "") : name;
         const view: Preorder = {
           id: key, orderNumber: offlineRef(key), customerName, storeCustomerId: buildCustomerId || null, status: "ON_HOLD",
           totalMinor: pricedCart.reduce((t, l) => t + unitOf(l) * l.quantity, 0), createdAt: new Date().toISOString(), dueAt: null,
+          locationId: locationId || null, locationName: storeHere?.name ?? null,
           items: pricedCart.map((l) => ({ productId: l.product.id, productName: l.product.name, unitPriceMinor: unitOf(l), quantity: l.quantity, lineTotalMinor: unitOf(l) * l.quantity })),
         };
         const sent = await sendStep(PREORDER_PATH, body, `Pre-order ${customerName}`, view);
@@ -633,6 +711,8 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
     footer: p.paidBy === "cash" ? "Paid in cash. Thank you!" : "On credit (utang). Thank you!",
   });
 
+  /** Moving a pre-order between stores is the owner's, and only makes sense with more than one store. */
+  const canMove = isOwner && locations.length > 1;
   /** One pre-order as a card: who, what, how much, then the actions (Complete sale first). */
   const preCard = (p: Preorder, pastDue: boolean, local = false) => (
     <div className="col" key={p.id}>
@@ -643,6 +723,8 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
             <div className="fw-bold fs-4 text-nowrap" style={{ fontVariantNumeric: "tabular-nums" }}>{maybePrice(p.totalMinor)}</div>
           </div>
           <div className="text-muted mb-1">{p.orderNumber} · {fmtDate(p.createdAt)}</div>
+          {/* Which store it belongs to: shown to a login that sees more than one store. */}
+          {p.locationName && !homeLocationId && <div className="fw-semibold mb-1"><i className="bi bi-shop me-1" aria-hidden="true"></i>{p.locationName}</div>}
           {p.dueAt && <div className={`mb-1 ${pastDue ? "text-danger fw-bold" : "text-muted"}`}>{pastDue && <span className="badge text-bg-danger me-2">Late</span>}Due {fmtDate(p.dueAt)}</div>}
           <div className="mb-3 flex-grow-1">{itemLines(p, 4)}</div>
           {local && p.status === "COMPLETED" && (
@@ -660,9 +742,11 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
           {!local && p.status === "ON_HOLD" && (
             <>
               <button className="btn btn-success btn-lg w-100 mb-2" onClick={() => openFinalize(p)}><i className="bi bi-check2-circle me-1" aria-hidden="true"></i>Complete sale</button>
-              <div className="d-flex gap-2">
+              {/* The owner has a fourth action (move to another store), so the four sit two by two. */}
+              <div className={canMove ? "preorder-actions preorder-actions-4" : "d-flex gap-2"}>
                 <button className="btn btn-outline-primary flex-fill" onClick={() => printSlip(preorderSlip(p))}><i className="bi bi-printer me-1" aria-hidden="true"></i>Print</button>
                 <button className="btn btn-outline-dark flex-fill" disabled={offline} onClick={() => void openPreEdit(p)}><i className="bi bi-pencil me-1" aria-hidden="true"></i>Change</button>
+                {canMove && <button className="btn btn-outline-dark flex-fill" disabled={offline} onClick={() => { setMoveTarget(p); setMoveTo(""); setMoveError(null); }}><i className="bi bi-arrow-left-right me-1" aria-hidden="true"></i>Move store</button>}
                 <button className="btn btn-outline-danger flex-fill" disabled={offline} onClick={() => { setConfirmVoid({ id: p.id, orderNumber: p.orderNumber }); setVoidReason(""); }}><i className="bi bi-trash me-1" aria-hidden="true"></i>Delete</button>
               </div>
             </>
@@ -864,6 +948,10 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
       {/* One row: the title, Waiting / Done, and the one green button. */}
       <div className="d-flex flex-wrap align-items-center gap-2 mb-2">
         <h1 className="h4 mb-0 me-1">{subTab !== "build" ? "Pre-order" : editingPre ? `Change ${editingPre.orderNumber}` : "New pre-order"}</h1>
+        {/* Which store this pre-order belongs to. A login tied to one store, or a pre-order being changed, cannot switch. */}
+        {subTab === "build" && (editingPre ? editingPre.locationName : homeLocationId ? storeHere?.name : null) && (
+          <span className="badge text-bg-dark fs-6"><i className="bi bi-shop me-1" aria-hidden="true"></i>{editingPre ? editingPre.locationName : storeHere?.name}</span>
+        )}
         {subTab !== "build" && (
           <div className="btn-group" role="group" aria-label="Pre-order list">
             <button type="button" className={`btn ${subTab === "list" ? "btn-dark" : "btn-outline-dark"}`} aria-pressed={subTab === "list"} onClick={() => setSubTab("list")}><i className="bi bi-hourglass-split me-1" aria-hidden="true"></i>Waiting ({drafts.length + here.length})</button>
@@ -878,6 +966,11 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
           <button className="btn btn-success ms-auto" onClick={newPreorder}><i className="bi bi-plus-lg me-1"></i>New pre-order</button>
         )}
       </div>
+
+      {subTab === "build" && !editingPre && !homeLocationId && locations.length > 1 && (
+        <StoreBar inline size="md" label="Pre-order at" locations={locations} value={locationId} homeLocationId={null} onPick={pickStore}
+          locked={buildCart.length > 0} lockedNote="To change the store, clear the order first." />
+      )}
 
       {localReceipt && doneLocal.length > 0 && subTab !== "build" && (
         <div className="alert alert-warning d-flex flex-wrap align-items-center justify-content-center gap-2">
@@ -899,6 +992,42 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
       {receiptOrder && <ReceiptModal orderId={receiptOrder} onClose={() => setReceiptOrder(null)} />}
 
       {subTab === "build" ? renderBuild() : <div className="fit-scroll">{renderList(subTab === "finalize")}</div>}
+
+      {/* Move a waiting pre-order to another store (owner) */}
+      {moveTarget && (
+        <>
+          <div className="modal fade show d-block" tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="po-move-title">
+            <div className="modal-dialog modal-dialog-centered">
+              <div className="modal-content">
+                <div className="modal-header">
+                  <h5 className="modal-title" id="po-move-title">Move {moveTarget.orderNumber} to another store?</h5>
+                  <button type="button" className="btn-close" aria-label="Close" onClick={() => setMoveTarget(null)}></button>
+                </div>
+                <div className="modal-body">
+                  <p className="mb-2">{moveTarget.customerName || "This customer"} will pick it up at the store you choose.{moveTarget.locationName ? ` It is at ${moveTarget.locationName} now.` : ""}</p>
+                  <p className="text-muted mb-3">The rice goes back on the first store's shelf and is taken from the new store's. The price stays the same.</p>
+                  <div className="fw-semibold mb-2" id="po-move-pick">Move it to</div>
+                  <div className="d-flex flex-wrap gap-2" role="group" aria-labelledby="po-move-pick">
+                    {locations.filter((l) => l.id !== moveTarget.locationId).map((l) => (
+                      <button key={l.id} type="button" className={`btn btn-lg ${moveTo === l.id ? "btn-dark" : "btn-outline-dark"}`} aria-pressed={moveTo === l.id} onClick={() => setMoveTo(l.id)}>
+                        {moveTo === l.id && <i className="bi bi-check-lg me-1" aria-hidden="true"></i>}{l.name}
+                      </button>
+                    ))}
+                  </div>
+                  {moveError && <div className="alert alert-danger py-2 mt-3 mb-0" role="alert">{moveError}</div>}
+                </div>
+                <div className="modal-footer">
+                  <button className="btn btn-outline-dark btn-lg" onClick={() => setMoveTarget(null)}>Keep it here</button>
+                  <button className="btn btn-success btn-lg" disabled={!moveTo || moveBusy} onClick={doMovePre}>
+                    <i className="bi bi-arrow-left-right me-1" aria-hidden="true"></i>{moveBusy ? "Moving…" : "Move"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div className="modal-backdrop fade show"></div>
+        </>
+      )}
 
       {/* Delete pre-order confirm */}
       {confirmVoid && (

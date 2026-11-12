@@ -187,6 +187,8 @@ export interface WriteInput {
   note?: string | null;
   idempotencyKey?: string | null;
   registerSessionId?: string | null;
+  /** The store that took the money (a pre-order paid at its store). Empty = the sale's own store. */
+  locationId?: string | null;
   /** Utang terms for CREDIT tenders (POS passes the sale's start/due dates). */
   creditTerms?: { startAt?: string; dueAt?: string };
 }
@@ -214,6 +216,7 @@ export async function writeTenders(tx: Prisma.TransactionClient, input: WriteInp
         type: "payment",
         createdBy: input.actorId,
         registerSessionId: input.registerSessionId ?? null,
+        locationId: input.locationId ?? null,
       },
     });
     if (p.kind === "CREDIT") {

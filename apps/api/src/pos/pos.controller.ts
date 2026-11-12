@@ -3,6 +3,7 @@ import type { ApiError, PosSellRequest, PosHoldRequest, PosHoldItemsRequest, Pos
 import { JwtAuthGuard, type AuthPrincipal } from "../auth/auth.guard.js";
 import { resolveTenant, TENANT_ROLES } from "../auth/tenant-context.js";
 import { prisma } from "../persistence/prisma-repositories.js";
+import { loadActor } from "../people/people.service.js";
 import { POS_SERVICE, PosService } from "./pos.service.js";
 
 function statusFor(error: ApiError): HttpStatus {
@@ -29,6 +30,12 @@ export class PosController {
       const { storeId } = await resolveTenant(req.user, headerStoreId, TENANT_ROLES.ADMIN);
       return storeId;
     }
+
+  /** The store and the full login (role + home store): pre-orders follow the login's store. */
+  private async guardAndActor(req: Request & { user?: AuthPrincipal }, headerStoreId?: string) {
+    const { storeId, role } = await resolveTenant(req.user, headerStoreId, TENANT_ROLES.ADMIN);
+    return { storeId, actor: await loadActor(storeId, req.user!.sub, role) };
+  }
 
   /** POST /admin/pos/sell — immediate cash/utang sale (V1: tendered + change, credit dates). */
   @Post("sell")
@@ -73,9 +80,8 @@ export class PosController {
   /** POST /admin/pos/preorder — create a v4 pre-order draft (customer required, stock reserved). */
   @Post("preorder")
   async createPreOrder(@Req() req: Request & { user?: AuthPrincipal }, @Body() body: PreOrderCreateRequest, @Headers("x-store-id") headerStoreId?: string, @Headers("idempotency-key") idempotencyKey?: string) {
-    const user = req.user!;
-    const storeId = await this.guardAndStore(req, headerStoreId);
-    const result = await this.pos.createPreOrder(storeId, user.sub, { ...body, ...(body?.idempotencyKey === undefined && idempotencyKey ? { idempotencyKey } : {}) });
+    const { storeId, actor } = await this.guardAndActor(req, headerStoreId);
+    const result = await this.pos.createPreOrder(storeId, actor, { ...body, ...(body?.idempotencyKey === undefined && idempotencyKey ? { idempotencyKey } : {}) });
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
     return { ...result.value, storeId };
   }
@@ -83,18 +89,16 @@ export class PosController {
   /** GET /admin/pos/preorders — pre-order drafts (optional from/to createdAt ISO filters). */
   @Get("preorders")
   async preorders(@Req() req: Request & { user?: AuthPrincipal }, @Query("from") from?: string, @Query("to") to?: string, @Headers("x-store-id") headerStoreId?: string) {
-    const user = req.user!;
-    const storeId = await this.guardAndStore(req, headerStoreId);
-    return { preorders: await this.pos.listPreorders(storeId, from, to), storeId };
+    const { storeId, actor } = await this.guardAndActor(req, headerStoreId);
+    return { preorders: await this.pos.listPreorders(storeId, from, to, actor), storeId };
   }
 
   /** POST /admin/pos/preorders/:id/finalize — utang finalize: signature REQUIRED → COMPLETED + CreditEntry. */
   @Post("preorders/:id/finalize")
   async finalizePreorder(@Req() req: Request & { user?: AuthPrincipal }, @Param("id") id: string, @Body() body: PreOrderFinalizeRequest, @Headers("x-store-id") headerStoreId?: string, @Headers("idempotency-key") idempotencyKey?: string) {
-    const user = req.user!;
-    const storeId = await this.guardAndStore(req, headerStoreId);
+    const { storeId, actor } = await this.guardAndActor(req, headerStoreId);
     // Offline store mode: a completion saved on the tablet carries a key, so sending it again is answered the same.
-    const result = await this.pos.finalizePreorder(storeId, user.sub, id, { ...body, ...(body?.idempotencyKey === undefined && idempotencyKey ? { idempotencyKey } : {}) });
+    const result = await this.pos.finalizePreorder(storeId, actor, id, { ...body, ...(body?.idempotencyKey === undefined && idempotencyKey ? { idempotencyKey } : {}) });
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
     return { ...result.value, storeId };
   }
@@ -114,9 +118,18 @@ export class PosController {
    *  PRE_ORDER drafts so it can never re-price a POS hold. */
   @Patch("preorders/:id/items")
   async preorderItems(@Req() req: Request & { user?: AuthPrincipal }, @Param("id") id: string, @Body() body: PosHoldItemsRequest, @Headers("x-store-id") headerStoreId?: string) {
-    const user = req.user!;
-    const storeId = await this.guardAndStore(req, headerStoreId);
-    const result = await this.pos.replaceItems(storeId, user.sub, id, body, { source: "PRE_ORDER" });
+    const { storeId, actor } = await this.guardAndActor(req, headerStoreId);
+    const result = await this.pos.replaceItems(storeId, actor, id, body, { source: "PRE_ORDER" });
+    if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
+    return { ...result.value, storeId };
+  }
+
+  /** POST /admin/pos/preorders/:id/move — the owner moves a waiting pre-order to another store
+   *  (its rice goes back on the first shelf and is taken from the new one; the agreed prices stay). */
+  @Post("preorders/:id/move")
+  async preorderMove(@Req() req: Request & { user?: AuthPrincipal }, @Param("id") id: string, @Body() body: { locationId?: string }, @Headers("x-store-id") headerStoreId?: string) {
+    const { storeId, actor } = await this.guardAndActor(req, headerStoreId);
+    const result = await this.pos.movePreorder(storeId, actor, id, body?.locationId);
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
     return { ...result.value, storeId };
   }
@@ -134,9 +147,8 @@ export class PosController {
   /** POST /admin/pos/holds/:id/void — void a held order (stock restored). */
   @Post("holds/:id/void")
   async holdVoid(@Req() req: Request & { user?: AuthPrincipal }, @Param("id") id: string, @Body() body: { reason?: string }, @Headers("x-store-id") headerStoreId?: string) {
-    const user = req.user!;
-    const storeId = await this.guardAndStore(req, headerStoreId);
-    const result = await this.pos.voidHold(storeId, user.sub, id, body?.reason);
+    const { storeId, actor } = await this.guardAndActor(req, headerStoreId);
+    const result = await this.pos.voidHold(storeId, actor, id, body?.reason);
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
     return { ...result.value, storeId };
   }
