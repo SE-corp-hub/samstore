@@ -602,3 +602,9 @@ main:has(> * > .rice-ui > .sell-fit), main:has(> .rice-ui > .sell-fit) { padding
    (Move store), so the four secondary buttons sit two by two instead of squeezing on one row. */
 .preorder-actions { display: grid; gap: 0.5rem; }
 .preorder-actions-4 { grid-template-columns: 1fr 1fr; }
+
+/* Expenses: the "paid from the drawer" tick is one big row to tap, not a small box. */
+.exp-check { display: flex; align-items: center; gap: 0.75rem; min-height: 48px; padding: 0.5rem 0.875rem; border: 1px solid #6c757d; border-radius: 0.5rem; cursor: pointer; width: fit-content; max-width: 100%; }
+.exp-check .form-check-input { width: 1.75rem; height: 1.75rem; margin: 0; flex: 0 0 auto; }
+.exp-check:has(.form-check-input:checked) { border-color: #1f6f3f; background: #eef7f0; }
+.exp-check:has(.form-check-input:focus-visible) { outline: 3px solid #0b5ed7; outline-offset: 2px; }

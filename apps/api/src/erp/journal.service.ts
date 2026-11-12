@@ -140,10 +140,21 @@ export class JournalService {
     const postedExpenseRefs = new Set(
       (await prisma.journalEntry.findMany({ where: { storeId, source: "expense" }, select: { reference: true } })).map((e) => e.reference),
     );
-    const expenses = await prisma.expense.findMany({ where: { storeId }, select: { id: true } });
+    const expenses = await prisma.expense.findMany({ where: { storeId }, select: { id: true, voidedAt: true, amountMinor: true } });
     let expensesPosted = 0;
     for (const e of expenses) {
-      if (postedExpenseRefs.has(`EXPENSE:${e.id}`)) continue;
+      const posted = postedExpenseRefs.has(`EXPENSE:${e.id}`);
+      if (e.voidedAt) {
+        // A cancelled expense is not posted. One that was posted before it was cancelled is posted back.
+        if (posted && !postedExpenseRefs.has(`EXPENSE-CANCEL:${e.id}`)) {
+          await this.postEntry(storeId, { reference: `EXPENSE-CANCEL:${e.id}`, memo: "Expense cancelled", source: "expense", lines: [
+            { accountCode: "1000", debitMinor: e.amountMinor },
+            { accountCode: "5000", creditMinor: e.amountMinor },
+          ] });
+        }
+        continue;
+      }
+      if (posted) continue;
       const r = await this.postExpense(storeId, e.id);
       if (r.ok) expensesPosted += 1;
     }

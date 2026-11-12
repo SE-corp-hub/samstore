@@ -58,7 +58,7 @@ export class DataExportService {
       prisma.stockIn.findMany({ where: { storeId, createdAt: range }, orderBy: { createdAt: "asc" }, select: { docNumber: true, createdAt: true, locationId: true, supplierName: true, note: true, lines: { select: { productId: true, quantity: true, unitCostMinor: true } } } }),
       prisma.resackJob.findMany({ where: { storeId, startedAt: range }, orderBy: { startedAt: "asc" }, select: { docNumber: true, status: true, startedAt: true, finishedAt: true, locationId: true, inputProductId: true, inputQty: true, inputGrams: true, inputValueMinor: true, outputGrams: true, lossGrams: true, lossValueMinor: true, varietyChange: true, outputs: { select: { productId: true, quantity: true } } } }),
       prisma.storePayableEntry.findMany({ where: { storeId, createdAt: range }, orderBy: { createdAt: "asc" }, select: { docNumber: true, createdAt: true, locationId: true, kind: true, amountMinor: true, productId: true, quantity: true, unitCostMinor: true, sourceLocationId: true, note: true } }),
-      prisma.expense.findMany({ where: { storeId, spentAt: range }, orderBy: { spentAt: "asc" }, select: { spentAt: true, category: true, amountMinor: true, note: true } }),
+      prisma.expense.findMany({ where: { storeId, spentAt: range }, orderBy: { spentAt: "asc" }, select: { spentAt: true, category: true, amountMinor: true, note: true, locationId: true, paidFromDrawer: true, voidedAt: true, voidReason: true } }),
       prisma.storeCustomer.findMany({ where: { storeId }, select: { id: true, createdAt: true, creditApproved: true, creditUnlimited: true, creditLimitMinor: true, creditBalanceMinor: true, tags: true, customer: { select: { name: true, phone: true, address: true } } } }),
       prisma.creditEntry.findMany({ where: { storeId, createdAt: range }, orderBy: { createdAt: "asc" }, select: { createdAt: true, startAt: true, dueAt: true, storeCustomerId: true, type: true, amountMinor: true, note: true, orderId: true } }),
     ]);
@@ -167,8 +167,8 @@ export class DataExportService {
 
     tables.push({
       name: "Expenses",
-      columns: cols([["Date", "datetime"], ["Category", "text"], ["Amount", "money"], ["Note", "text"]]),
-      rows: expenses.map((e): Cell[] => [e.spentAt, e.category, pesos(e.amountMinor), e.note]),
+      columns: cols([["Date", "datetime"], ["Store", "text"], ["Category", "text"], ["Amount", "money"], ["Note", "text"], ["Paid from the drawer", "text"], ["Cancelled", "text"], ["Why cancelled", "text"]]),
+      rows: expenses.map((e): Cell[] => [e.spentAt, e.locationId ? locName(e.locationId) : "Whole business", e.category, pesos(e.amountMinor), e.note, e.paidFromDrawer ? "Yes" : "", e.voidedAt ? "Cancelled" : "", e.voidReason]),
     });
 
     tables.push({
