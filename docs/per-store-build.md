@@ -11,8 +11,10 @@ store's rice and pay its cost for what they sell), Bodega (storage, does not sel
   and may replay queued requests (`apps/web/src/lib/offlineQueue.ts`). A missing `locationId` means
   the login's home place, then the main place. Never answer an old request shape with a 400.
 - Database: migration `20261114100000_per_store_plan` holds every new field for all ten steps and
-  only adds. It is applied to the beta database by hand (`beta-database.bat`, or the "Set up database"
-  workflow) BEFORE the first step that adds one of its fields to `prisma/schema.prisma` is merged.
+  only adds. It is applied to the beta database by hand with `beta-database-update.bat` (fields only:
+  `prisma migrate deploy` and nothing else) BEFORE the first step that adds one of its fields to
+  `prisma/schema.prisma` is merged. Do NOT use `beta-database.bat` on a beta database that is in use:
+  its last step refreshes the sample store (new owner password, new test PINs, sample rice put back).
   Until a step uses a field, the field is NOT in `schema.prisma`, so the running app never asks for a
   column that might not be there yet.
 - Screens follow the easy-read and tablet-fit rules (`easy-read.css`, `use-fit-height.ts`).

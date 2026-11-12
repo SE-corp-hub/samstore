@@ -1,5 +1,12 @@
 // Sets up the SEPARATE beta database: creates the tables, then the TEST Bigasan sample store.
 // Reads the address from go-live/beta-database-url.txt, or asks for it. Never saves it anywhere else.
+//
+//   node scripts/beta-database.mjs                first set-up (tables + the sample store)
+//   node scripts/beta-database.mjs --fields-only  an update of a beta database already in use: adds the
+//                                                 new tables and fields only (prisma migrate deploy). It
+//                                                 does NOT run the sample-store step, which gives the owner
+//                                                 login a new password, resets the test PINs and puts the
+//                                                 sample rice back.
 import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { createInterface } from "node:readline/promises";
@@ -9,6 +16,7 @@ const ROLES_SQL = `DO $$ BEGIN CREATE ROLE anon NOLOGIN; EXCEPTION WHEN duplicat
 DO $$ BEGIN CREATE ROLE authenticated NOLOGIN; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 `;
 const clean = (s) => (s ?? "").trim().replace(/^["']|["']$/g, "").trim();
+const FIELDS_ONLY = process.argv.includes("--fields-only");
 
 function refOf(url) {
   const m = /^postgres(?:ql)?:\/\/([^:@/]+)/i.exec(url);
@@ -47,6 +55,15 @@ async function main() {
     if (r.status !== 0) throw new Error(`Failed at: ${label}. Tell Claude what it says above.`);
   };
   // A Supabase database has these roles; Neon does not, and the lock-down migration revokes from them.
+  if (FIELDS_ONLY) {
+    step("Step 1 of 2: preparing the database...", "npx prisma db execute --schema prisma/schema.prisma --stdin", ROLES_SQL);
+    step("Step 2 of 2: adding the new fields (nothing is removed)...", "npx prisma migrate deploy");
+    const saved = existsSync(FILE);
+    if (saved) unlinkSync(FILE);
+    console.log("\nThe beta database has the new fields. Logins, rice, prices and stock were not touched.");
+    console.log(`${saved ? "The saved address file was deleted. " : ""}Tell Claude: database updated`);
+    return;
+  }
   step("Step 1 of 3: preparing the database...", "npx prisma db execute --schema prisma/schema.prisma --stdin", ROLES_SQL);
   step("Step 2 of 3: creating the tables...", "npx prisma migrate deploy");
   step("Step 3 of 3: adding the TEST Bigasan sample store...", "npx tsx scripts/test-setup.ts");
