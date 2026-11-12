@@ -19,6 +19,8 @@ export interface CachedMembership {
   storeStatus: string;
   /** The person's home location in this store (loadActor reads it from here: one query less per request). */
   homeLocationId: string | null;
+  /** Step 7: head of the home store (may change that store's prices, sees its profit). */
+  isLocationHead: boolean;
 }
 
 const PREFIX = "memberships";
@@ -32,9 +34,9 @@ export async function getMemberships(userId: string): Promise<CachedMembership[]
 
   const rows = await prisma.userStore.findMany({
     where: { userId, status: "ACTIVE" },
-    select: { storeId: true, role: true, homeLocationId: true, store: { select: { status: true } } },
+    select: { storeId: true, role: true, homeLocationId: true, isLocationHead: true, store: { select: { status: true } } },
   });
-  const value: CachedMembership[] = rows.map((m) => ({ storeId: m.storeId, role: m.role, storeStatus: m.store.status, homeLocationId: m.homeLocationId }));
+  const value: CachedMembership[] = rows.map((m) => ({ storeId: m.storeId, role: m.role, storeStatus: m.store.status, homeLocationId: m.homeLocationId, isLocationHead: m.isLocationHead && !!m.homeLocationId }));
   await cacheSet(key, value, TTL_MS);
   return value;
 }
