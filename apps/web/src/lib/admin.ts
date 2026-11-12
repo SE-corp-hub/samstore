@@ -345,6 +345,8 @@ export function isStoreHead(): boolean {
   }
   return !!storeHead && !!homeLocation();
 }
+/** The login's home store, null for the owner, a manager, or a login with no store. */
+export const getHomeLocation = (): string | null => homeLocation();
 function homeLocation(): string | null {
   if (homeLocationId === undefined) {
     try { homeLocationId = typeof window === "undefined" ? null : window.localStorage.getItem(HOME_KEY); } catch { homeLocationId = null; }

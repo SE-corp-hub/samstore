@@ -25,6 +25,9 @@ interface Location {
   consignment?: boolean;
   /** The Facebook Page that sells for this store. */
   facebookPageUrl?: string | null;
+  /** Step 9: the store's own receipt name and text, daily target and order-number start. */
+  receiptName?: string | null; receiptHeader?: string | null; receiptFooter?: string | null; receiptContact?: string | null;
+  dailySalesTargetMinor?: number | null; orderPrefix?: string | null;
   /** The other places it may take rice from, in order. null = no rule set yet (any place). [] = its own shelf only. */
   takesFrom?: string[] | null;
   stockCount: number;
@@ -58,7 +61,7 @@ interface PriceRow {
 type ApiBody = { message?: string; errors?: string[]; prices?: PriceRow[] };
 
 const label = (l: { name: string; code: string | null }) => (l.code ? `${l.code} · ${l.name}` : l.name);
-const emptyForm = { name: "", code: "", type: "STORE" as LocationType, address: "", consignment: false, facebookPageUrl: "", ruleOn: false, takesFrom: [] as string[] };
+const emptyForm = { name: "", code: "", type: "STORE" as LocationType, address: "", consignment: false, facebookPageUrl: "", ruleOn: false, takesFrom: [] as string[], receiptName: "", receiptHeader: "", receiptFooter: "", receiptContact: "", dailyTarget: "", orderPrefix: "" };
 const errorText = (d: ApiBody, fallback: string) => d?.errors?.join(", ") ?? d?.message ?? fallback;
 
 async function call(url: string, method: string, body?: unknown): Promise<{ ok: boolean; data: ApiBody }> {
@@ -135,6 +138,12 @@ export default function WarehousesPanel() {
       name: form.name, code: form.code || null, type: form.type, address: form.address || null, consignment: form.consignment,
       // The Page and the take-rice-from rule are set on a place that already exists (the rule names other places).
       ...(editingId ? { facebookPageUrl: form.type === "STORE" ? form.facebookPageUrl.trim() || null : null, takesFrom: form.ruleOn ? form.takesFrom : null } : {}),
+      // The store's own name and text on receipts, its target and its order numbers (empty = the business's, from Settings).
+      ...(editingId && form.type === "STORE" ? {
+        receiptName: form.receiptName.trim() || null, receiptHeader: form.receiptHeader.trim() || null, receiptFooter: form.receiptFooter.trim() || null,
+        receiptContact: form.receiptContact.trim() || null, orderPrefix: form.orderPrefix.trim() || null,
+        dailySalesTargetMinor: form.dailyTarget.trim() ? Math.round(Number(form.dailyTarget.replace(/,/g, "")) * 100) || null : null,
+      } : {}),
     };
     const { ok, data } = editingId
       ? await call(`${API_URL}/admin/warehouses/${editingId}`, "PATCH", body)
@@ -160,6 +169,8 @@ export default function WarehousesPanel() {
     setForm({
       name: l.name, code: l.code ?? "", type: l.type, address: l.address ?? "", consignment: l.consignment === true,
       facebookPageUrl: l.facebookPageUrl ?? "", ruleOn: Array.isArray(l.takesFrom), takesFrom: l.takesFrom ?? [],
+      receiptName: l.receiptName ?? "", receiptHeader: l.receiptHeader ?? "", receiptFooter: l.receiptFooter ?? "", receiptContact: l.receiptContact ?? "",
+      dailyTarget: l.dailySalesTargetMinor ? String(l.dailySalesTargetMinor / 100) : "", orderPrefix: l.orderPrefix ?? "",
     });
   };
 
@@ -274,6 +285,40 @@ export default function WarehousesPanel() {
                     <input id="loc-page" className="form-control" inputMode="url" autoCapitalize="none" autoCorrect="off" placeholder="facebook.com/yourpage" value={form.facebookPageUrl} onChange={(e) => setForm({ ...form, facebookPageUrl: e.target.value })} maxLength={300} aria-describedby="loc-page-help" />
                     <div id="loc-page-help" className="form-text">Orders from this Page are this store&apos;s sales, at this store&apos;s prices. Leave empty if the store has no Page.</div>
                   </div>
+                )}
+                {editingId && form.type === "STORE" && (
+                  <fieldset className="col-12 border rounded p-2" id="loc-identity">
+                    <legend className="form-label fw-semibold mb-1 float-none w-auto px-1 fs-6">On {form.name || "this store"}&apos;s receipts</legend>
+                    <p className="form-text mt-0 mb-2">Leave a box empty to use what is in Settings.</p>
+                    <div className="row g-2">
+                      <div className="col-sm-6">
+                        <label className="form-label small mb-1" htmlFor="loc-rname">Store name on the receipt</label>
+                        <input id="loc-rname" className="form-control" maxLength={60} placeholder={form.name} value={form.receiptName} onChange={(e) => setForm({ ...form, receiptName: e.target.value })} />
+                      </div>
+                      <div className="col-sm-6">
+                        <label className="form-label small mb-1" htmlFor="loc-rcontact">Phone number on the receipt</label>
+                        <input id="loc-rcontact" className="form-control" maxLength={60} inputMode="tel" placeholder="0917 123 4567" value={form.receiptContact} onChange={(e) => setForm({ ...form, receiptContact: e.target.value })} />
+                      </div>
+                      <div className="col-sm-6">
+                        <label className="form-label small mb-1" htmlFor="loc-rhead">Line under the name</label>
+                        <input id="loc-rhead" className="form-control" maxLength={120} placeholder="Street, barangay, town" value={form.receiptHeader} onChange={(e) => setForm({ ...form, receiptHeader: e.target.value })} />
+                      </div>
+                      <div className="col-sm-6">
+                        <label className="form-label small mb-1" htmlFor="loc-rfoot">Last line of the receipt</label>
+                        <input id="loc-rfoot" className="form-control" maxLength={120} placeholder="Thank you!" value={form.receiptFooter} onChange={(e) => setForm({ ...form, receiptFooter: e.target.value })} />
+                      </div>
+                      <div className="col-sm-6">
+                        <label className="form-label small mb-1" htmlFor="loc-target">Sales target for one day (₱)</label>
+                        <input id="loc-target" className="form-control" inputMode="decimal" placeholder="No own target" value={form.dailyTarget} onChange={(e) => setForm({ ...form, dailyTarget: e.target.value.replace(/[^0-9.,]/g, "") })} aria-describedby="loc-target-help" />
+                        <div id="loc-target-help" className="form-text">Shown on Home for this store&apos;s logins.</div>
+                      </div>
+                      <div className="col-sm-6">
+                        <label className="form-label small mb-1" htmlFor="loc-prefix">Order numbers start with</label>
+                        <input id="loc-prefix" className="form-control text-uppercase" maxLength={6} autoCapitalize="characters" placeholder="LIPA" value={form.orderPrefix} onChange={(e) => setForm({ ...form, orderPrefix: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "") })} aria-describedby="loc-prefix-help" />
+                        <div id="loc-prefix-help" className="form-text">Example: <strong>{form.orderPrefix || "LIPA"}-{new Date().getFullYear()}-000001</strong>. For new orders only.</div>
+                      </div>
+                    </div>
+                  </fieldset>
                 )}
                 {editingId && form.type !== "BUFFER" && (
                   <fieldset className="col-12">

@@ -838,6 +838,13 @@ model Warehouse {
   // as before). A saved rule always starts with the place itself, so "its own shelf only" is a list of one.
   sourceLocationIds String[] @default([])
   facebookPageUrl   String? // the Facebook Page that sells for this store
+  // Per-store build, step 9: what this store calls itself (empty = the business's own, from Settings).
+  receiptName           String?
+  receiptHeader         String?
+  receiptFooter         String?
+  receiptContact        String?
+  dailySalesTargetMinor Int?
+  orderPrefix           String?
   expenses          Expense[]
   cashHandovers     CashHandover[]
   paymentsFor       Payment[] @relation("PaymentForLocation")

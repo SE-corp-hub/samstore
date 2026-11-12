@@ -5,6 +5,7 @@
 //   • no orders on empty cart      • canonical idempotency key → no duplicates
 //   • claim token signed, single-use
 
+import { orderPrefixAt } from "../domain/store-identity.js";
 import type { CheckoutRequest, CheckoutResponse, ApiError } from "@sam-store/contracts";
 import { validateCheckoutInput } from "../domain/checkout-validation.js";
 import { revalidateCartLines, CartRevalidationError } from "../domain/cart.js";
@@ -431,7 +432,7 @@ export class CheckoutService {
 
     // 7. Order number from store-scoped sequence
     const seq = await this.sequences.nextOrderSequence(store.id);
-    const orderNumber = formatOrderNumber(store.slug, seq, { prefix: store.orderNumberPrefix ?? undefined });
+    const orderNumber = formatOrderNumber(store.slug, seq, { prefix: await orderPrefixAt(prisma, store.id, trusted?.sellingLocationId, store.orderNumberPrefix) });
 
     // 8. Immutable line items (names/SKUs snapshot at purchase time)
     const items = revalidated.lines.map((line) => {

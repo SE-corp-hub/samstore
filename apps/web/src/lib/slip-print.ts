@@ -2,6 +2,7 @@
 // Used by Resack, Stock in and anything else that needs "print what happened".
 // The HTML builder is pure so its escaping and layout are unit-tested.
 
+import { placeIdentity } from "./store-identity";
 import { getPrinterSettings, receiptName } from "./printer-settings";
 import { savedCopy } from "./offlineCache";
 import { printViaBluetooth } from "./bt-print";
@@ -26,6 +27,7 @@ export interface Slip {
   contact?: string | null;       // a second line under it (phone)
   copies?: number;               // 2 = one for the customer, one for the store
   a4?: boolean;                  // a full A4 page instead of a roll (statements)
+  locationId?: string | null;    // the store this slip is from (left out: the login's own store)
 }
 
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -66,10 +68,12 @@ ${s.footer ? `<hr><div class="c">${esc(s.footer)}</div>` : ""}
 /** Print the slip through a hidden frame (works on phones and desktops; "Save as PDF" is in the print dialog). */
 export function printSlip(s: Slip): void {
   const cfg = getPrinterSettings();
+  // Step 9: a store's own receipt name and text (Menu, Locations) come before this tablet's printer text.
+  const place = placeIdentity(s.locationId);
   s = {
-    ...s, storeName: receiptName(s.storeName, cfg.name, registeredStoreName()),
-    widthMm: s.widthMm ?? cfg.widthMm, header: s.header ?? (cfg.header || null), contact: s.contact ?? (cfg.contact || null),
-    footer: cfg.footer || s.footer, copies: s.copies ?? cfg.copies,
+    ...s, storeName: receiptName(s.storeName, place?.receiptName || cfg.name, registeredStoreName()),
+    widthMm: s.widthMm ?? cfg.widthMm, header: s.header ?? (place?.receiptHeader || cfg.header || null), contact: s.contact ?? (place?.receiptContact || cfg.contact || null),
+    footer: place?.receiptFooter || cfg.footer || s.footer, copies: s.copies ?? cfg.copies,
   };
   if (cfg.bluetooth && !s.a4) {
     // Straight to the Bluetooth printer. If that fails, fall back to the normal print window so a receipt is never lost.
