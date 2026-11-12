@@ -165,11 +165,13 @@ test("CART_ADD_DTO / LOGIN_DTO / REGISTER_DTO guard their boundaries", () => {
   assert.equal(checkDto({ email: "a@b.co", password: "whatever" }, LOGIN_DTO).ok, true);
   assert.equal(checkDto({ identifier: "+639171234567", password: "whatever" }, LOGIN_DTO).ok, true);
   // A1: register accepts phone-only OR email; must not accept role/storeId.
-  assert.equal(checkDto({ phone: "09171234567", password: "password1" }, REGISTER_DTO).ok, true);
-  assert.equal(checkDto({ email: "a@b.co", password: "password1" }, REGISTER_DTO).ok, true);
-  assert.equal(checkDto({ email: "a@b.co", password: "password1", role: "PLATFORM_ADMIN" }, REGISTER_DTO).ok, false);
-  assert.equal(checkDto({ email: "a@b.co", password: "password1", storeId: "x" }, REGISTER_DTO).ok, false);
-  assert.equal(checkDto({ email: "a@b.co", password: "short" }, REGISTER_DTO).ok, false);
+  // The password is typed twice (passwordConfirm is required since the register form asks for it).
+  assert.equal(checkDto({ phone: "09171234567", password: "password1", passwordConfirm: "password1" }, REGISTER_DTO).ok, true);
+  assert.equal(checkDto({ email: "a@b.co", password: "password1", passwordConfirm: "password1" }, REGISTER_DTO).ok, true);
+  assert.equal(checkDto({ email: "a@b.co", password: "password1" }, REGISTER_DTO).ok, false);
+  assert.equal(checkDto({ email: "a@b.co", password: "password1", passwordConfirm: "password1", role: "PLATFORM_ADMIN" }, REGISTER_DTO).ok, false);
+  assert.equal(checkDto({ email: "a@b.co", password: "password1", passwordConfirm: "password1", storeId: "x" }, REGISTER_DTO).ok, false);
+  assert.equal(checkDto({ email: "a@b.co", password: "short", passwordConfirm: "short" }, REGISTER_DTO).ok, false);
   assert.equal(checkDto({ email: "a@b.co" }, REGISTER_DTO).ok, false);
 });
 

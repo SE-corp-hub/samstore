@@ -1,10 +1,10 @@
 name: CI
 
 # Quality gate (no database) runs on every push/PR.
-# The DB-backed test gate needs a managed Postgres URL and only runs when the
-# operator has configured the DATABASE_URL repository secret (a red gate here
-# means "tests did not run", never a fabricated pass).
-# The Playwright critical-path suite needs both servers up, so it is manual.
+# The DB-backed test gate starts its own throwaway Postgres for the run, so it needs no
+# secret and can never touch a real database.
+# The Playwright critical-path suite needs both servers up, so it is manual; it still
+# uses the DATABASE_URL secret, so start it only while that secret is a test database.
 
 on:
   push:
@@ -37,36 +37,31 @@ jobs:
       - name: Build
         run: npm run build
 
-  # `secrets` cannot be read in a job-level `if`: GitHub rejects the whole file ("This run likely
-  # failed because of a workflow file issue"), so not even the no-DB gate above ever ran. A tiny
-  # job reads the secret inside a step and says whether it is set; the gate below skips when it
-  # is not — skipped, never faked green.
-  db-secret:
-    name: is DATABASE_URL configured?
-    runs-on: ubuntu-latest
-    outputs:
-      configured: ${{ steps.check.outputs.configured }}
-    steps:
-      - id: check
-        env:
-          DB: ${{ secrets.DATABASE_URL }}
-        run: |
-          if [ -n "$DB" ]; then
-            echo "configured=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "configured=false" >> "$GITHUB_OUTPUT"
-            echo "DATABASE_URL secret not set: the DB test gate is skipped."
-          fi
-
+  # The DB-backed tests run against their OWN throwaway Postgres, started for this run and
+  # thrown away after it. They used to run `prisma migrate deploy` and create test stores in
+  # whatever database the DATABASE_URL secret pointed at, which must never be the shop's.
   db-tests:
-    name: sequential test gate (needs DATABASE_URL secret)
+    name: sequential test gate (own throwaway database)
     runs-on: ubuntu-latest
-    needs: db-secret
-    if: needs.db-secret.outputs.configured == 'true'
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: sam_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
     env:
-      DATABASE_URL: ${{ secrets.DATABASE_URL }}
-      JWT_SECRET: ${{ secrets.JWT_SECRET || 'ci-only-jwt-secret-0123456789abcdef' }}
-      CLAIM_SIGNING_SECRET: ${{ secrets.CLAIM_SIGNING_SECRET || 'ci-only-claim-secret-0123456789abcdef' }}
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/sam_ci
+      JWT_SECRET: ci-only-jwt-secret-0123456789abcdef
+      SESSION_SECRET: ci-only-session-secret-0123456789abcdef
+      CLAIM_SIGNING_SECRET: ci-only-claim-secret-0123456789abcdef
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -75,9 +70,21 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx prisma generate
+      - name: Roles a hosted Postgres already has (the security test checks them)
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h localhost -U postgres -d sam_ci -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE ROLE anon NOLOGIN;
+          CREATE ROLE authenticated NOLOGIN;
+          CREATE ROLE authenticator NOLOGIN;
+          CREATE ROLE service_role NOLOGIN BYPASSRLS;
+          SQL
       - name: Apply migrations
         run: npx prisma migrate deploy
-      - name: Tests (one file at a time — the pooler caps sessions at 15)
+      - name: Address list the delivery-zone tests read
+        run: npm run db:seed:addresses
+      - name: Tests (one file at a time)
         run: npm test
       - name: Reconciliation must report zero drift
         run: npx tsx scripts/reconcile.ts

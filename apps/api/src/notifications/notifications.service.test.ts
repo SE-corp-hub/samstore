@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { NotificationsService } from "./notifications.service.js";
 import { MessengerService, MockMessengerProvider } from "../messenger/messenger.adapter.js";
@@ -10,8 +10,16 @@ function makeSvc(connected: boolean) {
   return { svc: new NotificationsService(messenger), mock };
 }
 
-// Use the seeded demo store (FK requirement for the audit log).
-const STORE_ID = "cmtifdks2000094ic1j9w8th7";
+// A store of this run's own (FK requirement for the notification log); it used to need one old database's demo store.
+let STORE_ID = "";
+before(async () => {
+  STORE_ID = (await prisma.store.create({ data: { slug: `ntf-${Date.now()}-${Math.floor(Math.random() * 1000)}`, name: "Notifications test store" } })).id;
+});
+after(async () => {
+  await prisma.notificationLog.deleteMany({ where: { storeId: STORE_ID } });
+  await prisma.store.deleteMany({ where: { id: STORE_ID } });
+  await prisma.$disconnect();
+});
 
 test("templates render with data", async () => {
   const { svc } = makeSvc(true);
@@ -61,7 +69,7 @@ test("notification log is written", async () => {
     template: "order_out_for_delivery",
     data: { orderNumber: "X" },
   });
-  const row = await prisma.notificationLog.findFirst({ where: { template: "order_out_for_delivery" }, orderBy: { createdAt: "desc" } });
+  const row = await prisma.notificationLog.findFirst({ where: { storeId: STORE_ID, template: "order_out_for_delivery" }, orderBy: { createdAt: "desc" } });
   assert.ok(row);
   assert.equal(row!.delivered, true);
   assert.match(row!.text, /out for delivery/);

@@ -2,7 +2,7 @@
 // Uses the real Prisma client (like the other *.test.ts files); every fixture is a
 // unique run-scoped record and is deleted in the after() hook so the shared DB stays clean.
 
-import { test, after } from "node:test";
+import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { prisma } from "../persistence/prisma-repositories.js";
 import { LoyaltyService } from "../loyalty/loyalty.service.js";
@@ -12,8 +12,13 @@ const loyalty = new LoyaltyService();
 const credit = new CreditService();
 
 const run = `V4T${Date.now()}${Math.floor(Math.random() * 1000)}`;
-const STORE = "cmtifdks2000094ic1j9w8th7"; // seeded sam-store
-const OTHER_STORE = "cmtl2go8u000194dgi5ysohv5"; // seeded store two
+// Two stores of this run's own (the test used to need two store ids that exist only in one old database).
+let STORE = "";
+let OTHER_STORE = "";
+before(async () => {
+  STORE = (await prisma.store.create({ data: { slug: `${run}-a`.toLowerCase(), name: `${run} store A` } })).id;
+  OTHER_STORE = (await prisma.store.create({ data: { slug: `${run}-b`.toLowerCase(), name: `${run} store B` } })).id;
+});
 
 const scIds: string[] = [];
 const customerIds: string[] = [];
@@ -68,6 +73,9 @@ after(async () => {
     }
     await prisma.customer.deleteMany({ where: { id: { in: customerIds } } });
   }
+  const stores = [STORE, OTHER_STORE].filter(Boolean);
+  await prisma.auditLog.deleteMany({ where: { storeId: { in: stores } } });
+  await prisma.store.deleteMany({ where: { id: { in: stores } } });
   await prisma.$disconnect();
 });
 
