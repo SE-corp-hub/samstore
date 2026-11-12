@@ -1361,3 +1361,10 @@ Commits: `32dce58` (loop 2).
 - New screen Money → Cash drawer (owner, manager, staff). Close the store's cash step and the daily report show the new lines.
 - The day stands alone as before: the change money and cash left from yesterday are not carried over.
 - Tests: `cash/cash-store.test.ts` (3): one day with a counter sale, a delivery, a credit payment, a refund, a void, a drawer expense and a hand-over matches to the peso. Screens checked at 1280x720, 800x1200 and 615x985.
+
+## 2026-11-12 — Per-store build, step 5: net profit per store on Compare stores
+
+- Store report → Compare stores now shows, above the table, a card for each store: profit from sales − that store's own expenses = net profit (or net loss), and a card for the whole business: profit of all stores − the stores' expenses − the expenses that belong to no store.
+- `store-report.service.ts` `compare()`: each row gains `expensesMinor` and `netProfitMinor`; the answer gains `business.expensesMinor` and `total.expensesMinor` / `total.netProfitMinor`. Cancelled expenses are left out. No database change.
+- The stores added together, less the whole-business expenses, equal the old Reports screen's profit and the month report's net profit for the same dates.
+- Tests: 1 more in `reports/sales-book.test.ts` (5). Screen checked at 1280x720, 800x1200 and 615x985.

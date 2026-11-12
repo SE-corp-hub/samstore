@@ -23,7 +23,7 @@ interface StockRow { productId: string; name: string; loose: boolean; unit: stri
 interface StockData { location: { id: string; name: string }; rows: StockRow[]; totals: { items: number; low: number; empty: number; valueMinor: number; costValueMinor?: number } }
 interface SalesTotals { count: number; totalMinor: number; cashMinor: number; gcashMinor: number; creditMinor: number; otherMinor: number; takenBack?: { count: number; totalMinor: number }; costMinor?: number; grossProfitMinor?: number; profitShareMinor?: number }
 interface SalesData { location: { id: string; name: string }; from: string; to: string; sales: SalesTotals; cashInMinor: number; creditGivenMinor: number; creditCollectedMinor: number; items: { name: string; unit: string; quantity: number; salesMinor: number; profitMinor?: number }[]; days: { date: string; count: number; totalMinor: number }[] }
-interface CompareData { from: string; to: string; stores: { location: { id: string; name: string; type: string }; sales: SalesTotals; cashInMinor: number; creditGivenMinor: number; creditCollectedMinor: number; stock: { items: number; low: number; empty: number; valueMinor: number }; owesMinor: number }[]; total: { salesMinor: number; count: number; grossProfitMinor: number; creditGivenMinor: number; stockValueMinor: number; owesMinor: number } }
+interface CompareData { from: string; to: string; stores: { location: { id: string; name: string; type: string }; sales: SalesTotals; cashInMinor: number; creditGivenMinor: number; creditCollectedMinor: number; stock: { items: number; low: number; empty: number; valueMinor: number }; owesMinor: number; expensesMinor?: number; netProfitMinor?: number }[]; business?: { expensesMinor: number }; total: { expensesMinor?: number; netProfitMinor?: number; salesMinor: number; count: number; grossProfitMinor: number; creditGivenMinor: number; stockValueMinor: number; owesMinor: number } }
 interface BufferData { buffer: { id: string; name: string } | null; owed: { productId: string; name: string; unit: string; quantity: number; valueMinor: number; oldestAt: string | null }[]; surplus: { productId: string; name: string; unit: string; quantity: number }[]; totals: { owedMinor: number; owedItems: number }; entries: { at: string; productName: string; unit: string; quantity: number; orderNumber: string | null; store: string | null; by: string | null; what: string }[] }
 interface RecordRow { at: string; kind: "SALE" | "STOCK" | "MONEY"; title: string; detail: string; store: string | null; docNumber: string | null; amountMinor: number | null; qtyText: string | null; balanceText: string | null; by: string | null }
 interface DaySection { location: { id: string; name: string }; locked: boolean; closedAt: string | null; cashCountedMinor: number | null; cashVarianceMinor: number | null; sales: { count: number; totalMinor: number; cashMinor: number; gcashMinor: number; utangMinor: number }; cash: { expectedMinor: number }; utang: { givenMinor: number; collectedMinor: number }; stockIn: { documents: number; units: number }; kilosByVariety: { variety: string; grams: number; salesMinor: number }[] }
@@ -312,6 +312,37 @@ export default function StoreReportPanel({ role, onNavigate }: { role?: string; 
 
       {tab === "compare" && compare && (
         <>
+          {compare.total.netProfitMinor !== undefined && (
+            <section className="mb-3" aria-labelledby="net-title">
+              <h2 className="h5 mb-1" id="net-title">Net profit of each store</h2>
+              <p className="text-muted mb-2">Profit from rice sold, less the store&apos;s own expenses.</p>
+              <div className="row row-cols-1 row-cols-md-2 row-cols-xl-4 g-2" style={{ fontVariantNumeric: "tabular-nums" }}>
+                {compare.stores.map((s) => (
+                  <div className="col" key={s.location.id}>
+                    <div className="card h-100"><div className="card-body">
+                      <h3 className="h6 fw-bold mb-2">{s.location.name}</h3>
+                      <div className="d-flex justify-content-between gap-2"><span>Profit from sales</span><span className="text-nowrap">{peso(s.sales.grossProfitMinor ?? 0)}</span></div>
+                      <div className="d-flex justify-content-between gap-2"><span>Less: expenses</span><span className="text-nowrap">−{peso(s.expensesMinor ?? 0)}</span></div>
+                      <div className="d-flex justify-content-between align-items-baseline gap-2 border-top mt-2 pt-2">
+                        <span className="fw-semibold">{(s.netProfitMinor ?? 0) < 0 ? "Net loss" : "Net profit"}</span>
+                        <span className={`fs-4 fw-bold text-nowrap ${(s.netProfitMinor ?? 0) < 0 ? "text-danger" : "text-success"}`}>{(s.netProfitMinor ?? 0) < 0 ? "−" : ""}{peso(Math.abs(s.netProfitMinor ?? 0))}</span>
+                      </div>
+                    </div></div>
+                  </div>
+                ))}
+              </div>
+              <div className="card mt-2"><div className="card-body" style={{ fontVariantNumeric: "tabular-nums" }}>
+                <h3 className="h6 fw-bold mb-2">The whole business</h3>
+                <div className="d-flex justify-content-between gap-2"><span>Profit from sales, all stores</span><span className="text-nowrap">{peso(compare.total.grossProfitMinor)}</span></div>
+                <div className="d-flex justify-content-between gap-2"><span>Less: expenses of the stores</span><span className="text-nowrap">−{peso((compare.total.expensesMinor ?? 0) - (compare.business?.expensesMinor ?? 0))}</span></div>
+                <div className="d-flex justify-content-between gap-2"><span>Less: expenses of the whole business (no store)</span><span className="text-nowrap">−{peso(compare.business?.expensesMinor ?? 0)}</span></div>
+                <div className="d-flex justify-content-between align-items-baseline gap-2 border-top mt-2 pt-2">
+                  <span className="fw-semibold">{compare.total.netProfitMinor < 0 ? "Net loss" : "Net profit"}</span>
+                  <span className={`fs-3 fw-bold text-nowrap ${compare.total.netProfitMinor < 0 ? "text-danger" : "text-success"}`}>{compare.total.netProfitMinor < 0 ? "−" : ""}{peso(Math.abs(compare.total.netProfitMinor))}</span>
+                </div>
+              </div></div>
+            </section>
+          )}
           <div className="table-responsive">
             <table className="table table-sm align-middle">
               <thead><tr><th>Store</th><th className="text-end">Sales</th><th className="text-end">Cash</th><th className="text-end">Credit</th><th className="text-end">Profit</th><th className="text-end">Stock worth</th><th className="text-end">Low/out</th><th className="text-end">Owes main store</th></tr></thead>
