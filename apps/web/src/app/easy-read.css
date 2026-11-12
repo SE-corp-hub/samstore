@@ -613,3 +613,16 @@ main:has(> * > .rice-ui > .sell-fit), main:has(> .rice-ui > .sell-fit) { padding
 .exp-check .form-check-input { width: 1.75rem; height: 1.75rem; margin: 0; flex: 0 0 auto; }
 .exp-check:has(.form-check-input:checked) { border-color: #1f6f3f; background: #eef7f0; }
 .exp-check:has(.form-check-input:focus-visible) { outline: 3px solid #0b5ed7; outline-offset: 2px; }
+
+/* Step 4 of the app review (2026-11-12): what the old-look screens still had small inside the large look. */
+/* Tick boxes in lists and forms: a 44 px box to tap (the Products list ticks, "Consignment store", filters). */
+.rice-ui input[type="checkbox"].form-check-input:not([role="switch"]):not(.form-switch > *) { width: 2.75rem; height: 2.75rem; margin-top: 0; flex: none; }
+.rice-ui .form-check:not(.form-switch):has(> input[type="checkbox"]:not([role="switch"])) { display: flex; align-items: center; gap: 0.6rem; padding-left: 0; min-height: 2.75rem; }
+.rice-ui .form-check:not(.form-switch):has(> input[type="checkbox"]:not([role="switch"])) > .form-check-input { float: none; margin-left: 0; }
+/* On / off switches: a wide, tall switch instead of the small one. */
+.rice-ui .form-switch .form-check-input, .rice-ui input[role="switch"] { width: 3.75rem; height: 2.75rem; margin-top: 0; }
+.rice-ui .form-switch { display: flex; align-items: center; gap: 0.6rem; min-height: 2.75rem; padding-left: 0; }
+.rice-ui .form-switch .form-check-input { margin-left: 0; float: none; flex: none; }
+.rice-ui .form-switch .form-check-label { white-space: nowrap; }
+/* Small button groups (view switches) keep 16 px text. */
+.rice-ui .btn-group-sm > .btn { font-size: 1rem; }

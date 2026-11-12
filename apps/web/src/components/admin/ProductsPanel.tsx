@@ -11,7 +11,7 @@ import LabelSheet from "./LabelSheet";
 import VariantEditor from "./VariantEditor";
 import PhotoPicker, { type PhotoChange } from "./PhotoPicker";
 import ProductPhoto from "./ProductPhoto";
-import { peso } from "../../lib/number-format";
+import { kg, peso } from "../../lib/number-format";
 
 export interface AdminProduct {
   id: string;
@@ -361,7 +361,7 @@ export default function ProductsPanel() {
             {/* P7 filter bar */}
             <div className="row g-2 mb-3">
               <div className="col-12 col-lg-3">
-                <input className="form-control form-control-sm" aria-label="Search products" placeholder="Search name / SKU (jump)…" value={search} onChange={(e) => setSearch(e.target.value)} />
+                <input className="form-control form-control-sm" aria-label="Search products" placeholder="Search rice name or code…" value={search} onChange={(e) => setSearch(e.target.value)} />
               </div>
               <div className="col-6 col-lg-2">
                 <select className="form-select form-select-sm" aria-label="Category" value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
@@ -438,7 +438,7 @@ export default function ProductsPanel() {
                     <div className="min-w-0">
                       {p.name}
                       {p.unit && <span className="badge text-bg-light border ms-1">{p.unit}</span>}
-                      {p.stockBaseUnit && p.stockBaseQuantity && <span className="badge text-bg-light border ms-1">{formatStockSize(p.stockBaseQuantity, p.stockBaseUnit)}</span>}
+                      {p.stockBaseUnit && p.stockBaseQuantity && !p.soldByWeight && <span className="badge text-bg-light border ms-1">{formatStockSize(p.stockBaseQuantity, p.stockBaseUnit)}</span>}
                       {p.stockConversionFamily && <span className="badge text-bg-info ms-1">{p.stockConversionFamily}</span>}
                       {p.soldByWeight && <span className="badge text-bg-secondary ms-1" title="Sold by weight">per-kilo</span>}
                       {p.trackStock === false && <span className="badge text-bg-warning ms-1" title="Sells at any time — stock is not counted">Not tracked</span>}
@@ -454,9 +454,9 @@ export default function ProductsPanel() {
                   <td className="text-end">{toPesos(p.priceMinor)}</td>
                   {hasCost && <td className="text-end text-muted col-wide">{toPesos(p.costMinor)}</td>}
                   <td className={`text-end ${p.trackStock !== false && p.reorderThreshold > 0 && p.availableQuantity <= p.reorderThreshold ? "text-danger fw-semibold" : ""}`}>
-                    {p.trackStock === false ? <span className="text-muted">—</span> : p.availableQuantity}
+                    {p.trackStock === false ? <span className="text-muted">—</span> : p.soldByWeight ? kg(p.availableQuantity) : p.availableQuantity}
                     {p.trackStock !== false && p.reorderThreshold > 0 && <small className="text-muted"> ≤{p.reorderThreshold}</small>}
-                    {p.quantityReserved > 0 && <small className="text-muted"> ({p.quantityReserved} reserved)</small>}
+                    {p.quantityReserved > 0 && <small className="text-muted"> ({p.soldByWeight ? kg(p.quantityReserved) : p.quantityReserved} held for orders)</small>}
                   </td>
                   <td className="small col-wide">{p.category?.name ?? "—"}</td>
                   <td>
