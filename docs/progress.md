@@ -1406,3 +1406,8 @@ Commits: `32dce58` (loop 2).
 - Order numbers: a new counter sale, pre-order, agent order or Facebook/online order starts with the selling store's own letters when set (LIPA-2026-000123), else the business's. The counter stays one for the whole business, so numbers never repeat. Old orders keep their numbers.
 - Home: a store login sees its own store's daily target when the owner set one.
 - Tests: `admin/store-identity.test.ts` (2). Locations screen checked at 1280x720, 800x1200 and 615x985. The fields were already in the `per_store_plan` migration; no new database change.
+
+## 2026-11-12 — Per-store build, step 10 (first half): one whole day in a test
+
+- `selling/full-day.test.ts` runs one day at Bogs and Lucy, Bahay Tindahan and Lipa through the same services the screens call: the six ready logins (decision 5) and one hand-over; each store's own price, with the head held to the owner's lowest price; counter sales off each store's own shelf of the shared stock; Lipa's own order numbers and receipt name; expenses and the cash drawer per store; net profit per store adding up to the whole business; what a counter login, a head and the owner each see; and the cost the consignment stores owe the main store. It passed on the first run, with no code change needed.
+- Second half, on the beta site with the owner: make the six ready logins, set the take-rice-from lists, Page links, lowest prices and each store's receipt box, then sell for a day on the tablet.
