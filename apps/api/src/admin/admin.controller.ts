@@ -1,4 +1,5 @@
 import { summarizeOrderItems, OPEN_ITEM_STATUSES } from "../domain/order-items-summary.js";
+import { orderWall, wallKey } from "../auth/wall.js";
 import {
   Body,
   Controller,
@@ -398,10 +399,11 @@ export class AdminController {
               throw new HttpException({ type: "validation", errors: [`${key} must be an ISO date`] }, HttpStatus.UNPROCESSABLE_ENTITY);
             }
           }
-          const cacheKeyStr = cacheKey("orders", storeId, status ?? "", from ?? "", to ?? "", customer ?? "", source ?? "", payment ?? "", fulfillment ?? "");
+          const cacheKeyStr = cacheKey("orders", storeId, wallKey(), status ?? "", from ?? "", to ?? "", customer ?? "", source ?? "", payment ?? "", fulfillment ?? "");
                   const hit = await cacheGet<unknown[]>(cacheKeyStr);
                   if (hit) return { orders: hit, storeId };
-                  const where: Record<string, unknown> = { storeId };
+                  // Step 6: a store login lists its own store's orders only.
+                  const where: Record<string, unknown> = { storeId, AND: [orderWall()] };
               if (status) {
                 // Validate against the OrderStatus enum — invalid values → empty result, never a 500.
                 const statuses = status.split(",").filter((s) => ORDER_STATES.includes(s as OrderState));
@@ -458,10 +460,10 @@ export class AdminController {
                                               throw new HttpException({ type: "validation", errors: [`${key} must be an ISO date`] }, HttpStatus.UNPROCESSABLE_ENTITY);
                                             }
                                           }
-                                          const key = cacheKey("orders-counts", storeId, status ?? "", from ?? "", to ?? "", customer ?? "", source ?? "", payment ?? "", fulfillment ?? "");
+                                          const key = cacheKey("orders-counts", storeId, wallKey(), status ?? "", from ?? "", to ?? "", customer ?? "", source ?? "", payment ?? "", fulfillment ?? "");
                                           const hit = await cacheGet<unknown>(key);
                                           if (hit) return { counts: hit, storeId };
-                                          const where: Record<string, unknown> = { storeId };
+                                          const where: Record<string, unknown> = { storeId, AND: [orderWall()] };
                                           if (from || to) {
                                             where.createdAt = {};
                                             if (from) (where.createdAt as Record<string, unknown>).gte = new Date(from);
@@ -527,16 +529,16 @@ export class AdminController {
     requireUser(user);
     const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.VIEW);
     const from = since && !Number.isNaN(Date.parse(since)) ? new Date(since) : null;
-    const key = cacheKey("orders", storeId, "pulse", from?.toISOString() ?? "");
+    const key = cacheKey("orders", storeId, "pulse", wallKey(), from?.toISOString() ?? "");
     const hit = await cacheGet<{ at: string | null; orders: unknown[] }>(key);
     if (hit) return { ...hit, storeId };
     let value: { at: string | null; orders: { updatedAt: Date }[] };
     if (!from) {
-      const last = await prisma.order.findFirst({ where: { storeId }, orderBy: { updatedAt: "desc" }, select: { updatedAt: true } });
+      const last = await prisma.order.findFirst({ where: { storeId, AND: [orderWall()] }, orderBy: { updatedAt: "desc" }, select: { updatedAt: true } });
       value = { at: (last?.updatedAt ?? new Date()).toISOString(), orders: [] };
     } else {
       const orders = await prisma.order.findMany({
-        where: { storeId, updatedAt: { gt: from } },
+        where: { storeId, updatedAt: { gt: from }, AND: [orderWall()] },
         orderBy: { updatedAt: "asc" },
         take: 20,
         select: {
@@ -567,10 +569,10 @@ export class AdminController {
       }
     }
     const anyDay = openAnyDay === "1" || openAnyDay === "true";
-    const key = cacheKey("orders", storeId, "items", from ?? "", to ?? "", anyDay ? "1" : "", customer ?? "", source ?? "", payment ?? "", fulfillment ?? "");
+    const key = cacheKey("orders", storeId, "items", wallKey(), from ?? "", to ?? "", anyDay ? "1" : "", customer ?? "", source ?? "", payment ?? "", fulfillment ?? "");
     const hit = await cacheGet<unknown>(key);
     if (hit) return { ...(hit as object), storeId };
-    const and: Record<string, unknown>[] = [{ storeId }];
+    const and: Record<string, unknown>[] = [{ storeId }, orderWall()];
     if (customer) {
       and.push({ OR: [
         { customerName: { contains: customer, mode: "insensitive" } },

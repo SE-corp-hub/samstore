@@ -5,6 +5,7 @@
 //                     with optional line replacement (resume-edit), void restores stock.
 // Totals are always server-computed; stock mutations are atomic.
 
+import { orderWall } from "../auth/wall.js";
 import { coverShortage } from "../domain/buffer.js";
 import { isTracked } from "../domain/stock-tracking.js";
 import { prisma } from "../persistence/prisma-repositories.js";
@@ -624,7 +625,7 @@ export class PosService {
 
   async listHolds(storeId: string) {
     return prisma.order.findMany({
-      where: { storeId, status: "ON_HOLD", source: "pos" },
+      where: { storeId, status: "ON_HOLD", source: "pos", AND: [orderWall()] },
       orderBy: { createdAt: "desc" },
       include: {
         items: { select: { productId: true, productName: true, sku: true, unitPriceMinor: true, quantity: true, lineTotalMinor: true } },

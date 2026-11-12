@@ -1,6 +1,7 @@
 // Loyalty service — earn points on delivered orders, redeem at checkout, ledger.
 // Encapsulates the StoreCustomer balance updates + LoyaltyEntry audit trail.
 
+import { orderWall } from "../auth/wall.js";
 import { prisma } from "../persistence/prisma-repositories.js";
 import { cacheGet, cacheSet, cacheBust, cacheKey } from "../persistence/ttl-cache.js";
 import { pointsEarnedFor, pointsEarned, redeemDiscountMinor, expirablePoints } from "../domain/loyalty.js";
@@ -281,7 +282,7 @@ export class LoyaltyService implements LoyaltyGateway {
     });
     if (!sc) return null;
     const orders = await prisma.order.findMany({
-      where: { storeId, storeCustomerId },
+      where: { storeId, storeCustomerId, AND: [orderWall()] }, // step 6: a store login sees its own store's sales to this customer
       orderBy: { createdAt: "desc" },
       take: 50,
       select: { id: true, orderNumber: true, status: true, totalMinor: true, source: true, createdAt: true, paymentStatus: true },

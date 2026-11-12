@@ -1,4 +1,6 @@
 import { freeOnShelves } from "./domain/sources.js";
+import { APP_INTERCEPTOR } from "@nestjs/core";
+import { WallInterceptor } from "./auth/wall.interceptor.js";
 import { Module } from "@nestjs/common";
 import { claimSecret, jwtSecret } from "./security/secrets.js";
 import { CHECKOUT_SERVICE, CheckoutService } from "./checkout/checkout.service.js";
@@ -83,6 +85,8 @@ const CLAIM_SECRET = claimSecret(); // M11: no committed fallback (see security/
 @Module({
     controllers: [CheckoutController, HubOrdersController, PublicStoreController, CartController, AuthController, AdminController, PeopleController, TransferFlowController, ResackController, BentaController, UtangController, AgentOrderController, CountController, RiceReportsController, PayableController, PurchaseOrderController, OrderLookupController, CustomerAuthController, PosController, PaymentsController, PaymentsWebhookController, DeliveryZonesAdminController, DeliveryBookingsAdminController, MessengerConnectionAdminController, ChatbotAdminController, ChatAgentAdminController, CrmAdminController, ErpAdminController, BirAdminController, SecurityIncidentAdminController, CreditController, ExpensesController, DataExportController, PurchasesController, InventoryController, ReportsController, DeliveryController, HealthController, RegisterController, RolePermissionsController, AddressController],
   providers: [
+    // Per-store build, step 6: every signed-in request runs behind its store's wall.
+    { provide: APP_INTERCEPTOR, useClass: WallInterceptor },
     {
       provide: DELIVERY_SERVICE,
       useFactory: () => new DeliveryService(),

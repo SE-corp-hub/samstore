@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   getAdminToken, getAdminStoreId, setAdminStoreId, getAdminRole, clearAdminSession,
-  NAV_GROUPS, allowedTabs, defaultTabFor, isOwnerRole, handleUnauthorized, navItemFor, navGroupFor, toneFor,
+  NAV_GROUPS, allowedTabs, setHomeLocation, adminHeaders, defaultTabFor, isOwnerRole, handleUnauthorized, navItemFor, navGroupFor, toneFor,
 } from "../../../lib/admin";
 import dynamic from "next/dynamic";
 import { API_URL } from "../../../config";
@@ -116,6 +116,17 @@ export default function AdminDashboard() {
   const [stores, setStores] = useState<MyStore[]>([]);
   const [activeStore, setActiveStore] = useState<string | null>(null);
   const [role, setRole] = useState("");
+  // Step 6 (the wall): the login's home store decides which screens the menu offers.
+  const [, setHomeSeen] = useState<string | null>(null);
+  useEffect(() => {
+    if (!authed || !activeStore) return;
+    let off = false;
+    fetch(`${API_URL}/admin/me/rice`, { headers: adminHeaders() })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((me) => { if (!off && me) { setHomeLocation(me.homeLocationId ?? null); setHomeSeen(me.homeLocationId ?? ""); } })
+      .catch(() => { /* offline: the saved answer stays */ });
+    return () => { off = true; };
+  }, [authed, activeStore]);
   const [email, setEmail] = useState("");
   const [tab, setTab] = useState("overview");
   const [mobileNav, setMobileNav] = useState(false);

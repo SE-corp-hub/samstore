@@ -1,6 +1,7 @@
 // Analytics service — tenant-scoped sales/order/product summaries.
 // All aggregation is pure SQL/Prisma; numbers come from the DB, never fabricated.
 
+import { orderWall } from "../auth/wall.js";
 import { prisma } from "../persistence/prisma-repositories.js";
 
 export class AnalyticsService {
@@ -31,7 +32,7 @@ export class AnalyticsService {
   async statusBreakdown(storeId: string) {
     const rows = await prisma.order.groupBy({
       by: ["status"],
-      where: { storeId },
+      where: { storeId, AND: [orderWall()] }, // step 6: a store login counts its own store's orders
       _count: { _all: true },
       _sum: { totalMinor: true },
     });
@@ -42,7 +43,7 @@ export class AnalyticsService {
   async dailyRevenue(storeId: string, days = 14): Promise<{ days: { date: string; count: number; revenueMinor: number }[] }> {
     const since = new Date(Date.now() - days * 86_400_000);
     const orders = await prisma.order.findMany({
-      where: { storeId, createdAt: { gte: since } },
+      where: { storeId, createdAt: { gte: since }, AND: [orderWall()] },
       select: { createdAt: true, totalMinor: true },
     });
     const byDay = new Map<string, { count: number; revenueMinor: number }>();

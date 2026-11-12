@@ -5,6 +5,7 @@
 // - Void (same-day, unfulfilled POS sale): reverses the sale, restores stock, order → CANCELLED.
 // - Refund: negative Payment + order → CANCELLED with reason (audited).
 
+import { orderWall } from "../auth/wall.js";
 import { reverseSaleCharges } from "../payable/charges.js";
 import { prisma } from "../persistence/prisma-repositories.js";
 import { randomId } from "../persistence/repositories.js";
@@ -170,7 +171,7 @@ export class PaymentsService {
   async reviewQueue(storeId: string) {
     const orders = await prisma.order.findMany({
       // Open orders only: a cancelled order has nothing left to confirm. Oldest first, the one waiting longest.
-      where: { storeId, paymentStatus: "RECEIVED", status: { notIn: ["CANCELLED"] } },
+      where: { storeId, paymentStatus: "RECEIVED", status: { notIn: ["CANCELLED"] }, AND: [orderWall()] },
       orderBy: { createdAt: "asc" },
       take: 100,
       select: {
