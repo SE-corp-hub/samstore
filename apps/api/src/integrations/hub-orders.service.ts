@@ -52,6 +52,20 @@ export interface HubOrderUpdate {
   reason?: string | null;
   items: { name: string; quantity: number; unitPriceMinor: number }[];
 }
+/** One of the store's customers as the hub keeps it: details, utang and points, and when any of it last changed. */
+export interface HubCustomer {
+  id: string;
+  changedAt: string;
+  name: string;
+  phone: string;
+  address: string;
+  /** What the customer owes on utang now (0 when nothing). */
+  utangMinor: number;
+  points: number;
+}
+/** The store's customers changed after a point (time, then id), oldest change first, at most `limit`. */
+export type ChangedCustomers = (storeId: string, after: { at: string; id: string }, limit: number) => Promise<HubCustomer[]>;
+
 /** The store's hub orders placed or changed since a time, newest changes included. */
 export type RecentHubOrders = (storeId: string, since: Date) => Promise<HubOrderUpdate[]>;
 
@@ -86,7 +100,15 @@ export class HubOrderService {
      * rice from (null location = the main store). Null when the store has no take-rice-from rule yet.
      */
     private readonly freeFor: (storeId: string, locationId: string | null) => Promise<Map<string, number> | null> = async () => null,
+    /** The store's customers that changed after a point, for the hub's Customers list: this store owns their details. */
+    private readonly changedCustomers: ChangedCustomers = async () => [],
   ) {}
+
+  /** Up to 200 of the store's customers changed after the hub's last copy, oldest change first. */
+  async customers(storeSlug: string, after: { at: string; id: string }): Promise<HubCustomer[]> {
+    const store = await this.stores.findBySlug(storeSlug);
+    return store ? this.changedCustomers(store.id, after, 200) : [];
+  }
 
   /** The store's hub orders from the last few days as they are now, for the hub to follow. */
   async updates(storeSlug: string, now = Date.now()): Promise<HubOrderUpdate[]> {
@@ -330,10 +352,20 @@ export async function syncWithHub(
       products.push({ store: l.store, ...(l.location ? { location: l.location } : {}), products: (await hub.products(l.store, l.location || undefined)) ?? [] });
     }
     for (const store of stores) updates.push(...(await hub.updates(store)).map((u) => ({ store, ...u })));
+    // Customers: only a hub that asks (it says where its copy stands) gets them, oldest change first.
+    const customers = [];
+    const after = Array.isArray((got as { customersAfter?: unknown }).customersAfter) ? ((got as { customersAfter: unknown[] }).customersAfter as Record<string, unknown>[]) : [];
+    for (const a of after.slice(0, 20)) {
+      const store = typeof a?.store === "string" ? a.store : "";
+      if (!store) continue;
+      const at = typeof a.at === "string" ? a.at : "";
+      const id = typeof a.id === "string" ? a.id : "";
+      customers.push(...(await hub.customers(store, { at, id })).map((c) => ({ store, ...c })));
+    }
     const answer = await send(door, {
       method: "POST",
       headers,
-      body: JSON.stringify({ results, products, updates: updates.slice(0, 200) }),
+      body: JSON.stringify({ results, products, updates: updates.slice(0, 200), ...(customers.length ? { customers } : {}) }),
       signal: AbortSignal.timeout(20_000),
     });
     if (!answer.ok) throw new Error(`hub answered ${answer.status}`);

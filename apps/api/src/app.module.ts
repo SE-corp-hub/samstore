@@ -278,6 +278,31 @@ const CLAIM_SECRET = claimSecret(); // M11: no committed fallback (see security/
             new Map((await prisma.locationPrice.findMany({ where: { storeId, warehouseId }, select: { productId: true, priceMinor: true } })).map((p) => [p.productId, p.priceMinor])),
           // What the Page's store can still sell: its own shelf and the places on its take-rice-from list.
           (storeId, locationId) => freeOnShelves(prisma, storeId, locationId),
+          // The hub's Customers list follows this store's customers: a change to the person (name, phone, address)
+          // or to their place in this store (utang, points) counts, whichever came last.
+          async (storeId, after, limit) => {
+            // The columns hold UTC without a zone, so the point is passed the same way.
+            const since = (after.at && !Number.isNaN(Date.parse(after.at)) ? new Date(after.at) : new Date(0)).toISOString().replace("Z", "");
+            const rows = await prisma.$queryRaw<
+              { id: string; changedAt: Date; name: string | null; phone: string | null; address: string | null; credit: number; points: number }[]
+            >`
+              SELECT sc."id", GREATEST(sc."updatedAt", c."updatedAt") AS "changedAt", c."name", c."phone", c."address",
+                     sc."creditBalanceMinor" AS "credit", sc."loyaltyBalancePoints" AS "points"
+                FROM "StoreCustomer" sc JOIN "Customer" c ON c."id" = sc."customerId"
+               WHERE sc."storeId" = ${storeId}
+                 AND (GREATEST(sc."updatedAt", c."updatedAt"), sc."id") > (CAST(${since} AS timestamp(3)), ${after.id})
+               ORDER BY 2, 1
+               LIMIT ${limit}`;
+            return rows.map((r) => ({
+              id: r.id,
+              changedAt: r.changedAt.toISOString(),
+              name: r.name ?? "",
+              phone: r.phone ?? "",
+              address: r.address ?? "",
+              utangMinor: Math.max(0, r.credit),
+              points: r.points,
+            }));
+          },
         ),
     },
   ],
