@@ -160,6 +160,7 @@ model UserStore {
   // Rice Ops M2: the location this person works at. Empty = every location.
   homeLocationId String?
   isLocationHead Boolean @default(false) // per-store build, step 7: head of the home store
+  readyLabel     String? // a ready-made login waiting to be handed over ("Lipa head")
   homeLocation   Warehouse? @relation("MemberHomeLocation", fields: [homeLocationId], references: [id], onDelete: SetNull)
 
   @@unique([userId, storeId])

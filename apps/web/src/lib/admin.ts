@@ -114,8 +114,7 @@ export function getAdminToken(): string | null {
   return getAuthItem("samstore.admin.token");
 }
 
-/** Decodes the role claim from the stored admin JWT (best-effort). */
-export function getAdminRole(): string {
+function tokenClaim(claim: "role" | "sub"): string {
   const token = getAdminToken();
   if (!token) return "";
   try {
@@ -124,10 +123,20 @@ export function getAdminRole(): string {
     const payloadPart = parts[1] ?? "";
     if (!payloadPart) return "";
     const payload = JSON.parse(atob(payloadPart.replace(/-/g, "+").replace(/_/g, "/")));
-    return payload.role ?? "";
+    return typeof payload[claim] === "string" ? payload[claim] : "";
   } catch {
     return "";
   }
+}
+
+/** Decodes the role claim from the stored admin JWT (best-effort). */
+export function getAdminRole(): string {
+  return tokenClaim("role");
+}
+
+/** The signed-in login (its id in the stored JWT), "" when nobody is signed in. */
+export function getAdminUserId(): string {
+  return tokenClaim("sub");
 }
 
 // ─────────────────────────────── Role-scoped navigation (U1/U2) ───────────────────────────────

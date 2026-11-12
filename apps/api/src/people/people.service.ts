@@ -2,6 +2,7 @@
 // numbers and drafts ("Tapusin"). Every query is scoped by storeId; every stock step
 // in later modules calls requireSignatures() inside its own transaction.
 
+import { randomInt } from "node:crypto";
 import bcrypt from "bcryptjs";
 import { Prisma, type SignerKind } from "@prisma/client";
 import type { ApiError } from "@sam-store/contracts";
@@ -65,6 +66,41 @@ export const isHeadOf = (actor: Actor, locationId: string | null | undefined): b
 
 /** Who may see cost and profit of one store: the owner side, and the head of that store. Nobody else. */
 export const seesProfitAt = (actor: Actor, locationId: string | null | undefined): boolean => SEES_ALL_PROFIT.includes(actor.role) || isHeadOf(actor, locationId);
+
+/** A temporary password that is easy to read aloud and copy by hand: no 0/O, 1/l/I. Changed at the first sign-in. */
+function readablePassword(): string {
+  const letters = "abcdefghjkmnpqrstuvwxyz";
+  const digits = "23456789";
+  const pick = (set: string, n: number) => Array.from({ length: n }, () => set[randomInt(set.length)]).join("");
+  return `${pick(letters, 4)}-${pick(digits, 4)}-${pick(letters, 4)}`;
+}
+
+/**
+ * The name and mobile a store may write on a login. Only for an account that is this store's alone
+ * (M11: a store must not rename someone who also works elsewhere), and a mobile nobody else uses.
+ */
+async function personDetails(storeId: string, userId: string, input: { name?: string; phone?: string | null }, nameRequired: boolean): Promise<PeopleResult<{ name?: string; phone?: string | null }>> {
+  if (!(await accountBelongsToStore(prisma, userId, storeId))) return forbidden("This person also works in another store. They change their own name and number.");
+  const out: { name?: string; phone?: string | null } = {};
+  if (input.name !== undefined || nameRequired) {
+    const name = (input.name ?? "").trim().replace(/\s+/g, " ");
+    if (name.length < 2 || name.length > 60) return fail("validation", "Type the person's name");
+    out.name = name;
+  }
+  if (input.phone !== undefined && input.phone !== null && input.phone.trim() !== "") {
+    const phone = toE164(input.phone);
+    if (!phone) return fail("validation", "A valid Philippine mobile number is required");
+    const taken = await prisma.user.findUnique({ where: { phone }, select: { id: true } });
+    if (taken && taken.id !== userId) return fail("validation", "That mobile number is already used by another login");
+    out.phone = phone;
+  } else if (input.phone === null || input.phone === "") {
+    // Taking the number away is only possible while there is another way to sign in.
+    const u = await prisma.user.findUnique({ where: { id: userId }, select: { email: true } });
+    if (!u?.email) return fail("validation", "This login signs in with its mobile number. Type the new number.");
+    out.phone = null;
+  }
+  return { ok: true, value: out };
+}
 
 // ─────────────────────────────── numbering ───────────────────────────────
 
@@ -246,6 +282,7 @@ export class PeopleService {
         role: true,
         homeLocationId: true,
         isLocationHead: true,
+        readyLabel: true,
         user: { select: { id: true, name: true, phone: true, email: true, pinHash: true, pinLockedUntil: true } },
       },
     });
@@ -258,6 +295,7 @@ export class PeopleService {
       role: r.role,
       homeLocationId: r.homeLocationId,
       isLocationHead: r.isLocationHead && !!r.homeLocationId,
+      readyLabel: r.readyLabel,
       hasPin: !!r.user.pinHash,
       pinLocked: !!r.user.pinLockedUntil && r.user.pinLockedUntil.getTime() > now,
     }));
@@ -325,6 +363,89 @@ export class PeopleService {
     await bustMemberships();
     const after = await prisma.userStore.findUnique({ where: { userId_storeId: { userId, storeId } }, select: { homeLocationId: true, user: { select: { pinHash: true } } } });
     return { ok: true, value: { userId, homeLocationId: after?.homeLocationId ?? null, hasPin: !!after?.user.pinHash } };
+  }
+
+  // ── step 8: logins that can be handed over ──
+
+  /**
+   * The owner makes a login before knowing who will use it ("Lipa head"): a staff login tied to a
+   * store, with a sign-in name and a temporary password that must be changed at the first sign-in.
+   */
+  async createReadyLogin(
+    storeId: string,
+    input: { label?: string; homeLocationId?: string | null; isLocationHead?: boolean },
+    actorId: string,
+  ): Promise<PeopleResult<{ userId: string; label: string; signInName: string; tempPassword: string }>> {
+    const label = (input.label ?? "").trim().replace(/\s+/g, " ");
+    if (label.length < 2 || label.length > 40) return fail("validation", "Give the login a short name, like Lipa counter");
+    const store = await prisma.store.findUnique({ where: { id: storeId }, select: { slug: true } });
+    if (!store) return notFound("Store not found");
+    if (!input.homeLocationId) return fail("validation", "Choose the store this login is for");
+    const loc = await locationInStore(prisma, storeId, input.homeLocationId);
+    if (!loc) return fail("validation", "Unknown location");
+    if (!loc.isActive) return fail("validation", "That location is closed");
+    const same = await prisma.userStore.findFirst({ where: { storeId, status: "ACTIVE", readyLabel: { equals: label, mode: "insensitive" } }, select: { id: true } });
+    if (same) return fail("validation", `There is already a ready login named ${label}`);
+
+    // The sign-in name: the label and the business, e.g. lipa-counter@bigasan. Never a real mailbox.
+    const slug = label.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "login";
+    let signInName = `${slug}@${store.slug}`;
+    for (let n = 2; await prisma.user.findUnique({ where: { email: signInName }, select: { id: true } }); n++) signInName = `${slug}-${n}@${store.slug}`;
+    const tempPassword = readablePassword();
+    const passwordHash = await bcrypt.hash(tempPassword, 12);
+    const userId = await prisma.$transaction(async (tx) => {
+      const user = await tx.user.create({ data: { email: signInName, name: label, passwordHash, role: "STAFF", mustChangePassword: true } });
+      await tx.userStore.create({ data: { userId: user.id, storeId, role: "STAFF", status: "ACTIVE", homeLocationId: loc.id, isLocationHead: input.isLocationHead === true, readyLabel: label } });
+      // "member.invite" is what Team reads for "Added by".
+      await tx.auditLog.create({ data: { storeId, actorType: "USER", actorId, action: "member.invite", entityType: "User", entityId: user.id, after: { role: "STAFF", newAccount: true, readyLabel: label, homeLocationId: loc.id, isLocationHead: input.isLocationHead === true } } });
+      return user.id;
+    });
+    await bustMemberships();
+    return { ok: true, value: { userId, label, signInName, tempPassword } };
+  }
+
+  /**
+   * A ready login goes to a real person: their name (and mobile), a fresh temporary password, the old
+   * PIN gone, and whoever was signed in with it signed out. What the login already sold stays its own.
+   */
+  async handOverLogin(
+    storeId: string,
+    userId: string,
+    input: { name?: string; phone?: string | null },
+    actorId: string,
+  ): Promise<PeopleResult<{ userId: string; name: string; signInWith: string; tempPassword: string }>> {
+    const m = await prisma.userStore.findUnique({ where: { userId_storeId: { userId, storeId } }, select: { status: true, readyLabel: true, user: { select: { email: true, phone: true } } } });
+    if (!m || m.status !== "ACTIVE") return notFound("That person is not in this store");
+    if (!m.readyLabel) return conflict("This login was already handed over. Use Edit name to change it.");
+    const who = await personDetails(storeId, userId, input, true);
+    if (!who.ok) return who;
+    const tempPassword = readablePassword();
+    const passwordHash = await bcrypt.hash(tempPassword, 12);
+    await prisma.$transaction(async (tx) => {
+      await tx.user.update({ where: { id: userId }, data: { ...who.value, passwordHash, mustChangePassword: true, pinHash: null, pinFailedCount: 0, pinLockedUntil: null, loginFailedCount: 0, loginLockedUntil: null, tokenVersion: { increment: 1 } } });
+      await tx.userStore.update({ where: { userId_storeId: { userId, storeId } }, data: { readyLabel: null } });
+      await tx.passwordResetHistory.create({ data: { userId, storeId, resetBy: actorId } });
+      await tx.auditLog.create({ data: { storeId, actorType: "USER", actorId, action: "member.ready.handover", entityType: "User", entityId: userId, before: { readyLabel: m.readyLabel }, after: { name: who.value.name, phoneSet: !!who.value.phone } } });
+    });
+    await bustTokenVersion(userId);
+    await bustMemberships();
+    return { ok: true, value: { userId, name: who.value.name!, signInWith: who.value.phone ?? m.user.phone ?? m.user.email ?? "", tempPassword } };
+  }
+
+  /** The owner corrects a login's name or mobile number (not the owner's own: that is in Settings). */
+  async editPerson(storeId: string, userId: string, input: { name?: string; phone?: string | null }, actorId: string): Promise<PeopleResult<{ userId: string; name: string | null; phone: string | null }>> {
+    const m = await prisma.userStore.findUnique({ where: { userId_storeId: { userId, storeId } }, select: { status: true, role: true, user: { select: { name: true, phone: true } } } });
+    if (!m || m.status !== "ACTIVE") return notFound("That person is not in this store");
+    if (m.role === "OWNER") return forbidden("The owner changes their own name in Settings");
+    const who = await personDetails(storeId, userId, input, false);
+    if (!who.ok) return who;
+    if (Object.keys(who.value).length === 0) return fail("validation", "Nothing to change");
+    const after = await prisma.$transaction(async (tx) => {
+      const u = await tx.user.update({ where: { id: userId }, data: who.value, select: { name: true, phone: true } });
+      await tx.auditLog.create({ data: { storeId, actorType: "USER", actorId, action: "member.people.edit", entityType: "User", entityId: userId, before: { name: m.user.name, phone: m.user.phone }, after: { name: u.name, phone: u.phone } } });
+      return u;
+    });
+    return { ok: true, value: { userId, ...after } };
   }
 
   /** A person changes their own PIN by proving the current PIN (or password if no PIN yet). */

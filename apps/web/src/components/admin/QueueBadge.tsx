@@ -9,24 +9,25 @@
 //     so nothing silently disappears. Waiting records still upload by themselves too.
 
 import { useEffect, useState } from "react";
-import { clearFailed, failedSteps, flushQueue, QUEUE_EVENT, queuedSteps, startQueue, type FailedStep, type QueuedStep } from "../../lib/offlineQueue";
+import { clearFailed, failedSteps, flushQueue, heldSteps, QUEUE_EVENT, queuedSteps, startQueue, type FailedStep, type QueuedStep } from "../../lib/offlineQueue";
 import { useLang } from "../../lib/lang";
 import { connectionState, isOffline, OFFLINE_EVENT } from "../../lib/offlineCache";
 
 function useSync() {
   const [waiting, setWaiting] = useState<QueuedStep[]>([]);
   const [failed, setFailed] = useState<FailedStep[]>([]);
+  const [held, setHeld] = useState<QueuedStep[]>([]);
   const [offline, setOffline] = useState(false);
   const [state, setState] = useState<ReturnType<typeof connectionState>>("online");
   useEffect(() => {
-    const refresh = () => { setWaiting(queuedSteps()); setFailed(failedSteps()); setOffline(isOffline()); setState(connectionState()); };
+    const refresh = () => { setWaiting(queuedSteps()); setHeld(heldSteps()); setFailed(failedSteps()); setOffline(isOffline()); setState(connectionState()); };
     const events = [QUEUE_EVENT, OFFLINE_EVENT, "storage", "online", "offline"];
     refresh();
     startQueue();
     for (const e of events) window.addEventListener(e, refresh);
     return () => { for (const e of events) window.removeEventListener(e, refresh); };
   }, []);
-  return { waiting, failed, offline, state };
+  return { waiting, held, failed, offline, state };
 }
 
 /** Top bar: Online / Offline / Connecting to server, always visible. */
@@ -44,7 +45,7 @@ export default function QueueBadge() {
 /** Under the top bar: records waiting on this tablet and the "Upload now" button. */
 export function SyncBar() {
   const { t } = useLang();
-  const { waiting, failed, offline } = useSync();
+  const { waiting, held, failed, offline } = useSync();
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<string | null>(null);
   const [details, setDetails] = useState(false);
@@ -60,7 +61,10 @@ export function SyncBar() {
     setResult(left === 0 ? t("sync.done", { n: r.sent }) : t("sync.notYet", { n: left }));
   };
 
-  if (waiting.length === 0 && failed.length === 0 && !result) return null;
+  // Records another login saved here: grouped by who made them. They only go up under that login.
+  const heldBy = [...held.reduce((m, s) => m.set(s.by ?? "", { who: s.byName || "another login", n: (m.get(s.by ?? "")?.n ?? 0) + 1 }), new Map<string, { who: string; n: number }>()).values()];
+
+  if (waiting.length === 0 && failed.length === 0 && heldBy.length === 0 && !result) return null;
   return (
     <div className="px-3 pt-2">
       {waiting.length > 0 && (
@@ -81,6 +85,15 @@ export function SyncBar() {
           )}
         </div>
       )}
+      {heldBy.map((h) => (
+        <div key={h.who} className="alert alert-secondary d-flex align-items-center gap-2 py-2 mb-2" role="status">
+          <i className="bi bi-person-lock fs-4" aria-hidden="true"></i>
+          <div className="flex-grow-1">
+            <div className="fw-semibold">{t("sync.held", { n: h.n, who: h.who })}</div>
+            <div className="small">{t("sync.heldHow", { who: h.who })}</div>
+          </div>
+        </div>
+      ))}
       {result && waiting.length === 0 && (
         <div className="alert alert-success d-flex align-items-center gap-2 py-2 mb-2" role="status">
           <i className="bi bi-check-circle fs-4"></i><div className="flex-grow-1 fw-semibold">{result}</div>
