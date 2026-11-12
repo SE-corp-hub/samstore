@@ -27,6 +27,7 @@ after(async () => {
     const where = { storeId: { in: storeIds } };
     const orderIds = (await prisma.order.findMany({ where, select: { id: true } })).map((o) => o.id);
     await prisma.auditLog.deleteMany({ where });
+    await prisma.storePayableEntry.deleteMany({ where });
     await prisma.signature.deleteMany({ where });
     await prisma.approvalRequest.deleteMany({ where });
     await prisma.smsMessage.deleteMany({ where });
@@ -203,6 +204,39 @@ test("M7: the customer pays after delivery, on credit within the limit", async (
   assert.equal(paid.ok && paid.value.dueMinor, 260_000, "both sacks delivered and charged");
   assert.equal((await prisma.storeCustomer.findUniqueOrThrow({ where: { id: o.storeCustomerId } })).creditBalanceMinor, 260_000);
   assert.match((await prisma.smsMessage.findFirstOrThrow({ where: { storeId: fx.storeId, documentId: o.id } })).text, /Utang ngayon: P2,600 .*Kabuuang utang: P2,600/);
+});
+
+test("per-store step 1b: an agent order for a store that sells the main store's rice — paid, that store owes the cost once, and the sale is dated the day it was paid", async () => {
+  const fx = await fixture();
+  await prisma.warehouse.update({ where: { id: fx.s2 }, data: { consignment: true } });
+  const phone = await freshPhone();
+  const made = await svc.create(fx.storeId, fx.agent, { idempotencyKey: key(), locationId: fx.s2, customerName: "Rosa Lim", customerPhone: phone, address: "Purok 3, Brgy. San Isidro", lines: [{ productId: fx.sin25.id, quantity: 2 }] });
+  assert.equal(made.ok, true, msg(made));
+  if (!made.ok) return;
+  customerIds.push((await prisma.storeCustomer.findFirstOrThrow({ where: { storeId: fx.storeId, customer: { phone: `+63${phone.slice(1)}` } }, select: { customerId: true } })).customerId);
+  const id = made.value.id;
+  // Ordered three days ago: the sale must land on the day the money came in, not on a day already closed.
+  await prisma.order.update({ where: { id }, data: { occurredAt: new Date(Date.now() - 3 * 86_400_000) } });
+  const owes = async () => (await prisma.storePayableEntry.aggregate({ where: { storeId: fx.storeId, locationId: fx.s2 }, _sum: { amountMinor: true } }))._sum.amountMinor ?? 0;
+
+  const ok = await svc.approve(fx.storeId, fx.staff2, id, {});
+  assert.equal(ok.ok, true, msg(ok));
+  const del = await svc.markDelivered(fx.storeId, fx.staff2, id);
+  assert.equal(del.ok, true, msg(del));
+  assert.equal(await owes(), 0, "delivered but not paid yet: not a sale yet");
+
+  const t0 = Date.now();
+  const paid = await svc.pay(fx.storeId, fx.staff2, id, { method: "cash", tenderedMinor: 260_000 });
+  assert.equal(paid.ok, true, msg(paid));
+  assert.equal(await owes(), 2 * 110_000, "Store 2 owes the main store's cost for the 2 sacks");
+  const o = await prisma.order.findUniqueOrThrow({ where: { id }, include: { items: true, payments: true } });
+  assert.ok(o.occurredAt && o.occurredAt.getTime() >= t0 - 1000, "dated when it was paid");
+  assert.deepEqual(o.items.map((i) => i.unitCostMinor), [110_000]);
+  assert.deepEqual(o.payments.map((p) => [p.method, p.amountMinor, p.locationId]), [["cash", 260_000, fx.s2]], "the cash is Store 2's");
+
+  const twice = await svc.pay(fx.storeId, fx.staff2, id, { method: "cash" });
+  assert.equal(twice.ok, false);
+  assert.equal(await owes(), 2 * 110_000, "charged once");
 });
 
 test("M7: one order per key — a double-tap by the agent makes one order", async () => {

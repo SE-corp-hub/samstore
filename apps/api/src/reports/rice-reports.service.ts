@@ -18,6 +18,7 @@ import { prisma } from "../persistence/prisma-repositories.js";
 import { profitShareByLocation } from "../payable/charges.js";
 import { aging, dayRange, lineCost, lineGrams, manilaDate, monthRange, pct, ReportError, stockFlag } from "../domain/reports.js";
 import { varietyOf } from "../domain/resack.js";
+import { SOLD_STATES } from "../domain/order-state.js";
 import { costValue, isLooseP } from "../domain/counting.js";
 import { checkChain, periodTotals, type ChainCheck, type LedgerRow } from "../domain/stock-book.js";
 import { buildSummary, type KiloTotals, type SummaryRow } from "../domain/movement-summary.js";
@@ -159,7 +160,7 @@ export class RiceReportsService {
     // and 10 at once could wait out the pool timeout on a slow link (M9 verify run).
     const [orders, payments, credits, stockIns] = await Promise.all([
       prisma.order.findMany({
-        where: { storeId, sellingLocationId: locationId, status: "COMPLETED", OR: [{ occurredAt: range }, { occurredAt: null, createdAt: range }] },
+        where: { storeId, sellingLocationId: locationId, status: { in: SOLD_STATES }, OR: [{ occurredAt: range }, { occurredAt: null, createdAt: range }] },
         select: { id: true, totalMinor: true, paymentMethod: true, encodedLater: true, items: { select: { productId: true, soldBy: true, quantity: true, grams: true, lineTotalMinor: true, unitCostMinor: true } } },
       }),
       prisma.payment.findMany({
@@ -185,7 +186,7 @@ export class RiceReportsService {
     for (const o of orders) {
       sales.totalMinor += o.totalMinor;
       if (o.encodedLater) sales.encodedLater++;
-      if (o.paymentMethod === "cash") sales.cashMinor += o.totalMinor;
+      if (o.paymentMethod === "cash" || o.paymentMethod === "cod") sales.cashMinor += o.totalMinor; // cod: cash paid on delivery or pick-up
       else if (o.paymentMethod === "gcash") sales.gcashMinor += o.totalMinor;
       else if (o.paymentMethod === "credit") sales.utangMinor += o.totalMinor;
       else sales.otherMinor += o.totalMinor;
@@ -241,8 +242,12 @@ export class RiceReportsService {
     const { from, to } = dayRange(date);
     const orders = await prisma.order.findMany({
       where: {
-        storeId, sellingLocationId: locationId, status: "COMPLETED", createdAt: { gt: closedAt },
-        OR: [{ occurredAt: { gte: from, lt: to } }, { occurredAt: null, createdAt: { gte: from, lt: to } }],
+        storeId, sellingLocationId: locationId, status: { in: SOLD_STATES },
+        // Rung up after the close, or handed over after it (a pre-order or a delivery that was placed earlier).
+        AND: [
+          { OR: [{ createdAt: { gt: closedAt } }, { occurredAt: { gt: closedAt } }] },
+          { OR: [{ occurredAt: { gte: from, lt: to } }, { occurredAt: null, createdAt: { gte: from, lt: to } }] },
+        ],
       },
       select: { totalMinor: true, paymentMethod: true },
     });
@@ -367,7 +372,7 @@ export class RiceReportsService {
         this.locations(storeId),
         prisma.product.findMany({ where: { storeId }, select: productSelect }),
         prisma.order.findMany({
-          where: { storeId, status: "COMPLETED", OR: [{ occurredAt: range }, { occurredAt: null, createdAt: range }] },
+          where: { storeId, status: { in: SOLD_STATES }, OR: [{ occurredAt: range }, { occurredAt: null, createdAt: range }] },
           select: { sellingLocationId: true, totalMinor: true, items: { select: { productId: true, soldBy: true, quantity: true, grams: true, lineTotalMinor: true, unitCostMinor: true } } },
         }),
         prisma.resackJob.findMany({ where: { storeId, status: "FINISHED", finishedAt: range }, select: { locationId: true, kargadorId: true, inputGrams: true, lossGrams: true, lossValueMinor: true, kargador: { select: { name: true } } } }),
@@ -652,7 +657,7 @@ export class RiceReportsService {
       // Money, per location: what sold here in these dates (completed sales only), at the cost frozen with each sale,
       // and what the stock left on the shelf is worth at the product's current cost (the main store's cost).
       const soldLines = await prisma.orderItem.findMany({
-        where: { storeId, productId: product.id, order: { status: "COMPLETED", sellingLocationId: input.locationId ? input.locationId : { not: null }, OR: [{ occurredAt: { gte: from, lt: to } }, { occurredAt: null, createdAt: { gte: from, lt: to } }] } },
+        where: { storeId, productId: product.id, order: { status: { in: SOLD_STATES }, sellingLocationId: input.locationId ? input.locationId : { not: null }, OR: [{ occurredAt: { gte: from, lt: to } }, { occurredAt: null, createdAt: { gte: from, lt: to } }] } },
         select: { soldBy: true, quantity: true, lineTotalMinor: true, unitCostMinor: true, order: { select: { sellingLocationId: true } } },
       });
       const money = new Map<string, { salesMinor: number; costOfSoldMinor: number; soldQty: number }>();

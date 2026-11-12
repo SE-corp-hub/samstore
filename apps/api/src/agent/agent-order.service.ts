@@ -22,7 +22,8 @@ import { toE164 } from "../domain/phone.js";
 import { priceAt, priceLine, saleKey, SellingError } from "../domain/selling.js";
 import { taxColumnsFor } from "../domain/tax-store.js";
 import { AGENT_STATUS_LABEL, agentStatus, amountDue, checkAddress, readyToPay } from "../domain/agent-order.js";
-import { limitCheck, saleText } from "../domain/utang.js";
+import { limitCheck, refundValue, saleText } from "../domain/utang.js";
+import { settleSaleAtStore } from "../selling/settle-sale.js";
 import { prepareTenders, writeTenders } from "../payments/tenders.js";
 import { RegisterService } from "../registers/register.service.js";
 import { CreditService } from "../credit/credit.service.js";
@@ -347,10 +348,19 @@ export class AgentOrderService {
           await requireSignatures(tx, storeId, { documentType: "SALE", documentId: id, step: "UTANG" });
         }
         try {
-          await writeTenders(tx, { storeId, orderId: id, actorId: actor.userId, plan, note: `Payment for agent order ${o.orderNumber}`, registerSessionId });
+          await writeTenders(tx, { storeId, orderId: id, actorId: actor.userId, plan, note: `Payment for agent order ${o.orderNumber}`, registerSessionId, locationId: sellingLocationId });
         } catch (e) {
           throw new StepError(conflict(e instanceof Error ? e.message : "The payment did not go through"));
         }
+        // Paid: the order becomes a sale at its store today, for what was delivered. A store that sells the main
+        // store's rice is charged its cost, and rice that came from another store's shelf books that store's share.
+        await settleSaleAtStore(tx, {
+          storeId, orderId: id, orderNumber: o.orderNumber, locationId: sellingLocationId, actorId: actor.userId, at: new Date(),
+          sold: o.items.filter((i) => !!i.productId).map((i) => {
+            const got = Math.min(i.quantity, delivered.get(i.productId!) ?? 0);
+            return { productId: i.productId!, quantity: got, lineTotalMinor: got >= i.quantity ? i.lineTotalMinor : got > 0 ? refundValue(i, got) : 0 };
+          }),
+        });
         await tx.orderStatusHistory.create({ data: { orderId: id, storeId, fromStatus: "CONFIRMED", toStatus: "COMPLETED", actorType: "staff", actorId: actor.userId, reason: due < o.totalMinor ? `Paid for what was delivered only (${(due / 100).toFixed(2)} of ${(o.totalMinor / 100).toFixed(2)})` : null } });
         if (method === "utang" && o.storeCustomerId) {
           const bal = await tx.storeCustomer.findUniqueOrThrow({ where: { id: o.storeCustomerId }, select: { creditBalanceMinor: true } });

@@ -3,6 +3,9 @@
 
 import { prisma } from "../persistence/prisma-repositories.js";
 import { settleForStatus } from "../domain/stock-settlement.js";
+import { paymentEffectFor } from "../domain/order-state.js";
+import { settleHandedOverOrder } from "../selling/settle-sale.js";
+import { txOptions } from "../persistence/tx-options.js";
 import { LoyaltyService } from "../loyalty/loyalty.service.js";
 import { cashNote } from "../domain/delivery-proof.js";
 import { captureSignatures, signatureErrorResult, type Actor } from "../people/people.service.js";
@@ -78,7 +81,8 @@ export class DeliveryService {
     if (order.status !== "OUT_FOR_DELIVERY") {
       return { ok: false, error: { type: "conflict", message: `Cannot update an order in ${order.status}` } };
     }
-    const paymentStatus = toStatus === "DELIVERED" ? "COLLECTED" : order.paymentStatus;
+    // A GCash payment still to be checked stays in Payment review after delivery; everything else is paid on delivery.
+    const paymentStatus = toStatus === "DELIVERED" ? paymentEffectFor("DELIVERED", order.paymentStatus) : order.paymentStatus;
     // Delivered: the cash the courier says they collected goes on the order's history line.
     const note = toStatus === "DELIVERED" && proof?.cashCollectedMinor !== undefined
       ? cashNote(proof.cashCollectedMinor, order.totalMinor)
@@ -87,7 +91,7 @@ export class DeliveryService {
       await prisma.$transaction(async (tx) => {
         await tx.order.update({
           where: { id: orderId },
-          data: { status: toStatus, paymentStatus },
+          data: { status: toStatus, paymentStatus: paymentStatus as never },
         });
         await tx.orderStatusHistory.create({
           data: { orderId, storeId, fromStatus: "OUT_FOR_DELIVERY", toStatus, reason: note, actorType: "delivery" },
@@ -96,10 +100,14 @@ export class DeliveryService {
           await captureSignatures(tx, storeId, proof.actor, { documentType: "ORDER", documentId: orderId, step: "DELIVERED", locationId: null },
             [{ signerKind: "CUSTOMER", signerName: proof.receivedBy, imagePng: proof.signaturePng }]);
         }
+        // Delivered: the order becomes a sale at its store today, and the cash the rider collected is that store's cash.
+        if (toStatus === "DELIVERED") {
+          await settleHandedOverOrder(tx, { storeId, orderId, actorId: proof?.actor.userId ?? null, cashCollectedMinor: proof?.cashCollectedMinor });
+        }
         // Handed to the customer: consume the checkout reservation in the same
         // transaction. A FAILED_DELIVERY keeps the reservation so a retry can go out.
         await settleForStatus(tx, { id: orderId, storeId }, toStatus);
-      });
+      }, txOptions());
     } catch (e) {
       const r = signatureErrorResult(e);
       if (r) return r;

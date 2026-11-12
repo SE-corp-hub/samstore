@@ -30,6 +30,12 @@ export const ALLOWED_TRANSITIONS: Record<OrderState, OrderState[]> = {
   FAILED_DELIVERY: ["OUT_FOR_DELIVERY", "CANCELLED"], // retry delivery, or cancel it (the rice comes back, its hold is given back)
 };
 
+/**
+ * An order in one of these states is a SALE: the rice was handed over. Counter sales, pre-orders and agent
+ * orders end COMPLETED; a delivered online or Facebook order ends DELIVERED. Every report counts both.
+ */
+export const SOLD_STATES: OrderState[] = ["COMPLETED", "DELIVERED"];
+
 /** States that are terminal — no transitions out. */
 export function isTerminal(state: OrderState): boolean {
   return ALLOWED_TRANSITIONS[state].length === 0;

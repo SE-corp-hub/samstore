@@ -630,6 +630,10 @@ export class PrismaOrderRepository implements OrderRepository {
       //    the whole transaction rolls back. Variant rows (P2a) reserve the variant's
       //    own counters + a movement carrying variantId; plain products use StockLevel.
       const untracked = await untrackedIds(tx, order.storeId, (effects.stockReservations ?? []).map((r) => r.productId));
+      // An order that names no store is the main store's: its shelf is tried first, like a named store's is.
+      const preferWarehouseId = effects.preferWarehouseId
+        ?? (await tx.warehouse.findFirst({ where: { storeId: order.storeId, isDefault: true, isActive: true }, select: { id: true } }))?.id
+        ?? null;
       for (const r of effects.stockReservations ?? []) {
         if (r.quantity <= 0) continue;
         if (untracked.has(r.productId)) continue; // Track stock off — nothing is held
@@ -655,7 +659,7 @@ export class PrismaOrderRepository implements OrderRepository {
           storeId: order.storeId,
           productId: r.productId,
           quantity: r.quantity,
-          prefer: effects.preferWarehouseId ?? null,
+          prefer: preferWarehouseId,
           orderId: o.id,
           actorId: "checkout",
         });

@@ -401,9 +401,11 @@ export class PaymentsService {
       // so the X/Z report's expected cash accounts for it (null when off-counter).
       const registerSessionId = await this.registers.attachOpenSession(storeId);
       await tx.payment.create({
-        data: { orderId, storeId, method: "cash", amountMinor: -refundAmount, note: `REFUND: ${reason?.trim() ?? "customer refund"}`.slice(0, 200), type: "refund", createdBy: actorId, registerSessionId },
+        data: { orderId, storeId, method: "cash", amountMinor: -refundAmount, note: `REFUND: ${reason?.trim() ?? "customer refund"}`.slice(0, 200), type: "refund", createdBy: actorId, registerSessionId, locationId: order.sellingLocationId },
       });
       await tx.order.update({ where: { id: orderId }, data: { status: "CANCELLED", paymentStatus: "REFUNDED" } });
+      // The sale is taken back, so is what its store owed the main store for it (and any profit share it booked).
+      await reverseSaleCharges(tx, storeId, orderId, actorId, reason?.trim() || "sale refunded");
       // An online order that is refunded before dispatch gives its reservation
       // back. Already-delivered orders were consumed, so this is a no-op there.
       await settleOrderReservations(tx, { id: orderId, storeId }, "RELEASED");

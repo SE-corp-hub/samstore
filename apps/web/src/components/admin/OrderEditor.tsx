@@ -49,6 +49,9 @@ export default function OrderEditor({ orderId, orderNumber, customerName, onClos
   const [extraMinor, setExtraMinor] = useState(0); // delivery fee − discount: kept as they are
   const [products, setProducts] = useState<Product[]>([]);
   const [floors, setFloors] = useState<Map<string, Floor>>(new Map());
+  // The order's own store and its own prices: the usual price of a line is its store's price, not the main one.
+  const [storePrices, setStorePrices] = useState<Record<string, number>>({});
+  const [storeName, setStoreName] = useState<string | null>(null);
   const [find, setFind] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -65,6 +68,8 @@ export default function OrderEditor({ orderId, orderNumber, customerName, onClos
       .then((d) => {
         if (!alive) return;
         setExtraMinor((d?.deliveryFeeMinor ?? 0) - (d?.discountMinor ?? 0));
+        setStorePrices(d?.storePrices && typeof d.storePrices === "object" ? d.storePrices as Record<string, number> : {});
+        setStoreName(typeof d?.sellingLocationName === "string" ? d.sellingLocationName : null);
         setLines(((d?.items ?? []) as { productId: string | null; productName: string; quantity: number; unitPriceMinor: number; catalogUnitPriceMinor?: number | null; priceOverridden?: boolean; priceOverrideReason?: string | null }[])
           .filter((i) => i.productId)
           .map((i) => ({
@@ -85,7 +90,8 @@ export default function OrderEditor({ orderId, orderNumber, customerName, onClos
   }, [orderId]);
 
   // Once both are in: each line learns its usual price; a line still at the usual price is "not changed".
-  const byId = useMemo(() => new Map(products.map((p) => [p.id, p])), [products]);
+  const priced = useMemo(() => products.map((p) => ({ ...p, priceMinor: storePrices[p.id] ?? p.priceMinor })), [products, storePrices]);
+  const byId = useMemo(() => new Map(priced.map((p) => [p.id, p])), [priced]);
   useEffect(() => {
     if (!lines || products.length === 0 || lines.every((l) => l.listPrice !== null || !byId.has(l.productId))) return;
     setLines((cur) => cur && cur.map((l) => {
@@ -119,7 +125,7 @@ export default function OrderEditor({ orderId, orderNumber, customerName, onClos
   const total = Math.max(0, itemsTotal + extraMinor);
   const count = (lines ?? []).reduce((s, l) => s + l.quantity, 0);
   const q = find.trim().toLowerCase();
-  const matches = products.filter((p) => !q || p.name.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q) || (p.category?.name ?? "").toLowerCase().includes(q));
+  const matches = priced.filter((p) => !q || p.name.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q) || (p.category?.name ?? "").toLowerCase().includes(q));
 
   /** Below cost: one popup per line before saving. False = stop (the person went back or is fixing a price). */
   const passesCost = async (): Promise<boolean> => {
@@ -194,6 +200,7 @@ export default function OrderEditor({ orderId, orderNumber, customerName, onClos
               <div className="min-w-0">
                 <h2 className="modal-title fs-4 mb-0" id="order-edit-title">Change order {orderNumber}</h2>
                 {customerName && <div className="text-muted text-truncate">{customerName}</div>}
+                {storeName && <div className="fw-semibold text-truncate"><i className="bi bi-shop me-1" aria-hidden="true"></i>{storeName} prices</div>}
               </div>
               <button ref={closeRef} type="button" className="btn btn-outline-dark ms-auto order-edit-close" onClick={onClose} aria-label="Close without saving">
                 <i className="bi bi-x-lg" aria-hidden="true"></i>

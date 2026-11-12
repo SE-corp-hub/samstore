@@ -366,6 +366,8 @@ export interface PreOrderCreateRequest {
   dueAt?: string;
   /** The same key always returns the same pre-order (a retry, or one saved with no signal and sent later). */
   idempotencyKey?: string;
+  /** The store that takes the pre-order (its price, its shelf). Left out: the login's home store, else the main store. */
+  locationId?: string;
 }
 
 export interface PreOrderCreateResponse {

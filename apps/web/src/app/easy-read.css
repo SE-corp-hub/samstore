@@ -597,3 +597,8 @@ main:has(> * > .rice-ui > .sell-fit), main:has(> .rice-ui > .sell-fit) { padding
 .items-order-list li { display: flex; align-items: center; gap: .75rem; padding: .25rem 0; border-top: 1px dashed #d9d3ca; }
 .items-order-list li:first-child { border-top: 0; }
 .items-order-list .btn { min-height: 44px; min-width: 5rem; }
+
+/* §13 Pre-orders follow their store (2026-11-12). The owner's card has a fourth action
+   (Move store), so the four secondary buttons sit two by two instead of squeezing on one row. */
+.preorder-actions { display: grid; gap: 0.5rem; }
+.preorder-actions-4 { grid-template-columns: 1fr 1fr; }

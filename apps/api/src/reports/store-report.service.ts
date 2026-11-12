@@ -7,6 +7,7 @@ import { prisma } from "../persistence/prisma-repositories.js";
 import { profitShareByLocation } from "../payable/charges.js";
 import { dayRange, lineCost, manilaDate, ReportError, stockFlag } from "../domain/reports.js";
 import { isLooseP } from "../domain/counting.js";
+import { SOLD_STATES } from "../domain/order-state.js";
 import { locationRefusal, type Actor } from "../people/people.service.js";
 
 export type StoreReportResult<T> = { ok: true; value: T } | { ok: false; error: ApiError };
@@ -115,7 +116,7 @@ export class StoreReportService {
     const range = { gte: start, lt: end };
     const [orders, payments, credits] = await Promise.all([
       prisma.order.findMany({
-        where: { storeId, sellingLocationId: locationId, status: "COMPLETED", OR: [{ occurredAt: range }, { occurredAt: null, createdAt: range }] },
+        where: { storeId, sellingLocationId: locationId, status: { in: SOLD_STATES }, OR: [{ occurredAt: range }, { occurredAt: null, createdAt: range }] },
         select: { id: true, totalMinor: true, paymentMethod: true, occurredAt: true, createdAt: true, items: { select: { productId: true, productName: true, soldBy: true, quantity: true, grams: true, lineTotalMinor: true, unitCostMinor: true } } },
       }),
       prisma.payment.findMany({
@@ -140,7 +141,7 @@ export class StoreReportService {
           rest -= sp.amountMinor;
         }
         if (rest > 0) t.otherMinor += rest;
-      } else if (o.paymentMethod === "cash") t.cashMinor += o.totalMinor;
+      } else if (o.paymentMethod === "cash" || o.paymentMethod === "cod") t.cashMinor += o.totalMinor; // cod: cash paid on delivery or pick-up
       else if (o.paymentMethod === "gcash") t.gcashMinor += o.totalMinor;
       else if (o.paymentMethod === "credit") t.creditMinor += o.totalMinor;
       else t.otherMinor += o.totalMinor;
@@ -314,7 +315,7 @@ export class StoreReportService {
 
       if (kind === "all" || kind === "sales") {
         const orders = await prisma.order.findMany({
-          where: { storeId, sellingLocationId: { in: ids }, status: { in: ["COMPLETED", "CANCELLED"] }, OR: [{ occurredAt: range }, { occurredAt: null, createdAt: range }], ...(input.productId ? { items: { some: { productId: input.productId } } } : {}) },
+          where: { storeId, sellingLocationId: { in: ids }, status: { in: [...SOLD_STATES, "CANCELLED"] }, OR: [{ occurredAt: range }, { occurredAt: null, createdAt: range }], ...(input.productId ? { items: { some: { productId: input.productId } } } : {}) },
           orderBy: { createdAt: "desc" }, take: LIMIT,
           select: { id: true, orderNumber: true, status: true, source: true, totalMinor: true, paymentMethod: true, customerName: true, occurredAt: true, createdAt: true, sellingLocationId: true, items: { select: { productName: true, quantity: true, grams: true, soldBy: true } } },
         });

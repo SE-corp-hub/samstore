@@ -17,7 +17,10 @@ import { computeOrderTotals } from "../domain/pricing.js";
 import { resolveLinePrice } from "../domain/price-override.js";
 import { settleForStatus } from "../domain/stock-settlement.js";
 import { taxColumnsFor } from "../domain/tax-store.js";
-import { saleKey, SellingError } from "../domain/selling.js";
+import { priceAt, saleKey, SellingError } from "../domain/selling.js";
+import { ALL_LOCATION_ROLES } from "../domain/people.js";
+import { locationRefusal, type Actor } from "../people/people.service.js";
+import { freezeLineCosts, settleHandedOverOrder, settleSaleAtStore } from "../selling/settle-sale.js";
 import { Prisma } from "@prisma/client";
 import { formatOrderNumber } from "../domain/order-number.js";
 import { randomId } from "../persistence/repositories.js";
@@ -46,6 +49,10 @@ export interface LoadedLine {
   sourceLocationId?: string | null;
 }
 
+/** Who is doing it: the full login (role + home store), or a bare user id (no home store: may act anywhere, as before). */
+export type PosActor = Actor | string;
+const actorOf = (who: PosActor): Actor => (typeof who === "string" ? { userId: who, role: "", homeLocationId: null } : who);
+
 export class PosService {
   private readonly sequences = new PrismaOrderSequenceRepository();
   private readonly credit = new CreditService();
@@ -67,7 +74,7 @@ export class PosService {
 
   /** Load fresh products for a store (active) + validate availability. P2b: variant lines
  *  resolve their own price + stock (variant must belong to the product and be active). */
-  private async loadProducts(storeId: string, items: PosSellItem[], opts: { allowRemote?: boolean; allowShort?: boolean } = {}): Promise<PosResult<{ products: any[]; lines: LoadedLine[]; totals: any }>> {
+  private async loadProducts(storeId: string, items: PosSellItem[], opts: { allowRemote?: boolean; allowShort?: boolean; /** The store that sells (a pre-order's store): its own price and its own shelf. Empty = the main store, main price. */ locationId?: string | null } = {}): Promise<PosResult<{ products: any[]; lines: LoadedLine[]; totals: any }>> {
     const ids = items.map((i) => i.productId);
     // Rice Ops M3: a line may be served from another location — immediate sales only.
     const remoteIds = [...new Set(items.map((i) => i.sourceLocationId).filter((x): x is string => typeof x === "string" && x.length > 0))];
@@ -98,7 +105,11 @@ export class PosService {
     const variantMap = new Map(variants.map((v) => [v.id, v]));
     // Rice Ops M1: a counter sale takes stock from THIS store's location (the
     // default), never silently from another store — the same rule deductStock uses.
-    const defaultLocation = await prisma.warehouse.findFirst({ where: { storeId, isDefault: true }, select: { id: true } });
+    const defaultLocation = opts.locationId ? { id: opts.locationId } : await prisma.warehouse.findFirst({ where: { storeId, isDefault: true }, select: { id: true } });
+    // The selling store's own prices (no own price for a rice = the main price).
+    const ownPrices = opts.locationId
+      ? new Map((await prisma.locationPrice.findMany({ where: { storeId, warehouseId: opts.locationId, productId: { in: ids } }, select: { productId: true, priceMinor: true } })).map((x) => [x.productId, x.priceMinor]))
+      : new Map<string, number>();
 
     for (const it of items) {
       const p = products.find((x) => x.id === it.productId)!;
@@ -143,7 +154,7 @@ export class PosService {
     for (const it of items) {
       const p = products.find((x) => x.id === it.productId)!;
       const v = it.variantId ? variantMap.get(it.variantId) : null;
-      const catalogUnitPriceMinor = v?.priceMinor ?? p.priceMinor;
+      const catalogUnitPriceMinor = v?.priceMinor ?? priceAt(p.priceMinor, ownPrices.get(p.id));
       let price;
       try {
         price = resolveLinePrice({
@@ -181,8 +192,51 @@ export class PosService {
   }
 
   /** Decrement stock for a set of lines (prefer default warehouse, then any level) + ledger. */
-  private async decrementStock(tx: any, storeId: string, lines: StockLine[], opts: { orderId?: string | null; createdBy?: string | null; allowBelowZero?: boolean } = {}) {
-    await deductStock(tx, storeId, lines, { type: "CONSUME", orderId: opts.orderId, createdBy: opts.createdBy, allowBelowZero: opts.allowBelowZero });
+  private async decrementStock(tx: any, storeId: string, lines: StockLine[], opts: { orderId?: string | null; createdBy?: string | null; allowBelowZero?: boolean; /** The shelf it leaves (empty = the main store's). */ warehouseId?: string | null } = {}) {
+    await deductStock(tx, storeId, lines, { type: "CONSUME", orderId: opts.orderId, createdBy: opts.createdBy, allowBelowZero: opts.allowBelowZero, ...(opts.warehouseId ? { warehouseId: opts.warehouseId } : {}) });
+  }
+
+  // ─── pre-orders follow their store (per-store build, step 1a) ─────────────────────
+
+  /**
+   * The store a NEW pre-order belongs to: the one asked for, else the login's home store,
+   * else the main store. A request with no store (an old copy of the app, or one saved
+   * offline) is never refused for that. `null` only for a legacy store with no locations.
+   */
+  private async preorderStore(storeId: string, actor: Actor, asked: unknown): Promise<PosResult<{ id: string; name: string } | null>> {
+    const pick = (id: string) => prisma.warehouse.findFirst({ where: { id, storeId, isActive: true }, select: { id: true, name: true, type: true } });
+    if (typeof asked === "string" && asked.length > 0) {
+      const loc = await pick(asked);
+      if (!loc) return { ok: false, error: { type: "validation", errors: ["Choose a store"] } };
+      if (loc.type === "BUFFER") return { ok: false, error: { type: "validation", errors: ["The Buffer store cannot sell — pick a store"] } };
+      const refusal = locationRefusal(actor, loc.id);
+      if (refusal) return { ok: false, error: { type: "forbidden", message: refusal } };
+      return { ok: true, value: { id: loc.id, name: loc.name } };
+    }
+    const home = actor.homeLocationId ? await pick(actor.homeLocationId) : null;
+    if (home && home.type !== "BUFFER") return { ok: true, value: { id: home.id, name: home.name } };
+    const main = await prisma.warehouse.findFirst({ where: { storeId, isDefault: true }, select: { id: true, name: true } });
+    return { ok: true, value: main };
+  }
+
+  /** May this login work on a pre-order that belongs to `locationId`? (Owner and manager: any store.) */
+  private async preorderRefusal(storeId: string, actor: Actor, locationId: string | null): Promise<string | null> {
+    if (!locationId || !locationRefusal(actor, locationId)) return null;
+    const loc = await prisma.warehouse.findFirst({ where: { id: locationId, storeId }, select: { name: true } });
+    return `This pre-order belongs to ${loc?.name ?? "another store"}. Ask the owner to move it to your store.`;
+  }
+
+  /** The open cash drawer at this store (else a drawer with no store); required only when the store says so. */
+  private async drawerAt(storeId: string, locationId: string | null): Promise<PosResult<string | null>> {
+    if (!locationId) {
+      const session = await this.registers.requireOpenSession(storeId);
+      return session.ok ? { ok: true, value: session.value } : { ok: false, error: { type: "conflict", message: session.error.message } };
+    }
+    const at = await this.registers.sessionAt(storeId, locationId);
+    if (at) return { ok: true, value: at };
+    const settings = await prisma.storeSettings.findUnique({ where: { storeId }, select: { requireOpenShift: true } });
+    if (settings?.requireOpenShift) return { ok: false, error: { type: "conflict", message: "No cash drawer is open here — open the drawer before taking cash" } };
+    return { ok: true, value: null };
   }
 
   /** Increment stock back for a set of lines (void / cancel) + ledger. */
@@ -585,7 +639,8 @@ export class PosService {
   // ─── pre-orders (v4) ──────────────────────────────────────────────────────────────
 
   /** v4: create a pre-order draft — customer REQUIRED, stock reserved (ON_HOLD + source=PRE_ORDER). */
-  async createPreOrder(storeId: string, actorId: string, input: PreOrderCreateRequest): Promise<PosResult<{ orderId: string; orderNumber: string; status: string; totalMinor: number; currencyCode: string }>> {
+  async createPreOrder(storeId: string, who: PosActor, input: PreOrderCreateRequest): Promise<PosResult<{ orderId: string; orderNumber: string; status: string; totalMinor: number; currencyCode: string }>> {
+    const actor = actorOf(who);
     // A pre-order saved with no signal is sent later, maybe more than once: the same key makes one pre-order.
     let key: string | null = null;
     if (input.idempotencyKey !== undefined) {
@@ -598,7 +653,7 @@ export class PosService {
       if (earlier) return { ok: true, value: earlier };
     }
     try {
-      return await this.createPreOrderOnce(storeId, actorId, input, key);
+      return await this.createPreOrderOnce(storeId, actor, input, key);
     } catch (e) {
       if (key && e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002" && JSON.stringify(e.meta?.target ?? "").includes("idempotencyKey")) {
         const won = await this.replayPreOrder(storeId, key);
@@ -613,11 +668,16 @@ export class PosService {
     return o ? { orderId: o.id, orderNumber: o.orderNumber, status: o.status, totalMinor: o.totalMinor, currencyCode: o.currencyCode } : null;
   }
 
-  private async createPreOrderOnce(storeId: string, actorId: string, input: PreOrderCreateRequest, key: string | null): Promise<PosResult<{ orderId: string; orderNumber: string; status: string; totalMinor: number; currencyCode: string }>> {
+  private async createPreOrderOnce(storeId: string, actor: Actor, input: PreOrderCreateRequest, key: string | null): Promise<PosResult<{ orderId: string; orderNumber: string; status: string; totalMinor: number; currencyCode: string }>> {
+    const actorId = actor.userId;
     if (!this.validateItems(input.items)) {
       return { ok: false, error: { type: "validation", errors: ["At least one item with positive quantity is required"] } };
     }
-    const loaded = await this.loadProducts(storeId, input.items, { allowShort: true });
+    // The pre-order belongs to one store: that store's price, and the rice is taken from that store's shelf.
+    const store_ = await this.preorderStore(storeId, actor, input.locationId);
+    if (!store_.ok) return store_;
+    const loc = store_.value;
+    const loaded = await this.loadProducts(storeId, input.items, { allowShort: true, locationId: loc?.id ?? null });
     if (!loaded.ok) return loaded;
     const { storeCustomerId: custId, displayName } = await this.resolveCustomer(storeId, input);
     if (!custId) {
@@ -636,19 +696,28 @@ export class PosService {
         currencyCode: store.currencyCode, totals, storeCustomerId: custId, customerName: displayName, lines,
         preorder: { startAt: input.startAt ?? new Date().toISOString(), dueAt: input.dueAt ?? null },
         idempotencyKey: key,
+        sellingLocationId: loc?.id ?? null,
       });
-      await this.decrementStock(tx, storeId, lines, { orderId: id, createdBy: actorId, allowBelowZero: true });
+      await this.decrementStock(tx, storeId, lines, { orderId: id, createdBy: actorId, allowBelowZero: true, warehouseId: loc?.id ?? null });
+      // The cost as it is today; it is frozen again when the pre-order is completed (the day it becomes a sale).
+      await freezeLineCosts(tx, { storeId, orderId: id, locationId: loc?.id ?? null });
     }, txOptions());
     await cacheBust(cacheKey("products", storeId));
     await cacheBust(cacheKey("orders", storeId));
     return { ok: true, value: { orderId: id, orderNumber, status: "ON_HOLD", totalMinor: totals.totalMinor, currencyCode: store.currencyCode } };
   }
 
-  /** v4: list pre-order drafts (optional createdAt from/to ISO filters). */
-  async listPreorders(storeId: string, from?: string, to?: string) {
+  /**
+   * v4: list pre-order drafts (optional createdAt from/to ISO filters).
+   * A login tied to one store sees that store's pre-orders (and old ones that have no store yet).
+   */
+  async listPreorders(storeId: string, from?: string, to?: string, who?: PosActor) {
+    const actor = who ? actorOf(who) : null;
+    const own = actor?.homeLocationId && !(ALL_LOCATION_ROLES as readonly string[]).includes(actor.role) ? actor.homeLocationId : null;
     return prisma.order.findMany({
       where: {
         storeId, source: "PRE_ORDER",
+        ...(own ? { OR: [{ sellingLocationId: own }, { sellingLocationId: null }] } : {}),
         ...(from || to ? { createdAt: { gte: from ? new Date(from) : undefined, lte: to ? new Date(to) : undefined } } : {}),
       },
       orderBy: { createdAt: "desc" },
@@ -657,10 +726,12 @@ export class PosService {
         // can re-send the exact same lines (and show why a price was changed).
         items: { select: { productId: true, productName: true, sku: true, variantId: true, variantName: true, unitPriceMinor: true, quantity: true, lineTotalMinor: true, priceOverridden: true, priceOverrideReason: true } },
         storeCustomer: { include: { customer: { select: { name: true } } } },
+        sellingLocation: { select: { name: true } },
       },
     }).then((rows) => rows.map((o) => ({
       id: o.id, orderNumber: o.orderNumber, customerName: o.customerName, storeCustomerId: o.storeCustomerId,
       status: o.status, totalMinor: o.totalMinor, createdAt: o.createdAt,
+      locationId: o.sellingLocationId, locationName: o.sellingLocation?.name ?? null,
       dueAt: (o.snapshot as any)?.preorder?.dueAt ?? null,
       items: o.items,
     })));
@@ -683,7 +754,9 @@ export class PosService {
   }
 
   /** v4: finalize a pre-order — utang only, signature REQUIRED → COMPLETED + CreditEntry. */
-  async finalizePreorder(storeId: string, actorId: string, id: string, input: PreOrderFinalizeRequest): Promise<PosResult<PreOrderFinalizeResponse>> {
+  async finalizePreorder(storeId: string, who: PosActor, id: string, input: PreOrderFinalizeRequest): Promise<PosResult<PreOrderFinalizeResponse>> {
+    const actor = actorOf(who);
+    const actorId = actor.userId;
     const order = await prisma.order.findFirst({ where: { storeId, id, source: "PRE_ORDER", status: "ON_HOLD" } });
     if (!order) {
       // A completion saved offline may be sent again after it already went through: answer the same.
@@ -702,6 +775,19 @@ export class PosService {
     if (!order.storeCustomerId) {
       return { ok: false, error: { type: "validation", errors: ["Pre-orders require a linked customer"] } };
     }
+    // The sale is made by the pre-order's own store: its report, its cash, and what it owes for the rice.
+    // (A pre-order from before stores were saved takes the store of whoever completes it.)
+    const refusal = await this.preorderRefusal(storeId, actor, order.sellingLocationId);
+    if (refusal) return { ok: false, error: { type: "forbidden", message: refusal } };
+    let locId = order.sellingLocationId;
+    if (!locId) {
+      const fallback = await this.preorderStore(storeId, actor, undefined);
+      locId = fallback.ok ? fallback.value?.id ?? null : null;
+    }
+    const becomeSale = async (tx: Prisma.TransactionClient, at: Date) => {
+      if (locId) await settleSaleAtStore(tx, { storeId, orderId: id, orderNumber: order.orderNumber, locationId: locId, actorId, at });
+      else await tx.order.update({ where: { id }, data: { occurredAt: at } });
+    };
     const finalTotal = order.totalMinor;
     const signatureAt = new Date();
     // Fall back to the pre-order's agreed dates when the finalize request omits them.
@@ -711,8 +797,8 @@ export class PosService {
     let creditEntryId = "";
     if (method === "cash") {
       // Paid in cash at finalize: the money goes in the drawer (needs an open shift only when the store requires one).
-      const session = await this.registers.requireOpenSession(storeId);
-      if (!session.ok) return { ok: false, error: { type: "conflict", message: session.error.message } };
+      const session = await this.drawerAt(storeId, locId);
+      if (!session.ok) return session;
       const prepared = await this.prepareCounterTenders(storeId, id, { paymentMethod: "cash", tenderedMinor: input.tenderedMinor }, finalTotal, order.storeCustomerId);
       if (!prepared.ok) return prepared;
       const plan = prepared.value;
@@ -720,7 +806,8 @@ export class PosService {
         await prisma.$transaction(async (tx) => {
           const moved = await tx.order.updateMany({ where: { id, status: "ON_HOLD" }, data: { status: "COMPLETED", paymentStatus: "COLLECTED", paymentMethod: "cash", signatureData, signatureAt: signatureData ? signatureAt : null, registerSessionId: session.value } });
           if (moved.count !== 1) throw new Error("This pre-order was already completed");
-          await writeTenders(tx, { storeId, orderId: id, actorId, plan, note: "Pre-order paid in cash", registerSessionId: session.value });
+          await writeTenders(tx, { storeId, orderId: id, actorId, plan, note: "Pre-order paid in cash", registerSessionId: session.value, locationId: locId });
+          await becomeSale(tx, signatureAt);
           await tx.orderStatusHistory.create({ data: { orderId: id, storeId, fromStatus: "ON_HOLD", toStatus: "COMPLETED", actorType: "pos_finalize", actorId } });
         }, txOptions());
       } catch (e) {
@@ -744,6 +831,7 @@ export class PosService {
           data: { status: "COMPLETED", paymentStatus: "PENDING", signatureData, signatureAt },
         });
         if (moved.count !== 1) throw new Error("This pre-order was already completed");
+        await becomeSale(tx as Prisma.TransactionClient, signatureAt);
         const entry = await tx.creditEntry.findFirst({ where: { orderId: id }, orderBy: { createdAt: "desc" } });
         creditEntryId = entry?.id ?? "";
         await tx.orderStatusHistory.create({
@@ -773,7 +861,9 @@ export class PosService {
    * never be re-priced through the pre-order route (and vice versa). Line prices come
    * from loadProducts, which honours a bounded + reasoned counter override.
    */
-  async replaceItems(storeId: string, actorId: string, holdId: string, input: PosHoldItemsRequest, opts?: { source?: "pos" | "PRE_ORDER" }): Promise<PosResult<{ id: string; totalMinor: number; lines: LoadedLine[] }>> {
+  async replaceItems(storeId: string, who: PosActor, holdId: string, input: PosHoldItemsRequest, opts?: { source?: "pos" | "PRE_ORDER" }): Promise<PosResult<{ id: string; totalMinor: number; lines: LoadedLine[] }>> {
+    const actor = actorOf(who);
+    const actorId = actor.userId;
     if (!this.validateItems(input.items)) {
       return { ok: false, error: { type: "validation", errors: ["At least one item with positive quantity is required"] } };
     }
@@ -785,7 +875,13 @@ export class PosService {
       };
     }
 
-    const loaded = await this.loadProducts(storeId, input.items, { allowShort: opts?.source === "PRE_ORDER" });
+    // A pre-order keeps its own store's price and shelf when it is changed.
+    const preLoc = hold.source === "PRE_ORDER" ? hold.sellingLocationId : null;
+    if (hold.source === "PRE_ORDER") {
+      const refusal = await this.preorderRefusal(storeId, actor, hold.sellingLocationId);
+      if (refusal) return { ok: false, error: { type: "forbidden", message: refusal } };
+    }
+    const loaded = await this.loadProducts(storeId, input.items, { allowShort: hold.source === "PRE_ORDER", locationId: preLoc });
     if (!loaded.ok) return loaded;
     // Only the stock identity of the previous lines matters here (restore delta).
     const oldLines = (await prisma.orderItem.findMany({ where: { orderId: holdId } })).map((i) => ({
@@ -804,7 +900,7 @@ export class PosService {
     await prisma.$transaction(async (tx) => {
       // Restore stock for removed lines, decrement for added (delta approach).
       await this.restoreStock(tx, storeId, oldLines, { orderId: holdId, createdBy: actorId });
-      await this.decrementStock(tx, storeId, lines, { orderId: holdId, createdBy: actorId, allowBelowZero: opts?.source === "PRE_ORDER" });
+      await this.decrementStock(tx, storeId, lines, { orderId: holdId, createdBy: actorId, allowBelowZero: hold.source === "PRE_ORDER", warehouseId: preLoc });
       await tx.orderItem.deleteMany({ where: { orderId: holdId } });
       await tx.orderItem.createMany({
         data: lines.map((l) => ({
@@ -821,9 +917,40 @@ export class PosService {
         })),
       });
       await tx.order.update({ where: { id: holdId }, data: { subtotalMinor: totals.subtotalMinor, totalMinor: totals.totalMinor, snapshot: { lines, source: hold.source.toLowerCase(), paymentMethod: hold.paymentMethod } as object, ...taxCols } });
+      if (hold.source === "PRE_ORDER") await freezeLineCosts(tx, { storeId, orderId: holdId, locationId: preLoc });
       await tx.orderStatusHistory.create({ data: { orderId: holdId, storeId, fromStatus: "ON_HOLD", toStatus: "ON_HOLD", reason: "items edited", actorType: "pos", actorId: actorId } });
     }, txOptions());
     return { ok: true, value: { id: holdId, totalMinor: totals.totalMinor, lines } };
+  }
+
+  /**
+   * Move a waiting pre-order to another store (the customer will pick it up there). The rice goes
+   * back on the first store's shelf and is taken from the new store's; the agreed prices stay.
+   * Owner and manager only.
+   */
+  async movePreorder(storeId: string, who: PosActor, id: string, toLocationId: unknown): Promise<PosResult<{ id: string; locationId: string; locationName: string }>> {
+    const actor = actorOf(who);
+    if (!(ALL_LOCATION_ROLES as readonly string[]).includes(actor.role)) {
+      return { ok: false, error: { type: "forbidden", message: "Only the owner can move a pre-order to another store" } };
+    }
+    const order = await prisma.order.findFirst({ where: { storeId, id, source: "PRE_ORDER", status: "ON_HOLD" }, include: { items: { select: { productId: true, variantId: true, quantity: true } } } });
+    if (!order) return { ok: false, error: { type: "not_found", message: "Pre-order not found" } };
+    const to = typeof toLocationId === "string" && toLocationId ? await prisma.warehouse.findFirst({ where: { id: toLocationId, storeId, isActive: true }, select: { id: true, name: true, type: true } }) : null;
+    if (!to) return { ok: false, error: { type: "validation", errors: ["Choose a store"] } };
+    if (to.type === "BUFFER") return { ok: false, error: { type: "validation", errors: ["The Buffer store cannot sell — pick a store"] } };
+    if (order.sellingLocationId === to.id) return { ok: true, value: { id, locationId: to.id, locationName: to.name } };
+    const lines: StockLine[] = order.items.filter((i) => !!i.productId).map((i) => ({ productId: i.productId!, variantId: i.variantId ?? null, quantity: i.quantity }));
+    await prisma.$transaction(async (tx) => {
+      const moved = await tx.order.updateMany({ where: { id, status: "ON_HOLD" }, data: { sellingLocationId: to.id } });
+      if (moved.count !== 1) throw new Error("This pre-order was already completed");
+      await this.restoreStock(tx, storeId, lines, { orderId: id, createdBy: actor.userId });
+      await this.decrementStock(tx, storeId, lines, { orderId: id, createdBy: actor.userId, allowBelowZero: true, warehouseId: to.id });
+      await freezeLineCosts(tx, { storeId, orderId: id, locationId: to.id });
+      await tx.orderStatusHistory.create({ data: { orderId: id, storeId, fromStatus: "ON_HOLD", toStatus: "ON_HOLD", reason: `moved to ${to.name}`, actorType: "pos", actorId: actor.userId } });
+    }, txOptions());
+    await cacheBust(cacheKey("products", storeId));
+    await cacheBust(cacheKey("orders", storeId));
+    return { ok: true, value: { id, locationId: to.id, locationName: to.name } };
   }
 
   async completeHold(storeId: string, actorId: string, holdId: string, input: PosHoldCompleteRequest): Promise<PosResult<PosSellResponse>> {
@@ -942,6 +1069,9 @@ export class PosService {
       await tx.orderStatusHistory.create({ data: { orderId: holdId, storeId, fromStatus: hold.status, toStatus: finalStatus, reason: input.sendForDelivery === true && isDelivery ? "paid at counter → send for delivery" : null, actorType: "pos", actorId: actorId } });
       // A shop-link / SE Corp Hub order still HOLDS its stock: paid and handed over here, the held units leave
       // the shelf now (sent for delivery, they leave when it is delivered). No-op for POS holds and pre-orders.
+      // Paid and handed over at the counter: an online / Facebook order becomes a sale at its store now.
+      // (Sent for delivery, it becomes one when it is delivered.) No-op for POS holds.
+      if (finalStatus === "COMPLETED") await settleHandedOverOrder(tx, { storeId, orderId: holdId, actorId });
       await settleForStatus(tx, { id: holdId, storeId }, finalStatus);
     }, txOptions());
 
@@ -962,9 +1092,15 @@ export class PosService {
         };
       }
 
-  async voidHold(storeId: string, actorId: string, holdId: string, reason?: string): Promise<PosResult<{ id: string; status: string }>> {
+  async voidHold(storeId: string, who: PosActor, holdId: string, reason?: string): Promise<PosResult<{ id: string; status: string }>> {
+    const actor = actorOf(who);
+    const actorId = actor.userId;
     const hold = await prisma.order.findFirst({ where: { storeId, id: holdId, status: "ON_HOLD" } });
     if (!hold) return { ok: false, error: { type: "not_found", message: "Held order not found" } };
+    if (hold.source === "PRE_ORDER") {
+      const refusal = await this.preorderRefusal(storeId, actor, hold.sellingLocationId);
+      if (refusal) return { ok: false, error: { type: "forbidden", message: refusal } };
+    }
     const items = await prisma.orderItem.findMany({ where: { orderId: holdId } });
     const lines: StockLine[] = items.map((i) => ({ productId: i.productId ?? "", variantId: i.variantId ?? null, quantity: i.quantity }));
 
