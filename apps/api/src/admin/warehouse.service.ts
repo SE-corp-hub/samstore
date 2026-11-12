@@ -426,13 +426,13 @@ export class WarehouseService {
   // ─────────────────────────────── Location prices ───────────────────────────────
 
   /** Every active product with its main price and this location's own price (if any). */
-  async listPrices(storeId: string, warehouseId: string): Promise<WarehouseResult<{ productId: string; name: string; sku: string; loose: boolean; mainPriceMinor: number; locationPriceMinor: number | null; effectivePriceMinor: number; costMinor: number; ownShelfCost: boolean }[]>> {
+  async listPrices(storeId: string, warehouseId: string): Promise<WarehouseResult<{ productId: string; name: string; sku: string; loose: boolean; mainPriceMinor: number; locationPriceMinor: number | null; effectivePriceMinor: number; costMinor: number; ownShelfCost: boolean; floorPriceMinor: number | null; lowestPriceMinor: number }[]>> {
     const warehouse = await prisma.warehouse.findFirst({ where: { id: warehouseId, storeId }, select: { id: true } });
     if (!warehouse) return { ok: false, error: { type: "not_found", message: "Location not found" } };
     // The cost a sale at this location is measured against (a consignment store: the main store's).
     const costLoc = (await consignmentMain(prisma, storeId, warehouseId)) ?? warehouseId;
     const [products, prices, costMode, shelves] = await Promise.all([
-      prisma.product.findMany({ where: { storeId, isActive: true }, select: { id: true, name: true, sku: true, priceMinor: true, costMinor: true, soldByWeight: true, stockBaseUnit: true, stockBaseQuantity: true }, orderBy: { name: "asc" } }),
+      prisma.product.findMany({ where: { storeId, isActive: true }, select: { id: true, name: true, sku: true, priceMinor: true, costMinor: true, floorPriceMinor: true, soldByWeight: true, stockBaseUnit: true, stockBaseQuantity: true }, orderBy: { name: "asc" } }),
       prisma.locationPrice.findMany({ where: { storeId, warehouseId }, select: { productId: true, priceMinor: true } }),
       costModeOf(prisma, storeId),
       prisma.stockLevel.findMany({ where: { storeId, warehouseId: costLoc }, select: { productId: true, costMinor: true } }),
@@ -443,23 +443,38 @@ export class WarehouseService {
       ok: true,
       value: products.map((p) => {
         const own = byProduct.get(p.id) ?? null;
+        const costMinor = effectiveCost(costMode, shelfCost.get(p.id), p.costMinor ?? 0);
         return {
           productId: p.id, name: p.name, sku: p.sku, loose: p.stockBaseUnit === "g" && p.stockBaseQuantity === 1, mainPriceMinor: p.priceMinor, locationPriceMinor: own, effectivePriceMinor: own ?? p.priceMinor,
-          costMinor: effectiveCost(costMode, shelfCost.get(p.id), p.costMinor ?? 0),
+          costMinor,
+          // The owner's lowest price for a store head; when the owner set none, the head may not sell below what the rice cost.
+          floorPriceMinor: p.floorPriceMinor, lowestPriceMinor: p.floorPriceMinor ?? costMinor,
           ownShelfCost: costMode === "PER_LOCATION" && typeof shelfCost.get(p.id) === "number",
         };
       }),
     };
   }
 
-  /** Set (or with null, remove) a location's own selling price for a product. */
-  async setPrice(storeId: string, warehouseId: string, productId: string, priceMinor: number | null, actorId: string): Promise<WarehouseResult<{ productId: string; warehouseId: string; priceMinor: number | null }>> {
+  /**
+   * Set (or with null, remove) a location's own selling price for a product.
+   * `asHead`: the store head is changing it. The price that results may not go under the owner's lowest
+   * price (or, when the owner set none, under what the rice cost). The owner side is not held to it.
+   */
+  async setPrice(storeId: string, warehouseId: string, productId: string, priceMinor: number | null, actorId: string, opts: { asHead?: boolean } = {}): Promise<WarehouseResult<{ productId: string; warehouseId: string; priceMinor: number | null }>> {
     const warehouse = await prisma.warehouse.findFirst({ where: { id: warehouseId, storeId }, select: { id: true } });
     if (!warehouse) return { ok: false, error: { type: "not_found", message: "Location not found" } };
     const product = await prisma.product.findFirst({ where: { id: productId, storeId }, select: { id: true, priceMinor: true } });
     if (!product) return { ok: false, error: { type: "not_found", message: "Product not found" } };
     if (priceMinor !== null && (!Number.isInteger(priceMinor) || priceMinor <= 0 || priceMinor > MAX_PRICE_MINOR)) {
       return { ok: false, error: { type: "validation", errors: ["priceMinor must be a positive whole number of centavos (or null to use the main price)"] } };
+    }
+    if (opts.asHead) {
+      const lowest = await this.lowestPrice(storeId, warehouseId, productId);
+      const wouldSellAt = priceMinor ?? product.priceMinor;
+      if (wouldSellAt < lowest) {
+        const peso = (lowest / 100).toLocaleString("en-PH", { minimumFractionDigits: 2 });
+        return { ok: false, error: { type: "validation", errors: [priceMinor === null ? `The main price is under the lowest price (₱${peso}). Keep the store's own price, or ask the owner.` : `The lowest price for this rice is ₱${peso}. Ask the owner to go lower.`] } };
+      }
     }
     const before = await prisma.locationPrice.findUnique({ where: { storeId_productId_warehouseId: { storeId, productId, warehouseId } } });
     if (priceMinor === null) {
@@ -472,8 +487,34 @@ export class WarehouseService {
       });
     }
     await prisma.auditLog.create({
-      data: { storeId, actorType: "USER", actorId, action: "price.location.set", entityType: "Product", entityId: productId, before: { warehouseId, priceMinor: before?.priceMinor ?? null }, after: { warehouseId, priceMinor } },
+      data: { storeId, actorType: "USER", actorId, action: "price.location.set", entityType: "Product", entityId: productId, before: { warehouseId, priceMinor: before?.priceMinor ?? null }, after: { warehouseId, priceMinor, ...(opts.asHead ? { byStoreHead: true } : {}) } },
     });
     return { ok: true, value: { productId, warehouseId, priceMinor } };
+  }
+
+  /** The lowest price a store head may sell one rice at, at one store. */
+  private async lowestPrice(storeId: string, warehouseId: string, productId: string): Promise<number> {
+    const product = await prisma.product.findFirst({ where: { id: productId, storeId }, select: { floorPriceMinor: true, costMinor: true } });
+    if (typeof product?.floorPriceMinor === "number") return product.floorPriceMinor;
+    const costLoc = (await consignmentMain(prisma, storeId, warehouseId)) ?? warehouseId;
+    const [costMode, shelf] = await Promise.all([
+      costModeOf(prisma, storeId),
+      prisma.stockLevel.findFirst({ where: { storeId, warehouseId: costLoc, productId }, select: { costMinor: true } }),
+    ]);
+    return effectiveCost(costMode, shelf?.costMinor, product?.costMinor ?? 0);
+  }
+
+  /** The owner sets (or with null, removes) the lowest price store heads may sell one rice at. One figure for every store. */
+  async setFloorPrice(storeId: string, productId: string, floorPriceMinor: number | null, actorId: string): Promise<WarehouseResult<{ productId: string; floorPriceMinor: number | null }>> {
+    const product = await prisma.product.findFirst({ where: { id: productId, storeId }, select: { id: true, floorPriceMinor: true } });
+    if (!product) return { ok: false, error: { type: "not_found", message: "Product not found" } };
+    if (floorPriceMinor !== null && (!Number.isInteger(floorPriceMinor) || floorPriceMinor <= 0 || floorPriceMinor > MAX_PRICE_MINOR)) {
+      return { ok: false, error: { type: "validation", errors: ["The lowest price must be a positive amount (or empty for none)"] } };
+    }
+    await prisma.product.update({ where: { id: product.id }, data: { floorPriceMinor } });
+    await prisma.auditLog.create({
+      data: { storeId, actorType: "USER", actorId, action: "price.floor.set", entityType: "Product", entityId: productId, before: { floorPriceMinor: product.floorPriceMinor }, after: { floorPriceMinor } },
+    });
+    return { ok: true, value: { productId, floorPriceMinor } };
   }
 }

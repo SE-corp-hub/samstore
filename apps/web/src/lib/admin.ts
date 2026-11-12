@@ -201,6 +201,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { id: "bilangin", label: "Count", icon: "bi-clipboard-check", hint: "Count the shelf and fix the numbers" },
       { id: "inventory", label: "Inventory", icon: "bi-boxes", hint: "How much rice is in each store" },
       { id: "products", label: "Products", icon: "bi-box-seam", hint: "Kinds of rice, prices and costs" },
+      { id: "storeprices", label: "Store prices", icon: "bi-tags", hint: "Each store's own selling prices" },
       { id: "drafts", label: "To finish", icon: "bi-hourglass-split", hint: "Work started and not finished" },
       { id: "kargadors", label: "Porters", icon: "bi-person-walking", hint: "Porters and what they carried" },
       { id: "warehouses", label: "Locations", icon: "bi-geo-alt", hint: "The stores and warehouse you use" },
@@ -269,7 +270,7 @@ export function toneFor(id: string): NavTone {
   return navGroupFor(id)?.tone ?? "setup";
 }
 
-const OWNER_TABS = ["overview", "pos", "preorders", "orders", "utang", "products", "inventory", "cash", "expenses", "purchases", "team", "customers", "analytics", "reports", "settings", "storelink", "warehouses", "approvals", "moves", "returns", "resack", "drafts", "kargadors", "pasok", "purchaseorders", "utangrice", "agentorders", "bilangin", "storereport", "payable", "ulat", "export"];
+const OWNER_TABS = ["overview", "pos", "preorders", "orders", "utang", "products", "inventory", "cash", "expenses", "purchases", "team", "customers", "analytics", "reports", "settings", "storelink", "warehouses", "approvals", "moves", "returns", "resack", "drafts", "kargadors", "pasok", "purchaseorders", "utangrice", "agentorders", "bilangin", "storereport", "payable", "ulat", "export", "storeprices"];
 
 /** Tab visibility per staff role (GET-level permissions from live API probes). */
 export const TABS_BY_ROLE: Record<string, string[]> = {
@@ -315,12 +316,25 @@ export function defaultTabFor(role: string): string {
 // the whole business. The server refuses them too; this only keeps them out of the menu.
 const WHOLE_BUSINESS_TABS = ["purchases", "purchaseorders", "reports", "analytics", "export"];
 const HOME_KEY = "sam.homeLocationId";
+const HEAD_KEY = "sam.isStoreHead";
 let homeLocationId: string | null | undefined;
+let storeHead: boolean | undefined;
 
-/** Remember the login's home store (from GET /admin/me/rice). Saved, so the menu is right before the server answers next time. */
-export function setHomeLocation(id: string | null): void {
+/** Remember the login's home store and whether it is the head of that store (from GET /admin/me/rice). Saved, so the menu is right before the server answers next time. */
+export function setHomeLocation(id: string | null, isHead = false): void {
   homeLocationId = id;
-  try { if (id) window.localStorage.setItem(HOME_KEY, id); else window.localStorage.removeItem(HOME_KEY); } catch { /* private window: the menu is right once the server answers */ }
+  storeHead = !!id && isHead;
+  try {
+    if (id) window.localStorage.setItem(HOME_KEY, id); else window.localStorage.removeItem(HOME_KEY);
+    if (storeHead) window.localStorage.setItem(HEAD_KEY, "1"); else window.localStorage.removeItem(HEAD_KEY);
+  } catch { /* private window: the menu is right once the server answers */ }
+}
+/** Step 7: is this login the head of its store? (The server decides what a head may do; this only shapes the menu.) */
+export function isStoreHead(): boolean {
+  if (storeHead === undefined) {
+    try { storeHead = typeof window !== "undefined" && window.localStorage.getItem(HEAD_KEY) === "1"; } catch { storeHead = false; }
+  }
+  return !!storeHead && !!homeLocation();
 }
 function homeLocation(): string | null {
   if (homeLocationId === undefined) {
@@ -335,7 +349,10 @@ export function isStoreLogin(role: string): boolean {
 
 export function allowedTabs(role: string): string[] {
   const tabs = TABS_BY_ROLE[role] ?? [];
-  return isStoreLogin(role) ? tabs.filter((t) => !WHOLE_BUSINESS_TABS.includes(t)) : tabs;
+  if (!isStoreLogin(role)) return tabs;
+  const own = tabs.filter((t) => !WHOLE_BUSINESS_TABS.includes(t));
+  // The head of a store also gets the screen for that store's own prices.
+  return role === "STAFF" && isStoreHead() ? [...own, "storeprices"] : own;
 }
 
 /** Fetches orders for the admin dashboard (demo: reads from API; auth via token). */

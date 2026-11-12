@@ -159,6 +159,7 @@ model UserStore {
   createdAt DateTime         @default(now())
   // Rice Ops M2: the location this person works at. Empty = every location.
   homeLocationId String?
+  isLocationHead Boolean @default(false) // per-store build, step 7: head of the home store
   homeLocation   Warehouse? @relation("MemberHomeLocation", fields: [homeLocationId], references: [id], onDelete: SetNull)
 
   @@unique([userId, storeId])
@@ -390,6 +391,7 @@ model Product {
   trackStock            Boolean   @default(true) // false = sells at any time, no stock check and no stock movement ("not tracked")
   taxExempt             Boolean   @default(false) // M4: VAT-exempt line (e.g. basic goods / zero-rated)
   costMinor             Int       @default(0) // latest purchase cost (P5) — feeds COGS/profit (P10)
+  floorPriceMinor Int? // per-store build, step 7: the lowest price a store head may set (owner only)
   isActive              Boolean   @default(true)
   // P3d: merchandising — featured flag + free-form display tags (store-scoped via the row).
   featured              Boolean   @default(false)

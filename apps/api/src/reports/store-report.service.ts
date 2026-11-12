@@ -9,7 +9,7 @@ import { dayRange, manilaDate, ReportError, stockFlag } from "../domain/reports.
 import { isLooseP } from "../domain/counting.js";
 import { SOLD_STATES } from "../domain/order-state.js";
 import { bookLines, bookTotals, mainLocationId, ordersOfStore, paymentsOfStore, salesBook } from "./sales-book.js";
-import { locationRefusal, type Actor } from "../people/people.service.js";
+import { locationRefusal, seesProfitAt, type Actor } from "../people/people.service.js";
 
 export type StoreReportResult<T> = { ok: true; value: T } | { ok: false; error: ApiError };
 const fail = (type: "validation" | "forbidden", m: string): { ok: false; error: ApiError } =>
@@ -98,7 +98,7 @@ export class StoreReportService {
     const p = await this.places(storeId, actor, input.locationId ?? actor.homeLocationId ?? undefined);
     if (p.res) return p.res;
     const loc = p.wanted[0]!;
-    const owner = isOwner(actor);
+    const owner = seesProfitAt(actor, loc.id);
     const rows = await this.stockRows(storeId, loc.id, owner);
     return {
       ok: true,
@@ -161,7 +161,7 @@ export class StoreReportService {
       const p = await this.places(storeId, actor, input.locationId ?? actor.homeLocationId ?? undefined);
       if (p.res) return p.res;
       const loc = p.wanted[0]!;
-      const value = await this.salesOf(storeId, loc.id, r.start, r.end, isOwner(actor));
+      const value = await this.salesOf(storeId, loc.id, r.start, r.end, seesProfitAt(actor, loc.id));
       return { ok: true as const, value: { location: { id: loc.id, name: loc.name }, from: r.from, to: r.to, ...value } };
     } catch (e) {
       if (e instanceof ReportError) return fail("validation", e.message);

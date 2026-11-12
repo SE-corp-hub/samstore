@@ -39,7 +39,7 @@ import { StoreAdminService } from "./store-admin.service.js";
 import { AnalyticsService } from "./analytics.service.js";
 import { TeamService } from "./team.service.js";
 import { WarehouseService } from "./warehouse.service.js";
-import { loadActor, locationRefusal } from "../people/people.service.js";
+import { isHeadOf, loadActor, locationRefusal } from "../people/people.service.js";
 import { signaturesFrom } from "../people/signature-input.js";
 import { LoyaltyService } from "../loyalty/loyalty.service.js";
 import { CartRecoveryService } from "../cart/recovery.service.js";
@@ -1517,7 +1517,11 @@ export class AdminController {
     const { storeId, role } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
     const result = await this.warehouses.listPrices(storeId, id);
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
-    return { prices: seesCost(role) ? result.value : redactCost(result.value), storeId };
+    // The head of this store sees its cost and may change its prices; other staff see neither the cost nor the lowest price.
+    const head = isHeadOf(await loadActor(storeId, user.sub, role), id);
+    const canSetLowest = (TENANT_ROLES.OWNER_MANAGER as readonly string[]).includes(role);
+    if (seesCost(role) || head) return { prices: result.value, storeId, canEdit: true, canSetLowest };
+    return { prices: redactCost(result.value).map(({ floorPriceMinor: _f, lowestPriceMinor: _l, ...rest }) => rest), storeId, canEdit: false, canSetLowest: false };
   }
 
   /** PUT /admin/warehouses/:id/prices/:productId — set (or null to clear) a location's own price. */
@@ -1531,9 +1535,31 @@ export class AdminController {
   ) {
     const user = req.user;
     requireUser(user);
-    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.OWNER_MANAGER);
+    const { storeId, role } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
+    const ownerSide = (TENANT_ROLES.OWNER_MANAGER as readonly string[]).includes(role);
+    // Besides the owner side, only the head of this very store may change its prices, and never under the lowest price.
+    if (!ownerSide && !isHeadOf(await loadActor(storeId, user.sub, role), id)) {
+      throw new HttpException({ type: "forbidden", message: "Only the owner or the head of this store can change its prices" }, HttpStatus.FORBIDDEN);
+    }
     const priceMinor = body?.priceMinor === null ? null : Number(body?.priceMinor);
-    const result = await this.warehouses.setPrice(storeId, id, productId, priceMinor, user.sub);
+    const result = await this.warehouses.setPrice(storeId, id, productId, priceMinor, user.sub, { asHead: !ownerSide });
+    if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
+    return result.value;
+  }
+
+  /** PUT /admin/products/:productId/lowest-price — the owner's lowest price for store heads (null = none). */
+  @Put("products/:productId/lowest-price")
+  async setLowestPrice(
+    @Req() req: Request & { user?: AuthPrincipal },
+    @Param("productId") productId: string,
+    @Body() body: { floorPriceMinor: number | null },
+    @Headers("x-store-id") headerStoreId?: string,
+  ) {
+    const user = req.user;
+    requireUser(user);
+    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.OWNER_MANAGER);
+    const floor = body?.floorPriceMinor === null || body?.floorPriceMinor === undefined ? null : Number(body.floorPriceMinor);
+    const result = await this.warehouses.setFloorPrice(storeId, productId, floor, user.sub);
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
     return result.value;
   }

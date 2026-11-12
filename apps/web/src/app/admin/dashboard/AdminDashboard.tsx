@@ -28,7 +28,7 @@ import { OPEN_ORDER_EVENT, OPEN_ORDER_KEY } from "../../../lib/order-pulse";
 import { isScreenLocked, lockAgain, lockListFor, useFeatureLock } from "../../../lib/feature-lock";
 
 /** Rice Ops M10: the store screens get the large, high-contrast look (globals.css .rice-ui). */
-const RICE_TABS = new Set(["pos", "preorders", "orders", "utang", "utangrice", "agentorders", "agent", "approvals", "moves", "returns", "resack", "pasok", "purchaseorders", "bilangin", "storereport", "payable", "ulat", "drafts", "kargadors", "settings", "expenses", "cash"]);
+const RICE_TABS = new Set(["pos", "preorders", "orders", "utang", "utangrice", "agentorders", "agent", "approvals", "moves", "returns", "resack", "pasok", "purchaseorders", "bilangin", "storereport", "payable", "ulat", "drafts", "kargadors", "settings", "expenses", "cash", "storeprices"]);
 // The landing panel stays eager (it is the first paint); every other panel loads when
 // its tab opens. Shipping every panel at once cost ~95 kB of route JS for one visible screen,
 // and dragged jsbarcode/qrcode (used by two panels) into the initial payload.
@@ -62,6 +62,7 @@ const PreOrdersPanel = panel(() => import("../../../components/admin/PreOrdersPa
 const CounterSettingsPanel = panel(() => import("../../../components/admin/CounterSettingsPanel"));
 const ExpensesPanel = panel(() => import("../../../components/admin/ExpensesPanel"));
 const CashPanel = panel(() => import("../../../components/admin/CashPanel"));
+const StorePricesPanel = panel(() => import("../../../components/admin/StorePricesPanel"));
 const PurchasesPanel = panel(() => import("../../../components/admin/PurchasesPanel"));
 const InventoryPanel = panel(() => import("../../../components/admin/InventoryPanel"));
 const StoreLinkPanel = panel(() => import("../../../components/admin/StoreLinkPanel"));
@@ -123,7 +124,7 @@ export default function AdminDashboard() {
     let off = false;
     fetch(`${API_URL}/admin/me/rice`, { headers: adminHeaders() })
       .then((r) => (r.ok ? r.json() : null))
-      .then((me) => { if (!off && me) { setHomeLocation(me.homeLocationId ?? null); setHomeSeen(me.homeLocationId ?? ""); } })
+      .then((me) => { if (!off && me) { setHomeLocation(me.homeLocationId ?? null, !!me.isHead); setHomeSeen(`${me.homeLocationId ?? ""}:${me.isHead ? 1 : 0}`); } })
       .catch(() => { /* offline: the saved answer stays */ });
     return () => { off = true; };
   }, [authed, activeStore]);
@@ -340,6 +341,7 @@ export default function AdminDashboard() {
       case "inventory": return <InventoryPanel />;
       case "expenses": return <ExpensesPanel />;
       case "cash": return <CashPanel />;
+      case "storeprices": return <StorePricesPanel />;
       case "purchases": return <PurchasesPanel />;
       case "storelink": return <StoreLinkPanel />;
       case "reports": return <ReportsPanel />;

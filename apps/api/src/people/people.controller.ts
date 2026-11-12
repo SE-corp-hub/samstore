@@ -51,7 +51,7 @@ export class PeopleController {
   @Get("me/rice")
   async me(@Req() req: Req_, @Headers("x-store-id") h?: string) {
     const { storeId, actor } = await this.ctx(req, h, TENANT_ROLES.VIEW);
-    return { storeId, userId: actor.userId, role: actor.role, homeLocationId: actor.homeLocationId, pendingApprovals: await this.people.countPending(storeId, actor.role) };
+    return { storeId, userId: actor.userId, role: actor.role, homeLocationId: actor.homeLocationId, isHead: !!actor.isHead, pendingApprovals: await this.people.countPending(storeId, actor.role) };
   }
 
   /** POST /admin/me/pin — change your own PIN (prove the current PIN, or your password if none yet). */
@@ -78,6 +78,7 @@ export class PeopleController {
       homeLocationId: optNullStr(body?.homeLocationId),
       pin: str(body?.pin),
       unlock: body?.unlock === true,
+      isLocationHead: typeof body?.isLocationHead === "boolean" ? body.isLocationHead : undefined,
     }, actor.userId));
   }
 

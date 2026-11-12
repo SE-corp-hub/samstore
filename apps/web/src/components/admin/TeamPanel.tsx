@@ -17,6 +17,7 @@ interface Member {
   role: string;
   joinedAt?: string;
   homeLocationId?: string | null;
+  isLocationHead?: boolean;
   hasPin?: boolean;
   pinLocked?: boolean;
   addedBy?: string | null;
@@ -257,16 +258,28 @@ export default function TeamPanel() {
                   </td>
                   <td>
                     {canManage && m.role !== "OWNER" && m.role !== "MANAGER" ? (
-                      <select
-                        className="form-select form-select-sm" style={{ width: 170 }} aria-label={`Home location of ${m.name ?? m.userId}`}
-                        value={m.homeLocationId ?? ""}
-                        onChange={(e) => patchPerson(m.userId, { homeLocationId: e.target.value || null }, "Location saved.")}
-                      >
-                        <option value="">All locations</option>
-                        {locations.map((l) => <option key={l.id} value={l.id}>{locLabel(l.id)}</option>)}
-                      </select>
+                      <>
+                        <select
+                          className="form-select form-select-sm" style={{ width: 170 }} aria-label={`Home location of ${m.name ?? m.userId}`}
+                          value={m.homeLocationId ?? ""}
+                          onChange={(e) => patchPerson(m.userId, { homeLocationId: e.target.value || null }, "Location saved.")}
+                        >
+                          <option value="">All locations</option>
+                          {locations.map((l) => <option key={l.id} value={l.id}>{locLabel(l.id)}</option>)}
+                        </select>
+                        {/* Step 7: the head may change this store's own prices (never under the owner's lowest price) and sees its profit. */}
+                        {m.role === "STAFF" && m.homeLocationId && (
+                          <label className="exp-check mt-2" htmlFor={`tm-head-${m.userId}`}>
+                            <input
+                              id={`tm-head-${m.userId}`} type="checkbox" className="form-check-input" checked={!!m.isLocationHead}
+                              onChange={(e) => patchPerson(m.userId, { isLocationHead: e.target.checked }, e.target.checked ? `${m.name ?? "This person"} is now the head of the store.` : "No longer the head of the store.")}
+                            />
+                            <span>Head of this store</span>
+                          </label>
+                        )}
+                      </>
                     ) : (
-                      <span className="small">{m.role === "OWNER" || m.role === "MANAGER" ? "All locations" : locLabel(m.homeLocationId)}</span>
+                      <span className="small">{m.role === "OWNER" || m.role === "MANAGER" ? "All locations" : locLabel(m.homeLocationId)}{m.isLocationHead ? " · Head" : ""}</span>
                     )}
                   </td>
                   <td>

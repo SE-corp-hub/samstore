@@ -24,7 +24,7 @@ import { costValue, isLooseP } from "../domain/counting.js";
 import { checkChain, periodTotals, type ChainCheck, type LedgerRow } from "../domain/stock-book.js";
 import { buildSummary, type KiloTotals, type SummaryRow } from "../domain/movement-summary.js";
 import { isDraftStale } from "../domain/people.js";
-import { captureSignatures, locationRefusal, requireSignatures, signatureErrorResult, type Actor, type SignatureInput } from "../people/people.service.js";
+import { captureSignatures, locationRefusal, requireSignatures, seesProfitAt, signatureErrorResult, type Actor, type SignatureInput } from "../people/people.service.js";
 
 export type ReportResult<T> = { ok: true; value: T } | { ok: false; error: ApiError };
 
@@ -294,10 +294,13 @@ export class RiceReportsService {
         });
       }
       const sum = (f: (s: Section) => number) => sections.reduce((a, s) => a + f(s), 0);
-      const isOwnerRole = OWNERS.includes(actor.role);
+      const ownerSide = OWNERS.includes(actor.role);
+      // The head of a store sees that store's own profit, and nothing of the others.
+      const isOwnerRole = ownerSide || locs.every((l) => seesProfitAt(actor, l.id));
+      const expenseAt = ownerSide ? input.locationId : actor.homeLocationId ?? undefined;
       const dayBounds = dayRange(date);
       // One store chosen: that store's expenses. All stores: every expense, the whole-business ones too. Cancelled ones never count.
-      const expensesMinor = isOwnerRole ? (await prisma.expense.aggregate({ where: { storeId, voidedAt: null, ...(input.locationId ? { locationId: input.locationId } : {}), spentAt: { gte: dayBounds.from, lt: dayBounds.to } }, _sum: { amountMinor: true } }))._sum.amountMinor ?? 0 : 0;
+      const expensesMinor = isOwnerRole ? (await prisma.expense.aggregate({ where: { storeId, voidedAt: null, ...(expenseAt ? { locationId: expenseAt } : {}), spentAt: { gte: dayBounds.from, lt: dayBounds.to } }, _sum: { amountMinor: true } }))._sum.amountMinor ?? 0 : 0;
       // Staff never see profit: it is taken out here, not just hidden on the screen.
       const shown = isOwnerRole ? sections : sections.map((s) => ({ ...s, sales: { ...s.sales, grossProfitMinor: undefined as unknown as number, profitShareMinor: undefined as unknown as number } }));
       return {

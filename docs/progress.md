@@ -1380,3 +1380,13 @@ Commits: `32dce58` (loop 2).
 - Shared on purpose (decision 7 and 9): the customer and credit list with its balances, and the sack counts of other places.
 - Menu: a store login no longer gets Purchases, Supplier orders, Reports, Analytics and Export data.
 - Tests: `auth/wall.test.ts` (2), one of them reads every controller and fails if a route that names an order has no wall rule. Checked through the running API with a store login. No database change.
+
+## 2026-11-12 — Per-store build, step 7: the store head
+
+- The owner names the head of a store on Team: a tick box "Head of this store" under the person's store. Only a staff login with a store can be one; taking the store away ends it (`UserStore.isLocationHead`).
+- The head changes the own store's selling prices (`PUT /admin/warehouses/:id/prices/:productId`), never under the owner's lowest price for that rice (`Product.floorPriceMinor`, one figure for every store). When the owner set no lowest price, the head cannot go under the cost. Going back to the main price is refused when the main price is under the lowest price. The owner and a manager are not held to it. Another store's prices: refused (403).
+- The owner sets or removes the lowest price with `PUT /admin/products/:productId/lowest-price` (owner and manager only; refused behind the wall).
+- New screen Stock → Store prices (owner, manager, and a store head): one row per rice with the store's price, the main price and the lowest price; Change price, Use main price, and for the owner Lowest price. The old price table on Locations still works.
+- Decision 2: the head sees the cost and profit of the own store only (`seesProfitAt` in `people.service.ts`): the daily report with that store's expenses and net profit, Store report sales and stock value, and the cost on the price list. Compare stores, Top customers and every other store stay owner only. Plain staff see no cost, no profit and no lowest price, as before.
+- Not in this step: the price a seller types on one sale at the counter is not held to the lowest price (the below-cost warning still shows).
+- Tests: `admin/store-head.test.ts` (2). Checked through the running API with a head login, and the screens at 1280x720, 800x1200 and 615x985. The two fields were already in the `per_store_plan` migration; no new database change.

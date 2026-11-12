@@ -54,7 +54,17 @@ export interface Actor {
   userId: string;
   role: string;
   homeLocationId: string | null;
+  /** Step 7: head of the home store. Left out = no. */
+  isHead?: boolean;
 }
+
+const SEES_ALL_PROFIT = ["OWNER", "MANAGER", "STORE_OWNER", "PLATFORM_ADMIN"];
+
+/** Head of this very store (step 7). */
+export const isHeadOf = (actor: Actor, locationId: string | null | undefined): boolean => !!actor.isHead && !!locationId && actor.homeLocationId === locationId;
+
+/** Who may see cost and profit of one store: the owner side, and the head of that store. Nobody else. */
+export const seesProfitAt = (actor: Actor, locationId: string | null | undefined): boolean => SEES_ALL_PROFIT.includes(actor.role) || isHeadOf(actor, locationId);
 
 // ─────────────────────────────── numbering ───────────────────────────────
 
@@ -75,9 +85,9 @@ export async function loadActor(storeId: string, userId: string, role: string): 
   if (role === "PLATFORM_ADMIN") return { userId, role, homeLocationId: null };
   // The guard has just read this person's active memberships (cached 10 s, busted on every membership write).
   const cached = (await getMemberships(userId)).find((x) => x.storeId === storeId);
-  if (cached) return { userId, role: cached.role, homeLocationId: cached.homeLocationId };
-  const m = await prisma.userStore.findUnique({ where: { userId_storeId: { userId, storeId } }, select: { homeLocationId: true, role: true } });
-  return { userId, role: m?.role ?? role, homeLocationId: m?.homeLocationId ?? null };
+  if (cached) return { userId, role: cached.role, homeLocationId: cached.homeLocationId, isHead: cached.isLocationHead };
+  const m = await prisma.userStore.findUnique({ where: { userId_storeId: { userId, storeId } }, select: { homeLocationId: true, role: true, isLocationHead: true } });
+  return { userId, role: m?.role ?? role, homeLocationId: m?.homeLocationId ?? null, isHead: !!m?.isLocationHead && !!m?.homeLocationId };
 }
 
 export function locationRefusal(actor: Actor, locationId: string | null | undefined): string | null {
@@ -235,6 +245,7 @@ export class PeopleService {
       select: {
         role: true,
         homeLocationId: true,
+        isLocationHead: true,
         user: { select: { id: true, name: true, phone: true, email: true, pinHash: true, pinLockedUntil: true } },
       },
     });
@@ -246,6 +257,7 @@ export class PeopleService {
       email: r.user.email,
       role: r.role,
       homeLocationId: r.homeLocationId,
+      isLocationHead: r.isLocationHead && !!r.homeLocationId,
       hasPin: !!r.user.pinHash,
       pinLocked: !!r.user.pinLockedUntil && r.user.pinLockedUntil.getTime() > now,
     }));
@@ -255,10 +267,10 @@ export class PeopleService {
   async updateMember(
     storeId: string,
     userId: string,
-    input: { homeLocationId?: string | null; pin?: string; unlock?: boolean },
+    input: { homeLocationId?: string | null; pin?: string; unlock?: boolean; isLocationHead?: boolean },
     actorId: string,
   ): Promise<PeopleResult<{ userId: string; homeLocationId: string | null; hasPin: boolean }>> {
-    const m = await prisma.userStore.findUnique({ where: { userId_storeId: { userId, storeId } }, select: { homeLocationId: true, status: true } });
+    const m = await prisma.userStore.findUnique({ where: { userId_storeId: { userId, storeId } }, select: { homeLocationId: true, status: true, role: true, isLocationHead: true } });
     if (!m || m.status !== "ACTIVE") return notFound("That person is not in this store");
     const data: Prisma.UserStoreUpdateInput = {};
     if (input.homeLocationId !== undefined) {
@@ -269,6 +281,15 @@ export class PeopleService {
         if (!loc.isActive) return fail("validation", "That location is closed");
         data.homeLocation = { connect: { id: loc.id } };
       }
+    }
+    // Step 7: the head of a store. Only a staff login that has a store can be one; taking the store away ends it.
+    const homeAfter = input.homeLocationId === undefined ? m.homeLocationId : input.homeLocationId || null;
+    if (input.isLocationHead === true) {
+      if (m.role !== "STAFF") return fail("validation", "Only a staff login can be the head of a store");
+      if (!homeAfter) return fail("validation", "Choose this person's store first");
+      data.isLocationHead = true;
+    } else if (input.isLocationHead === false || (!homeAfter && m.isLocationHead)) {
+      data.isLocationHead = false;
     }
     let pinHash: string | undefined;
     if (input.pin !== undefined) {
@@ -296,7 +317,7 @@ export class PeopleService {
         data: {
           storeId, actorType: "USER", actorId, action: "member.people.update", entityType: "User", entityId: userId,
           before: { homeLocationId: m.homeLocationId },
-          after: { homeLocationId: input.homeLocationId === undefined ? m.homeLocationId : input.homeLocationId || null, pinChanged: !!pinHash, unlocked: !!input.unlock },
+          after: { homeLocationId: homeAfter, ...(data.isLocationHead !== undefined ? { isLocationHead: data.isLocationHead } : {}), pinChanged: !!pinHash, unlocked: !!input.unlock },
         },
       });
     });
