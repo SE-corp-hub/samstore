@@ -52,6 +52,8 @@ interface Report {
 }
 interface Cash {
   day: string; location: string; salesMinor: number; salesCount: number; walkInMinor: number; expectedMinor: number;
+  /** Step 4 of the per-store build (an older server does not send these). */
+  creditPaidMinor?: number; givenBackMinor?: number; paidOutMinor?: number; handedOverMinor?: number;
   saved: { countedMinor: number; expectedMinor: number; diffMinor: number; note: string | null; at: string } | null;
 }
 
@@ -227,11 +229,15 @@ function CashStep({ countId, cash, onSaved, onSkip }: { countId: string; cash: C
     <section className="card mb-3" aria-labelledby="cash-title">
       <div className="card-body">
         <h3 id="cash-title" className="h5 mb-1">Count the cash</h3>
-        <p className="mb-2">Count the money from today&apos;s sales at {cash.location}. Do not include the change money you started with or credit payments.</p>
+        <p className="mb-2">Count all the cash taken in today at {cash.location}. Do not include the change money you started with.</p>
         <div className="row g-3">
         <div className="col-lg-6">
           <div className="cash-row"><span>Cash sales today ({day}) · {cash.salesCount} sale{cash.salesCount === 1 ? "" : "s"} rung up</span><span>{peso(cash.salesMinor)}</span></div>
           <div className="cash-row"><span>Walk-in sales from this count</span><span>{peso(cash.walkInMinor)}</span></div>
+          {!!cash.creditPaidMinor && <div className="cash-row"><span>Credit paid in cash</span><span>{peso(cash.creditPaidMinor)}</span></div>}
+          {!!cash.givenBackMinor && <div className="cash-row"><span>Less: cash given back to customers</span><span>−{peso(cash.givenBackMinor)}</span></div>}
+          {!!cash.paidOutMinor && <div className="cash-row"><span>Less: expenses paid from the drawer</span><span>−{peso(cash.paidOutMinor)}</span></div>}
+          {!!cash.handedOverMinor && <div className="cash-row"><span>Less: cash handed over to the owner</span><span>−{peso(cash.handedOverMinor)}</span></div>}
           <div className="cash-row total"><span>Cash you should have</span><span>{peso(cash.expectedMinor)}</span></div>
         </div>
         <div className="col-lg-6">

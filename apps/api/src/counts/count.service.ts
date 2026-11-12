@@ -29,6 +29,7 @@ import { accStat, flagText, needsLook, REPEAT_DAYS, suggestList, suggestText, we
 import { asksRecount, checkReason, cleanNote, missingReasons, missingReasonsMessage, reasonsFor, REASON_LABEL, type CountReason } from "../domain/count-reasons.js";
 import { balanceOf, costValue, countedUnits, CountError, gramsIn, isLooseP, lineResult, verdict, WRITE_OFF_LABEL, writeOffCheck } from "../domain/counting.js";
 import { formatKilos } from "../domain/weight.js";
+import { cashOfDay } from "../cash/cash-book.js";
 import {
   captureSignatures, locationRefusal, nextDocNumber, registerApprovalHandler, requestApproval, requireSignatures, signatureErrorResult,
   type Actor, type SignatureInput,
@@ -60,6 +61,9 @@ export interface CashCheck {
   salesMinor: number; salesCount: number;
   /** The walk-in sale(s) made from this count's shortages. */
   walkInMinor: number;
+  /** Step 4: credit paid in cash here, cash given back, expenses paid from the drawer, cash handed over to the owner. */
+  creditPaidMinor: number; givenBackMinor: number; paidOutMinor: number; handedOverMinor: number;
+  /** In − given back − paid out − handed over. */
   expectedMinor: number;
   saved: { countedMinor: number; expectedMinor: number; diffMinor: number; note: string | null; at: Date } | null;
 }
@@ -847,23 +851,20 @@ export class CountService {
     if (refusal) throw new StepError(forbidden(refusal));
     if (c.status !== "APPROVED") throw new StepError(conflict("Finish the count first"));
     const day = manilaDate(c.decidedAt ?? c.submittedAt ?? c.startedAt);
-    const { from, to } = dayRange(day);
     const walkInIds = [...new Set(c.lines.map((l) => l.walkInOrderId).filter((x): x is string => !!x))];
-    const cash = { storeId, method: "cash", type: { not: "void" } } as const;
-    const [sales, walkIns, savedRow] = await Promise.all([
-      prisma.payment.findMany({
-        where: { ...cash, receivedAt: { gte: from, lt: to }, order: { sellingLocationId: c.locationId, status: { not: "CANCELLED" } }, ...(walkInIds.length ? { orderId: { notIn: walkInIds } } : {}) },
-        select: { amountMinor: true, orderId: true },
-      }),
-      walkInIds.length ? prisma.payment.findMany({ where: { ...cash, orderId: { in: walkInIds } }, select: { amountMinor: true } }) : Promise.resolve([]),
+    // The cash book (step 4), the same reading as the daily report: cash in at this store (sales,
+    // deliveries and credit paid in cash), less cash given back, paid out of the drawer and handed over.
+    const [cash, savedRow] = await Promise.all([
+      cashOfDay(prisma, storeId, c.locationId, day),
       prisma.auditLog.findFirst({ where: { storeId, action: "count.cash_check", entityType: "StockCount", entityId: c.id }, orderBy: { createdAt: "desc" }, select: { after: true, createdAt: true } }),
     ]);
-    const salesMinor = sales.reduce((s, p) => s + p.amountMinor, 0);
-    const walkInMinor = walkIns.reduce((s, p) => s + p.amountMinor, 0);
+    const walkInMinor = walkInIds.reduce((s, id) => s + (cash.inByOrder.get(id) ?? 0), 0);
+    const salesMinor = cash.inMinor - cash.creditPaidMinor - walkInMinor;
+    const salesCount = [...cash.inByOrder.entries()].filter(([id, v]) => id && v > 0 && !walkInIds.includes(id)).length;
     const a = (savedRow?.after ?? null) as { countedMinor?: number; expectedMinor?: number; diffMinor?: number; note?: string | null } | null;
     return {
       countId: c.id, docNumber: c.docNumber, location: c.location.name, day,
-      salesMinor, salesCount: new Set(sales.filter((p) => p.amountMinor > 0).map((p) => p.orderId)).size, walkInMinor, expectedMinor: salesMinor + walkInMinor,
+      salesMinor, salesCount, walkInMinor, creditPaidMinor: cash.creditPaidMinor, givenBackMinor: cash.givenBackMinor, paidOutMinor: cash.paidOutMinor, handedOverMinor: cash.handedOverMinor, expectedMinor: cash.expectedMinor,
       saved: a && typeof a.countedMinor === "number" ? { countedMinor: a.countedMinor, expectedMinor: a.expectedMinor ?? 0, diffMinor: a.diffMinor ?? 0, note: a.note ?? null, at: savedRow!.createdAt } : null,
     };
   }

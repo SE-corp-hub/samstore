@@ -181,6 +181,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { id: "utangrice", label: "Credit", icon: "bi-journal-text", hint: "Who owes the store; take payments" }, // Credit + Credit Ledger, merged
       { id: "payable", label: "Store payable", icon: "bi-cash-coin", hint: "What each store owes the main store" },
       { id: "approvals", label: "For your approval", icon: "bi-inbox", hint: "Requests waiting for your yes or no" },
+      { id: "cash", label: "Cash drawer", icon: "bi-safe", hint: "Cash that should be in the drawer; cash handed to the owner" },
       { id: "expenses", label: "Expenses", icon: "bi-receipt-cutoff", hint: "Money the store paid out" },
       { id: "purchases", label: "Purchases", icon: "bi-cart4", hint: "Stock bought and what was paid" },
       { id: "purchaseorders", label: "Supplier orders", icon: "bi-truck", hint: "Orders sent to suppliers" },
@@ -267,7 +268,7 @@ export function toneFor(id: string): NavTone {
   return navGroupFor(id)?.tone ?? "setup";
 }
 
-const OWNER_TABS = ["overview", "pos", "preorders", "orders", "utang", "products", "inventory", "expenses", "purchases", "team", "customers", "analytics", "reports", "settings", "storelink", "warehouses", "approvals", "moves", "returns", "resack", "drafts", "kargadors", "pasok", "purchaseorders", "utangrice", "agentorders", "bilangin", "storereport", "payable", "ulat", "export"];
+const OWNER_TABS = ["overview", "pos", "preorders", "orders", "utang", "products", "inventory", "cash", "expenses", "purchases", "team", "customers", "analytics", "reports", "settings", "storelink", "warehouses", "approvals", "moves", "returns", "resack", "drafts", "kargadors", "pasok", "purchaseorders", "utangrice", "agentorders", "bilangin", "storereport", "payable", "ulat", "export"];
 
 /** Tab visibility per staff role (GET-level permissions from live API probes). */
 export const TABS_BY_ROLE: Record<string, string[]> = {
@@ -278,7 +279,7 @@ export const TABS_BY_ROLE: Record<string, string[]> = {
   // Platform operators manage tenants/access and monitor the platform; daily POS/catalog tabs belong to store roles.
   PLATFORM_ADMIN: ["overview", "stores", "useraccess", "maintenance", "analytics", "reports", "settings"],
   MANAGER: OWNER_TABS.filter((t) => t !== "storelink" && t !== "export"), // export carries costs + every customer: owner only
-  STAFF: ["overview", "pos", "preorders", "orders", "utang", "products", "inventory", "expenses", "purchases", "customers", "reports", "countersettings", "moves", "returns", "resack", "drafts", "kargadors", "pasok", "utangrice", "agentorders", "bilangin", "storereport", "ulat"],
+  STAFF: ["overview", "pos", "preorders", "orders", "utang", "products", "inventory", "cash", "expenses", "purchases", "customers", "reports", "countersettings", "moves", "returns", "resack", "drafts", "kargadors", "pasok", "utangrice", "agentorders", "bilangin", "storereport", "ulat"],
   SALES_AGENT: ["agent", "overview", "orders", "customers", "reports"],
   DELIVERY: [],
 };

@@ -1351,3 +1351,13 @@ Commits: `32dce58` (loop 2).
 - Ledger backfill (`erp/journal.service.ts`): a cancelled expense is not posted; one posted before it was cancelled is posted back (`EXPENSE-CANCEL:<id>`).
 - Expenses screen rebuilt in the store look: store and kind as big buttons, amount, note, drawer tick, one green Save; list with Dates and Store choices, a total, and Cancel (owner) that asks why.
 - Tests: `expenses/expenses-store.test.ts` (3). Screens checked at 1280x720, 800x1200 and 615x985.
+
+## 2026-11-12 — Per-store build, step 4: cash at each store
+
+- `CashHandover` and `Payment.forLocationId` from migration `20261114100000_per_store_plan` are now in `schema.prisma`. No new migration.
+- One cash calculation, `cash/cash-book.ts` (`cashOfDay`), read by the daily report, Close the store and the new Cash drawer screen: cash taken in at the store (sales, deliveries paid in cash, credit paid in cash) − cash given back (refunds, voided cash sales, on the day it was given back) − expenses paid from the drawer − cash handed over to the owner. Before this the daily report ignored refunds and voids, and Close the store left out credit paid in cash; the two could disagree.
+- Cash handed over to the owner (`cash/cash.service.ts`, routes under `/admin/rice/cash`): staff write it for their own store, today; the owner for any store and day, marks it received, and cancels a wrong one with a reason (it stays on the list, crossed out).
+- Credit paid at another store (decision 12): the cash stays in the drawer where it was paid, and the payment notes the store it is for (`forLocationId` = the store of the customer's oldest unpaid credit sale, when it is not the store that took the money). The daily report shows it on both stores.
+- New screen Money → Cash drawer (owner, manager, staff). Close the store's cash step and the daily report show the new lines.
+- The day stands alone as before: the change money and cash left from yesterday are not carried over.
+- Tests: `cash/cash-store.test.ts` (3): one day with a counter sale, a delivery, a credit payment, a refund, a void, a drawer expense and a hand-over matches to the peso. Screens checked at 1280x720, 800x1200 and 615x985.
