@@ -221,10 +221,10 @@ export const NAV_GROUPS: NavGroup[] = [
     tone: "report",
     icon: "bi-bar-chart-line",
     items: [
-      { id: "overview", label: "Overview", icon: "bi-speedometer2", hint: "How the store is doing today" },
+      { id: "overview", label: "Reports", icon: "bi-speedometer2", hint: "Today, closing, each store and money" },
       { id: "storereport", label: "Store report", icon: "bi-shop", hint: "One store's sales and stock" },
-      { id: "ulat", label: "Reports & closing", icon: "bi-bar-chart-line", hint: "Close the day and see reports" },
-      { id: "reports", label: "Reports", icon: "bi-file-bar-graph", hint: "Sales, credit and stock by date" },
+      { id: "ulat", label: "Closing & stock", icon: "bi-bar-chart-line", hint: "Close the day, stock and this month" },
+      { id: "reports", label: "Money reports", icon: "bi-file-bar-graph", hint: "Profit, income and loss, payments, customers" },
       { id: "analytics", label: "Analytics", icon: "bi-graph-up-arrow", hint: "Trends across the platform" },
       { id: "export", label: "Export data", icon: "bi-download", hint: "Excel file of sales, stock and money" },
     ],
@@ -263,6 +263,22 @@ export const NAV_GROUPS: NavGroup[] = [
     ],
   },
 ];
+
+/**
+ * One Reports place (2026-11-12): the four report screens open from one menu entry ("Reports", which is
+ * Overview) and a switch at the top of each moves between them. Each keeps its own id, so the address,
+ * Back, the PIN lock and who may open what stay as they were.
+ */
+export const REPORT_SECTIONS: { id: string; label: string }[] = [
+  { id: "overview", label: "Today" },
+  { id: "ulat", label: "Closing & stock" },
+  { id: "storereport", label: "Store report" },
+  { id: "reports", label: "Money" },
+];
+/** Screens a role may open that the menu and Home do not list (they open from another screen). */
+export const MENU_HIDDEN = new Set(["ulat", "storereport", "reports"]);
+/** Is this screen one of the report sections? */
+export const isReportSection = (id: string) => REPORT_SECTIONS.some((s) => s.id === id);
 
 /** The nav entry for a tab id (label + icon), for the top bar title. */
 export function navItemFor(id: string): NavItem | undefined {

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   getAdminToken, getAdminStoreId, setAdminStoreId, getAdminRole, clearAdminSession,
-  NAV_GROUPS, allowedTabs, setHomeLocation, adminHeaders, defaultTabFor, isOwnerRole, handleUnauthorized, navItemFor, navGroupFor, toneFor,
+  NAV_GROUPS, MENU_HIDDEN, REPORT_SECTIONS, isReportSection, allowedTabs, setHomeLocation, adminHeaders, defaultTabFor, isOwnerRole, handleUnauthorized, navItemFor, navGroupFor, toneFor,
 } from "../../../lib/admin";
 import dynamic from "next/dynamic";
 import { API_URL } from "../../../config";
@@ -378,7 +378,7 @@ export default function AdminDashboard() {
   const active = stores.find((s) => s.id === activeStore);
   const allowed = allowedTabs(role);
   const visibleGroups = NAV_GROUPS
-    .map((g) => ({ ...g, items: g.items.filter((i) => allowed.includes(i.id)) }))
+    .map((g) => ({ ...g, items: g.items.filter((i) => allowed.includes(i.id) && !MENU_HIDDEN.has(i.id)) }))
     .filter((g) => g.items.length > 0);
 
   const pinLocked = (id: string) => isScreenLocked(pinLock.lock, role, id);
@@ -455,7 +455,7 @@ export default function AdminDashboard() {
               {g.items.map((item) => (
                 <li className="nav-item" key={item.id}>
                   <button
-                    className={`nav-link w-100 text-start d-flex align-items-center gap-2 ${tab === item.id ? "active" : ""}`}
+                    className={`nav-link w-100 text-start d-flex align-items-center gap-2 ${tab === item.id || (item.id === "overview" && isReportSection(tab)) ? "active" : ""}`}
                     onClick={() => { userNavigated.current = true; setTab(item.id); setMobileNav(false); }}
                   >
                     <i className={`bi ${item.icon}`}></i>
@@ -603,6 +603,16 @@ export default function AdminDashboard() {
             </div>
           )}
           {/* Always the same wrapper, so going offline locks the screen without reloading it. */}
+          {isReportSection(tab) && (() => {
+            const parts = REPORT_SECTIONS.filter((r) => allowed.includes(r.id));
+            return parts.length > 1 ? (
+              <div className="report-sections tone-report d-flex flex-wrap gap-2 mb-3" role="group" aria-label="Reports">
+                {parts.map((r) => (
+                  <button key={r.id} type="button" className={`btn btn-lg ${tab === r.id ? "active" : ""}`} aria-pressed={tab === r.id} onClick={() => { userNavigated.current = true; setTab(r.id); }}>{r.label}</button>
+                ))}
+              </div>
+            ) : null;
+          })()}
           <fieldset disabled={locked} className="border-0 p-0 m-0" style={{ minWidth: 0 }}>
             {RICE_TABS.has(tab) ? <div className="rice-ui p-2 rounded">{renderTab()}</div> : renderTab()}
           </fieldset>

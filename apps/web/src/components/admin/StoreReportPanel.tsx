@@ -4,7 +4,7 @@
 //   Stock left     what is on the shelf now, with the selling price and what it is worth
 //   Sales          one store's sales for a day or a period: by payment, by item, by day
 //   Compare        all stores side by side (owner / manager)
-//   End of day     the day's summary for one store, ready to print; closing is in Reports & closing
+//   End of day     the day's summary for one store, ready to print; closing is in Reports, Closing & stock
 // Staff see their own store and no cost or profit.
 
 import { useCallback, useEffect, useMemo, useState } from "react";

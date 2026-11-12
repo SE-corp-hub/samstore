@@ -5,7 +5,7 @@
 //   2 Check   the differences; one tap marks every shortage "Sold but not rung up"
 //   3 Walk-ins  the shortages sold to walk-ins become one cash sale at the store's price
 //   4 Cash    the cash from today's sales here (plus those walk-ins) against the cash counted; the
-//             person signs and the day closes (the same closing record as Reports & closing)
+//             person signs and the day closes (the same closing record as Reports, Closing & stock)
 //   5 Done    a short summary and a slip to print
 // Steps 1 and 2 are the count sheet and the check (BilanginPanel / CountCheck); this file holds the
 // step bar and steps 3-5, which work on a posted count. Nothing here moves stock twice: the walk-in
@@ -57,7 +57,7 @@ interface Cash {
   /** Step 4 of the per-store build (an older server does not send these). */
   creditPaidMinor?: number; givenBackMinor?: number; paidOutMinor?: number; handedOverMinor?: number;
   saved: { countedMinor: number; expectedMinor: number; diffMinor: number; note: string | null; at: string } | null;
-  /** The closing of that day at this store, made here or on Reports & closing (an older server does not send it). */
+  /** The closing of that day at this store, made here or on Reports, Closing & stock (an older server does not send it). */
   closed?: { countedMinor: number; expectedMinor: number; diffMinor: number; at: string; fromThisCount: boolean } | null;
 }
 
@@ -105,7 +105,7 @@ export default function CloseStoreAfter({ countId, onClose }: { countId: string;
 
   const walkInMinor = (report.walkIn?.sales ?? []).reduce((s, x) => s + x.totalMinor, 0);
   const notSales = report.lines.filter((l) => l.varianceQty < 0 && !l.soldToWalkIns && l.reasonLabel && !report.walkIn?.open.some((o) => o.productId === l.productId));
-  // With today's server the day is closed only by the signed cash step (or on Reports & closing).
+  // With today's server the day is closed only by the signed cash step (or on Reports, Closing & stock).
   const dayClosed = cash.closed === undefined ? !!cash.saved : !!cash.closed;
   const head = (
     <>
@@ -141,7 +141,7 @@ export default function CloseStoreAfter({ countId, onClose }: { countId: string;
     );
   }
 
-  // Done. A closed day shows the numbers it was closed with (one closing a day, here or on Reports & closing).
+  // Done. A closed day shows the numbers it was closed with (one closing a day, here or on Reports, Closing & stock).
   const s = cash.closed ? { countedMinor: cash.closed.countedMinor, expectedMinor: cash.closed.expectedMinor, diffMinor: cash.closed.diffMinor, note: cash.saved?.note ?? null } : cash.saved;
   const expectedMinor = s?.expectedMinor ?? cash.expectedMinor;
   const lossMinor = report.lines.filter((l) => l.varianceQty < 0 && !l.soldToWalkIns).reduce((sum, l) => sum + Math.abs(l.varianceValueMinor), 0);
@@ -170,7 +170,7 @@ export default function CloseStoreAfter({ countId, onClose }: { countId: string;
           {dayClosed
             ? <h3 className="h5 text-success"><i className="bi bi-check-circle-fill me-1" aria-hidden="true"></i>{report.count.location} is closed for today</h3>
             : <h3 className="h5"><i className="bi bi-exclamation-triangle-fill text-warning me-1" aria-hidden="true"></i>The count is saved. The day is not closed yet.</h3>}
-          {cash.closed && !cash.closed.fromThisCount && <p className="mb-2">The cash was already counted and signed on Reports &amp; closing. Nothing more to do here.</p>}
+          {cash.closed && !cash.closed.fromThisCount && <p className="mb-2">The cash was already counted and signed on Reports, Closing &amp; stock. Nothing more to do here.</p>}
           <div className="cash-row"><span>Rice counted</span><strong>{report.summary.counted} items · {report.summary.correct} correct</strong></div>
           <div className="cash-row"><span>Walk-in sales recorded</span><strong>{peso(walkInMinor)}</strong></div>
           {lossMinor > 0 && <div className="cash-row"><span>Short and not sold, at cost (spilled, wet…)</span><strong className="text-danger">{pesoText(lossMinor)}</strong></div>}
