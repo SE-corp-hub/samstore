@@ -11,6 +11,7 @@ import { API_URL } from "../../../config";
 import { wakeFetch } from "../../../lib/wake-fetch";
 import { cachedGet, saveCopy, savedCopy, useOffline } from "../../../lib/offlineCache";
 import { PLACES_PATH } from "../../../lib/store-identity";
+import { useShopLink } from "../../../lib/shop-link";
 
 /** Screens that work with no internet; every other screen still opens, but read-only (its buttons are off). */
 // Settings opens offline too: Printer is kept on this tablet, the other groups lock their own buttons.
@@ -29,7 +30,7 @@ import { OPEN_ORDER_EVENT, OPEN_ORDER_KEY } from "../../../lib/order-pulse";
 import { isScreenLocked, lockAgain, lockListFor, useFeatureLock } from "../../../lib/feature-lock";
 
 /** Rice Ops M10: the store screens get the large, high-contrast look (globals.css .rice-ui). */
-const RICE_TABS = new Set(["pos", "preorders", "orders", "utang", "utangrice", "agentorders", "agent", "approvals", "moves", "returns", "resack", "pasok", "purchaseorders", "bilangin", "storereport", "payable", "ulat", "drafts", "kargadors", "settings", "expenses", "cash", "storeprices"]);
+const RICE_TABS = new Set(["pos", "preorders", "orders", "utang", "utangrice", "agentorders", "agent", "approvals", "moves", "returns", "resack", "pasok", "purchaseorders", "bilangin", "storereport", "payable", "ulat", "drafts", "kargadors", "settings", "expenses", "cash", "storeprices", "storelink"]);
 // The landing panel stays eager (it is the first paint); every other panel loads when
 // its tab opens. Shipping every panel at once cost ~95 kB of route JS for one visible screen,
 // and dragged jsbarcode/qrcode (used by two panels) into the initial payload.
@@ -131,6 +132,8 @@ export default function AdminDashboard() {
     void cachedGet(PLACES_PATH).catch(() => null);
     return () => { off = true; };
   }, [authed, activeStore]);
+  // The customers' shop, with its key (the plain /name address answers "Store not found").
+  const shopUrl = useShopLink(authed ? activeStore : null);
   const [email, setEmail] = useState("");
   const [tab, setTab] = useState("overview");
   const [mobileNav, setMobileNav] = useState(false);
@@ -335,7 +338,7 @@ export default function AdminDashboard() {
   const renderTab = () => {
     switch (tab) {
       case "home": return <StaffHome role={role} onNavigate={(id) => { userNavigated.current = true; setTab(id); }} labelFor={navLabel} isLocked={pinLock.open ? undefined : pinLocked} />;
-      case "overview": return <OverviewPanel onNavigate={setTab} storeSlug={active?.slug} storeName={active?.name} />;
+      case "overview": return <OverviewPanel onNavigate={setTab} shopUrl={shopUrl} storeName={active?.name} />;
       // One POS: the rice-ready counter screen.
       case "pos": return <PosPanel />;
       case "preorders": return <PreOrdersPanel onNavigate={setTab} />;
@@ -515,8 +518,8 @@ export default function AdminDashboard() {
               )}
               <QueueBadge />
               <span className="badge text-bg-primary role-badge text-uppercase d-none d-sm-inline">{role}</span>
-              {active && (
-                <a className="btn btn-sm btn-outline-primary d-none d-sm-inline-block" href={`/${active.slug}`} target="_blank" rel="noreferrer" title="Open storefront" aria-label="Open storefront">
+              {active && shopUrl && (
+                <a className="btn btn-sm btn-outline-primary d-none d-sm-inline-block" href={shopUrl} target="_blank" rel="noreferrer" title="Open the customers' shop" aria-label="Open the customers' shop">
                   <i className="bi bi-box-arrow-up-right"></i>
                 </a>
               )}

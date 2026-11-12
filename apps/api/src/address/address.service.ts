@@ -20,7 +20,8 @@ async function cached<T>(key: string, load: () => Promise<T>): Promise<T> {
   const hit = await cacheGet<T>(k);
   if (hit) return hit;
   const value = await load();
-  await cacheSet(k, value, ADDRESS_CACHE_TTL_MS);
+  // An empty list means the address list is not loaded yet: do not keep that answer for ten minutes.
+  if (!Array.isArray(value) || value.length > 0) await cacheSet(k, value, ADDRESS_CACHE_TTL_MS);
   return value;
 }
 

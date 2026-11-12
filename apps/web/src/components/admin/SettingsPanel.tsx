@@ -23,6 +23,7 @@ import { PesoInput, WholeInput } from "../NumberBoxes";
 import DeliveryZonesCard from "./DeliveryZonesCard";
 import NoStoreScope from "./NoStoreScope";
 import PrinterSettingsCard from "./PrinterSettingsCard";
+import { shopLinkOn, shopLinkUrl } from "../../lib/shop-link";
 
 interface StoreSettings {
   id: string;
@@ -460,9 +461,11 @@ export default function SettingsPanel({ role = "" }: { role?: string }) {
           <>
             {data?.publicLink?.slug && (
               <div className="border rounded-3 p-3 mb-3 bg-light">
-                <div className="fw-semibold">Shop link</div>
-                <code className="text-break">/public/{data.publicLink.slug}</code>
-                <div className="small text-muted">Share or change it on the Store Link screen.</div>
+                <div className="fw-semibold">Shop link · {shopLinkOn(data.publicLink) ? "on" : "switched off"}</div>
+                {shopLinkOn(data.publicLink)
+                  ? <a className="text-break" href={shopLinkUrl(data.publicLink)} target="_blank" rel="noreferrer">{shopLinkUrl(data.publicLink)}</a>
+                  : <div>Customers cannot open the shop until the link is switched on again.</div>}
+                <div className="small text-muted">Share it, print its QR code or switch it off on the Store Link screen (Menu, People &amp; settings).</div>
               </div>
             )}
             <SwitchRow id="st-paused" label="Close the shop for now" checked={form.paused} onChange={(v) => set({ paused: v })}
