@@ -28,9 +28,9 @@ export interface FeatureLock {
 export const SUGGESTED = {
   // The owner's tablet is often left signed in at the counter: money and setup screens.
   // The owner asked (2026-11-07) for Reports, Credit and the other screens where someone could change things.
-  owner: ["utangrice", "reports", "storereport", "overview", "settings", "team", "products", "payable", "expenses", "purchases", "customers"],
+  owner: ["utangrice", "reports", "storereport", "overview", "settings", "team", "products", "payable", "expenses", "customers"],
   // Staff keep selling, pre-orders, resack and stock in; credit, prices, money and reports need the owner.
-  staff: ["utangrice", "reports", "storereport", "overview", "ulat", "products", "expenses", "purchases", "customers"],
+  staff: ["utangrice", "reports", "storereport", "overview", "ulat", "products", "expenses", "customers"],
 };
 
 /** Which list applies to a role: the owner's own list, or the staff list for everyone else. */

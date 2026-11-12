@@ -397,7 +397,7 @@ export default function AdminDashboard() {
       case "preorders": return <PreOrdersPanel onNavigate={setTab} />;
       case "utang": // the bar id; the menu id is "utangrice" (one merged Credit screen)
       case "utangrice": return <UtangRicePanel role={role} />;
-      case "inventory": return <InventoryPanel />;
+      case "inventory": return <InventoryPanel role={role} />;
       case "expenses": return <ExpensesPanel />;
       case "cash": return <CashPanel />;
       case "storeprices": return <StorePricesPanel />;
