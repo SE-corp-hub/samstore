@@ -174,7 +174,7 @@ export default function StoreReportPanel({ role, onNavigate }: { role?: string; 
     });
   };
 
-  const tabs: [Tab, string][] = [["stock", "Stock left"], ["sales", "Sales"], ["records", "All records"], ...(owner ? ([["compare", "Compare stores"]] as [Tab, string][]) : []), ["day", "End of day"]];
+  const tabs: [Tab, string][] = [["stock", "Stock left"], ["sales", "Sales"], ["records", "All records"], ...(owner ? ([["compare", "Compare stores"]] as [Tab, string][]) : []), ["day", "One day"]];
   const single = tab !== "compare" && tab !== "buffer";
   const range = tab === "sales" || tab === "compare" || tab === "records";
 

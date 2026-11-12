@@ -37,6 +37,8 @@ const formatBaseQty = (qty: number, unit: string) => {
 };
 const STATUS_BADGE: Record<string, string> = { in: "text-bg-success", low: "text-bg-warning", out: "text-bg-danger" };
 
+const SHOW_CONVERT = false;
+
 export default function InventoryPanel({ role = "" }: { role?: string }) {
   // Changing a number by hand is for the owner and managers (the server refuses everyone else): staff use Stock in and Count.
   const canChange = roleCan(role, "profit");
@@ -325,7 +327,9 @@ export default function InventoryPanel({ role = "" }: { role?: string }) {
         <span><strong>{items.length}</strong> products</span>
         {hasCost && <span>Inventory value (cost): <strong>{toPesos(totalValue)}</strong></span>}
         <div className="d-flex gap-2">
-          {canChange && (
+          {/* Opening a sack into packs is done on Resack (2026-11-12, one screen per job); Convert stock stays for a
+              non-rice item only if SHOW_CONVERT is turned on again. */}
+          {canChange && SHOW_CONVERT && (
             <button type="button" className="btn btn-sm btn-outline-success" onClick={() => void openConversion()}>
               <i className="bi bi-arrow-left-right me-1"></i>Convert stock
             </button>
