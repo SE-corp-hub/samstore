@@ -105,7 +105,7 @@ const STAFF_BAR: { id: string; label: string; icon: string }[] = [
 /** Roles that get the bottom bar: the same five jobs for staff, manager and owner. */
 const BAR_ROLES = ["STAFF", "MANAGER", "OWNER", "STORE_OWNER"];
 /** Menu ids that open the same screen as a bar button. */
-const BAR_ALIAS: Record<string, string> = { utangrice: "utang" };
+const BAR_ALIAS: Record<string, string> = { utangrice: "utang", agentorders: "orders" };
 
 /** Screens opened by a bar button that the menu lists under another id (for the page title and icon). */
 const NAV_ID: Record<string, string> = { utang: "utangrice" };
@@ -405,7 +405,7 @@ export default function AdminDashboard() {
       case "storelink": return <StoreLinkPanel />;
       case "reports": return <ReportsPanel />;
       case "export": return <ExportPanel />;
-      case "orders": return <OrdersPanel />;
+      case "orders": return BAR_ROLES.includes(role) ? <OrdersWithAgents /> : <OrdersPanel />;
       case "products": return <ProductsPanel />;
       case "settings": return <SettingsPanel role={role} />;
       case "countersettings": return <CounterSettingsPanel />;
@@ -417,7 +417,7 @@ export default function AdminDashboard() {
       case "analytics": return <AnalyticsPanel />;
       case "maintenance": return <MaintenancePanel />;
       case "useraccess": return <UserAccessPanel />;
-      case "warehouses": return <WarehousesPanel />;
+      case "warehouses": return <WarehousesPanel onNavigate={setTab} />;
       case "approvals": return <ApprovalsPanel />;
       case "drafts": return <DraftsPanel />;
       case "kargadors": return <KargadorsPanel />;
@@ -636,5 +636,26 @@ export default function AdminDashboard() {
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * Orders, with the agents' orders one tap away (2026-11-12: one place for every order instead of two
+ * menu screens). Agent orders keep their own steps (approve, delivered, take payment).
+ */
+function OrdersWithAgents() {
+  const [which, setWhich] = useState<"all" | "agent">("all");
+  return (
+    <>
+      <div className="d-flex flex-wrap gap-2 mb-3" role="group" aria-label="Which orders">
+        <button type="button" className={`btn btn-lg ${which === "all" ? "btn-primary" : "btn-outline-primary"}`} aria-pressed={which === "all"} onClick={() => setWhich("all")}>
+          <i className="bi bi-receipt me-1" aria-hidden="true"></i>All orders
+        </button>
+        <button type="button" className={`btn btn-lg ${which === "agent" ? "btn-primary" : "btn-outline-primary"}`} aria-pressed={which === "agent"} onClick={() => setWhich("agent")}>
+          <i className="bi bi-person-lines-fill me-1" aria-hidden="true"></i>Agent orders
+        </button>
+      </div>
+      {which === "all" ? <OrdersPanel /> : <AgentOrdersPanel />}
+    </>
   );
 }

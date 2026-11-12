@@ -1,16 +1,14 @@
 "use client";
 
-// Rice Ops M1 — Locations (stores + warehouse), transfers between them, and each
-// location's own selling prices. A "warehouse" row in the API is a stock location.
+// Rice Ops M1 — Locations (stores + warehouse): add, edit and set up each place. A "warehouse" row in
+// the API is a stock location. Moving rice is on Move stock and each store's prices on Store prices
+// (2026-11-12: the copies that were here are gone, one screen per job); old unfinished transfers can
+// still be cancelled here.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { API_URL } from "../../config";
 import { adminHeaders } from "../../lib/admin";
 import { toast } from "../../lib/toast";
-import { isBelowCost } from "../../lib/below-cost";
-import { askBelowCost, saveUnitCost } from "./BelowCostDialog";
-import SignCapture, { type SignatureOut } from "./SignCapture";
-import { peso } from "../../lib/number-format";
 
 type LocationType = "STORE" | "WAREHOUSE" | "BUFFER";
 interface Location {
@@ -45,7 +43,6 @@ interface Transfer {
   toWarehouse: { name: string; code: string | null };
   product: { name: string; sku: string };
 }
-interface ProductOption { id: string; name: string; sku: string }
 interface PriceRow {
   productId: string;
   name: string;
@@ -79,36 +76,26 @@ const STATUS_BADGE: Record<string, string> = {
   COMPLETED: "text-bg-success", CANCELLED: "text-bg-secondary", RETURNING: "text-bg-warning",
 };
 
-export default function WarehousesPanel() {
+export default function WarehousesPanel({ onNavigate }: { onNavigate?: (tab: string) => void }) {
   const [locations, setLocations] = useState<Location[]>([]);
   const [transfers, setTransfers] = useState<Transfer[]>([]);
-  const [products, setProducts] = useState<ProductOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [transfer, setTransfer] = useState({ from: "", to: "", productId: "", quantity: "", reason: "" });
-  const [requesting, setRequesting] = useState(false);
-  // Rice Ops M2: receiving is signed — the step waits here until the receiver signs.
-  const [receiving, setReceiving] = useState<Transfer | null>(null);
-  const [signingBusy, setSigningBusy] = useState(false);
-  const [priceLocation, setPriceLocation] = useState("");
-  const [prices, setPrices] = useState<PriceRow[]>([]);
-  const [priceDraft, setPriceDraft] = useState<Record<string, string>>({});
+  const openTransfers = transfers.filter((t) => (t.status === "REQUESTED" || t.status === "APPROVED") && t.kind !== "ORDER_RELEASE");
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [w, t, p] = await Promise.all([
+      const [w, t] = await Promise.all([
         fetch(`${API_URL}/admin/warehouses`, { headers: adminHeaders() }).then((r) => r.json()),
         fetch(`${API_URL}/admin/transfers`, { headers: adminHeaders() }).then((r) => r.json()),
-        fetch(`${API_URL}/admin/products`, { headers: adminHeaders() }).then((r) => r.json()),
       ]);
       setLocations(w.warehouses ?? []);
       setTransfers(t.transfers ?? []);
-      setProducts(p.products ?? []);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not load locations");
     } finally {
@@ -117,18 +104,6 @@ export default function WarehousesPanel() {
   }, []);
 
   useEffect(() => { void load(); }, [load]);
-
-  const active = useMemo(() => locations.filter((l) => l.isActive), [locations]);
-
-  const loadPrices = useCallback(async (locationId: string) => {
-    setPriceLocation(locationId);
-    setPrices([]);
-    setPriceDraft({});
-    if (!locationId) return;
-    const { ok, data } = await call(`${API_URL}/admin/warehouses/${locationId}/prices`, "GET");
-    if (!ok) { setError(errorText(data, "Could not load prices")); return; }
-    setPrices(data.prices ?? []);
-  }, []);
 
   const saveLocation = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -174,24 +149,6 @@ export default function WarehousesPanel() {
     });
   };
 
-  const request = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setRequesting(true);
-    setError(null);
-    const { ok, data } = await call(`${API_URL}/admin/moves`, "POST", {
-      fromLocationId: transfer.from,
-      toLocationId: transfer.to,
-      productId: transfer.productId,
-      quantity: parseInt(transfer.quantity, 10),
-      note: transfer.reason || undefined,
-    });
-    setRequesting(false);
-    if (!ok) { setError(errorText(data, "Could not move the stock")); return; }
-    toast("Moved — both counts changed");
-    setTransfer({ from: "", to: "", productId: "", quantity: "", reason: "" });
-    await load();
-  };
-
   const act = async (t: Transfer, step: "approve" | "cancel", done: string) => {
     setError(null);
     const { ok, data } = await call(`${API_URL}/admin/transfers/${t.id}/${step}`, "PATCH", step === "cancel" ? {} : undefined);
@@ -200,49 +157,10 @@ export default function WarehousesPanel() {
     await load();
   };
 
-  const receive = async (t: Transfer, signatures: SignatureOut[]) => {
-    setSigningBusy(true);
-    setError(null);
-    const { ok, data } = await call(`${API_URL}/admin/transfers/${t.id}/complete`, "PATCH", { signatures });
-    setSigningBusy(false);
-    setReceiving(null);
-    if (!ok) { setError(errorText(data, "Not received")); return; }
-    toast("Received");
-    await load();
-  };
-
-  const savePrice = async (row: PriceRow, clear = false) => {
-    setError(null);
-    let priceMinor: number | null = null;
-    if (!clear) {
-      const raw = priceDraft[row.productId];
-      const value = Number(raw);
-      if (!raw || !Number.isFinite(value) || value <= 0) { setError("Enter a price above ₱0, or choose Use main."); return; }
-      priceMinor = Math.round(value * 100);
-    }
-    // A location price (or going back to the main price) that sells under the unit cost: ask first.
-    const willSell = priceMinor ?? row.mainPriceMinor;
-    if (isBelowCost(willSell, row.costMinor)) {
-      const pick = await askBelowCost({ name: row.name, priceMinor: willSell, costMinor: row.costMinor!, unit: row.loose ? "kilo" : "piece", showCost: true, proceed: "Save anyway",
-        canChangeCost: row.ownShelfCost ? "This location has its own cost. Change it in Inventory." : true });
-      if (!pick) return;
-      if (pick.kind === "price") priceMinor = pick.priceMinor;
-      if (pick.kind === "cost") {
-        const err = await saveUnitCost(row.productId, pick.costMinor);
-        if (err) { setError(err); return; }
-        toast("Unit cost saved");
-      }
-    }
-    const { ok, data } = await call(`${API_URL}/admin/warehouses/${priceLocation}/prices/${row.productId}`, "PUT", { priceMinor });
-    if (!ok) { setError(errorText(data, "Could not save the price")); return; }
-    toast(clear ? "Main price restored" : "Price saved");
-    await loadPrices(priceLocation);
-  };
-
   return (
     <div>
-      <h1 className="h4 mb-1"><i className="bi bi-geo-alt me-2" aria-hidden="true"></i>Locations &amp; transfers</h1>
-      <p className="text-muted small mb-3">Your stores and warehouse share one stock ledger. Every move between them is recorded.</p>
+      <h1 className="h4 mb-1"><i className="bi bi-geo-alt me-2" aria-hidden="true"></i>Locations</h1>
+      <p className="text-muted small mb-3">Your stores and warehouse: add one, change its name, receipt text, Facebook Page and where it takes rice from.</p>
       {error && <div className="alert alert-danger py-2 small" role="alert">{error}</div>}
 
       <div className="row g-3 mb-3">
@@ -371,50 +289,20 @@ export default function WarehousesPanel() {
         </div>
 
         <div className="col-lg-7">
-          <form onSubmit={request} className="card h-100">
-            <div className="card-body">
-              <h2 className="h6 card-title">Move stock now</h2>
-              <div className="row g-2">
-                <div className="col-md-6">
-                  <label className="form-label small mb-1" htmlFor="tr-from">From</label>
-                  <select id="tr-from" className="form-select form-select-sm" required value={transfer.from} onChange={(e) => setTransfer({ ...transfer, from: e.target.value })}>
-                    <option value="">Choose…</option>
-                    {active.map((l) => <option key={l.id} value={l.id}>{label(l)}</option>)}
-                  </select>
-                </div>
-                <div className="col-md-6">
-                  <label className="form-label small mb-1" htmlFor="tr-to">To</label>
-                  <select id="tr-to" className="form-select form-select-sm" required value={transfer.to} onChange={(e) => setTransfer({ ...transfer, to: e.target.value })}>
-                    <option value="">Choose…</option>
-                    {active.filter((l) => l.id !== transfer.from).map((l) => <option key={l.id} value={l.id}>{label(l)}</option>)}
-                  </select>
-                </div>
-                <div className="col-md-8">
-                  <label className="form-label small mb-1" htmlFor="tr-product">Product</label>
-                  <select id="tr-product" className="form-select form-select-sm" required value={transfer.productId} onChange={(e) => setTransfer({ ...transfer, productId: e.target.value })}>
-                    <option value="">Choose…</option>
-                    {products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                  </select>
-                </div>
-                <div className="col-md-4">
-                  <label className="form-label small mb-1" htmlFor="tr-qty">Quantity</label>
-                  <input id="tr-qty" className="form-control form-control-sm" type="number" inputMode="numeric" min="1" step="1" required value={transfer.quantity} onChange={(e) => setTransfer({ ...transfer, quantity: e.target.value })} />
-                </div>
-                <div className="col-md-8">
-                  <label className="form-label small mb-1" htmlFor="tr-reason">Reason (optional)</label>
-                  <input id="tr-reason" className="form-control form-control-sm" placeholder="e.g. restock for the weekend" value={transfer.reason} onChange={(e) => setTransfer({ ...transfer, reason: e.target.value })} />
-                </div>
-                <div className="col-md-4 d-flex align-items-end">
-                  <button className="btn btn-primary btn-sm w-100" type="submit" disabled={requesting || active.length < 2}>{requesting ? "Moving…" : "Move now"}</button>
-                </div>
-              </div>
+          {/* Moving rice and each store's prices have their own screens (Move stock, Store prices); this screen only sets up the places. */}
+          <div className="card h-100"><div className="card-body">
+            <h2 className="h6 card-title">Move rice or set a store&apos;s prices</h2>
+            <p className="mb-2">These have their own screens now, so there is one place for each job.</p>
+            <div className="d-flex flex-wrap gap-2">
+              <button type="button" className="btn btn-outline-primary btn-lg" onClick={() => onNavigate?.("moves")}><i className="bi bi-arrow-left-right me-1" aria-hidden="true"></i>Move stock</button>
+              <button type="button" className="btn btn-outline-primary btn-lg" onClick={() => onNavigate?.("storeprices")}><i className="bi bi-tags me-1" aria-hidden="true"></i>Store prices</button>
             </div>
-          </form>
+          </div></div>
         </div>
       </div>
 
       <div className="row g-3 mb-3">
-        <div className="col-lg-5">
+        <div className={openTransfers.length > 0 ? "col-lg-5" : "col-12"}>
           <div className="card h-100"><div className="card-body">
             <h2 className="h6 card-title">Locations</h2>
             {loading ? <p className="text-muted small">Loading…</p> : locations.length === 0 ? (
@@ -463,26 +351,17 @@ export default function WarehousesPanel() {
           </div></div>
         </div>
 
-        <div className="col-lg-7">
+        {openTransfers.length > 0 && <div className="col-lg-7">
           <div className="card h-100"><div className="card-body">
-            <h2 className="h6 card-title">Moves</h2>
-            {receiving && (
-              <SignCapture
-                sentence={`Tatanggapin: ${receiving.quantity} × ${receiving.product.name}, mula ${label(receiving.fromWarehouse)} papuntang ${label(receiving.toWarehouse)}.`}
-                staffName="you (staff)"
-                busy={signingBusy}
-                onCancel={() => setReceiving(null)}
-                onDone={(sigs) => void receive(receiving, sigs)}
-              />
-            )}
-            {loading ? <p className="text-muted small">Loading…</p> : transfers.length === 0 ? (
-              <p className="text-muted small mb-0">No transfers yet.</p>
-            ) : (
+            <h2 className="h6 card-title">Old moves not finished</h2>
+            <p className="small mb-2">Moves made the old way that never finished. Cancel the ones that will not happen. New moves are on Move stock.</p>
+            {(
+
               <div className="table-responsive">
                 <table className="table table-sm align-middle mb-0">
                   <thead><tr><th>Product</th><th>From → To</th><th className="text-end">Qty</th><th>Status</th><th className="text-end">Actions</th></tr></thead>
                   <tbody>
-                    {transfers.map((t) => (
+                    {openTransfers.map((t) => (
                       <tr key={t.id}>
                         <td className="small">{t.docNumber && <div className="text-muted">{t.docNumber}</div>}{t.product.name}{t.reason && <div className="text-muted">{t.reason}</div>}{!!t.shortQty && <div><span className="badge text-bg-danger">Short {t.shortQty}</span></div>}</td>
                         <td className="small text-muted">{label(t.fromWarehouse)} → {label(t.toWarehouse)}</td>
@@ -500,59 +379,8 @@ export default function WarehousesPanel() {
               </div>
             )}
           </div></div>
-        </div>
+        </div>}
       </div>
-
-      <div className="card"><div className="card-body">
-        <div className="d-flex flex-wrap justify-content-between align-items-end gap-2 mb-2">
-          <div>
-            <h2 className="h6 card-title mb-0">Selling price per location</h2>
-            <p className="text-muted small mb-0">Cost is the same everywhere. A location without its own price sells at the main price.</p>
-          </div>
-          <div>
-            <label className="form-label small mb-1" htmlFor="price-loc">Location</label>
-            <select id="price-loc" className="form-select form-select-sm" value={priceLocation} onChange={(e) => void loadPrices(e.target.value)}>
-              <option value="">Choose…</option>
-              {locations.map((l) => <option key={l.id} value={l.id}>{label(l)}</option>)}
-            </select>
-          </div>
-        </div>
-        {priceLocation && (prices.length === 0 ? <p className="text-muted small mb-0">No active products.</p> : (
-          <div className="table-responsive">
-            <table className="table table-sm align-middle mb-0">
-              <thead><tr><th>Product</th><th className="text-end">Main price</th><th className="text-end">This location</th><th style={{ width: 260 }}>Set price (₱)</th></tr></thead>
-              <tbody>
-                {prices.map((row) => (
-                  <tr key={row.productId}>
-                    <td className="small">{row.name}{isBelowCost(row.effectivePriceMinor, row.costMinor) && <span className="badge text-bg-danger ms-1">Below cost {peso(row.costMinor!)}</span>}<div className="text-muted">{row.sku}</div></td>
-                    <td className="text-end small">{peso(row.mainPriceMinor)}</td>
-                    <td className="text-end small fw-semibold">{row.locationPriceMinor === null ? <span className="text-muted fw-normal">uses main</span> : peso(row.locationPriceMinor)}</td>
-                    <td>
-                      <div className="input-group input-group-sm">
-                        <input
-                          aria-label={`Price for ${row.name} at this location`}
-                          className="form-control"
-                          type="number"
-                          inputMode="decimal"
-                          min="0.01"
-                          step="0.01"
-                          placeholder={(row.effectivePriceMinor / 100).toFixed(2)}
-                          value={priceDraft[row.productId] ?? ""}
-                          onChange={(e) => setPriceDraft({ ...priceDraft, [row.productId]: e.target.value })}
-                        />
-                        <button type="button" className="btn btn-outline-primary" onClick={() => void savePrice(row)}>Save</button>
-                        {row.locationPriceMinor !== null && (
-                          <button type="button" className="btn btn-outline-secondary" onClick={() => void savePrice(row, true)}>Use main</button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ))}
-      </div></div>
     </div>
   );
 }
