@@ -3,7 +3,7 @@
 import ProductPhoto from "./ProductPhoto";
 import { useCallback, useEffect, useState } from "react";
 import { API_URL } from "../../config";
-import { adminHeaders } from "../../lib/admin";
+import { adminHeaders, roleCan } from "../../lib/admin";
 import { peso } from "../../lib/number-format";
 
 interface InvItem {
@@ -37,7 +37,9 @@ const formatBaseQty = (qty: number, unit: string) => {
 };
 const STATUS_BADGE: Record<string, string> = { in: "text-bg-success", low: "text-bg-warning", out: "text-bg-danger" };
 
-export default function InventoryPanel() {
+export default function InventoryPanel({ role = "" }: { role?: string }) {
+  // Changing a number by hand is for the owner and managers (the server refuses everyone else): staff use Stock in and Count.
+  const canChange = roleCan(role, "profit");
   const [items, setItems] = useState<InvItem[]>([]);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -323,9 +325,11 @@ export default function InventoryPanel() {
         <span><strong>{items.length}</strong> products</span>
         {hasCost && <span>Inventory value (cost): <strong>{toPesos(totalValue)}</strong></span>}
         <div className="d-flex gap-2">
-          <button type="button" className="btn btn-sm btn-outline-success" onClick={() => void openConversion()}>
-            <i className="bi bi-arrow-left-right me-1"></i>Convert stock
-          </button>
+          {canChange && (
+            <button type="button" className="btn btn-sm btn-outline-success" onClick={() => void openConversion()}>
+              <i className="bi bi-arrow-left-right me-1"></i>Convert stock
+            </button>
+          )}
           <div className="btn-group btn-group-sm" role="group" aria-label="Inventory view">
             <button type="button" className={`btn ${view === "stock" ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setView("stock")}>
               <i className="bi bi-boxes me-1"></i>Stock
@@ -413,10 +417,12 @@ export default function InventoryPanel() {
                   {hasCost && <td className="text-end">{toPesos(r.valueMinor)}</td>}
                   <td><span className={`badge ${STATUS_BADGE[r.status]}`}>{r.status}{r.reorderThreshold > 0 ? ` ≤${r.reorderThreshold}` : ""}</span></td>
                   <td className="text-end">
-                    <button type="button" className="btn btn-sm btn-outline-primary text-nowrap" aria-label={`Adjust ${r.name}`}
-                      onClick={() => { setAdjust(r); setAdjustMode("delta"); setAdjustQty(""); setAdjustReason(""); setAdjustAllowNegative(false); setAdjustError(null); }}>
-                      <i className="bi bi-sliders me-1"></i>Adjust
-                    </button>
+                    {canChange && (
+                      <button type="button" className="btn btn-sm btn-outline-primary text-nowrap" aria-label={`Adjust ${r.name}`}
+                        onClick={() => { setAdjust(r); setAdjustMode("delta"); setAdjustQty(""); setAdjustReason(""); setAdjustAllowNegative(false); setAdjustError(null); }}>
+                        <i className="bi bi-sliders me-1"></i>Adjust
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}

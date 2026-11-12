@@ -4,11 +4,12 @@
 //   1 Count   every rice at the store (− / + for sacks, kilos for loose rice)
 //   2 Check   the differences; one tap marks every shortage "Sold but not rung up"
 //   3 Walk-ins  the shortages sold to walk-ins become one cash sale at the store's price
-//   4 Cash    the cash from today's sales here (plus those walk-ins) against the cash counted
+//   4 Cash    the cash from today's sales here (plus those walk-ins) against the cash counted; the
+//             person signs and the day closes (the same closing record as Reports & closing)
 //   5 Done    a short summary and a slip to print
 // Steps 1 and 2 are the count sheet and the check (BilanginPanel / CountCheck); this file holds the
 // step bar and steps 3-5, which work on a posted count. Nothing here moves stock twice: the walk-in
-// sale is the existing "missing = sold to walk-ins" sale, and the cash check only records a number.
+// sale is the existing "missing = sold to walk-ins" sale, and the cash step moves no stock or money.
 
 import { useCallback, useEffect, useState } from "react";
 import { API_URL } from "../../config";
@@ -20,6 +21,7 @@ import { printSlip } from "../../lib/slip-print";
 import { toast } from "../../lib/toast";
 import CountReport from "./CountReport";
 import CountWalkIn, { type WalkInInfo } from "./CountWalkIn";
+import SignaturePad from "./SignaturePad";
 
 export const CLOSE_STEPS = ["Count", "Check", "Walk-ins", "Cash", "Done"] as const;
 export type CloseStep = (typeof CLOSE_STEPS)[number];
@@ -55,6 +57,8 @@ interface Cash {
   /** Step 4 of the per-store build (an older server does not send these). */
   creditPaidMinor?: number; givenBackMinor?: number; paidOutMinor?: number; handedOverMinor?: number;
   saved: { countedMinor: number; expectedMinor: number; diffMinor: number; note: string | null; at: string } | null;
+  /** The closing of that day at this store, made here or on Reports & closing (an older server does not send it). */
+  closed?: { countedMinor: number; expectedMinor: number; diffMinor: number; at: string; fromThisCount: boolean } | null;
 }
 
 const qty = (loose: boolean, n: number) => (loose ? formatKg(Math.abs(n) / 1000) : `${Math.abs(n)}`);
@@ -85,7 +89,7 @@ export default function CloseStoreAfter({ countId, onClose }: { countId: string;
     void load().then((x) => {
       if (!x) return;
       // Open where the person left off: walk-ins still to record, then the cash, then the summary.
-      setStep(x.r.walkIn?.open.length ? "Walk-ins" : x.c.saved ? "Done" : "Cash");
+      setStep(x.r.walkIn?.open.length ? "Walk-ins" : x.c.saved || x.c.closed ? "Done" : "Cash");
     }).catch(() => setError("No internet. Try again when the tablet is online."));
     void fetch(`${API_URL}/admin/settings`, { headers: adminHeaders() }).then((r) => (r.ok ? r.json() : null)).then((d) => setStoreName(d?.name ?? "")).catch(() => {});
   }, [load]);
@@ -101,10 +105,13 @@ export default function CloseStoreAfter({ countId, onClose }: { countId: string;
 
   const walkInMinor = (report.walkIn?.sales ?? []).reduce((s, x) => s + x.totalMinor, 0);
   const notSales = report.lines.filter((l) => l.varianceQty < 0 && !l.soldToWalkIns && l.reasonLabel && !report.walkIn?.open.some((o) => o.productId === l.productId));
+  // With today's server the day is closed only by the signed cash step (or on Reports & closing).
+  const dayClosed = cash.closed === undefined ? !!cash.saved : !!cash.closed;
   const head = (
     <>
       <h2 className="h4 mb-2">Close the store · {report.count.location}</h2>
-      <CloseSteps step={step} />
+      {/* The summary of a day that is not closed yet keeps the Cash step open in the bar. */}
+      <CloseSteps step={step === "Done" && !dayClosed ? "Cash" : step} />
       {error && <div className="alert alert-danger py-2" role="alert">{error}</div>}
     </>
   );
@@ -134,8 +141,9 @@ export default function CloseStoreAfter({ countId, onClose }: { countId: string;
     );
   }
 
-  // Done
-  const s = cash.saved;
+  // Done. A closed day shows the numbers it was closed with (one closing a day, here or on Reports & closing).
+  const s = cash.closed ? { countedMinor: cash.closed.countedMinor, expectedMinor: cash.closed.expectedMinor, diffMinor: cash.closed.diffMinor, note: cash.saved?.note ?? null } : cash.saved;
+  const expectedMinor = s?.expectedMinor ?? cash.expectedMinor;
   const lossMinor = report.lines.filter((l) => l.varianceQty < 0 && !l.soldToWalkIns).reduce((sum, l) => sum + Math.abs(l.varianceValueMinor), 0);
   const printClosing = () => printSlip({
     storeName: storeName || "SAM STORE", title: "STORE CLOSED", reference: report.count.docNumber,
@@ -148,7 +156,7 @@ export default function CloseStoreAfter({ countId, onClose }: { countId: string;
     totals: [
       { label: "Items counted", value: String(report.summary.counted) },
       { label: "Walk-in sales", value: peso(walkInMinor) },
-      { label: "Cash expected", value: peso(cash.expectedMinor) },
+      { label: "Cash expected", value: peso(expectedMinor) },
       ...(s ? [{ label: "Cash counted", value: peso(s.countedMinor) }, { label: s.diffMinor === 0 ? "Cash" : s.diffMinor < 0 ? "Cash short" : "Cash over", value: s.diffMinor === 0 ? "matches" : pesoText(s.diffMinor) }] : []),
     ],
     signatures: [{ role: "Closed by", name: "" }],
@@ -159,11 +167,14 @@ export default function CloseStoreAfter({ countId, onClose }: { countId: string;
       {head}
       <div className="card mb-3">
         <div className="card-body">
-          <h3 className="h5 text-success"><i className="bi bi-check-circle-fill me-1" aria-hidden="true"></i>{report.count.location} is closed for today</h3>
+          {dayClosed
+            ? <h3 className="h5 text-success"><i className="bi bi-check-circle-fill me-1" aria-hidden="true"></i>{report.count.location} is closed for today</h3>
+            : <h3 className="h5"><i className="bi bi-exclamation-triangle-fill text-warning me-1" aria-hidden="true"></i>The count is saved. The day is not closed yet.</h3>}
+          {cash.closed && !cash.closed.fromThisCount && <p className="mb-2">The cash was already counted and signed on Reports &amp; closing. Nothing more to do here.</p>}
           <div className="cash-row"><span>Rice counted</span><strong>{report.summary.counted} items · {report.summary.correct} correct</strong></div>
           <div className="cash-row"><span>Walk-in sales recorded</span><strong>{peso(walkInMinor)}</strong></div>
           {lossMinor > 0 && <div className="cash-row"><span>Short and not sold, at cost (spilled, wet…)</span><strong className="text-danger">{pesoText(lossMinor)}</strong></div>}
-          <div className="cash-row"><span>Cash expected</span><strong>{peso(cash.expectedMinor)}</strong></div>
+          <div className="cash-row"><span>Cash expected</span><strong>{peso(expectedMinor)}</strong></div>
           {s ? (
             <>
               <div className="cash-row"><span>Cash counted</span><strong>{peso(s.countedMinor)}</strong></div>
@@ -172,13 +183,16 @@ export default function CloseStoreAfter({ countId, onClose }: { countId: string;
                 {s.note && <div className="fw-normal fs-6">{s.note}</div>}
               </div>
             </>
-          ) : <p className="text-muted mb-0 mt-2">The cash was not counted.</p>}
+          ) : <p className="mb-0 mt-2">The cash was not counted.</p>}
+          {!dayClosed && <p className="mb-0 mt-2">To close the day, count the cash and sign.</p>}
         </div>
       </div>
       <div className="d-flex flex-wrap gap-2 mb-3">
-        <button type="button" className="btn btn-primary btn-lg" onClick={onClose}>Finish</button>
+        {dayClosed
+          ? <button type="button" className="btn btn-primary btn-lg" onClick={onClose}>Finish</button>
+          : <button type="button" className="btn btn-primary btn-lg" onClick={() => setStep("Cash")}>Count the cash and close the day</button>}
         <button type="button" className="btn btn-outline-primary btn-lg" onClick={printClosing}><i className="bi bi-printer me-1" aria-hidden="true"></i>Print closing slip</button>
-        {!s && <button type="button" className="btn btn-outline-dark btn-lg" onClick={() => setStep("Cash")}>Count the cash</button>}
+        {!dayClosed && <button type="button" className="btn btn-outline-dark btn-lg" onClick={onClose}>Close it later</button>}
         <button type="button" className="btn btn-outline-dark btn-lg" aria-expanded={full} onClick={() => setFull((v) => !v)}>{full ? "Hide the full report" : "See the full report"}</button>
       </div>
       {full && <CountReport countId={countId} embedded />}
@@ -200,10 +214,11 @@ function NotSales({ lines }: { lines: ShortLine[] }) {
   );
 }
 
-/** Step 4: count the cash from today's sales here; the difference shows as you type. Nothing moves. */
+/** Step 4: count the cash from today's sales here; the difference shows as you type. Signing closes the day. */
 function CashStep({ countId, cash, onSaved, onSkip }: { countId: string; cash: Cash; onSaved: (c: Cash) => void; onSkip: () => void }) {
   const [typed, setTyped] = useState(cash.saved ? String(cash.saved.countedMinor / 100) : "");
   const [note, setNote] = useState(cash.saved?.note ?? "");
+  const [sig, setSig] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const counted = typed.trim() === "" ? null : pesosToMinor(typed);
@@ -211,12 +226,13 @@ function CashStep({ countId, cash, onSaved, onSkip }: { countId: string; cash: C
   const day = new Date(`${cash.day}T00:00:00+08:00`).toLocaleDateString("en-PH", { day: "numeric", month: "short", timeZone: "Asia/Manila" });
 
   const save = async () => {
-    if (counted === null) return;
+    if (counted === null || !sig) return;
     setBusy(true); setError(null);
     try {
-      const res = await fetch(`${API_URL}/admin/counts/${countId}/cash`, { method: "POST", headers: { ...adminHeaders(), "Content-Type": "application/json" }, body: JSON.stringify({ countedMinor: counted, note: note.trim() || undefined }) });
+      const res = await fetch(`${API_URL}/admin/counts/${countId}/cash`, { method: "POST", headers: { ...adminHeaders(), "Content-Type": "application/json" }, body: JSON.stringify({ countedMinor: counted, note: note.trim() || undefined, signatures: [{ signerKind: "STAFF", imagePng: sig }] }) });
       const d = (await res.json().catch(() => null)) as ApiBody | null;
-      if (!res.ok) { setError(errText(d, "Could not save the cash")); return; }
+      if (!res.ok) { setError(errText(d, "Could not close the day")); return; }
+      toast("The day is closed");
       onSaved(d as unknown as Cash);
     } catch {
       setError("No internet. Try again when the tablet is online.");
@@ -228,7 +244,7 @@ function CashStep({ countId, cash, onSaved, onSkip }: { countId: string; cash: C
   return (
     <section className="card mb-3" aria-labelledby="cash-title">
       <div className="card-body">
-        <h3 id="cash-title" className="h5 mb-1">Count the cash</h3>
+        <h3 id="cash-title" className="h5 mb-1">Count the cash and close the day</h3>
         <p className="mb-2">Count all the cash taken in today at {cash.location}. Do not include the change money you started with.</p>
         <div className="row g-3">
         <div className="col-lg-6">
@@ -260,11 +276,14 @@ function CashStep({ countId, cash, onSaved, onSkip }: { countId: string; cash: C
             <input id="cash-note" className="form-control form-control-lg mb-2" maxLength={120} value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. paid the kargador ₱200 from the drawer" />
           </>
         )}
-        {error && <div className="alert alert-danger py-2" role="alert">{error}</div>}
+        <div className="fw-semibold mt-2">Your signature</div>
+        <div className="cash-sign"><SignaturePad onSignature={setSig} /></div>
+        {error && <div className="alert alert-danger py-2 mt-2" role="alert">{error}</div>}
         <div className="d-flex flex-wrap gap-2 mt-2">
-          <button type="button" className="btn btn-primary btn-lg flex-grow-1" disabled={busy || counted === null} aria-busy={busy} onClick={() => void save()}>{busy ? "Saving…" : "Save the cash count"}</button>
-          <button type="button" className="btn btn-outline-dark btn-lg" disabled={busy} onClick={onSkip}>Skip</button>
+          <button type="button" className="btn btn-primary btn-lg flex-grow-1" disabled={busy || counted === null || !sig} aria-busy={busy} onClick={() => void save()}>{busy ? "Closing…" : "Close the day"}</button>
+          <button type="button" className="btn btn-outline-dark btn-lg" disabled={busy} onClick={onSkip}>Close it later</button>
         </div>
+        {(counted === null || !sig) && <p className="text-muted mb-0 mt-2">{counted === null ? "Type the cash you counted, then sign." : "Sign in the box to close the day."}</p>}
         </div>
         </div>
       </div>

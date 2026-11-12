@@ -193,7 +193,6 @@ export const NAV_GROUPS: NavGroup[] = [
       { id: "approvals", label: "For your approval", icon: "bi-inbox", hint: "Requests waiting for your yes or no" },
       { id: "cash", label: "Cash drawer", icon: "bi-safe", hint: "Cash that should be in the drawer; cash handed to the owner" },
       { id: "expenses", label: "Expenses", icon: "bi-receipt-cutoff", hint: "Money the store paid out" },
-      { id: "purchases", label: "Purchases", icon: "bi-cart4", hint: "Stock bought and what was paid" },
       { id: "purchaseorders", label: "Supplier orders", icon: "bi-truck", hint: "Orders sent to suppliers" },
     ],
   },
@@ -240,8 +239,13 @@ export const NAV_GROUPS: NavGroup[] = [
       { id: "team", label: "Team", icon: "bi-people", hint: "Staff accounts, roles and PINs" },
       { id: "settings", label: "Settings", icon: "bi-gear", hint: "Store name, receipts, printer" },
       { id: "countersettings", label: "Counter & printer", icon: "bi-sliders", hint: "Cash drawer and printer here" },
+      // Hidden: no role list includes them. Add the id to OWNER_TABS to show one again.
+      // Purchases (2026-11-12): it added stock to the main store with no signature, a second way in beside Stock in,
+      // so one delivery could be counted twice. Rice arrives through Stock in; what is owed is on Supplier orders.
+      { id: "purchases", label: "Purchases", icon: "bi-cart4", hint: "Stock bought and what was paid" },
+      // Store Link (2026-11-12, the owner's decision): customers order through the stores' Facebook Pages only,
+      // so the web shop link is not offered anywhere. Settings, Online shop has the one switch that turns an old link off.
       { id: "storelink", label: "Store Link", icon: "bi-link-45deg", hint: "Web link and QR code for customers" },
-      // Vouchers, CRM and ERP & BIR are hidden: no role list includes them. Add the id to OWNER_TABS to show one again.
       { id: "vouchers", label: "Vouchers", icon: "bi-ticket-perforated", hint: "Discount vouchers for customers" },
       { id: "crm", label: "CRM", icon: "bi-people-heart", hint: "Customer messages and campaigns" },
       { id: "erp", label: "ERP & BIR", icon: "bi-journal-check", hint: "Accounting entries and BIR reports" },
@@ -279,7 +283,7 @@ export function toneFor(id: string): NavTone {
   return navGroupFor(id)?.tone ?? "setup";
 }
 
-const OWNER_TABS = ["overview", "pos", "preorders", "orders", "utang", "products", "inventory", "cash", "expenses", "purchases", "team", "customers", "analytics", "reports", "settings", "storelink", "warehouses", "approvals", "moves", "returns", "resack", "drafts", "kargadors", "pasok", "purchaseorders", "utangrice", "agentorders", "bilangin", "storereport", "payable", "ulat", "export", "storeprices"];
+const OWNER_TABS = ["overview", "pos", "preorders", "orders", "utang", "products", "inventory", "cash", "expenses", "team", "customers", "analytics", "reports", "settings", "warehouses", "approvals", "moves", "returns", "resack", "drafts", "kargadors", "pasok", "purchaseorders", "utangrice", "agentorders", "bilangin", "storereport", "payable", "ulat", "export", "storeprices"];
 
 /** Tab visibility per staff role (GET-level permissions from live API probes). */
 export const TABS_BY_ROLE: Record<string, string[]> = {
@@ -290,7 +294,7 @@ export const TABS_BY_ROLE: Record<string, string[]> = {
   // Platform operators manage tenants/access and monitor the platform; daily POS/catalog tabs belong to store roles.
   PLATFORM_ADMIN: ["overview", "stores", "useraccess", "maintenance", "analytics", "reports", "settings"],
   MANAGER: OWNER_TABS.filter((t) => t !== "storelink" && t !== "export"), // export carries costs + every customer: owner only
-  STAFF: ["overview", "pos", "preorders", "orders", "utang", "products", "inventory", "cash", "expenses", "purchases", "customers", "reports", "countersettings", "moves", "returns", "resack", "drafts", "kargadors", "pasok", "utangrice", "agentorders", "bilangin", "storereport", "ulat"],
+  STAFF: ["overview", "pos", "preorders", "orders", "utang", "products", "inventory", "cash", "expenses", "customers", "reports", "countersettings", "moves", "returns", "resack", "drafts", "kargadors", "pasok", "utangrice", "agentorders", "bilangin", "storereport", "ulat"],
   SALES_AGENT: ["agent", "overview", "orders", "customers", "reports"],
   DELIVERY: [],
 };
@@ -323,7 +327,7 @@ export function defaultTabFor(role: string): string {
 
 // Per-store build, step 6 (the wall): a login tied to one store does not get the screens that show
 // the whole business. The server refuses them too; this only keeps them out of the menu.
-const WHOLE_BUSINESS_TABS = ["purchases", "purchaseorders", "reports", "analytics", "export"];
+const WHOLE_BUSINESS_TABS = ["purchaseorders", "reports", "analytics", "export"];
 const HOME_KEY = "sam.homeLocationId";
 const HEAD_KEY = "sam.isStoreHead";
 let homeLocationId: string | null | undefined;

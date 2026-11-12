@@ -416,6 +416,8 @@ main:has(> * > .rice-ui > .sell-fit), main:has(> .rice-ui > .sell-fit) { padding
 .cash-row.total { border-bottom: 0; border-top: 2px solid #1f1d1a; font-weight: 800; font-size: 1.25rem; padding-top: 0.5rem; }
 .cash-input { max-width: 16rem; min-height: 3.5rem; font-size: 1.75rem !important; font-weight: 800; text-align: right; font-variant-numeric: tabular-nums; }
 .cash-result { border-radius: 0.5rem; padding: 0.6rem 0.9rem; font-weight: 700; font-size: 1.2rem; }
+/* The signature box of the cash step: its Clear button is a full-size touch target with 16 px text. */
+.cash-sign .btn-sm { min-height: 2.75rem; font-size: 1rem; padding-inline: 0.9rem; }
 .cash-result.ok { background: #e4f3ea; color: #1f6f3f; border: 1px solid #1f6f3f; }
 .cash-result.short { background: #fbe9e7; color: #a3201b; border: 1px solid #a3201b; }
 .cash-result.over { background: #fff3d6; color: #6f4800; border: 1px solid #8a5a00; }

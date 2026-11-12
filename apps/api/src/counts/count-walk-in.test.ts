@@ -10,6 +10,7 @@ import { prisma } from "../persistence/prisma-repositories.js";
 import { CountService } from "./count.service.js";
 import { BentaService } from "../selling/benta.service.js";
 import { PayableService } from "../payable/payable.service.js";
+import { RiceReportsService } from "../reports/rice-reports.service.js";
 import { type Actor, type SignatureInput } from "../people/people.service.js";
 
 const PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==";
@@ -23,6 +24,7 @@ after(async () => {
     const where = { storeId: { in: storeIds } };
     const orderIds = (await prisma.order.findMany({ where, select: { id: true } })).map((o) => o.id);
     await prisma.auditLog.deleteMany({ where });
+    await prisma.dailyClose.deleteMany({ where });
     await prisma.signature.deleteMany({ where });
     await prisma.approvalRequest.deleteMany({ where });
     await prisma.storePayableEntry.deleteMany({ where });
@@ -218,6 +220,21 @@ test("Close the store: only 'Sold but not rung up' shortages become walk-in sale
   assert.equal(again.ok && again.value.saved?.countedMinor, 140_000);
   assert.equal(again.ok && again.value.saved?.note, "short ₱6");
   assert.equal((await counts.cashCheck(fx.storeId, fx.staff2, countId)).ok, false, "staff see only their own store");
+
+  // One closing a day: the signed cash step closes the day (the record of Reports & closing), and a
+  // closed day takes no second cash count from the old, unsigned request.
+  assert.equal(again.ok && again.value.closed, null, "an unsigned cash count does not close the day");
+  const closedDay = await new RiceReportsService().close(fx.storeId, fx.staff1, { locationId: fx.s1, date: cash.value.day, cashCountedMinor: 140_000, closingCountId: countId, signatures: staffSig });
+  assert.equal(closedDay.ok, true, msg(closedDay));
+  const after = await counts.cashCheck(fx.storeId, fx.owner, countId);
+  assert.equal(after.ok && after.value.closed?.countedMinor, 140_000);
+  assert.equal(after.ok && after.value.closed?.diffMinor, -600, "the closing and the cash step read the same cash book");
+  assert.equal(after.ok && after.value.closed?.fromThisCount, true);
+  const second = await counts.saveCashCheck(fx.storeId, fx.staff1, countId, { countedMinor: 150_000 });
+  assert.equal(!second.ok && second.error.type, "conflict", "a closed day takes no second cash count");
+  assert.equal((await counts.saveCashCheck(fx.storeId, fx.staff1, countId, { countedMinor: 140_000 }, true)).ok, true, "the cash step that just closed the day records its number");
+  const twice = await new RiceReportsService().close(fx.storeId, fx.staff1, { locationId: fx.s1, date: cash.value.day, cashCountedMinor: 1, signatures: staffSig });
+  assert.equal(!twice.ok && twice.error.type, "conflict", "the day closes once");
 });
 
 test("Close the store: the Home reminder shows when everything was last counted, per store", async () => {

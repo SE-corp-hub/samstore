@@ -53,10 +53,10 @@ const OWNERS = ["OWNER", "MANAGER", "STORE_OWNER", "PLATFORM_ADMIN"];
 /** The note on a count started with "Close the store" (every item at the store, at closing time). */
 export const CLOSE_STORE_NOTE = "Close the store";
 /** Most cash a person may type at the cash check (₱10,000,000). */
-const MAX_CASH_MINOR = 1_000_000_000;
+export const MAX_CASH_MINOR = 1_000_000_000;
 
 export interface CashCheck {
-  countId: string; docNumber: string; location: string; day: string;
+  countId: string; docNumber: string; location: string; locationId: string; day: string;
   /** Cash from sales rung up at this store that day (POS, Walk-in, paid pre-orders), without the walk-ins below. */
   salesMinor: number; salesCount: number;
   /** The walk-in sale(s) made from this count's shortages. */
@@ -66,6 +66,8 @@ export interface CashCheck {
   /** In − given back − paid out − handed over. */
   expectedMinor: number;
   saved: { countedMinor: number; expectedMinor: number; diffMinor: number; note: string | null; at: Date } | null;
+  /** The closing of that day at this store (the one record of the day, also made from Reports & closing), if it is closed. */
+  closed: { countedMinor: number; expectedMinor: number; diffMinor: number; at: Date; fromThisCount: boolean } | null;
 }
 const productSelect = { id: true, name: true, stockBaseUnit: true, stockBaseQuantity: true, costMinor: true, variety: true } as const;
 type P = Prisma.ProductGetPayload<{ select: typeof productSelect }>;
@@ -832,11 +834,17 @@ export class CountService {
     return this.run(() => this.cashFigures(storeId, actor, id));
   }
 
-  async saveCashCheck(storeId: string, actor: Actor, id: string, input: { countedMinor?: unknown; note?: unknown }): Promise<CountResult<CashCheck>> {
+  /**
+   * `dayJustClosed`: the caller closed the day with this same cash a moment ago (the signed cash step
+   * of "Close the store"). Without it, a day that is already closed takes no second cash count: the
+   * closing is one record a day, so the two closing screens can never show two different numbers.
+   */
+  async saveCashCheck(storeId: string, actor: Actor, id: string, input: { countedMinor?: unknown; note?: unknown }, dayJustClosed = false): Promise<CountResult<CashCheck>> {
     return this.run(async () => {
       const counted = input.countedMinor;
       if (typeof counted !== "number" || !Number.isInteger(counted) || counted < 0 || counted > MAX_CASH_MINOR) throw new CountError("Type the cash you counted");
       const figures = await this.cashFigures(storeId, actor, id);
+      if (figures.closed && !dayJustClosed) throw new StepError(conflict(`${figures.location} is already closed for ${figures.day}. The cash was counted then.`));
       const note = cleanNote(input.note);
       const after = { countedMinor: counted, expectedMinor: figures.expectedMinor, diffMinor: counted - figures.expectedMinor, note };
       await prisma.auditLog.create({ data: { storeId, actorType: "USER", actorId: actor.userId, action: "count.cash_check", entityType: "StockCount", entityId: id, after } });
@@ -854,18 +862,20 @@ export class CountService {
     const walkInIds = [...new Set(c.lines.map((l) => l.walkInOrderId).filter((x): x is string => !!x))];
     // The cash book (step 4), the same reading as the daily report: cash in at this store (sales,
     // deliveries and credit paid in cash), less cash given back, paid out of the drawer and handed over.
-    const [cash, savedRow] = await Promise.all([
+    const [cash, savedRow, close] = await Promise.all([
       cashOfDay(prisma, storeId, c.locationId, day),
       prisma.auditLog.findFirst({ where: { storeId, action: "count.cash_check", entityType: "StockCount", entityId: c.id }, orderBy: { createdAt: "desc" }, select: { after: true, createdAt: true } }),
+      prisma.dailyClose.findFirst({ where: { storeId, locationId: c.locationId, businessDate: day }, select: { cashCountedMinor: true, cashExpectedMinor: true, cashVarianceMinor: true, closedAt: true, closingCountId: true } }),
     ]);
     const walkInMinor = walkInIds.reduce((s, id) => s + (cash.inByOrder.get(id) ?? 0), 0);
     const salesMinor = cash.inMinor - cash.creditPaidMinor - walkInMinor;
     const salesCount = [...cash.inByOrder.entries()].filter(([id, v]) => id && v > 0 && !walkInIds.includes(id)).length;
     const a = (savedRow?.after ?? null) as { countedMinor?: number; expectedMinor?: number; diffMinor?: number; note?: string | null } | null;
     return {
-      countId: c.id, docNumber: c.docNumber, location: c.location.name, day,
+      countId: c.id, docNumber: c.docNumber, location: c.location.name, locationId: c.locationId, day,
       salesMinor, salesCount, walkInMinor, creditPaidMinor: cash.creditPaidMinor, givenBackMinor: cash.givenBackMinor, paidOutMinor: cash.paidOutMinor, handedOverMinor: cash.handedOverMinor, expectedMinor: cash.expectedMinor,
       saved: a && typeof a.countedMinor === "number" ? { countedMinor: a.countedMinor, expectedMinor: a.expectedMinor ?? 0, diffMinor: a.diffMinor ?? 0, note: a.note ?? null, at: savedRow!.createdAt } : null,
+      closed: close ? { countedMinor: close.cashCountedMinor, expectedMinor: close.cashExpectedMinor, diffMinor: close.cashVarianceMinor, at: close.closedAt, fromThisCount: close.closingCountId === c.id } : null,
     };
   }
 

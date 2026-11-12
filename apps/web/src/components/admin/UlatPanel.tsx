@@ -93,7 +93,7 @@ export default function UlatPanel({ role, onNavigate }: { role?: string; onNavig
         {tabs.map(([k, label]) => <li key={k} className="nav-item"><button className={`nav-link text-nowrap ${tab === k ? "active" : ""}`} onClick={() => setTab(k)}>{label}</button></li>)}
       </ul>
       {tab === "live" && <StockLive />}
-      {tab === "daily" && <Daily owner={owner} />}
+      {tab === "daily" && <Daily owner={owner} onNavigate={onNavigate} />}
       {tab === "monthly" && owner && <Monthly />}
       {tab === "kulang" && owner && <Kulang />}
       {tab === "trace" && owner && <Trace />}
@@ -377,7 +377,7 @@ interface DaySection {
   afterClose?: { count: number; totalMinor: number; cashMinor: number; cashGivenBackMinor?: number; cashPaidOutMinor?: number; cashHandedOverMinor?: number; takenBack?: { count: number; totalMinor: number } } | null;
 }
 
-function Daily({ owner }: { owner: boolean }) {
+function Daily({ owner, onNavigate }: { owner: boolean; onNavigate?: (tab: string) => void }) {
   const [date, setDate] = useState(today());
   const [data, setData] = useState<{ sections: DaySection[]; total: Record<string, number> } | null>(null);
   const [closing, setClosing] = useState<DaySection | null>(null);
@@ -390,7 +390,7 @@ function Daily({ owner }: { owner: boolean }) {
   }, [date]);
   useEffect(() => { void load(); }, [load]);
   const placeName = (id: string) => data?.sections.find((x) => x.location.id === id)?.location.name ?? "another store";
-  if (closing) return <CloseDay section={closing} date={date} onCancel={() => setClosing(null)} onDone={async () => { setClosing(null); await load(); }} />;
+  if (closing) return <CloseDay section={closing} date={date} onCancel={() => setClosing(null)} onDone={async () => { setClosing(null); await load(); }} onCountAll={onNavigate ? () => onNavigate("bilangin") : undefined} />;
   return (
     <div>
       <div className="d-flex gap-2 mb-3 align-items-center">
@@ -411,7 +411,7 @@ function Daily({ owner }: { owner: boolean }) {
               <div className="d-flex justify-content-between align-items-center">
                 <h2 className="h5 mb-0">{s.location.name}</h2>
                 {s.locked ? <span className="badge text-bg-secondary">Closed {s.closedAt ? new Date(s.closedAt).toLocaleTimeString("en-PH") : ""}</span>
-                  : date === today() ? <button type="button" className="btn btn-success" onClick={() => setClosing(s)}>Closing</button> : null}
+                  : date === today() ? <button type="button" className="btn btn-success" onClick={() => setClosing(s)}>Close the day</button> : null}
               </div>
               <div className="fs-4 mt-1">Sales {peso(s.sales.totalMinor)} <span className="fs-6 text-muted">({s.sales.count})</span></div>
               <div className="small">Cash {peso(s.sales.cashMinor)} · GCash {peso(s.sales.gcashMinor)} · Credit {peso(s.sales.utangMinor)}{s.sales.encodedLater ? ` · ${s.sales.encodedLater} from paper slips` : ""}</div>
@@ -446,7 +446,7 @@ function Daily({ owner }: { owner: boolean }) {
   );
 }
 
-function CloseDay({ section, date, onCancel, onDone }: { section: DaySection; date: string; onCancel: () => void; onDone: () => void | Promise<void> }) {
+function CloseDay({ section, date, onCancel, onDone, onCountAll }: { section: DaySection; date: string; onCancel: () => void; onDone: () => void | Promise<void>; onCountAll?: () => void }) {
   const [cash, setCash] = useState("");
   const [sig, setSig] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -487,6 +487,10 @@ function CloseDay({ section, date, onCancel, onDone }: { section: DaySection; da
     <div className="card border-success" style={{ maxWidth: 520, fontSize: 18 }}>
       <div className="card-body">
         <div className="small text-muted">Closing · {section.location.name} · {date}</div>
+        <div className="alert alert-info py-2 mt-2" role="note">
+          A store is closed once a day. This screen closes it with the cash only. To count all the rice as well, use <strong>Close the store</strong> on Count: its last step closes the same day, so you do not close here again.
+          {onCountAll && <div className="mt-2"><button type="button" className="btn btn-outline-primary btn-lg" onClick={onCountAll}>Go to Count</button></div>}
+        </div>
         <h2 className="h5">1. Count the cash in the drawer</h2>
         <p className="mb-2">Should be: <strong>{peso(section.cash.expectedMinor)}</strong> (cash sales and cash credit payments today, not counting the change fund)</p>
         {error && <div className="alert alert-danger py-2">{error}</div>}
