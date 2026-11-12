@@ -367,14 +367,14 @@ function StockLive() {
 
 interface DaySection {
   location: Loc; locked: boolean; closedAt: string | null; cashCountedMinor: number | null; cashVarianceMinor: number | null;
-  sales: { count: number; totalMinor: number; cashMinor: number; gcashMinor: number; utangMinor: number; encodedLater: number; grossProfitMinor: number; profitShareMinor?: number };
+  sales: { count: number; totalMinor: number; cashMinor: number; gcashMinor: number; utangMinor: number; encodedLater: number; grossProfitMinor: number; profitShareMinor?: number; takenBack?: { count: number; totalMinor: number } };
   kilosByVariety: { variety: string; grams: number; salesMinor: number }[];
   utang: { givenMinor: number; collectedMinor: number }; cash: { expectedMinor: number };
   stockIn: { documents: number }; trips: { releasedOut: number; receivedIn: number; returnedIn: number };
   resack: { jobs: number; lossGrams: number; lossValueMinor: number }; writeOffs: { count: number; valueMinor: number }; counts: { kulangMinor: number; sobraMinor: number };
   kargadors: { name: string; transactions: number }[];
   openHandOffs: { trips: { docNumber: string | null; status: string; product: string }[]; resacks: { docNumber: string; product: string }[] };
-  afterClose?: { count: number; totalMinor: number; cashMinor: number } | null;
+  afterClose?: { count: number; totalMinor: number; cashMinor: number; takenBack?: { count: number; totalMinor: number } } | null;
 }
 
 function Daily({ owner }: { owner: boolean }) {
@@ -414,6 +414,9 @@ function Daily({ owner }: { owner: boolean }) {
               </div>
               <div className="fs-4 mt-1">Sales {peso(s.sales.totalMinor)} <span className="fs-6 text-muted">({s.sales.count})</span></div>
               <div className="small">Cash {peso(s.sales.cashMinor)} · GCash {peso(s.sales.gcashMinor)} · Credit {peso(s.sales.utangMinor)}{s.sales.encodedLater ? ` · ${s.sales.encodedLater} from paper slips` : ""}</div>
+              {s.sales.takenBack && s.sales.takenBack.count > 0 && (
+                <div className="small"><i className="bi bi-arrow-counterclockwise me-1" aria-hidden="true"></i>Taken back this day: {s.sales.takenBack.count} {s.sales.takenBack.count === 1 ? "sale" : "sales"}, {peso(s.sales.takenBack.totalMinor)}. Already taken off the sales above.</div>
+              )}
               {owner && <div className="small">Profit (gross) {peso(s.sales.grossProfitMinor)}{s.sales.profitShareMinor ? <span className="text-muted"> (incl. profit share {s.sales.profitShareMinor > 0 ? "+" : "−"}{peso(Math.abs(s.sales.profitShareMinor))})</span> : null}</div>}
               <div className="small">Kilos: {s.kilosByVariety.map((v) => `${v.variety} ${kg(v.grams)}`).join(" · ") || "—"}</div>
               <div className="small">Credit given {peso(s.utang.givenMinor)} · paid {peso(s.utang.collectedMinor)}</div>
@@ -421,9 +424,9 @@ function Daily({ owner }: { owner: boolean }) {
               <div className="small">Transfers: out {s.trips.releasedOut} · in {s.trips.receivedIn} · returned {s.trips.returnedIn} · Stock in (supplier) {s.stockIn.documents}</div>
               <div className="small">Resack {s.resack.jobs} (short {kg(s.resack.lossGrams)}, {peso(s.resack.lossValueMinor)}) · Write-offs {s.writeOffs.count} ({peso(s.writeOffs.valueMinor)}) · Counts: short <span className="text-danger">{peso(s.counts.kulangMinor)}</span>, over {peso(s.counts.sobraMinor)}</div>
               {s.kargadors.length > 0 && <div className="small">Porters: {s.kargadors.map((k) => `${k.name} ${k.transactions}`).join(" · ")}</div>}
-              {s.afterClose && s.afterClose.count + s.afterClose.cashMinor > 0 && (
+              {s.afterClose && s.afterClose.count + s.afterClose.cashMinor + (s.afterClose.takenBack?.count ?? 0) > 0 && (
                 <div className="alert alert-danger py-1 px-2 mt-2 mb-0 small">
-                  <strong>After closing:</strong> sales {peso(s.afterClose.totalMinor)} ({s.afterClose.count}) · cash taken in {peso(s.afterClose.cashMinor)} — not included in the closed report above.
+                  <strong>After closing:</strong> sales {peso(s.afterClose.totalMinor)} ({s.afterClose.count}) · cash taken in {peso(s.afterClose.cashMinor)}{s.afterClose.takenBack?.count ? ` · ${s.afterClose.takenBack.count} taken back (${peso(s.afterClose.takenBack.totalMinor)})` : ""} — not included in the closed report above.
                 </div>
               )}
               {(s.openHandOffs.trips.length + s.openHandOffs.resacks.length) > 0 && (

@@ -21,7 +21,7 @@ type Tab = "stock" | "sales" | "records" | "compare" | "day" | "buffer";
 
 interface StockRow { productId: string; name: string; loose: boolean; unit: string; onHand: number; reserved: number; available: number; daysLeft?: number | null; flag: "ZERO" | "LOW" | "OK"; unitPriceMinor: number; valueMinor: number; costValueMinor?: number }
 interface StockData { location: { id: string; name: string }; rows: StockRow[]; totals: { items: number; low: number; empty: number; valueMinor: number; costValueMinor?: number } }
-interface SalesTotals { count: number; totalMinor: number; cashMinor: number; gcashMinor: number; creditMinor: number; otherMinor: number; costMinor?: number; grossProfitMinor?: number; profitShareMinor?: number }
+interface SalesTotals { count: number; totalMinor: number; cashMinor: number; gcashMinor: number; creditMinor: number; otherMinor: number; takenBack?: { count: number; totalMinor: number }; costMinor?: number; grossProfitMinor?: number; profitShareMinor?: number }
 interface SalesData { location: { id: string; name: string }; from: string; to: string; sales: SalesTotals; cashInMinor: number; creditGivenMinor: number; creditCollectedMinor: number; items: { name: string; unit: string; quantity: number; salesMinor: number; profitMinor?: number }[]; days: { date: string; count: number; totalMinor: number }[] }
 interface CompareData { from: string; to: string; stores: { location: { id: string; name: string; type: string }; sales: SalesTotals; cashInMinor: number; creditGivenMinor: number; creditCollectedMinor: number; stock: { items: number; low: number; empty: number; valueMinor: number }; owesMinor: number }[]; total: { salesMinor: number; count: number; grossProfitMinor: number; creditGivenMinor: number; stockValueMinor: number; owesMinor: number } }
 interface BufferData { buffer: { id: string; name: string } | null; owed: { productId: string; name: string; unit: string; quantity: number; valueMinor: number; oldestAt: string | null }[]; surplus: { productId: string; name: string; unit: string; quantity: number }[]; totals: { owedMinor: number; owedItems: number }; entries: { at: string; productName: string; unit: string; quantity: number; orderNumber: string | null; store: string | null; by: string | null; what: string }[] }
@@ -156,7 +156,7 @@ export default function StoreReportPanel({ role, onNavigate }: { role?: string; 
     if (!sales) return;
     printSlip({
       storeName: sales.location.name, title: "SALES", when: sales.from === sales.to ? sales.from : `${sales.from} to ${sales.to}`, a4,
-      lines: [{ label: "Sales", value: String(sales.sales.count) }],
+      lines: [{ label: "Sales", value: String(sales.sales.count) }, ...(sales.sales.takenBack?.count ? [{ label: "Taken back", value: `${sales.sales.takenBack.count} (${peso(sales.sales.takenBack.totalMinor)})` }] : [])],
       rows: rankedItems(sales.items, sortBy).map((i) => ({ name: i.name, qty: i.unit === "kg" ? `${i.quantity} kg` : String(i.quantity), note: peso(i.salesMinor) })),
       totals: [{ label: "Cash", value: peso(sales.sales.cashMinor) }, { label: "GCash", value: peso(sales.sales.gcashMinor) }, { label: "Credit", value: peso(sales.sales.creditMinor) }, { label: "Maya/bank/other", value: peso(sales.sales.otherMinor) }, { label: "Total", value: peso(sales.sales.totalMinor) }],
     });
@@ -253,6 +253,9 @@ export default function StoreReportPanel({ role, onNavigate }: { role?: string; 
             <div className="col-6 col-md-3"><div className="border rounded p-2"><div className="small text-muted">Credit</div><div className="fs-5">{peso(sales.sales.creditMinor)}</div></div></div>
             <div className="col-6 col-md-3"><div className="border rounded p-2"><div className="small text-muted">Maya / bank / other</div><div className="fs-5">{peso(sales.sales.otherMinor)}</div></div></div>
           </div>
+          {sales.sales.takenBack && sales.sales.takenBack.count > 0 && (
+            <div className="small mb-1"><i className="bi bi-arrow-counterclockwise me-1" aria-hidden="true"></i>Taken back in these dates: {sales.sales.takenBack.count} {sales.sales.takenBack.count === 1 ? "sale" : "sales"}, {peso(sales.sales.takenBack.totalMinor)}. Already taken off the numbers above.</div>
+          )}
           <div className="small mb-3">Cash received {peso(sales.cashInMinor)} · Credit collected {peso(sales.creditCollectedMinor)}{owner && sales.sales.grossProfitMinor !== undefined ? <> · <span className={sales.sales.grossProfitMinor < 0 ? "text-danger fw-bold" : "text-success fw-bold"}>Profit {peso(sales.sales.grossProfitMinor)}</span>{sales.sales.profitShareMinor ? <span className="text-muted"> (incl. profit share {sales.sales.profitShareMinor > 0 ? "+" : "−"}{peso(Math.abs(sales.sales.profitShareMinor))})</span> : null}</> : null}</div>
           <div className="d-flex flex-wrap align-items-center gap-2 mb-1">
             <h6 className="mb-0 me-auto">Items sold — {sortBy === "slow" ? "slowest first" : "best first"}</h6>
@@ -315,7 +318,7 @@ export default function StoreReportPanel({ role, onNavigate }: { role?: string; 
               <tbody>
                 {compare.stores.map((s) => (
                   <tr key={s.location.id}>
-                    <td className="fw-semibold">{s.location.name}<div className="small text-muted">{s.sales.count} sales</div></td>
+                    <td className="fw-semibold">{s.location.name}<div className="small text-muted">{s.sales.count} sales{s.sales.takenBack?.count ? ` · ${s.sales.takenBack.count} taken back` : ""}</div></td>
                     <td className="text-end">{peso(s.sales.totalMinor)}</td>
                     <td className="text-end">{peso(s.sales.cashMinor)}</td>
                     <td className="text-end">{peso(s.sales.creditMinor)}</td>
