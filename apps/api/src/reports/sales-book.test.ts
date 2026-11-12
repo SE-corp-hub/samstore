@@ -231,3 +231,34 @@ test("an agent order delivered in part counts for what was delivered", async () 
   const day = await daily(fx, manilaDate(now));
   assert.deepEqual([day(fx.bt).totalMinor, day(fx.bt).costMinor], [405_000, 345_000], "profit is on 3 sacks, not 5");
 });
+
+// Per-store build, step 5 — net profit per store on Compare stores.
+test("net profit per store: each store's profit less its own expenses, and all of it adds up to the whole business", async () => {
+  const fx = await fixture();
+  const now = new Date();
+  const today = manilaDate(now);
+  // Bahay Tindahan: 2 sacks at ₱1,350 (cost ₱1,150): profit ₱400. Main store: 3 sacks at ₱1,300: profit ₱450.
+  await sale(fx, { at: now, locationId: fx.bt, lines: [sacks(fx, 2, 135_000)] });
+  await sale(fx, { at: now, locationId: fx.main, lines: [sacks(fx, 3)] });
+  const spend = (locationId: string | null, amountMinor: number, voided = false) =>
+    prisma.expense.create({ data: { storeId: fx.storeId, locationId, category: "other", amountMinor, spentAt: now, ...(voided ? { voidedAt: now, voidReason: "wrong" } : {}) } });
+  await spend(fx.bt, 15_000); //   Bahay Tindahan: ₱150
+  await spend(fx.bt, 99_900, true); // cancelled: counts nowhere
+  await spend(fx.main, 60_000); // main store: ₱600, more than its profit
+  await spend(null, 10_000); //    whole business: ₱100
+
+  const cmp = await compare(fx, today, today);
+  const at = (id: string) => cmp.stores.find((s) => s.location.id === id)!;
+  assert.deepEqual([at(fx.bt).sales.grossProfitMinor, at(fx.bt).expensesMinor, at(fx.bt).netProfitMinor], [40_000, 15_000, 25_000]);
+  assert.deepEqual([at(fx.main).sales.grossProfitMinor, at(fx.main).expensesMinor, at(fx.main).netProfitMinor], [45_000, 60_000, -15_000], "a store can show a loss");
+  assert.equal(cmp.business.expensesMinor, 10_000);
+  assert.deepEqual([cmp.total.grossProfitMinor, cmp.total.expensesMinor, cmp.total.netProfitMinor], [85_000, 85_000, 0]);
+  assert.equal(cmp.stores.reduce((a, s) => a + s.netProfitMinor, 0) - cmp.business.expensesMinor, cmp.total.netProfitMinor, "the stores added together, less the whole-business expenses, are the whole business");
+
+  const old = await oldReports(fx, today, today);
+  assert.equal(old.profitMinor, cmp.total.netProfitMinor, "the old Reports screen shows the same net profit");
+  assert.equal(old.expensesMinor, cmp.total.expensesMinor);
+  const month = await new RiceReportsService().monthly(fx.storeId, fx.owner, today.slice(0, 7));
+  assert.equal(month.ok, true, msg(month));
+  if (month.ok) assert.equal(month.value.profit.netProfitMinor, cmp.total.netProfitMinor, "and so does the month report");
+});
