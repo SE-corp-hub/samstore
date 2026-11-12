@@ -4,7 +4,7 @@ import ProductPhoto from "./ProductPhoto";
 import { useCallback, useEffect, useState } from "react";
 import { API_URL } from "../../config";
 import { adminHeaders, roleCan } from "../../lib/admin";
-import { peso } from "../../lib/number-format";
+import { kg, peso } from "../../lib/number-format";
 
 interface InvItem {
   photoKey?: string | null;
@@ -38,6 +38,10 @@ const formatBaseQty = (qty: number, unit: string) => {
 const STATUS_BADGE: Record<string, string> = { in: "text-bg-success", low: "text-bg-warning", out: "text-bg-danger" };
 
 const SHOW_CONVERT = false;
+/** Plain words for the stock badge. */
+const STATUS_WORD: Record<InvItem["status"], string> = { in: "In stock", low: "Low", out: "Sold out" };
+/** Loose rice is kept in grams (1 g per unit): show it in kilos, like everywhere else in the app. */
+const qtyText = (r: Pick<InvItem, "stockBaseUnit" | "stockBaseQuantity">, q: number) => (r.stockBaseUnit === "g" && r.stockBaseQuantity === 1 ? kg(q) : String(q));
 
 export default function InventoryPanel({ role = "" }: { role?: string }) {
   // Changing a number by hand is for the owner and managers (the server refuses everyone else): staff use Stock in and Count.
@@ -291,7 +295,7 @@ export default function InventoryPanel({ role = "" }: { role?: string }) {
 
       <div className="row g-2 mb-2">
         <div className="col-12 col-lg-3">
-          <input className="form-control form-control-sm" aria-label="Search products" placeholder="Search name or SKU…" value={search} onChange={(e) => setSearch(e.target.value)} />
+          <input className="form-control form-control-sm" aria-label="Search products" placeholder="Search rice name or code…" value={search} onChange={(e) => setSearch(e.target.value)} />
         </div>
         <div className="col-6 col-lg-2">
           <select className="form-select form-select-sm" aria-label="Category" value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
@@ -301,7 +305,7 @@ export default function InventoryPanel({ role = "" }: { role?: string }) {
         </div>
         <div className="col-6 col-lg-3">
           <select className="form-select form-select-sm" aria-label="Location" value={warehouseId} onChange={(e) => setWarehouseId(e.target.value)}>
-            <option value="">All warehouses</option>
+            <option value="">All stores and Bodega</option>
             {warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}{w.isDefault ? " (default)" : ""}</option>)}
           </select>
         </div>
@@ -403,8 +407,8 @@ export default function InventoryPanel({ role = "" }: { role?: string }) {
             <thead>
               <tr>
                 <th>Product</th><th className="col-wide">SKU</th><th className="col-wide">Category</th>
-                <th className="text-end">On hand</th><th className="text-end col-wide">Reserved</th>
-                <th className="text-end">Available</th>{hasCost && <th className="text-end col-wide">Unit cost</th>}
+                <th className="text-end">On the shelf</th><th className="text-end col-wide">Held for orders</th>
+                <th className="text-end">Free to sell</th>{hasCost && <th className="text-end col-wide">Unit cost</th>}
                 {hasCost && <th className="text-end">Value</th>}<th>Status</th><th></th>
               </tr>
             </thead>
@@ -414,12 +418,12 @@ export default function InventoryPanel({ role = "" }: { role?: string }) {
                   <td className="fw-semibold"><div className="d-flex align-items-center gap-2"><ProductPhoto photoKey={r.photoKey} size="thumb" /><div>{r.name}<div className="small text-muted fw-normal d-lg-none">{r.sku}{r.quantityReserved > 0 ? ` · ${r.quantityReserved} reserved` : ""}</div></div></div></td>
                   <td className="small text-muted col-wide">{r.sku}</td>
                   <td className="small text-muted col-wide">{r.category ?? "—"}</td>
-                  <td className="text-end">{r.quantityOnHand}</td>
-                  <td className="text-end text-muted col-wide">{r.quantityReserved}</td>
-                  <td className="text-end fw-semibold">{r.availableQuantity}</td>
+                  <td className="text-end">{qtyText(r, r.quantityOnHand)}</td>
+                  <td className="text-end text-muted col-wide">{qtyText(r, r.quantityReserved)}</td>
+                  <td className="text-end fw-semibold">{qtyText(r, r.availableQuantity)}</td>
                   {hasCost && <td className="text-end col-wide">{toPesos(r.costMinor)}</td>}
                   {hasCost && <td className="text-end">{toPesos(r.valueMinor)}</td>}
-                  <td><span className={`badge ${STATUS_BADGE[r.status]}`}>{r.status}{r.reorderThreshold > 0 ? ` ≤${r.reorderThreshold}` : ""}</span></td>
+                  <td><span className={`badge ${STATUS_BADGE[r.status]}`}>{STATUS_WORD[r.status]}{r.reorderThreshold > 0 ? ` (reorder at ${r.reorderThreshold})` : ""}</span></td>
                   <td className="text-end">
                     {canChange && (
                       <button type="button" className="btn btn-sm btn-outline-primary text-nowrap" aria-label={`Adjust ${r.name}`}

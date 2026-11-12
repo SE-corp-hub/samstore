@@ -120,7 +120,8 @@ export default function OverviewPanel({ onNavigate, storeName }: OverviewProps) 
   const today = daily.length > 0 ? daily[daily.length - 1] : null;
   const awaiting = countOf("RECEIVED") + countOf("CONFIRMED");
   const outForDelivery = countOf("OUT_FOR_DELIVERY");
-  const chartData = daily.map((d) => ({ label: d.date.slice(5), value: d.revenueMinor }));
+  // Dates read "Nov 6", not "11-06" (which many read as 11 June).
+  const chartData = daily.map((d) => ({ label: new Date(`${d.date}T00:00:00+08:00`).toLocaleDateString("en-PH", { month: "short", day: "numeric", timeZone: "Asia/Manila" }), value: d.revenueMinor }));
 
   if (loading) {
     return (

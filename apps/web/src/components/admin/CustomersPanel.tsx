@@ -267,13 +267,13 @@ export default function CustomersPanel() {
   return (
       <div>
         <div className="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
-          <h1 className="h4 mb-0">Customers &amp; Loyalty</h1>
+          <h1 className="h4 mb-0">Customers</h1>
         <div className="d-flex gap-2">
           <button className="btn btn-primary btn-sm" onClick={openAdd}>
             <i className="bi bi-plus-lg me-1"></i>Add customer
           </button>
           <button className="btn btn-outline-secondary btn-sm" onClick={exportCsv}>
-            <i className="bi bi-filetype-csv me-1"></i>Export CSV
+            <i className="bi bi-download me-1" aria-hidden="true"></i>Download list
           </button>
         </div>
       </div>
@@ -281,18 +281,18 @@ export default function CustomersPanel() {
 
       <div className="row g-2 mb-2">
         <div className="col-md-5">
-          <input className="form-control form-control-sm" aria-label="Search customers" placeholder="Search name, email or phone…" value={search} onChange={(e) => setSearch(e.target.value)} />
+          <input className="form-control form-control-sm" aria-label="Search customers" placeholder="Search name or phone…" value={search} onChange={(e) => setSearch(e.target.value)} />
         </div>
         <div className="col-md-3">
           <select className="form-select form-select-sm" aria-label="Approval" value={approvalFilter} onChange={(e) => setApprovalFilter(e.target.value)}>
-            <option value="">All approval statuses</option>
+            <option value="">Everyone</option>
             {Object.keys(APPROVAL_BADGE).map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
         </div>
         <div className="col-md-2">
           <div className="form-check form-switch">
             <input className="form-check-input" type="checkbox" id="onlyUtang" checked={onlyUtang} onChange={(e) => setOnlyUtang(e.target.checked)} />
-            <label className="form-check-label small" htmlFor="onlyUtang">Has credit</label>
+            <label className="form-check-label" htmlFor="onlyUtang">Owes money only</label>
           </div>
         </div>
       </div>
@@ -300,7 +300,7 @@ export default function CustomersPanel() {
       {loading ? (
         <p className="text-muted">Loading…</p>
       ) : customers.length === 0 ? (
-        <p className="text-muted">No customers match.</p>
+        <p>{search.trim() || onlyUtang || approvalFilter ? "No customers match. Clear the search to see everyone." : "No customers yet. A customer added on POS, Pre-order or with Add customer shows here."}</p>
       ) : (
         <div className="table-responsive">
         <table className="table table-hover align-middle">
