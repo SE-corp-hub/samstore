@@ -82,6 +82,27 @@ export class PeopleController {
     }, actor.userId));
   }
 
+  /** PATCH /admin/people/:userId/details — owner corrects a login's name or mobile number. */
+  @Patch("people/:userId/details")
+  async editPerson(@Req() req: Req_, @Param("userId") userId: string, @Body() body: Record<string, unknown>, @Headers("x-store-id") h?: string) {
+    const { storeId, actor } = await this.ctx(req, h, TENANT_ROLES.MANAGE);
+    return unwrap(await this.people.editPerson(storeId, userId, { name: str(body?.name), phone: optNullStr(body?.phone) }, actor.userId));
+  }
+
+  /** POST /admin/people/ready — owner makes a login to hand over later (temporary password shown once). */
+  @Post("people/ready")
+  async createReady(@Req() req: Req_, @Body() body: Record<string, unknown>, @Headers("x-store-id") h?: string) {
+    const { storeId, actor } = await this.ctx(req, h, TENANT_ROLES.MANAGE);
+    return unwrap(await this.people.createReadyLogin(storeId, { label: str(body?.label), homeLocationId: optNullStr(body?.homeLocationId), isLocationHead: body?.isLocationHead === true }, actor.userId));
+  }
+
+  /** POST /admin/people/:userId/hand-over — a ready login goes to a real person (new temporary password shown once). */
+  @Post("people/:userId/hand-over")
+  async handOver(@Req() req: Req_, @Param("userId") userId: string, @Body() body: Record<string, unknown>, @Headers("x-store-id") h?: string) {
+    const { storeId, actor } = await this.ctx(req, h, TENANT_ROLES.MANAGE);
+    return unwrap(await this.people.handOverLogin(storeId, userId, { name: str(body?.name), phone: optNullStr(body?.phone) }, actor.userId));
+  }
+
   // ── kargadors ──
 
   /** GET /admin/kargadors — active kargadors (?all=1 includes inactive). Staff need it to pick who signs. */

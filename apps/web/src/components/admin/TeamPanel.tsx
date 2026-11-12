@@ -18,6 +18,8 @@ interface Member {
   joinedAt?: string;
   homeLocationId?: string | null;
   isLocationHead?: boolean;
+  /** Step 8: a ready-made login still waiting to be handed over to a person. */
+  readyLabel?: string | null;
   hasPin?: boolean;
   pinLocked?: boolean;
   addedBy?: string | null;
@@ -43,6 +45,14 @@ export default function TeamPanel() {
   const [pinFor, setPinFor] = useState<string | null>(null);
   const [pinValue, setPinValue] = useState("");
   const canManage = roleCan(getAdminRole(), "manageTeam");
+  // Step 8: logins made ahead and handed over later.
+  const [ready, setReady] = useState({ label: "", homeLocationId: "", head: false });
+  const [readyError, setReadyError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  /** Shown once, until the owner says it is written down. */
+  const [slip, setSlip] = useState<{ title: string; signIn: string; password: string } | null>(null);
+  const [details, setDetails] = useState<{ userId: string; mode: "handover" | "edit"; label: string; name: string; phone: string } | null>(null);
+  const [detailsError, setDetailsError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -72,6 +82,50 @@ export default function TeamPanel() {
     const l = locations.find((x) => x.id === id);
     return l ? `${l.code ? `${l.code} · ` : ""}${l.name}` : "—";
   };
+
+  const send = async (path: string, method: "POST" | "PATCH", body: unknown) => {
+    try {
+      const res = await fetch(`${API_URL}${path}`, { method, headers: { "Content-Type": "application/json", ...adminHeaders() }, body: JSON.stringify(body) });
+      const d = await res.json().catch(() => null);
+      return res.ok ? { ok: true as const, data: d } : { ok: false as const, message: errText(d, "Not saved. Try again.") };
+    } catch {
+      return { ok: false as const, message: "No connection. Not saved. Try again." };
+    }
+  };
+
+  const makeReady = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setReadyError(null); setNotice(null); setError(null);
+    if (ready.label.trim().length < 2) { setReadyError("Give the login a short name, like Lipa counter."); return; }
+    if (!ready.homeLocationId) { setReadyError("Choose the store this login is for."); return; }
+    setBusy(true);
+    const r = await send("/admin/people/ready", "POST", { label: ready.label, homeLocationId: ready.homeLocationId, isLocationHead: ready.head });
+    setBusy(false);
+    if (!r.ok) { setReadyError(r.message); return; }
+    setSlip({ title: `Ready login "${r.data.label}" is made`, signIn: r.data.signInName, password: r.data.tempPassword });
+    setReady({ label: "", homeLocationId: "", head: false });
+    await load();
+  };
+
+  const saveDetails = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!details) return;
+    setDetailsError(null); setNotice(null); setError(null);
+    if (details.name.trim().length < 2) { setDetailsError("Type the person's name."); return; }
+    setBusy(true);
+    const body = { name: details.name, ...(details.phone.trim() ? { phone: details.phone.trim() } : {}) };
+    const r = details.mode === "handover"
+      ? await send(`/admin/people/${details.userId}/hand-over`, "POST", body)
+      : await send(`/admin/people/${details.userId}/details`, "PATCH", body);
+    setBusy(false);
+    if (!r.ok) { setDetailsError(r.message); return; }
+    if (details.mode === "handover") setSlip({ title: `"${details.label}" now belongs to ${r.data.name}`, signIn: r.data.signInWith, password: r.data.tempPassword });
+    else setNotice("Name and number saved.");
+    setDetails(null);
+    await load();
+  };
+
+  const waitingReady = members.filter((m) => m.readyLabel);
 
   const invite = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -203,6 +257,95 @@ export default function TeamPanel() {
         </form>
       )}
 
+      {slip && (
+        <div className="card border-warning border-2 mb-4" role="alert">
+          <div className="card-body">
+            <h2 className="h5">{slip.title}</h2>
+            <p className="mb-2">Write these down now. The password is shown only this once.</p>
+            <dl className="row mb-2 fs-5">
+              <dt className="col-sm-4 fw-normal">Sign in with</dt>
+              <dd className="col-sm-8 fw-bold text-break" id="tm-slip-signin">{slip.signIn}</dd>
+              <dt className="col-sm-4 fw-normal">Temporary password</dt>
+              <dd className="col-sm-8 fw-bold text-break" id="tm-slip-password" style={{ fontFamily: "ui-monospace, monospace", letterSpacing: "0.05em" }}>{slip.password}</dd>
+            </dl>
+            <p className="text-muted mb-3">At the first sign-in the app asks for a new password. After that you can set a PIN for the tablet.</p>
+            <button type="button" className="btn btn-success btn-lg" onClick={() => setSlip(null)}><i className="bi bi-check-lg me-1" aria-hidden="true"></i>I wrote it down</button>
+          </div>
+        </div>
+      )}
+
+      {canManage && (
+        <section className="card mb-4" aria-labelledby="tm-ready-title">
+          <div className="card-body">
+            <h2 className="h6 card-title" id="tm-ready-title">Ready logins</h2>
+            <p className="text-muted small">Make a login for a store now and hand it over when you know who will use it. Its sales belong to that store from the first day.</p>
+            <form onSubmit={makeReady} className="row g-2 align-items-end" noValidate>
+              <div className="col-md-4">
+                <label className="form-label small mb-1" htmlFor="tm-ready-label">Name of the login</label>
+                <input id="tm-ready-label" className="form-control" placeholder="Lipa counter" maxLength={40} autoComplete="off" value={ready.label} onChange={(e) => setReady({ ...ready, label: e.target.value })} />
+              </div>
+              <div className="col-md-3">
+                <label className="form-label small mb-1" htmlFor="tm-ready-store">Store</label>
+                <select id="tm-ready-store" className="form-select" value={ready.homeLocationId} onChange={(e) => setReady({ ...ready, homeLocationId: e.target.value })}>
+                  <option value="">Choose…</option>
+                  {locations.map((l) => <option key={l.id} value={l.id}>{locLabel(l.id)}</option>)}
+                </select>
+              </div>
+              <div className="col-md-auto">
+                <label className="exp-check" htmlFor="tm-ready-head">
+                  <input id="tm-ready-head" type="checkbox" className="form-check-input" checked={ready.head} onChange={(e) => setReady({ ...ready, head: e.target.checked })} />
+                  <span>Head of this store</span>
+                </label>
+              </div>
+              <div className="col-md-auto">
+                <button className="btn btn-success" type="submit" disabled={busy} style={{ minHeight: 48 }}>{busy ? "Making…" : "Make the login"}</button>
+              </div>
+              {readyError && <div className="col-12 text-danger fw-semibold" role="alert">{readyError}</div>}
+            </form>
+            {waitingReady.length > 0 && (
+              <ul className="list-group mt-3">
+                {waitingReady.map((m) => (
+                  <li key={m.userId} className="list-group-item d-flex flex-wrap justify-content-between align-items-center gap-2">
+                    <div style={{ minWidth: 0 }}>
+                      <div className="fw-semibold">{m.readyLabel}{m.isLocationHead ? " · Head" : ""} <span className="badge text-bg-warning ms-1">Waiting to be handed over</span></div>
+                      <div className="small text-muted text-break">{locLabel(m.homeLocationId)} · signs in with {m.email ?? m.phone}</div>
+                    </div>
+                    <button type="button" className="btn btn-outline-success" style={{ minHeight: 48 }} onClick={() => { setDetails({ userId: m.userId, mode: "handover", label: m.readyLabel ?? "", name: "", phone: "" }); setDetailsError(null); }}>
+                      <i className="bi bi-person-check me-1" aria-hidden="true"></i>Hand over
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </section>
+      )}
+
+      {details && (
+        <form onSubmit={saveDetails} className="card mb-4 border-success" noValidate>
+          <div className="card-body">
+            <h2 className="h6">{details.mode === "handover" ? `Hand over "${details.label}"` : `Name and number of ${details.label}`}</h2>
+            {details.mode === "handover" && <p className="small text-muted mb-2">The login gets the person&apos;s name and a new temporary password. Whoever used it before is signed out, and the old PIN stops working.</p>}
+            <div className="row g-2" style={{ maxWidth: 640 }}>
+              <div className="col-sm-6">
+                <label className="form-label small mb-1" htmlFor="tm-det-name">Name of the person</label>
+                <input id="tm-det-name" className="form-control form-control-lg" autoComplete="off" autoFocus maxLength={60} value={details.name} onChange={(e) => { setDetails({ ...details, name: e.target.value }); setDetailsError(null); }} />
+              </div>
+              <div className="col-sm-6">
+                <label className="form-label small mb-1" htmlFor="tm-det-phone">Mobile number (optional)</label>
+                <input id="tm-det-phone" className="form-control form-control-lg" inputMode="tel" autoComplete="off" placeholder="0917 123 4567" value={details.phone} onChange={(e) => { setDetails({ ...details, phone: e.target.value }); setDetailsError(null); }} aria-describedby="tm-det-help" />
+              </div>
+            </div>
+            <div className="form-text" id="tm-det-help">With a mobile number the person can sign in with that number and a PIN.</div>
+            {detailsError && <div className="text-danger fw-semibold mt-1" role="alert">{detailsError}</div>}
+            <div className="d-flex gap-2 mt-3">
+              <button className="btn btn-success btn-lg" type="submit" disabled={busy}>{busy ? "Saving…" : details.mode === "handover" ? "Hand over" : "Save"}</button>
+              <button className="btn btn-outline-secondary btn-lg" type="button" disabled={busy} onClick={() => setDetails(null)}>Back</button>
+            </div>
+          </div>
+        </form>
+      )}
+
       {pinFor && (
         <form onSubmit={savePin} className="card mb-4 border-success">
           <div className="card-body">
@@ -239,7 +382,7 @@ export default function TeamPanel() {
               {members.map((m) => (
                 <tr key={m.userId}>
                   <td>
-                    <div className="fw-semibold">{m.name ?? "—"}</div>
+                    <div className="fw-semibold">{m.name ?? "—"}{m.readyLabel && <span className="badge text-bg-warning ms-1">Ready login</span>}</div>
                     {(m.phone || m.email) && <div className="small d-lg-none text-nowrap">{m.phone ?? m.email}</div>}
                     <div className="small text-muted">
                       {m.addedBy ? `Added by ${m.addedBy}` : "Joined"}{m.joinedAt ? ` · ${day(m.joinedAt)}` : ""}
@@ -300,6 +443,9 @@ export default function TeamPanel() {
                         )}
                         {m.role !== "OWNER" && (
                           <>
+                            <button className="btn btn-sm btn-outline-secondary text-nowrap" onClick={() => { setDetails({ userId: m.userId, mode: "edit", label: m.name ?? "this login", name: m.name ?? "", phone: m.phone ?? "" }); setDetailsError(null); window.scrollTo({ top: 0, behavior: "smooth" }); }}>
+                              <i className="bi bi-pencil me-1" aria-hidden="true"></i>Edit name
+                            </button>
                             <button
                               className="btn btn-sm btn-outline-secondary text-nowrap"
                               onClick={async () => {

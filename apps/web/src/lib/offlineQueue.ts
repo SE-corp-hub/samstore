@@ -6,7 +6,7 @@
 // the server is down (lib/retryable.ts); only a clear refusal is listed under "Not sent".
 
 import { API_URL } from "../config";
-import { adminHeaders } from "./admin";
+import { adminHeaders, getAdminUserId, getAuthItem } from "./admin";
 import { newSaleKey } from "./saleKey";
 import { keepInQueue } from "./retryable";
 import { notFromApi } from "./wake-fetch";
@@ -16,7 +16,18 @@ const QUEUE = "rice-offline-queue-v1";
 const FAILED = "rice-offline-failed-v1";
 const EVENT = "rice-queue";
 
-export interface QueuedStep { id: string; path: string; body: unknown; label: string; createdAt: number; attempts: number; /** What the screen shows while it waits (never sent). */ view?: unknown }
+export interface QueuedStep {
+  id: string; path: string; body: unknown; label: string; createdAt: number; attempts: number;
+  /** What the screen shows while it waits (never sent). */
+  view?: unknown;
+  /**
+   * Per-store build, step 8: the login that made this step, and its name then. A step is only ever
+   * sent under its maker's own login, so a sale saved offline by one seller is never booked to the
+   * next person (or the next store) who signs in on the same tablet. Steps saved before this have none.
+   */
+  by?: string;
+  byName?: string;
+}
 export interface FailedStep { id: string; label: string; message: string; at: number }
 export type StepResult = { status: "sent"; ok: boolean; data: (Record<string, unknown> & { message?: string; errors?: string[] }) | null } | { status: "queued" };
 
@@ -40,7 +51,12 @@ function write<T>(key: string, items: T[]): boolean {
   }
 }
 
-export const queuedSteps = () => read<QueuedStep>(QUEUE);
+const allSteps = () => read<QueuedStep>(QUEUE);
+const isMine = (s: QueuedStep, me: string) => !s.by || s.by === me;
+/** What the signed-in login has waiting (and steps saved before makers were recorded). */
+export const queuedSteps = () => { const me = getAdminUserId(); return allSteps().filter((s) => isMine(s, me)); };
+/** Steps another login made on this tablet: they wait until that login signs in here again. */
+export const heldSteps = () => { const me = getAdminUserId(); return allSteps().filter((s) => !isMine(s, me)); };
 export const failedSteps = () => read<FailedStep>(FAILED);
 export const clearFailed = () => write<FailedStep>(FAILED, []);
 export const QUEUE_EVENT = EVENT;
@@ -78,8 +94,10 @@ export async function sendStep(path: string, body: unknown, label: string, view?
       /* no signal mid-send: queue it with the SAME key — if it did arrive, the server answers once */
     }
   }
-  const items = queuedSteps();
-  items.push({ id, path, body, label, createdAt: Date.now(), attempts: 0, ...(view === undefined ? {} : { view }) });
+  const items = allSteps();
+  const by = getAdminUserId();
+  const byName = getAuthItem("samstore.admin.email");
+  items.push({ id, path, body, label, createdAt: Date.now(), attempts: 0, ...(view === undefined ? {} : { view }), ...(by ? { by, ...(byName ? { byName } : {}) } : {}) });
   if (!write(QUEUE, items)) return { status: "sent", ok: false, data: { message: "No signal and the phone is full — try again later" } };
   if (!noSignal) void flushQueue();
   return { status: "queued" };
@@ -87,7 +105,7 @@ export async function sendStep(path: string, body: unknown, label: string, view?
 
 let flushing = false;
 
-/** Send what is waiting, oldest first. Stops at the first step that still has no signal. */
+/** Send what the signed-in login has waiting, oldest first. Stops at the first step that still has no signal. Another login's steps stay. */
 export async function flushQueue(): Promise<{ sent: number; failed: number }> {
   if (flushing) return { sent: 0, failed: 0 };
   flushing = true;
@@ -101,7 +119,7 @@ export async function flushQueue(): Promise<{ sent: number; failed: number }> {
       try {
         r = await post(next.path, next.body, next.id);
       } catch {
-        write(QUEUE, queuedSteps().map((s) => (s.id === next.id ? { ...s, attempts: s.attempts + 1 } : s)));
+        write(QUEUE, allSteps().map((s) => (s.id === next.id ? { ...s, attempts: s.attempts + 1 } : s)));
         break;
       }
       if (!r.reachedApi) break; // the server is asleep or unreachable: the same as no signal, however long it takes
@@ -109,10 +127,10 @@ export async function flushQueue(): Promise<{ sent: number; failed: number }> {
       if (r.status === 409 && /Pinoproseso|process/i.test(String(r.data?.message ?? ""))) break; // still running server-side — try again later
       if (!r.ok && keepInQueue(r.status, next.attempts)) {
         // The login ran out or the server was busy: the sale stays on the phone and goes later.
-        write(QUEUE, queuedSteps().map((s) => (s.id === next.id ? { ...s, attempts: s.attempts + 1 } : s)));
+        write(QUEUE, allSteps().map((s) => (s.id === next.id ? { ...s, attempts: s.attempts + 1 } : s)));
         break;
       }
-      write(QUEUE, queuedSteps().filter((s) => s.id !== next.id));
+      write(QUEUE, allSteps().filter((s) => s.id !== next.id));
       if (r.ok) sent++;
       else {
         failed++;
