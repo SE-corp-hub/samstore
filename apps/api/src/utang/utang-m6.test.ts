@@ -245,9 +245,9 @@ test("M6: reminders go out once per period, only to customers who owe, and can b
   const fx = await fixture();
   setSmsProviderForTests(new MockSmsProvider());
   assert.equal((await sellUtang(fx, 1)).ok, true);
-  // Make the utang 40 days old.
-  await prisma.creditEntry.updateMany({ where: { storeCustomerId: fx.customerId }, data: { createdAt: new Date(Date.now() - 40 * 86_400_000) } });
   const firstOfMonth = new Date("2026-11-02T02:00:00Z"); // 10 am, 2 Nov, Manila
+  // Make the utang 40 days old on that day (counted from the test's own "now", not from the day the test runs).
+  await prisma.creditEntry.updateMany({ where: { storeCustomerId: fx.customerId }, data: { createdAt: new Date(firstOfMonth.getTime() - 40 * 86_400_000) } });
   const r1 = await utang.runReminders(fx.storeId, firstOfMonth);
   assert.deepEqual(r1, { monthly: 1, overdue: 1 });
   const r2 = await utang.runReminders(fx.storeId, new Date(firstOfMonth.getTime() + 3_600_000));
