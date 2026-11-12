@@ -8,7 +8,8 @@ import { JwtAuthGuard, type AuthPrincipal } from "../auth/auth.guard.js";
 import { requireUser, resolveTenant, TENANT_ROLES } from "../auth/tenant-context.js";
 import { loadActor } from "../people/people.service.js";
 import { signaturesFrom } from "../people/signature-input.js";
-import { CountService } from "./count.service.js";
+import { CountService, MAX_CASH_MINOR } from "./count.service.js";
+import { RiceReportsService } from "../reports/rice-reports.service.js";
 
 function statusFor(error: ApiError): HttpStatus {
   switch (error.type) {
@@ -35,6 +36,7 @@ const obj = (v: unknown): Record<string, unknown> => (v && typeof v === "object"
 @UseInterceptors(IdempotencyInterceptor)
 export class CountController {
   private readonly counts = new CountService();
+  private readonly reports = new RiceReportsService();
 
   private async ctx(req: Req_, h: string | undefined) {
     const user = req.user;
@@ -99,11 +101,24 @@ export class CountController {
     return unwrap(await this.counts.cashCheck(storeId, actor, id));
   }
 
-  /** POST /admin/counts/:id/cash — { countedMinor, note? }: record the cash counted at closing (nothing moves). */
+  /**
+   * POST /admin/counts/:id/cash — { countedMinor, note?, signatures? }: the cash counted at closing.
+   * Signed (the app since Nov 2026): it also closes the day at that store, the same record that
+   * Reports & closing makes, so there is one closing a day. Not signed (an app saved on a tablet
+   * before that): only the number is recorded, as before. A day already closed takes no second count.
+   */
   @Post("counts/:id/cash")
   async saveCash(@Req() req: Req_, @Param("id") id: string, @Body() body: Record<string, unknown>, @Headers("x-store-id") h?: string) {
     const { storeId, actor } = await this.ctx(req, h);
-    return unwrap(await this.counts.saveCashCheck(storeId, actor, id, { countedMinor: body?.countedMinor, note: body?.note }));
+    const signatures = signaturesFrom(body?.signatures);
+    if (signatures.length === 0) return unwrap(await this.counts.saveCashCheck(storeId, actor, id, { countedMinor: body?.countedMinor, note: body?.note }));
+    // Checked here as well: the day must not close on a number the cash check would then refuse.
+    const counted = body?.countedMinor;
+    if (typeof counted !== "number" || !Number.isInteger(counted) || counted < 0 || counted > MAX_CASH_MINOR) throw new HttpException({ type: "validation", errors: ["Type the cash you counted"] } satisfies ApiError, HttpStatus.UNPROCESSABLE_ENTITY);
+    const figures = unwrap(await this.counts.cashCheck(storeId, actor, id));
+    if (figures.closed) throw new HttpException({ type: "conflict", message: `${figures.location} is already closed for ${figures.day}. The cash was counted then.` } satisfies ApiError, HttpStatus.CONFLICT);
+    unwrap(await this.reports.close(storeId, actor, { locationId: figures.locationId, date: figures.day, cashCountedMinor: counted, closingCountId: id, note: str(body?.note), signatures }));
+    return unwrap(await this.counts.saveCashCheck(storeId, actor, id, { countedMinor: body?.countedMinor, note: body?.note }, true));
   }
 
   /** GET /admin/counts/report?locationId=&from=&to= — counts posted in a period, totals, shortages by reason, every difference. */
