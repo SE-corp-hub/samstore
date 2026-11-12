@@ -23,7 +23,7 @@ import { PesoInput, WholeInput } from "../NumberBoxes";
 import DeliveryZonesCard from "./DeliveryZonesCard";
 import NoStoreScope from "./NoStoreScope";
 import PrinterSettingsCard from "./PrinterSettingsCard";
-import { shopLinkOn, shopLinkUrl } from "../../lib/shop-link";
+import { shopLinkOn } from "../../lib/shop-link";
 
 interface StoreSettings {
   id: string;
@@ -200,6 +200,19 @@ export default function SettingsPanel({ role = "" }: { role?: string }) {
   const [mpErr, setMpErr] = useState<string | null>(null);
   const [printerTick, setPrinterTick] = useState(0);
   const [categories, setCategories] = useState<{ id: string; name: string }[]>([]); // product groups, for the quota promo
+
+  const [linkBusy, setLinkBusy] = useState(false);
+  const switchLinkOff = async () => {
+    if (!(await askConfirm("Switch the old web shop link off? Anyone who opens it will see \"Store not found\". Orders from your Facebook Pages are not affected.", { ok: "Switch it off", cancel: "Keep it", danger: true }))) return;
+    setLinkBusy(true);
+    try {
+      const res = await fetch(`${API_URL}/admin/store-link/revoke`, { method: "POST", headers: adminHeaders() });
+      if (!res.ok) { toast("Could not switch it off. Try again.", "danger"); return; }
+      setData((d) => (d && d.publicLink ? { ...d, publicLink: { ...d.publicLink, status: "REVOKED" } } : d));
+      toast("The old web shop link is off", "success");
+    } catch { toast("Could not switch it off. Check the internet.", "danger"); }
+    finally { setLinkBusy(false); }
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -459,13 +472,21 @@ export default function SettingsPanel({ role = "" }: { role?: string }) {
       case "shop":
         return (
           <>
+            {/* Orders come from the Facebook Pages only (the owner's decision, 2026-11-12): the web shop link is not offered.
+                An old link that is still on can be switched off here; nothing in the app switches it back on. */}
             {data?.publicLink?.slug && (
               <div className="border rounded-3 p-3 mb-3 bg-light">
-                <div className="fw-semibold">Shop link · {shopLinkOn(data.publicLink) ? "on" : "switched off"}</div>
-                {shopLinkOn(data.publicLink)
-                  ? <a className="text-break" href={shopLinkUrl(data.publicLink)} target="_blank" rel="noreferrer">{shopLinkUrl(data.publicLink)}</a>
-                  : <div>Customers cannot open the shop until the link is switched on again.</div>}
-                <div className="small text-muted">Share it, print its QR code or switch it off on the Store Link screen (Menu, People &amp; settings).</div>
+                <div className="fw-semibold">Web shop link · {shopLinkOn(data.publicLink) ? "still on" : "switched off"}</div>
+                {shopLinkOn(data.publicLink) ? (
+                  <>
+                    <div className="mb-2">Not used: customers order through your Facebook Pages. Anyone who still has the old link can open the web shop and order there.</div>
+                    {isOwnerRole(role) && (
+                      <button type="button" className="btn btn-outline-danger" disabled={offline || linkBusy} onClick={() => void switchLinkOff()}>
+                        <i className="bi bi-x-octagon me-2" aria-hidden="true"></i>{linkBusy ? "Switching off…" : "Switch the old link off"}
+                      </button>
+                    )}
+                  </>
+                ) : <div>Nobody can open the old web shop. Orders from your Facebook Pages are not affected.</div>}
               </div>
             )}
             <SwitchRow id="st-paused" label="Close the shop for now" checked={form.paused} onChange={(v) => set({ paused: v })}

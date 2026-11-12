@@ -11,7 +11,8 @@ import { API_URL } from "../../../config";
 import { wakeFetch } from "../../../lib/wake-fetch";
 import { cachedGet, saveCopy, savedCopy, useOffline } from "../../../lib/offlineCache";
 import { PLACES_PATH } from "../../../lib/store-identity";
-import { useShopLink } from "../../../lib/shop-link";
+import { askConfirm } from "../../../lib/ask";
+import { queuedSteps } from "../../../lib/offlineQueue";
 
 /** Screens that work with no internet; every other screen still opens, but read-only (its buttons are off). */
 // Settings opens offline too: Printer is kept on this tablet, the other groups lock their own buttons.
@@ -132,10 +133,24 @@ export default function AdminDashboard() {
     void cachedGet(PLACES_PATH).catch(() => null);
     return () => { off = true; };
   }, [authed, activeStore]);
-  // The customers' shop, with its key (the plain /name address answers "Store not found").
-  const shopUrl = useShopLink(authed ? activeStore : null);
   const [email, setEmail] = useState("");
-  const [tab, setTab] = useState("overview");
+  const [tab, setTabState] = useState("overview");
+  const tabRef = useRef("overview");
+  /**
+   * Open a screen and write it in the address (?tab=…), so the tablet's Back button goes to the screen
+   * before (it used to leave the app) and a reload stays on the same screen (it used to return to Overview).
+   * `replace` = do not add a Back step (the first screen after signing in).
+   */
+  const setTab = useCallback((id: string, replace = false) => {
+    tabRef.current = id;
+    setTabState(id);
+    try {
+      const url = new URL(window.location.href);
+      if (url.searchParams.get("tab") === id) return;
+      url.searchParams.set("tab", id);
+      window.history[replace ? "replaceState" : "pushState"](window.history.state, "", url);
+    } catch { /* an odd browser: the screen still opens */ }
+  }, []);
   const [mobileNav, setMobileNav] = useState(false);
   // Whether we know which stores this account can reach. Without this the shell
   // renders while the answer is still "none", and every tab answers 403.
@@ -167,7 +182,11 @@ export default function AdminDashboard() {
           return;
         }
         setRole(isOwnerRole(member.role) ? "OWNER" : member.role);
-        if (!userNavigated.current) setTab(defaultTabFor(isOwnerRole(member.role) ? "OWNER" : member.role));
+        const memberRole = isOwnerRole(member.role) ? "OWNER" : member.role;
+        // A screen named in the address that this login may not open (an old link, another person's tablet) falls back to the start screen.
+        const open = BAR_ALIAS[tabRef.current] ?? tabRef.current;
+        const mayOpen = tabRef.current === "home" ? BAR_ROLES.includes(memberRole) : allowedTabs(memberRole).some((t) => (BAR_ALIAS[t] ?? t) === open);
+        if (!userNavigated.current || !mayOpen) setTab(defaultTabFor(memberRole), true);
       }
       setStoresStatus("ready");
     };
@@ -211,7 +230,7 @@ export default function AdminDashboard() {
     } catch {
       if (!fromKept) setStoresStatus("error");
     }
-  }, [router]);
+  }, [router, setTab]);
 
   // PC sidebar: keep the open screen's menu item in view (the menu is longer than the screen).
   useEffect(() => {
@@ -233,7 +252,10 @@ export default function AdminDashboard() {
       return;
     }
     setRole(r);
-    setTab(defaultTabFor(r));
+    // The screen named in the address wins (a reload, or Back from another page); else the role's start screen.
+    const asked = new URLSearchParams(window.location.search).get("tab") ?? "";
+    if (asked && (asked === "home" || asked === "utang" || navItemFor(asked))) { userNavigated.current = true; setTab(asked, true); }
+    else setTab(defaultTabFor(r), true);
     setAuthed(true);
     setActiveStore(getAdminStoreId());
     fetch(`${API_URL}/admin/me`, { headers: { Authorization: `Bearer ${token}` } })
@@ -244,7 +266,21 @@ export default function AdminDashboard() {
       .then((d) => d && setEmail(d.email ?? ""))
       .catch(() => {});
     void loadStores();
-  }, [router, loadStores]);
+  }, [router, loadStores, setTab]);
+
+  // Back / Forward on the tablet: show the screen the address now names.
+  useEffect(() => {
+    const onPop = () => {
+      const id = new URLSearchParams(window.location.search).get("tab");
+      if (!id) return;
+      userNavigated.current = true;
+      tabRef.current = id;
+      setTabState(id);
+      setMobileNav(false);
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
 
   const switchStore = (storeId: string) => {
     setAdminStoreId(storeId);
@@ -258,8 +294,25 @@ export default function AdminDashboard() {
     router.push("/admin/login");
   };
 
+  /**
+   * Leaving needs a yes: one wrong tap used to log the tablet out at once. With no internet nobody can log in
+   * again until it is back, and sales still waiting to upload stay on the tablet until the same person returns.
+   */
+  const sureToLeave = async (what: "logout" | "switch"): Promise<boolean> => {
+    const noNet = typeof navigator !== "undefined" && navigator.onLine === false;
+    let waiting = 0;
+    try { waiting = queuedSteps().length; } catch { /* nothing waiting */ }
+    if (what === "switch" && !noNet && waiting === 0) return true; // handing over at the counter: no extra question
+    const lines = [what === "logout" ? "Log out of this tablet?" : "Switch to another person?"];
+    if (noNet) lines.push("There is no internet now. Nobody can log in again until it is back.");
+    if (waiting > 0) lines.push(`${waiting} saved ${waiting === 1 ? "entry is" : "entries are"} still waiting to upload. ${waiting === 1 ? "It uploads" : "They upload"} only when you log in again.`);
+    return askConfirm(lines.join(" "), { ok: what === "logout" ? "Log out" : "Switch user", cancel: "Stay", danger: noNet || waiting > 0 });
+  };
+  const askLogout = async () => { if (await sureToLeave("logout")) logout(); };
+
   // Rice Ops M2: hand the phone to the next person — they log in with their own PIN.
-  const switchUser = () => {
+  const switchUser = async () => {
+    if (!(await sureToLeave("switch"))) return;
     lockAgain();
     clearAdminSession();
     router.push("/admin/login?pin=1");
@@ -338,7 +391,7 @@ export default function AdminDashboard() {
   const renderTab = () => {
     switch (tab) {
       case "home": return <StaffHome role={role} onNavigate={(id) => { userNavigated.current = true; setTab(id); }} labelFor={navLabel} isLocked={pinLock.open ? undefined : pinLocked} />;
-      case "overview": return <OverviewPanel onNavigate={setTab} shopUrl={shopUrl} storeName={active?.name} />;
+      case "overview": return <OverviewPanel onNavigate={setTab} storeName={active?.name} />;
       // One POS: the rice-ready counter screen.
       case "pos": return <PosPanel />;
       case "preorders": return <PreOrdersPanel onNavigate={setTab} />;
@@ -426,10 +479,10 @@ export default function AdminDashboard() {
             </div>
           </div>
           <div className="side-actions">
-            <button type="button" className="btn side-btn" onClick={switchUser} title="Switch user (PIN)">
+            <button type="button" className="btn side-btn" onClick={() => void switchUser()} title="Switch user (PIN)">
               <i className="bi bi-arrow-left-right" aria-hidden="true"></i>Switch user
             </button>
-            <button type="button" className="btn side-btn side-btn-out" onClick={logout}>
+            <button type="button" className="btn side-btn side-btn-out" onClick={() => void askLogout()}>
               <i className="bi bi-box-arrow-right" aria-hidden="true"></i>Log out
             </button>
           </div>
@@ -439,10 +492,10 @@ export default function AdminDashboard() {
           <div className="mb-3"><TextSizePicker /></div>
           <div className="small fw-semibold">{email || "Admin"}</div>
           <div className="small mb-2">{role} · {active?.name}</div>
-          <button className="btn btn-outline-secondary btn-sm w-100 mb-2" onClick={switchUser}>
+          <button className="btn btn-outline-secondary w-100 mb-2" onClick={() => void switchUser()}>
             <i className="bi bi-arrow-left-right me-1"></i>Switch user (PIN)
           </button>
-          <button className="btn btn-outline-danger btn-sm w-100" onClick={logout}>
+          <button className="btn btn-outline-danger w-100" onClick={() => void askLogout()}>
             <i className="bi bi-box-arrow-right me-1"></i>Log out
           </button>
         </div>
@@ -518,14 +571,7 @@ export default function AdminDashboard() {
               )}
               <QueueBadge />
               <span className="badge text-bg-primary role-badge text-uppercase d-none d-sm-inline">{role}</span>
-              {active && shopUrl && (
-                <a className="btn btn-sm btn-outline-primary d-none d-sm-inline-block" href={shopUrl} target="_blank" rel="noreferrer" title="Open the customers' shop" aria-label="Open the customers' shop">
-                  <i className="bi bi-box-arrow-up-right"></i>
-                </a>
-              )}
-              <button className="btn btn-sm btn-outline-secondary d-lg-none touch-show" onClick={logout} title="Log out" aria-label="Log out">
-                <i className="bi bi-box-arrow-right"></i>
-              </button>
+{/* Log out lives in the Menu (bottom) only: the picture-only button here was one wrong tap away from locking the tablet out. */}
             </div>
           </div>
         </nav>

@@ -17,15 +17,13 @@ const toPesos = (m: number) => peso(m);
 
 interface OverviewProps {
   onNavigate: (tab: string) => void;
-  /** The customers' shop address with its key; null when the link is off. */
-  shopUrl?: string | null;
   storeName?: string;
 }
 
 interface StatusRow { status: string; count: number; revenueMinor: number }
 interface DayRow { date: string; count: number; revenueMinor: number }
 
-export default function OverviewPanel({ onNavigate, shopUrl, storeName }: OverviewProps) {
+export default function OverviewPanel({ onNavigate, storeName }: OverviewProps) {
   const [status, setStatus] = useState<StatusRow[]>([]);
   const [daily, setDaily] = useState<DayRow[]>([]);
   const [lowStockCount, setLowStockCount] = useState<number | null>(null);
@@ -142,11 +140,6 @@ export default function OverviewPanel({ onNavigate, shopUrl, storeName }: Overvi
           {storeName && <small className="text-muted">Here&apos;s how {storeName} is doing today.</small>}
         </div>
         <div className="d-flex gap-2 align-items-center">
-          {shopUrl && (
-            <a className="btn btn-sm btn-outline-primary" href={shopUrl} target="_blank" rel="noreferrer">
-              <i className="bi bi-box-arrow-up-right me-1"></i>Open shop
-            </a>
-          )}
           <button className="btn btn-sm btn-outline-secondary" onClick={() => load()} title="Refresh" aria-label="Refresh" disabled={loading}>
             <i className="bi bi-arrow-clockwise"></i>
           </button>

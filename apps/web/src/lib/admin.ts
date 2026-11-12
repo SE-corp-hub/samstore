@@ -240,8 +240,10 @@ export const NAV_GROUPS: NavGroup[] = [
       { id: "team", label: "Team", icon: "bi-people", hint: "Staff accounts, roles and PINs" },
       { id: "settings", label: "Settings", icon: "bi-gear", hint: "Store name, receipts, printer" },
       { id: "countersettings", label: "Counter & printer", icon: "bi-sliders", hint: "Cash drawer and printer here" },
+      // Hidden: no role list includes them. Add the id to OWNER_TABS to show one again.
+      // Store Link (2026-11-12, the owner's decision): customers order through the stores' Facebook Pages only,
+      // so the web shop link is not offered anywhere. Settings, Online shop has the one switch that turns an old link off.
       { id: "storelink", label: "Store Link", icon: "bi-link-45deg", hint: "Web link and QR code for customers" },
-      // Vouchers, CRM and ERP & BIR are hidden: no role list includes them. Add the id to OWNER_TABS to show one again.
       { id: "vouchers", label: "Vouchers", icon: "bi-ticket-perforated", hint: "Discount vouchers for customers" },
       { id: "crm", label: "CRM", icon: "bi-people-heart", hint: "Customer messages and campaigns" },
       { id: "erp", label: "ERP & BIR", icon: "bi-journal-check", hint: "Accounting entries and BIR reports" },
@@ -279,7 +281,7 @@ export function toneFor(id: string): NavTone {
   return navGroupFor(id)?.tone ?? "setup";
 }
 
-const OWNER_TABS = ["overview", "pos", "preorders", "orders", "utang", "products", "inventory", "cash", "expenses", "purchases", "team", "customers", "analytics", "reports", "settings", "storelink", "warehouses", "approvals", "moves", "returns", "resack", "drafts", "kargadors", "pasok", "purchaseorders", "utangrice", "agentorders", "bilangin", "storereport", "payable", "ulat", "export", "storeprices"];
+const OWNER_TABS = ["overview", "pos", "preorders", "orders", "utang", "products", "inventory", "cash", "expenses", "purchases", "team", "customers", "analytics", "reports", "settings", "warehouses", "approvals", "moves", "returns", "resack", "drafts", "kargadors", "pasok", "purchaseorders", "utangrice", "agentorders", "bilangin", "storereport", "payable", "ulat", "export", "storeprices"];
 
 /** Tab visibility per staff role (GET-level permissions from live API probes). */
 export const TABS_BY_ROLE: Record<string, string[]> = {
