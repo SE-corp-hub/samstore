@@ -19,6 +19,7 @@ import type {
 } from "./repositories.js";
 import { OrderStatus, PaymentStatus } from "@prisma/client";
 import { InsufficientStockError, holdAcrossLevels, untrackedIds } from "../domain/movements.js";
+import { shelvesFor } from "../domain/sources.js";
 import { UNLIMITED_STOCK, isTracked } from "../domain/stock-tracking.js";
 
 // Module 4/5 hardening: the managed Postgres pooler can take several seconds to
@@ -634,6 +635,8 @@ export class PrismaOrderRepository implements OrderRepository {
       const preferWarehouseId = effects.preferWarehouseId
         ?? (await tx.warehouse.findFirst({ where: { storeId: order.storeId, isDefault: true, isActive: true }, select: { id: true } }))?.id
         ?? null;
+      // Its take-rice-from rule: its own shelf, then the places it may take from, in order (null = no rule yet).
+      const shelves = await shelvesFor(tx, order.storeId, preferWarehouseId);
       for (const r of effects.stockReservations ?? []) {
         if (r.quantity <= 0) continue;
         if (untracked.has(r.productId)) continue; // Track stock off — nothing is held
@@ -660,6 +663,7 @@ export class PrismaOrderRepository implements OrderRepository {
           productId: r.productId,
           quantity: r.quantity,
           prefer: preferWarehouseId,
+          shelves,
           orderId: o.id,
           actorId: "checkout",
         });

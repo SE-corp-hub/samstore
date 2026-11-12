@@ -108,6 +108,8 @@ function savedCart(): { locationId: string; cart: CartLine[]; key: string | null
 
 export default function BentaPanel() {
   const [locations, setLocations] = useState<Loc[]>([]);
+  /** Where this store may take rice from, itself first (null = no rule set, any place). */
+  const [takeFrom, setTakeFrom] = useState<string[] | null>(null);
   const [locationId, setLocationId] = useState("");
   const [homeLocationId, setHomeLocationId] = useState<string | null>(null);
   const [items, setItems] = useState<Item[]>([]);
@@ -163,6 +165,7 @@ export default function BentaPanel() {
     const show = (d: ApiBody) => {
       if (ask !== catalogAsk.current || !d?.products) return;
       setLocations((d.locations as Loc[]).filter((l) => (l as { type?: string }).type !== "BUFFER"));
+      setTakeFrom(Array.isArray(d.takeFrom) ? (d.takeFrom as string[]) : null);
       setItems(d.products as Item[]);
       setSeesCost(d.seesCost === true);
       setPromo(promoFrom(d.quotaPromo as Parameters<typeof promoFrom>[0]));
@@ -253,6 +256,8 @@ export default function BentaPanel() {
     setEditing(l); setEditIdx(idx); setFromOpen(!!l.sourceLocationId);
   };
   const here = locations.find((l) => l.id === locationId);
+  // "Take from another store" offers only the places the owner allowed, in the owner's order.
+  const fromChoices = takeFrom ? takeFrom.map((id) => locations.find((l) => l.id === id)).filter((l): l is Loc => !!l) : locations;
   const code = (id: string) => { const l = locations.find((x) => x.id === id); return l?.code ?? l?.name ?? "?"; };
   // Quota promo: enough sacks of the chosen groups in this sale and each of them is cheaper. It goes to
   // the server as a price change with the reason "Quota promo"; a price someone typed is left alone.
@@ -628,14 +633,14 @@ export default function BentaPanel() {
           {/* One line only (sideways the card has no room for two): the reason is asked once the price differs from the usual one. */}
           <label className="form-label mb-1 mt-2 text-nowrap" htmlFor="bt-reason">Why the new price?{!changed && <span className="text-muted"> (not needed yet)</span>}</label>
           <PriceReason id="bt-reason" className="form-select form-select-lg" value={editing.reason ?? ""} disabled={!changed} onChange={(v) => setEditing({ ...editing, reason: v })} />
-          {it.tracked && locations.length > 1 && !fromOpen && !short && (
+          {it.tracked && fromChoices.length > 1 && !fromOpen && !short && (
             <div className="text-center mt-2">
               <button type="button" className="btn btn-outline-primary" onClick={() => setFromOpen(true)}><i className="bi bi-shop me-1" aria-hidden="true"></i>Take from another store</button>
             </div>
           )}
           {it.tracked && (fromOpen || short) && (
             <div className="mt-2">
-              <LocationPicker id="bt-from" size="md" label="Taken from (where the item comes from)" locations={locations} value={from}
+              <LocationPicker id="bt-from" size="md" label="Taken from (where the item comes from)" locations={fromChoices} value={from}
                 labelFor={(l) => `${l.name}${l.id === locationId ? " (here)" : ""} — ${it.loose ? kg(it.stock[l.id] ?? 0) : `${it.stock[l.id] ?? 0}`}`}
                 onAdded={(loc) => setLocations([...locations, { id: loc.id, name: loc.name, code: null, type: "STORE" }])}
                 onChange={(id) => setEditing({ ...editing, sourceLocationId: id === locationId ? null : id })} />

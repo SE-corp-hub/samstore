@@ -27,6 +27,7 @@
 
 import type { MovementTx } from "./movements.js";
 import { holdAcrossLevels, InsufficientStockError, recordMovement } from "./movements.js";
+import { shelvesFor } from "./sources.js";
 
 export type StockDisposition = "CONSUMED" | "RELEASED";
 
@@ -255,14 +256,21 @@ export async function moveOrderReservation(
     select: { id: true },
   });
   const isTracked = new Set(tracked.map((p) => p.id));
+  // The order's store keeps to its take-rice-from rule (an order with no store is the main store's).
+  const sellingId = (await tx.order.findFirst({ where: { id: order.id, storeId: order.storeId }, select: { sellingLocationId: true } }))?.sellingLocationId
+    ?? (await tx.warehouse.findFirst({ where: { storeId: order.storeId, isDefault: true, isActive: true }, select: { id: true } }))?.id
+    ?? null;
+  const shelves = await shelvesFor(tx as never, order.storeId, sellingId);
   for (const line of lines) {
     if (line.quantity <= 0 || !isTracked.has(line.productId)) continue; // Track stock off — nothing is held
-    const before = old.find((l) => l.productId === line.productId && !l.variantId)?.warehouseId ?? null;
+    const held = old.find((l) => l.productId === line.productId && !l.variantId)?.warehouseId ?? null;
+    const before = held && (!shelves || shelves.includes(held)) ? held : sellingId;
     const remaining = await holdAcrossLevels(tx, {
       storeId: order.storeId,
       productId: line.productId,
       quantity: line.quantity,
       prefer: before,
+      shelves,
       orderId: order.id,
       actorId,
       note: "order edited — new lines held",

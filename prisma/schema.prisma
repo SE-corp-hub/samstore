@@ -830,6 +830,10 @@ model Warehouse {
   isActive  Boolean      @default(true) // M1: inactive locations keep history but take no new stock
   needsReview Boolean    @default(false) // added by counter staff on the spot — the owner checks it
   consignment Boolean    @default(false) // sells the main store's rice: each sale charges the main store's cost to its Store payable
+  // Per-store build, step 2. Where this place may take rice from, in order. Empty = no rule set yet (any shelf,
+  // as before). A saved rule always starts with the place itself, so "its own shelf only" is a list of one.
+  sourceLocationIds String[] @default([])
+  facebookPageUrl   String? // the Facebook Page that sells for this store
   createdAt DateTime     @default(now())
   updatedAt DateTime     @updatedAt
 

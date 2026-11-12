@@ -81,6 +81,11 @@ export class HubOrderService {
     private readonly locate: (storeId: string, code: string) => Promise<string | null> = async () => null,
     /** A location's own selling prices by product id (products without one sell at the store's price). */
     private readonly pricesAt: (storeId: string, locationId: string) => Promise<Map<string, number>> = async () => new Map(),
+    /**
+     * What a store can still sell of each product: the free stock on its own shelf and on the places it may take
+     * rice from (null location = the main store). Null when the store has no take-rice-from rule yet.
+     */
+    private readonly freeFor: (storeId: string, locationId: string | null) => Promise<Map<string, number> | null> = async () => null,
   ) {}
 
   /** The store's hub orders from the last few days as they are now, for the hub to follow. */
@@ -96,12 +101,14 @@ export class HubOrderService {
     // The selling price is the linked location's own price where it has one (Menu > Prices), else the store's.
     const loc = locationCode ? await this.locate(store.id, locationCode) : null;
     const own = loc ? await this.pricesAt(store.id, loc) : new Map<string, number>();
+    // The Page may only promise rice its store can take: its own shelf and the places on its list.
+    const free = await this.freeFor(store.id, loc);
     return (await this.catalog.listActiveProducts(store.id)).map((p) => ({
       sku: p.sku,
       name: p.name,
       category: p.categoryName,
       priceMinor: own.get(p.id) ?? p.priceMinor,
-      available: Math.max(0, p.quantityOnHand - p.quantityReserved),
+      available: free ? free.get(p.id) ?? 0 : Math.max(0, p.quantityOnHand - p.quantityReserved),
     }));
   }
 
@@ -150,10 +157,11 @@ export class HubOrderService {
     // order the hub offers again every few seconds can't eat through the order numbers while it waits for stock.
     // Skipped once placed (the cart became the order): checkout hands back that same order, whose own hold counts.
     const short: string[] = [];
+    const reach = cart.status === "OPEN" ? await this.freeFor(store.id, sellingLocationId) : null;
     for (const l of cart.status === "OPEN" ? lines : []) {
       const p = products.find((x) => x.id === l.productId)!;
-      const free = p.quantityOnHand - p.quantityReserved;
-      if (free < l.quantity) short.push(`Not enough "${p.name}": needs ${l.quantity}, ${Math.max(0, free)} left in all locations`);
+      const free = reach ? reach.get(p.id) ?? 0 : p.quantityOnHand - p.quantityReserved;
+      if (free < l.quantity) short.push(`Not enough "${p.name}": needs ${l.quantity}, ${Math.max(0, free)} left ${reach ? "where this store may take rice from" : "in all locations"}`);
     }
     if (cart.status === "OPEN" && short.length > 0) return { ok: false, error: { type: "validation", errors: short } };
 

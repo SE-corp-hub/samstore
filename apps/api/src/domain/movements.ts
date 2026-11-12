@@ -607,11 +607,22 @@ export async function adjustForCount(tx: MovementTx, leg: TripLeg, delta: number
  */
 export async function holdAcrossLevels(
   tx: MovementTx,
-  h: { storeId: string; productId: string; quantity: number; prefer?: string | null; orderId: string; actorId: string; note?: string },
+  h: {
+    storeId: string; productId: string; quantity: number; prefer?: string | null; orderId: string; actorId: string; note?: string;
+    /** The store's take-rice-from rule (`shelvesFor`): only these shelves, in this order. Left out or null = any shelf. */
+    shelves?: string[] | null;
+  },
 ): Promise<number> {
-  const levels = await tx.stockLevel.findMany({ where: { storeId: h.storeId, productId: h.productId } });
-  if (levels.length === 0 || h.quantity <= 0) return 0;
-  const rank = (w: string | null) => (h.prefer && w === h.prefer ? 0 : w ? 1 : 2);
+  const all = await tx.stockLevel.findMany({ where: { storeId: h.storeId, productId: h.productId } });
+  if (all.length === 0 || h.quantity <= 0) return 0;
+  const shelves = h.shelves && h.shelves.length ? h.shelves : null;
+  // With a rule, a shelf outside it is never touched, so what it cannot fill comes back as "not held".
+  const levels = shelves ? all.filter((l) => !!l.warehouseId && shelves.includes(l.warehouseId)) : all;
+  const rank = (w: string | null) => {
+    if (h.prefer && w === h.prefer) return 0;
+    if (shelves) return 1 + shelves.indexOf(w!);
+    return w ? 1 : 2;
+  };
   levels.sort((a, b) => rank(a.warehouseId) - rank(b.warehouseId));
   let remaining = h.quantity;
   for (const lvl of levels) {

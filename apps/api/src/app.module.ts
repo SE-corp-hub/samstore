@@ -1,3 +1,4 @@
+import { freeOnShelves } from "./domain/sources.js";
 import { Module } from "@nestjs/common";
 import { claimSecret, jwtSecret } from "./security/secrets.js";
 import { CHECKOUT_SERVICE, CheckoutService } from "./checkout/checkout.service.js";
@@ -271,6 +272,8 @@ const CLAIM_SECRET = claimSecret(); // M11: no committed fallback (see security/
             (await prisma.warehouse.findFirst({ where: { storeId, code: { equals: code.trim(), mode: "insensitive" }, isActive: true }, select: { id: true } }))?.id ?? null,
           async (storeId, warehouseId) =>
             new Map((await prisma.locationPrice.findMany({ where: { storeId, warehouseId }, select: { productId: true, priceMinor: true } })).map((p) => [p.productId, p.priceMinor])),
+          // What the Page's store can still sell: its own shelf and the places on its take-rice-from list.
+          (storeId, locationId) => freeOnShelves(prisma, storeId, locationId),
         ),
     },
   ],

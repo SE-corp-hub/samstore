@@ -1461,7 +1461,7 @@ export class AdminController {
   async updateWarehouse(
     @Req() req: Request & { user?: AuthPrincipal },
     @Param("id") id: string,
-    @Body() body: { name?: string; type?: string; code?: string | null; address?: string | null; isActive?: boolean; isDefault?: boolean; needsReview?: boolean; consignment?: boolean },
+    @Body() body: { name?: string; type?: string; code?: string | null; address?: string | null; isActive?: boolean; isDefault?: boolean; needsReview?: boolean; consignment?: boolean; facebookPageUrl?: string | null; takesFrom?: string[] | null },
     @Headers("x-store-id") headerStoreId?: string,
   ) {
     const user = req.user;
@@ -1476,6 +1476,8 @@ export class AdminController {
       isDefault: typeof body?.isDefault === "boolean" ? body.isDefault : undefined,
       needsReview: typeof body?.needsReview === "boolean" ? body.needsReview : undefined,
       consignment: typeof body?.consignment === "boolean" ? body.consignment : undefined,
+      facebookPageUrl: body?.facebookPageUrl === null || typeof body?.facebookPageUrl === "string" ? body.facebookPageUrl : undefined,
+      sourceLocationIds: body?.takesFrom === null ? null : Array.isArray(body?.takesFrom) ? body.takesFrom.filter((x): x is string => typeof x === "string") : undefined,
     });
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
     return result.value;
