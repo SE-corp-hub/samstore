@@ -23,6 +23,9 @@ import { LoyaltyService } from "../loyalty/loyalty.service.js";
 import { RiceReportsService } from "../reports/rice-reports.service.js";
 import { StoreReportService } from "../reports/store-report.service.js";
 import { manilaDate } from "../domain/reports.js";
+import { cleanFacebookPageUrl, freeOnShelves } from "../domain/sources.js";
+import { WarehouseService } from "../admin/warehouse.service.js";
+import { BentaService } from "./benta.service.js";
 import type { Actor } from "../people/people.service.js";
 
 const run = `ORS${Date.now()}${Math.floor(Math.random() * 1000)}`;
@@ -36,6 +39,7 @@ const hub = new HubOrderService(
   new PrismaStoreRepository(), new PrismaCatalogRepository(), new PrismaCartRepository(), checkout, undefined,
   async (storeId, code) => (await prisma.warehouse.findFirst({ where: { storeId, code: { equals: code.trim(), mode: "insensitive" }, isActive: true }, select: { id: true } }))?.id ?? null,
   async (storeId, warehouseId) => new Map((await prisma.locationPrice.findMany({ where: { storeId, warehouseId }, select: { productId: true, priceMinor: true } })).map((p) => [p.productId, p.priceMinor])),
+  (storeId, locationId) => freeOnShelves(prisma, storeId, locationId),
 );
 const admin = new OrderAdminService();
 const delivery = new DeliveryService();
@@ -281,4 +285,83 @@ test("a failed delivery is not a sale; cancelled, the rice is free again and not
   assert.equal(gone.ok, true, msg(gone));
   assert.deepEqual([await shelf(fx, fx.bt), await owes(fx, fx.bt)], [[20, 0], 0]);
   assert.equal((await reports(fx)).day(fx.bt).sales.count, 0);
+});
+
+// ───────────── Per-store build, step 2: Facebook Pages and where each store may take rice from ─────────────
+
+/** The owner's rules: Bogs and Lucy takes from Bahay Tindahan, then Bodega. Bahay Tindahan: Bodega. Lipa: its own shelf only. */
+async function withRules(fx: Fx) {
+  const wh = await prisma.warehouse.create({ data: { storeId: fx.storeId, name: "Bodega", code: "WH", type: "WAREHOUSE" } });
+  await prisma.stockLevel.create({ data: { storeId: fx.storeId, productId: fx.riceId, warehouseId: wh.id, quantityOnHand: 50 } });
+  const svc = new WarehouseService();
+  for (const [id, takesFrom] of [[fx.main, [fx.bt, wh.id]], [fx.bt, [wh.id]], [fx.lipa, []]] as const) {
+    const r = await svc.update(fx.storeId, id, { sourceLocationIds: [...takesFrom] });
+    assert.equal(r.ok, true, msg(r));
+  }
+  return { wh: wh.id, svc };
+}
+
+test("step 2: the Facebook Page link is cleaned, one Page belongs to one store, and the rule is saved in order", async () => {
+  assert.equal(cleanFacebookPageUrl(" facebook.com/SamriceLipa/ "), "https://www.facebook.com/SamriceLipa");
+  assert.equal(cleanFacebookPageUrl("https://m.facebook.com/profile.php?id=61562701030651&mibextid=abc"), "https://www.facebook.com/profile.php?id=61562701030651");
+  assert.equal(cleanFacebookPageUrl(""), null);
+  assert.throws(() => cleanFacebookPageUrl("https://example.com/thesamrice"));
+  assert.throws(() => cleanFacebookPageUrl("facebook.com"));
+
+  const fx = await fixture();
+  const { wh, svc } = await withRules(fx);
+  assert.equal((await svc.update(fx.storeId, fx.lipa, { facebookPageUrl: "facebook.com/SamriceLipa" })).ok, true);
+  const twice = await svc.update(fx.storeId, fx.bt, { facebookPageUrl: "https://www.facebook.com/SamriceLipa/" });
+  assert.equal(twice.ok, false, "the same Page cannot sell for two stores");
+  assert.equal((await svc.update(fx.storeId, fx.bt, { facebookPageUrl: "https://evil.example/page" })).ok, false);
+  assert.equal((await svc.update(fx.storeId, fx.bt, { sourceLocationIds: ["not-a-place"] })).ok, false);
+  const list = await svc.list(fx.storeId);
+  const row = (id: string) => list.find((l) => l.id === id)!;
+  assert.deepEqual([row(fx.main).takesFrom, row(fx.bt).takesFrom, row(fx.lipa).takesFrom, row(wh).takesFrom], [[fx.bt, wh], [wh], [], null]);
+  assert.equal(row(fx.lipa).facebookPageUrl, "https://www.facebook.com/SamriceLipa");
+  // Clearing the rule and the Page.
+  assert.equal((await svc.update(fx.storeId, fx.lipa, { sourceLocationIds: null, facebookPageUrl: null })).ok, true);
+  const after = (await svc.list(fx.storeId)).find((l) => l.id === fx.lipa)!;
+  assert.deepEqual([after.takesFrom, after.facebookPageUrl], [null, null]);
+});
+
+test("step 2: an order takes rice from its own shelf, then the places on its list in order, and from nowhere else", async () => {
+  const fx = await fixture();
+  const { wh } = await withRules(fx);
+  await prisma.stockLevel.updateMany({ where: { storeId: fx.storeId, productId: fx.riceId, warehouseId: fx.lipa }, data: { quantityOnHand: 30 } });
+  await prisma.stockLevel.updateMany({ where: { storeId: fx.storeId, productId: fx.riceId, warehouseId: fx.bt }, data: { quantityOnHand: 2 } });
+
+  // What each Page may promise: Bogs and Lucy 10 + 2 + 50, Bahay Tindahan 2 + 50, Lipa its own 30.
+  const can = async (code: string) => (await hub.products(fx.slug, code))!.find((p) => p.name === "Dinorado 25 kg")!.available;
+  assert.deepEqual([await can("S1"), await can("S2"), await can("S3")], [62, 52, 30]);
+
+  // Bogs and Lucy sells 14: its own 10, then Bahay Tindahan's 2, then Bodega's 2. Lipa's 30 are not touched.
+  const made = await place(fx, 14, { locationCode: "S1" });
+  assert.deepEqual([await shelf(fx, fx.main), await shelf(fx, fx.bt), await shelf(fx, wh), await shelf(fx, fx.lipa)], [[10, 10], [2, 2], [50, 2], [30, 0]]);
+  assert.equal((await order(made.orderId)).sellingLocationId, fx.main);
+
+  // Lipa asks for more than its own shelf has: refused, even though Bodega has plenty.
+  const tooMany = await hub.place({ storeSlug: fx.slug, idempotencyKey: key(), channel: "messenger", pageName: "Samrice Lipa", customerName: "Ana Cruz", customerPhone: fx.phone, deliveryType: "pickup", items: [{ name: "Dinorado 25 kg", quantity: 31 }], locationCode: "S3" });
+  assert.equal(tooMany.ok, false);
+  assert.match(msg(tooMany), /where this store may take rice from/);
+  assert.deepEqual(await shelf(fx, fx.lipa), [30, 0]);
+  const fits = await place(fx, 30, { locationCode: "S3", deliveryType: "pickup", deliveryFeeMinor: 0 });
+  assert.deepEqual(await shelf(fx, fx.lipa), [30, 30]);
+  assert.equal((await order(fits.orderId)).sellingLocationId, fx.lipa);
+});
+
+test("step 2: at the counter a store may only take rice from the places on its list", async () => {
+  const fx = await fixture();
+  const { wh } = await withRules(fx);
+  const benta = new BentaService();
+  const staff: Actor = { ...fx.rider }; // a Bahay Tindahan login
+  const cat = await benta.catalog(fx.storeId, staff, undefined);
+  assert.equal(cat.ok, true, msg(cat));
+  if (cat.ok) assert.deepEqual(cat.value.takeFrom, [fx.bt, wh]);
+  const barred = await benta.sell(fx.storeId, staff, { idempotencyKey: key(), lines: [{ productId: fx.riceId, quantity: 1, sourceLocationId: fx.main }], payment: { method: "cash" } });
+  assert.equal(barred.ok, false);
+  assert.match(msg(barred), /may not take rice from Bogs and Lucy/);
+  assert.deepEqual(await shelf(fx, fx.main), [10, 0]);
+  const fine = await benta.sell(fx.storeId, staff, { idempotencyKey: key(), lines: [{ productId: fx.riceId, quantity: 1, sourceLocationId: wh }], payment: { method: "cash" } });
+  assert.equal(fine.ok, true, msg(fine));
 });

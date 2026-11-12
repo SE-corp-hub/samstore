@@ -23,6 +23,10 @@ interface Location {
   isDefault: boolean;
   needsReview?: boolean;
   consignment?: boolean;
+  /** The Facebook Page that sells for this store. */
+  facebookPageUrl?: string | null;
+  /** The other places it may take rice from, in order. null = no rule set yet (any place). [] = its own shelf only. */
+  takesFrom?: string[] | null;
   stockCount: number;
 }
 interface Transfer {
@@ -54,7 +58,7 @@ interface PriceRow {
 type ApiBody = { message?: string; errors?: string[]; prices?: PriceRow[] };
 
 const label = (l: { name: string; code: string | null }) => (l.code ? `${l.code} · ${l.name}` : l.name);
-const emptyForm = { name: "", code: "", type: "STORE" as LocationType, address: "", consignment: false };
+const emptyForm = { name: "", code: "", type: "STORE" as LocationType, address: "", consignment: false, facebookPageUrl: "", ruleOn: false, takesFrom: [] as string[] };
 const errorText = (d: ApiBody, fallback: string) => d?.errors?.join(", ") ?? d?.message ?? fallback;
 
 async function call(url: string, method: string, body?: unknown): Promise<{ ok: boolean; data: ApiBody }> {
@@ -127,7 +131,11 @@ export default function WarehousesPanel() {
     e.preventDefault();
     setSaving(true);
     setError(null);
-    const body = { name: form.name, code: form.code || null, type: form.type, address: form.address || null, consignment: form.consignment };
+    const body = {
+      name: form.name, code: form.code || null, type: form.type, address: form.address || null, consignment: form.consignment,
+      // The Page and the take-rice-from rule are set on a place that already exists (the rule names other places).
+      ...(editingId ? { facebookPageUrl: form.type === "STORE" ? form.facebookPageUrl.trim() || null : null, takesFrom: form.ruleOn ? form.takesFrom : null } : {}),
+    };
     const { ok, data } = editingId
       ? await call(`${API_URL}/admin/warehouses/${editingId}`, "PATCH", body)
       : await call(`${API_URL}/admin/warehouses`, "POST", body);
@@ -149,7 +157,10 @@ export default function WarehousesPanel() {
 
   const startEdit = (l: Location) => {
     setEditingId(l.id);
-    setForm({ name: l.name, code: l.code ?? "", type: l.type, address: l.address ?? "", consignment: l.consignment === true });
+    setForm({
+      name: l.name, code: l.code ?? "", type: l.type, address: l.address ?? "", consignment: l.consignment === true,
+      facebookPageUrl: l.facebookPageUrl ?? "", ruleOn: Array.isArray(l.takesFrom), takesFrom: l.takesFrom ?? [],
+    });
   };
 
   const request = async (e: React.FormEvent) => {
@@ -257,6 +268,53 @@ export default function WarehousesPanel() {
                   <label className="form-label small mb-1" htmlFor="loc-address">Address (for the porter)</label>
                   <input id="loc-address" className="form-control form-control-sm" placeholder="Street, barangay" value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} maxLength={300} />
                 </div>
+                {editingId && form.type === "STORE" && (
+                  <div className="col-12">
+                    <label className="form-label small mb-1" htmlFor="loc-page">Facebook Page of this store</label>
+                    <input id="loc-page" className="form-control" inputMode="url" autoCapitalize="none" autoCorrect="off" placeholder="facebook.com/yourpage" value={form.facebookPageUrl} onChange={(e) => setForm({ ...form, facebookPageUrl: e.target.value })} maxLength={300} aria-describedby="loc-page-help" />
+                    <div id="loc-page-help" className="form-text">Orders from this Page are this store&apos;s sales, at this store&apos;s prices. Leave empty if the store has no Page.</div>
+                  </div>
+                )}
+                {editingId && form.type !== "BUFFER" && (
+                  <fieldset className="col-12">
+                    <legend className="form-label small mb-1">Where may {form.name || "this place"} take rice from?</legend>
+                    <div className="form-check py-1">
+                      <input id="loc-rule-off" type="radio" name="loc-rule" className="form-check-input" checked={!form.ruleOn} onChange={() => setForm({ ...form, ruleOn: false })} />
+                      <label className="form-check-label" htmlFor="loc-rule-off">Any place that has it (no rule)</label>
+                    </div>
+                    <div className="form-check py-1">
+                      <input id="loc-rule-on" type="radio" name="loc-rule" className="form-check-input" checked={form.ruleOn} onChange={() => setForm({ ...form, ruleOn: true })} />
+                      <label className="form-check-label" htmlFor="loc-rule-on">Its own shelf first, then only the places I choose</label>
+                    </div>
+                    {form.ruleOn && (
+                      <div className="border rounded p-2 mt-1" id="loc-rule-list">
+                        {form.takesFrom.length === 0 && <div className="small mb-2"><i className="bi bi-info-circle me-1" aria-hidden="true"></i>No other place chosen: it sells from its own shelf only.</div>}
+                        {form.takesFrom.length > 0 && (
+                          <ol className="list-group list-group-numbered mb-2">
+                            {form.takesFrom.map((id, i) => {
+                              const o = locations.find((x) => x.id === id);
+                              const move = (to: number) => { const next = [...form.takesFrom]; next.splice(i, 1); next.splice(to, 0, id); setForm({ ...form, takesFrom: next }); };
+                              return (
+                                <li key={id} className="list-group-item d-flex align-items-center gap-2 py-1">
+                                  <span className="flex-grow-1 text-break">{o ? label(o) : "A place that was removed"}</span>
+                                  <button type="button" className="btn btn-outline-secondary" style={{ minWidth: 44, minHeight: 44 }} disabled={i === 0} onClick={() => move(i - 1)} aria-label={`Move ${o?.name ?? "place"} up`}><i className="bi bi-arrow-up" aria-hidden="true"></i></button>
+                                  <button type="button" className="btn btn-outline-secondary" style={{ minWidth: 44, minHeight: 44 }} disabled={i === form.takesFrom.length - 1} onClick={() => move(i + 1)} aria-label={`Move ${o?.name ?? "place"} down`}><i className="bi bi-arrow-down" aria-hidden="true"></i></button>
+                                  <button type="button" className="btn btn-outline-danger" style={{ minWidth: 44, minHeight: 44 }} onClick={() => setForm({ ...form, takesFrom: form.takesFrom.filter((x) => x !== id) })} aria-label={`Remove ${o?.name ?? "place"}`}><i className="bi bi-x-lg" aria-hidden="true"></i></button>
+                                </li>
+                              );
+                            })}
+                          </ol>
+                        )}
+                        <div className="d-flex flex-wrap gap-2">
+                          {locations.filter((o) => o.id !== editingId && o.isActive && o.type !== "BUFFER" && !form.takesFrom.includes(o.id)).map((o) => (
+                            <button key={o.id} type="button" className="btn btn-outline-primary" style={{ minHeight: 44 }} onClick={() => setForm({ ...form, takesFrom: [...form.takesFrom, o.id] })}><i className="bi bi-plus-lg me-1" aria-hidden="true"></i>{o.name}</button>
+                          ))}
+                        </div>
+                        <div className="form-text">It takes from the first place on the list that has the rice, then the next.</div>
+                      </div>
+                    )}
+                  </fieldset>
+                )}
               </div>
               <div className="d-flex gap-2 mt-3">
                 <button className="btn btn-primary btn-sm" type="submit" disabled={saving}>{saving ? "Saving…" : editingId ? "Save location" : "Add location"}</button>
@@ -330,6 +388,15 @@ export default function WarehousesPanel() {
                           {l.needsReview && <span className="badge text-bg-warning ms-2">Added by staff — please check</span>}
                         </div>
                         {l.address && <div className="small text-muted">{l.address}</div>}
+                        {l.facebookPageUrl && <div className="small text-break"><i className="bi bi-facebook me-1" aria-hidden="true"></i>Page: {l.facebookPageUrl.replace(/^https:\/\/www\./, "")}</div>}
+                        {l.type !== "BUFFER" && l.isActive && (
+                          <div className="small">
+                            <i className="bi bi-box-arrow-in-down me-1" aria-hidden="true"></i>
+                            {l.takesFrom == null ? "Takes rice from: any place (no rule yet)"
+                              : l.takesFrom.length === 0 ? "Takes rice from: its own shelf only"
+                                : `Takes rice from: its own shelf, then ${l.takesFrom.map((id) => locations.find((x) => x.id === id)?.name ?? "?").join(", then ")}`}
+                          </div>
+                        )}
                       </div>
                       <div className="d-flex flex-wrap gap-1 justify-content-end">
                         {l.needsReview && <button type="button" className="btn btn-sm btn-warning" onClick={() => void patchLocation(l, { needsReview: false }, `${l.name} checked`)}>Mark checked</button>}

@@ -12,6 +12,7 @@ import { adjustStock, InsufficientStockError, reserveForTrip, transferStock, unr
 import { autoApproves } from "../domain/transfer-flow.js";
 import type { ApiError } from "@sam-store/contracts";
 import { consignmentMain } from "../payable/charges.js";
+import { cleanFacebookPageUrl, normalizeSources } from "../domain/sources.js";
 import { costModeOf, effectiveCost } from "../domain/shelf-cost.js";
 import { captureSignatures, locationRefusal, nextDocNumber, requireSignatures, signatureErrorResult, type Actor, type SignatureInput } from "../people/people.service.js";
 
@@ -33,6 +34,10 @@ export interface LocationInput {
   needsReview?: boolean;
   /** Sells the main store's rice and owes its cost for every sale. */
   consignment?: boolean;
+  /** The Facebook Page that sells for this store (null or "" clears it). */
+  facebookPageUrl?: string | null;
+  /** The other places this one may take rice from, in order. [] = its own shelf only; null = no rule (any place). */
+  sourceLocationIds?: string[] | null;
 }
 
 function validateLocation(input: LocationInput, creating: boolean): string[] {
@@ -75,6 +80,9 @@ export class WarehouseService {
       isDefault: w.isDefault,
       needsReview: w.needsReview,
       consignment: w.consignment,
+      facebookPageUrl: w.facebookPageUrl,
+      // The rule as the screen shows it: null = none yet; otherwise the OTHER places, in order (may be empty).
+      takesFrom: w.sourceLocationIds.length === 0 ? null : w.sourceLocationIds.filter((id) => id !== w.id),
       stockCount: w._count.stockLevels,
     }));
   }
@@ -130,6 +138,24 @@ export class WarehouseService {
       const clash = await prisma.warehouse.findFirst({ where: { storeId, code, NOT: { id: warehouseId } } });
       if (clash) return { ok: false, error: { type: "conflict", message: `Code ${code} is already used by ${clash.name}` } };
     }
+    let pageUrl: string | null | undefined;
+    try {
+      pageUrl = input.facebookPageUrl === undefined ? undefined : cleanFacebookPageUrl(input.facebookPageUrl);
+    } catch (e) {
+      return { ok: false, error: { type: "validation", errors: [e instanceof Error ? e.message : "Wrong Facebook Page link"] } };
+    }
+    if (pageUrl) {
+      const taken = await prisma.warehouse.findFirst({ where: { storeId, facebookPageUrl: pageUrl, NOT: { id: warehouseId } }, select: { name: true } });
+      if (taken) return { ok: false, error: { type: "conflict", message: `That Facebook Page is already linked to ${taken.name}` } };
+    }
+    let sources: string[] | undefined;
+    if (input.sourceLocationIds !== undefined) {
+      const wanted = [...new Set((input.sourceLocationIds ?? []).filter((id) => typeof id === "string" && id !== warehouseId))];
+      if (wanted.length > 10) return { ok: false, error: { type: "validation", errors: ["Choose at most 10 places"] } };
+      const found = await prisma.warehouse.findMany({ where: { storeId, id: { in: wanted }, isActive: true, type: { not: "BUFFER" } }, select: { id: true } });
+      if (found.length !== wanted.length) return { ok: false, error: { type: "validation", errors: ["One of the places to take rice from was not found or is switched off"] } };
+      sources = input.sourceLocationIds === null ? [] : normalizeSources(warehouseId, [warehouseId, ...wanted]);
+    }
     await prisma.$transaction(async (tx) => {
       if (input.isDefault === true && !current.isDefault) {
         await tx.warehouse.updateMany({ where: { storeId, isDefault: true }, data: { isDefault: false } });
@@ -145,6 +171,8 @@ export class WarehouseService {
           ...(input.address !== undefined ? { address: input.address?.trim() || null } : {}),
           ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
           ...(input.isDefault === true ? { isDefault: true } : {}),
+          ...(pageUrl !== undefined ? { facebookPageUrl: pageUrl } : {}),
+          ...(sources !== undefined ? { sourceLocationIds: sources } : {}),
         },
       });
     });

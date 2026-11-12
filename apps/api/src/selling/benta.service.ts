@@ -45,6 +45,7 @@ import {
   type Actor, type SignatureInput,
 } from "../people/people.service.js";
 import { txOptions } from "../persistence/tx-options.js";
+import { shelvesFor } from "../domain/sources.js";
 
 export type BentaResult<T> = { ok: true; value: T } | { ok: false; error: ApiError };
 type Tx = Prisma.TransactionClient;
@@ -261,7 +262,9 @@ export class BentaService {
       const locations = warehouses.filter((w) => w.isActive).map((w) => ({ id: w.id, name: w.name, code: w.code, type: w.type }));
       // The quota promo travels with the price list, so the tablet applies it with no internet too.
       const quotaPromo = promo ? { quotaPromoEnabled: promo.quotaPromoEnabled, quotaPromoMinSacks: promo.quotaPromoMinSacks, quotaPromoOffMinor: promo.quotaPromoOffMinor, quotaPromoCategoryIds: promo.quotaPromoCategoryIds } : null;
-      return { location: loc, locations, products: items, seesCost: seesCost(actor.role), quotaPromo };
+      // Where this store may take rice from, itself first (null = no rule yet, any place).
+      const takeFrom = await shelvesFor(prisma, storeId, loc.id);
+      return { location: loc, locations, takeFrom, products: items, seesCost: seesCost(actor.role), quotaPromo };
     });
   }
 
@@ -328,6 +331,10 @@ export class BentaService {
       const remoteIds = [...new Set(lines.map((l) => l.sourceLocationId).filter((x): x is string => !!x && x !== loc.id))];
       const remotes = new Map((await prisma.warehouse.findMany({ where: { storeId, id: { in: remoteIds }, isActive: true }, select: { id: true, name: true } })).map((w) => [w.id, w]));
       if (remotes.size !== remoteIds.length) throw new SellingError("Unknown location to take from");
+      // The store's take-rice-from rule: only the places on its list (no rule yet = any place, as before).
+      const allowed = remoteIds.length ? await shelvesFor(prisma, storeId, loc.id) : null;
+      const barred = allowed ? remoteIds.find((id) => !allowed.includes(id)) : undefined;
+      if (barred) throw new SellingError(`${loc.name} may not take rice from ${remotes.get(barred)!.name}. The owner sets this in Menu, Locations.`);
 
       // A customer picked at the counter may have special prices; they beat the store's price (not a manual change, so no reason is needed).
       const pcust = input.customerId ? await prisma.storeCustomer.findFirst({ where: { storeId, id: input.customerId }, include: { customer: { select: { name: true } } } }) : null;

@@ -1329,3 +1329,13 @@ Commits: `32dce58` (loop 2).
 - Old Reports: labels now say "Sales (all stores)", "Cost of rice sold", "Taken back"; Sold stock shows loose rice in kilos. Its totals equal the stores added up in Compare stores.
 - Not changed here: the BIR and journal screens (`erp/`), the platform data summary, the delivery fee inside sale totals, and expected cash after a cash refund (step 4, cash per store).
 - Tests: `reports/sales-book.test.ts` (4): every report agrees, a refund the next day leaves the first day alone, a same-day void nets to nothing, an agent order delivered in part. `reports-m9.test.ts` updated for the new `takenBack` field. No database change.
+
+## 2026-11-12 — Per-store build, step 2: Facebook Pages and where each store may take rice from
+
+- Two fields from migration `20261114100000_per_store_plan` are now in `schema.prisma`: `Warehouse.facebookPageUrl` and `Warehouse.sourceLocationIds`. No new migration.
+- Menu → Locations → Edit: "Facebook Page of this store" (cleaned to a plain facebook.com link; one Page belongs to one store) and "Where may this place take rice from?": any place (no rule, the behaviour until now), or its own shelf first and then only the places the owner chooses, in the owner's order. The list of places shows both for every place.
+- The rule (`domain/sources.ts`, `shelvesFor`): an empty saved list means no rule yet; a saved rule always starts with the place itself, so "own shelf only" is a list of one. A place that was switched off is skipped.
+- Where it is enforced: online and Facebook orders hold rice on the store's own shelf, then down its list, and nowhere else (`holdAcrossLevels` takes `shelves`); Orders → Change items keeps to the same list; the hub is told only what the Page's store can really take (`available`), and an order for more is refused before it uses an order number; at the counter, "Take from another store" offers only the listed places in order, and the server refuses any other.
+- An order with no store follows the main store's rule.
+- After merging, the owner sets three rules on the Locations screen: Bogs and Lucy = Bahay Tindahan, then Bodega; Bahay Tindahan = Bodega; Lipa = its own shelf only. Until then nothing changes.
+- Tests: 3 more in `selling/order-store.test.ts` (9 in all). Screens checked at 1280x720, 800x1200 and 615x985.
