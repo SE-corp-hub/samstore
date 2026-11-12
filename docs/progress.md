@@ -1308,3 +1308,15 @@ Commits: `32dce58` (loop 2).
 - Pre-order screen: "Pre-order at" store picker for the owner (locked once rice is in the order), the store's own prices and counts on the tiles, the store name on each pre-order, "Move store" for the owner. Checked at 1280x720, 800x1200 and 615x985 with no page scroll.
 - Kept as it was, on purpose: a customer's special price is not applied to pre-orders yet; a moved pre-order keeps its price, and changing it later asks for a price reason if that price is not the new store's usual one; an old pre-order with no store takes the store of the login that completes it.
 - Tests: `pos/preorder-store.test.ts` (8). No database change.
+
+## 2026-11-12 — Per-store build, step 1b: Facebook, online and agent orders follow their store
+
+- An online or Facebook order (`source` online / hub) becomes a sale at its store at the moment it is handed over: delivered by the rider, marked Delivered or Completed in Orders, picked up (Complete now), or paid at the counter. `settleHandedOverOrder` (`selling/settle-sale.ts`) runs in the same transaction as the status change: the order's store is the one the Page named, else the main store; each line saves its cost; the sale is dated that moment (`occurredAt`), so a day already closed never changes; a store that sells the main store's rice is charged the main store's cost once; rice the order held on another store's shelf books that store's profit share, per shelf.
+- Cash on delivery (and cash at pick-up) is written as a cash `Payment` at the order's store, once, when nothing was paid before. The rider's figure is used when the rider gives one. A GCash payment still to be checked writes no cash and stays in Payment review (the rider screen and Complete now used to mark it paid).
+- Reports: a delivered order is a sale. `SOLD_STATES` (COMPLETED + DELIVERED, `domain/order-state.ts`) replaces the "COMPLETED only" filter in the daily report, the sales after closing, the month report, the stock book and Store report / Compare stores. A cash-on-delivery sale counts under cash.
+- Orders → Change items: the usual price is the order's own store's price (the order detail now sends `sellingLocationName` and `storePrices`), so a Bahay Tindahan order no longer asks for a price reason on every line, and added rice comes in at that store's price. The server prices the same way.
+- An online order that names no store holds its rice on the main store's shelf first.
+- Agent orders: paid, the order is charged to its store for what was delivered, the profit share of rice from another store's shelf is booked, the sale is dated the day it was paid, and the payment carries the store.
+- A refund takes back what the store owed for the sale, and the refund line carries the store.
+- Kept as it was: the delivery fee is part of the sale total; which other shelf an order falls back to is not ordered yet (step 2); an agent order delivered in part keeps its ordered quantities on its lines (the charge uses what was delivered).
+- Tests: `selling/order-store.test.ts` (6), one more in `agent/agent-orders-m7.test.ts`. No database change.

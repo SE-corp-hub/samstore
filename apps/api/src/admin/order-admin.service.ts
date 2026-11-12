@@ -11,6 +11,9 @@ import { computeOrderTotals } from "../domain/pricing.js";
 import { taxColumnsFor } from "../domain/tax-store.js";
 import { LoyaltyService } from "../loyalty/loyalty.service.js";
 import type { NotificationsService } from "../notifications/notifications.service.js";
+import { settleHandedOverOrder } from "../selling/settle-sale.js";
+import { priceAt } from "../domain/selling.js";
+import { txOptions } from "../persistence/tx-options.js";
 import type { ApiError } from "@sam-store/contracts";
 
 /** One line of an edited order: a changed price needs its reason (see domain/price-override). */
@@ -70,10 +73,15 @@ export class OrderAdminService {
           actorId: actor?.id ?? null,
         },
       });
+      // Handed over: an online / Facebook order becomes a sale at its store now (cost, what the store
+      // owes, cash on delivery), dated today. No-op for counter sales, pre-orders and agent orders.
+      if (toStatus === "DELIVERED" || toStatus === "COMPLETED") {
+        await settleHandedOverOrder(tx, { storeId, orderId, actorId: actor?.id ?? null });
+      }
       // Fulfilment consumes the checkout reservation; cancellation releases it.
       // Same transaction as the status change — never a half-applied outcome.
       await settleForStatus(tx, { id: orderId, storeId }, toStatus);
-    });
+    }, txOptions());
 
     // Loyalty: award points when the order is delivered (and linked to a customer).
     if (toStatus === "DELIVERED") {
@@ -113,7 +121,15 @@ export class OrderAdminService {
       },
     });
     if (!order) return null;
-    return order;
+    // The order's own store and that store's own prices (Menu > Prices), so Change items shows and keeps
+    // the store's price as the usual price. A product with no own price there sells at the main price.
+    const store = order.sellingLocationId
+      ? await prisma.warehouse.findFirst({ where: { id: order.sellingLocationId, storeId }, select: { name: true } })
+      : null;
+    const own = order.sellingLocationId
+      ? await prisma.locationPrice.findMany({ where: { storeId, warehouseId: order.sellingLocationId }, select: { productId: true, priceMinor: true } })
+      : [];
+    return { ...order, sellingLocationName: store?.name ?? null, storePrices: Object.fromEntries(own.map((x) => [x.productId, x.priceMinor])) };
   }
 
   // ─────────────────────────────── W1: edit + routing ───────────────────────────────
@@ -168,12 +184,17 @@ export class OrderAdminService {
 
     // Prices: the list price unless the screen sends a changed one (bounded + reasoned). The screen sends a line's
     // earlier changed price again with its reason, so a later edit never quietly puts the list price back.
+    // The list price is the order's own store's price (Menu > Prices) where it has one, else the main price:
+    // an order changed after it was placed keeps its store's price.
+    const own = order.sellingLocationId
+      ? new Map((await prisma.locationPrice.findMany({ where: { storeId, warehouseId: order.sellingLocationId, productId: { in: ids } }, select: { productId: true, priceMinor: true } })).map((x) => [x.productId, x.priceMinor]))
+      : new Map<string, number>();
     const newLines: { productId: string; productName: string; sku: string; unitPriceMinor: number; quantity: number; lineTotalMinor: number; priceOverridden: boolean; priceOverrideReason: string | null; catalogUnitPriceMinor: number | null }[] = [];
     for (const it of items) {
       const p = products.find((x) => x.id === it.productId)!;
       let price;
       try {
-        price = resolveLinePrice({ catalogUnitPriceMinor: p.priceMinor, override: it.unitPriceMinorOverride, reason: it.priceOverrideReason });
+        price = resolveLinePrice({ catalogUnitPriceMinor: priceAt(p.priceMinor, own.get(p.id)), override: it.unitPriceMinorOverride, reason: it.priceOverrideReason });
       } catch (e) {
         return { ok: false, error: { type: "validation", errors: [`${p.name}: ${e instanceof Error ? e.message : "Invalid price"}`] } };
       }
@@ -276,7 +297,7 @@ export class OrderAdminService {
   }
 
   /** W1: complete a pickup/POS order directly from RECEIVED/CONFIRMED. */
-  async completeNow(storeId: string, orderId: string): Promise<AdminResult<{ id: string; status: string }>> {
+  async completeNow(storeId: string, orderId: string, actorId: string | null = null): Promise<AdminResult<{ id: string; status: string }>> {
     const order = await prisma.order.findFirst({ where: { storeId, id: orderId } });
     if (!order) return { ok: false, error: { type: "not_found", message: "Order not found" } };
     if (this.isDeliveryOrder(order)) {
@@ -286,13 +307,16 @@ export class OrderAdminService {
       return { ok: false, error: { type: "conflict", message: `Cannot complete an order in ${order.status}` } };
     }
     await prisma.$transaction(async (tx) => {
-      await tx.order.update({ where: { id: orderId }, data: { status: "COMPLETED", paymentStatus: "COLLECTED" } });
+      // A GCash payment still to be checked stays in Payment review: handing the rice over does not prove the money came in.
+      await tx.order.update({ where: { id: orderId }, data: { status: "COMPLETED", paymentStatus: paymentEffectFor("COMPLETED", order.paymentStatus) as never } });
       await tx.orderStatusHistory.create({
-        data: { orderId, storeId, fromStatus: order.status, toStatus: "COMPLETED", reason: "move-to-completed (pickup)", actorType: "admin", actorId: null },
+        data: { orderId, storeId, fromStatus: order.status, toStatus: "COMPLETED", reason: "move-to-completed (pickup)", actorType: "admin", actorId },
       });
+      // Picked up: the order becomes a sale at its store now, and cash paid on pick-up is that store's cash.
+      await settleHandedOverOrder(tx, { storeId, orderId, actorId });
       // Handed over at the counter: the checkout reservation is now consumed.
       await settleForStatus(tx, { id: orderId, storeId }, "COMPLETED");
-    });
+    }, txOptions());
     await cacheBust(cacheKey("orders", storeId));
     return { ok: true, value: { id: orderId, status: "COMPLETED" } };
   }

@@ -20,7 +20,7 @@ import { taxColumnsFor } from "../domain/tax-store.js";
 import { priceAt, saleKey, SellingError } from "../domain/selling.js";
 import { ALL_LOCATION_ROLES } from "../domain/people.js";
 import { locationRefusal, type Actor } from "../people/people.service.js";
-import { freezeLineCosts, settleSaleAtStore } from "../selling/settle-sale.js";
+import { freezeLineCosts, settleHandedOverOrder, settleSaleAtStore } from "../selling/settle-sale.js";
 import { Prisma } from "@prisma/client";
 import { formatOrderNumber } from "../domain/order-number.js";
 import { randomId } from "../persistence/repositories.js";
@@ -1069,6 +1069,9 @@ export class PosService {
       await tx.orderStatusHistory.create({ data: { orderId: holdId, storeId, fromStatus: hold.status, toStatus: finalStatus, reason: input.sendForDelivery === true && isDelivery ? "paid at counter → send for delivery" : null, actorType: "pos", actorId: actorId } });
       // A shop-link / SE Corp Hub order still HOLDS its stock: paid and handed over here, the held units leave
       // the shelf now (sent for delivery, they leave when it is delivered). No-op for POS holds and pre-orders.
+      // Paid and handed over at the counter: an online / Facebook order becomes a sale at its store now.
+      // (Sent for delivery, it becomes one when it is delivered.) No-op for POS holds.
+      if (finalStatus === "COMPLETED") await settleHandedOverOrder(tx, { storeId, orderId: holdId, actorId });
       await settleForStatus(tx, { id: holdId, storeId }, finalStatus);
     }, txOptions());
 

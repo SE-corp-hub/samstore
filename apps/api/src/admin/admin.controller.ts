@@ -1331,7 +1331,7 @@ export class AdminController {
     const user = req.user;
     requireUser(user);
     const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.VIEW);
-    const result = await this.ordersAdmin.completeNow(storeId, id);
+    const result = await this.ordersAdmin.completeNow(storeId, id, user.sub);
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
     return { ...result.value, storeId };
   }
