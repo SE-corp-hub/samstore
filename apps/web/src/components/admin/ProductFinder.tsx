@@ -1,19 +1,24 @@
 "use client";
 
-// The product buttons for POS and Pre-order, built for 50+ items: one bar holds the search box and
-// the variety buttons (one tap filters to a variety), the items this device sells most come first,
-// and the rest are grouped by variety under their own heading. With `fit`, the results scroll in
-// their own box under the bar, so the bar, the sale and the buttons never leave the screen.
+// The product buttons for POS and Pre-order, built for 30–50+ items. One bar holds the search box,
+// the size buttons and the List / Big switch; under it, one button per group (the owner's own price-list
+// sections from Products → Group — Premium, Imported, Local … — or the kind of rice from the name), each
+// with how many items it holds. "List" shows the products as rows like the printed price list (name,
+// price, what is left), two columns on a tablet, so two to three times more fit on the screen than the
+// big buttons. The group headings stay at the top of the box while it scrolls, so you always see where
+// you are. With `fit`, the results scroll in their own box under the bar, so the bar, the sale and the
+// buttons never leave the screen.
 
-import { useEffect, useState, type ReactNode } from "react";
-import { groupsFor, matchesSearch, mostUsed, sizeOf, sizesFor } from "../../lib/product-find";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { finderGroups, matchesSearch, mostUsed, saveView, savedView, sizeOf, sizesFor, sortGroups, type FinderView } from "../../lib/product-find";
 import { useMediaQuery } from "../../lib/use-media-query";
 
-export default function ProductFinder<T extends { id: string; name: string }>({ items, list, renderTile, colClass = "col-6 col-md-4 col-lg-3", clearSignal = 0, lead, footer, fit = false }: {
+export default function ProductFinder<T extends { id: string; name: string; group?: string | null }>({ items, list, renderTile, colClass = "col-6 col-md-4 col-lg-3", clearSignal = 0, lead, footer, fit = false }: {
   items: T[];
   /** Which list the "sold most" counts belong to (pos, preorder). */
   list: string;
-  renderTile: (item: T) => ReactNode;
+  /** One product: a PickTile with `layout={view === "list" ? "row" : "tile"}`. */
+  renderTile: (item: T, view: FinderView) => ReactNode;
   colClass?: string;
   /** Change it to empty the search box (e.g. after an item went into the sale). */
   clearSignal?: number;
@@ -28,33 +33,47 @@ export default function ProductFinder<T extends { id: string; name: string }>({ 
   const [group, setGroup] = useState("");
   const [size, setSize] = useState("");
   const [often, setOften] = useState<string[]>([]);
+  const [view, setView] = useState<FinderView>("list");
+  useEffect(() => { setView(savedView()); }, []);
   useEffect(() => { setOften(mostUsed(list, 8)); }, [list, items.length]);
   useEffect(() => { setQ(""); }, [clearSignal]);
-  // A phone has no room for a dozen buttons: there the varieties are one big drop-down.
+  // A phone has no room for a line of group buttons: there they are one big drop-down.
   const roomy = useMediaQuery("(min-width: 768px)");
+  // A new filter starts at the top of the list, never half-way down the old one.
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => { box.current?.scrollTo({ top: 0 }); }, [q, group, size, view]);
 
-  const groupOfName = groupsFor(items.map((i) => i.name));
+  const groupOfName = finderGroups(items);
   const groupOf = (name: string) => groupOfName.get(name) ?? "Other";
-  const groups = [...new Set(groupOfName.values())].sort((a, b) => (a === "Other" ? 1 : b === "Other" ? -1 : a.localeCompare(b)));
+  const groups = sortGroups(groupOfName.values());
+  const countIn = (g: string) => items.filter((i) => groupOf(i.name) === g).length;
   const byName = (a: T, b: T) => a.name.localeCompare(b.name, undefined, { numeric: true });
-  // Size buttons (25kg / 5kg …) work together with the kind buttons and the search box.
+  // Size buttons (25kg / 5kg …) work together with the group buttons and the search box.
   const sizes = sizesFor(items.map((i) => i.name));
   const sizeOn = sizes.includes(size) ? size : "";
-  const found = items.filter((i) => matchesSearch(i.name, q) && (!group || groupOf(i.name) === group) && (!sizeOn || sizeOf(i.name) === sizeOn)).sort(byName);
-  const filtering = q.trim() !== "" || group !== "" || sizeOn !== "";
-  const oftenItems = often.map((id) => items.find((i) => i.id === id)).filter((i): i is T => !!i);
-  const grid = (rows: T[]) => (
+  const groupOn = groups.includes(group) ? group : "";
+  const found = items.filter((i) => matchesSearch(i.name, q) && (!groupOn || groupOf(i.name) === groupOn) && (!sizeOn || sizeOf(i.name) === sizeOn)).sort(byName);
+  const filtering = q.trim() !== "" || groupOn !== "" || sizeOn !== "";
+  const oftenItems = often.map((id) => items.find((i) => i.id === id)).filter((i): i is T => !!i).slice(0, view === "list" ? 6 : 8);
+  const grid = (rows: T[]) => view === "list" ? (
+    <ul className="pick-rows">
+      {rows.map((i) => <li key={i.id}>{renderTile(i, view)}</li>)}
+    </ul>
+  ) : (
     <div className="row g-2 mb-2">
-      {rows.map((i) => <div key={i.id} className={colClass}>{renderTile(i)}</div>)}
+      {rows.map((i) => <div key={i.id} className={colClass}>{renderTile(i, view)}</div>)}
     </div>
   );
+  const pickView = (v: FinderView) => { setView(v); saveView(v); };
+  const pickGroup = (g: string) => { setGroup(g); setQ(""); };
+  const groupButtons = groups.length > 1 && roomy;
 
   const bar = (
     <div className="finder-bar">
       {lead}
       <div className="finder-search">
         <i className="bi bi-search position-absolute top-50 translate-middle-y ms-3 text-muted" aria-hidden="true"></i>
-        <input type="text" enterKeyHint="search" autoComplete="off" className="form-control ps-5 pe-5" placeholder="Search: type a few letters" aria-label="Search items"
+        <input type="text" enterKeyHint="search" autoComplete="off" className="form-control ps-5 pe-5" placeholder={lead ? "Search" : "Search: type a few letters"} aria-label="Search items"
           value={q} onChange={(e) => { setQ(e.target.value); if (e.target.value.trim()) setGroup(""); }} />
         {q && (
           <button type="button" className="btn btn-link position-absolute top-50 end-0 translate-middle-y text-dark py-0" style={{ minWidth: 48, minHeight: 44 }} aria-label="Clear search" onClick={() => setQ("")}>
@@ -69,22 +88,41 @@ export default function ProductFinder<T extends { id: string; name: string }>({ 
           ))}
         </div>
       )}
-      {groups.length > 1 && !roomy && (
-        <select className="form-select" style={{ flex: "1 1 10rem" }} aria-label="Show one variety" value={group} onChange={(e) => { setGroup(e.target.value); setQ(""); }}>
-          <option value="">Show: all varieties</option>
-          {groups.map((g) => <option key={g} value={g}>{g}</option>)}
+      <div className="finder-view" role="group" aria-label="How to show the items">
+        <button type="button" className={`btn text-nowrap ${view === "list" ? "btn-dark" : "btn-outline-dark"}`} aria-pressed={view === "list"} aria-label="Show as a price list" title="List" onClick={() => pickView("list")}>
+          <i className="bi bi-list-ul" aria-hidden="true"></i><span className="finder-view-word">List</span>
+        </button>
+        <button type="button" className={`btn text-nowrap ${view === "tiles" ? "btn-dark" : "btn-outline-dark"}`} aria-pressed={view === "tiles"} aria-label="Show as big buttons with pictures" title="Big buttons" onClick={() => pickView("tiles")}>
+          <i className="bi bi-grid-3x2-gap" aria-hidden="true"></i><span className="finder-view-word">Big</span>
+        </button>
+      </div>
+      {groups.length > 1 && !groupButtons && (
+        <select className="form-select" style={{ flex: "1 1 10rem" }} aria-label="Show one group" value={groupOn} onChange={(e) => pickGroup(e.target.value)}>
+          <option value="">Show: all ({items.length})</option>
+          {groups.map((g) => <option key={g} value={g}>{g} ({countIn(g)})</option>)}
         </select>
       )}
-      {groups.length > 1 && roomy && (
-        <div className="finder-groups" role="group" aria-label="Show one variety">
-          <button type="button" className={`btn ${group === "" ? "btn-dark" : "btn-outline-dark"}`} aria-pressed={group === ""} onClick={() => setGroup("")}>All</button>
+      {groupButtons && (
+        <div className="finder-groups" role="group" aria-label="Show one group">
+          <button type="button" className={`btn ${groupOn === "" ? "btn-dark" : "btn-outline-dark"}`} aria-pressed={groupOn === ""} onClick={() => pickGroup("")}>
+            All <span className="finder-n">{items.length}</span>
+          </button>
           {groups.map((g) => (
-            <button key={g} type="button" className={`btn text-nowrap ${group === g ? "btn-dark" : "btn-outline-dark"}`} aria-pressed={group === g} onClick={() => { setGroup(group === g ? "" : g); setQ(""); }}>{g}</button>
+            <button key={g} type="button" className={`btn text-nowrap ${groupOn === g ? "btn-dark" : "btn-outline-dark"}`} aria-pressed={groupOn === g} onClick={() => pickGroup(groupOn === g ? "" : g)}>
+              {g} <span className="finder-n">{countIn(g)}</span>
+            </button>
           ))}
         </div>
       )}
-      {filtering && <span className="text-muted text-nowrap" aria-live="polite">{found.length} of {items.length}</span>}
+      {filtering && <span className="finder-found text-muted text-nowrap" aria-live="polite">{found.length} of {items.length}</span>}
     </div>
+  );
+
+  const heading = (text: ReactNode, n?: number, star = false) => (
+    <h3 className={`finder-heading${star ? "" : " group"}`}>
+      {star && <i className="bi bi-star-fill" aria-hidden="true"></i>}{text}
+      {n !== undefined && <span className="finder-heading-n">{n} {n === 1 ? "item" : "items"}</span>}
+    </h3>
   );
 
   const results = (
@@ -92,7 +130,7 @@ export default function ProductFinder<T extends { id: string; name: string }>({ 
       {filtering ? (
         found.length > 0 ? grid(found) : (
           <div className="text-center py-4">
-            <div className="mb-2">No item matches{q.trim() ? ` "${q.trim()}"` : ""}{group ? ` in ${group}` : ""}{sizeOn ? ` (${sizeOn})` : ""}.</div>
+            <div className="mb-2">No item matches{q.trim() ? ` "${q.trim()}"` : ""}{groupOn ? ` in ${groupOn}` : ""}{sizeOn ? ` (${sizeOn})` : ""}.</div>
             <div className="text-muted small mb-3">Try the first letters only, like &quot;din&quot; for Dinorado.</div>
             <button type="button" className="btn btn-outline-dark btn-lg" onClick={() => { setQ(""); setGroup(""); setSize(""); }}>Show all items</button>
           </div>
@@ -100,18 +138,21 @@ export default function ProductFinder<T extends { id: string; name: string }>({ 
       ) : (
         <>
           {oftenItems.length > 0 && items.length > 8 && (
-            <>
-              <h3 className="finder-heading"><i className="bi bi-star-fill" aria-hidden="true"></i>Sold most here</h3>
+            <section aria-label="Sold most here">
+              {heading("Sold most here", undefined, true)}
               {grid(oftenItems)}
-            </>
-          )}
-          {/* Up to 8 items (two rows) are one grid: a heading per variety would cost more rows than it saves. */}
-          {groups.length > 1 && items.length > 8 ? groups.map((g) => (
-            <section key={g} aria-label={g}>
-              <h3 className="finder-heading group">{g}</h3>
-              {grid(items.filter((i) => groupOf(i.name) === g).sort(byName))}
             </section>
-          )) : grid([...items].sort(byName))}
+          )}
+          {/* Up to 8 items (two rows) are one grid: a heading per group would cost more rows than it saves. */}
+          {groups.length > 1 && items.length > 8 ? groups.map((g) => {
+            const rows = items.filter((i) => groupOf(i.name) === g).sort(byName);
+            return (
+              <section key={g} aria-label={g}>
+                {heading(g, rows.length)}
+                {grid(rows)}
+              </section>
+            );
+          }) : grid([...items].sort(byName))}
         </>
       )}
       {footer}
@@ -121,7 +162,7 @@ export default function ProductFinder<T extends { id: string; name: string }>({ 
   return (
     <>
       {bar}
-      {fit ? <div className="fit-scroll">{results}</div> : results}
+      {fit ? <div className="fit-scroll finder-results" ref={box}>{results}</div> : <div className="finder-results" ref={box}>{results}</div>}
     </>
   );
 }

@@ -50,6 +50,8 @@ interface Item {
   id: string; name: string; photoKey?: string | null; loose: boolean; gramsPerUnit: number | null; priceMinor: number; forReview: boolean;
   /** Products → group; the quota promo is for some groups only. */
   categoryId?: string | null;
+  /** Products → group's name (Premium, Imported, 5kg …): the group buttons on the product list. */
+  group?: string | null;
   stock: Record<string, number>; tracked: boolean;
   /** Unit cost here (per piece, or per kilo): selling under it loses money. Staff get it only to compare. */
   floorMinor?: number; ownShelfCost?: boolean;
@@ -448,12 +450,12 @@ export default function BentaPanel() {
           <button type="button" className="btn btn-outline-primary" disabled={offline} onClick={() => setNewItem(true)}>+ New item (not on the list yet){offline && <> · <i className="bi bi-lock"></i> {NEEDS_NET}</>}</button>
         </div>
       )}
-      renderTile={(i) => {
+      renderTile={(i, view) => {
         const n = inSale(i.id);
         const inText = i.loose ? kg(n) : `${n}`;
         const left = i.stock[locationId] ?? 0; // only this store's count: other stores show when a line is taken from them
         return (
-          <PickTile name={i.name} photoKey={i.photoKey} price={peso(i.priceMinor)} priceNote={i.loose ? "/kg" : undefined}
+          <PickTile layout={view === "list" ? "row" : "tile"} name={i.name} photoKey={i.photoKey} price={peso(i.priceMinor)} priceNote={i.loose ? "/kg" : undefined}
             countText={n > 0 ? `${inText} in sale` : undefined}
             stock={left <= 0 ? "None left here" : `${i.loose ? kg(left) : left} left`} stockOut={left <= 0}
             extra={i.forReview ? <span className="badge text-bg-warning">To review</span> : undefined}

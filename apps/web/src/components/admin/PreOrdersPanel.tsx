@@ -52,6 +52,8 @@ interface Preorder {
 interface PosProduct {
   id: string; name: string; sku: string; priceMinor: number; photoKey?: string | null;
   availableQuantity: number; category: { name: string } | null;
+  /** false = removed from Products (kept only for old orders): not offered for a new pre-order. */
+  isActive?: boolean;
 }
 interface PosCustomer { id: string; name: string | null; email: string | null; phone: string | null; }
 interface CartLine { product: PosProduct; quantity: number; variantId?: string | null; /** What is typed in the price box, kept while typing. */ priceText?: string; /** Manual price (centavos each) when it differs from the list price. */ price?: number; reason?: string }
@@ -224,7 +226,7 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
   const [moveError, setMoveError] = useState<string | null>(null);
   /** The products at this store's price, with this store's count. */
   const buildProducts = useMemo(
-    () => rawProducts.map((p) => ({ ...p, priceMinor: atStore.price.get(p.id) ?? p.priceMinor, availableQuantity: atStore.stock.get(p.id) ?? p.availableQuantity })),
+    () => rawProducts.filter((p) => p.isActive !== false).map((p) => ({ ...p, group: p.category?.name ?? null, priceMinor: atStore.price.get(p.id) ?? p.priceMinor, availableQuantity: atStore.stock.get(p.id) ?? p.availableQuantity })),
     [rawProducts, atStore],
   );
   // Unit cost per product (from the counter list, saved for offline) and whether this login may see it.
@@ -797,7 +799,8 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
     : reasonMissing ? "Pick a reason for each changed price (part 3)." : null;
   const saveLabel = buildBusy ? "Saving…" : editingPre ? "Save changes" : "Save pre-order";
 
-  // Part 1 in two short rows (the customer; or a new name and mobile), so the products start high on the screen.
+  // Part 1 in two short rows (the customer; or a new name and mobile). Sideways it sits above the order on the
+  // right (as the customer does on POS), so the price list on the left gets the whole height.
   const customerSection = (
     <section aria-labelledby="po-who">
       <div className="d-flex flex-wrap align-items-center gap-2 mb-2">
@@ -812,9 +815,9 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
         )}
       </div>
       {!editingPre && !buildCustomerId && (
-        <div className="d-flex flex-wrap align-items-center gap-2 mb-2" style={{ paddingLeft: "2.5rem" }}>
-          <span className="text-muted text-nowrap">or a new customer:</span>
-          <input className="form-control" style={{ flex: "2 1 10rem", maxWidth: "18rem" }} aria-label="New customer's name" placeholder="Name" value={buildNewName} onChange={(e) => setBuildNewName(e.target.value)} />
+        <div className="d-flex flex-wrap align-items-center gap-2 mb-2" style={{ paddingLeft: wide ? 0 : "2.5rem" }}>
+          {!wide && <span className="text-muted text-nowrap">or a new customer:</span>}
+          <input className="form-control" style={{ flex: "2 1 10rem", maxWidth: "18rem" }} aria-label="New customer's name" placeholder={wide ? "Or a new customer: name" : "Name"} value={buildNewName} onChange={(e) => setBuildNewName(e.target.value)} />
           <input className="form-control" style={{ flex: "1 1 9rem", maxWidth: "14rem" }} inputMode="tel" aria-label="New customer's mobile number" placeholder="Mobile (optional)" value={buildNewPhone} onChange={(e) => setBuildNewPhone(e.target.value)} />
         </div>
       )}
@@ -837,10 +840,10 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
             <button type="button" className="btn btn-outline-primary" disabled={offline} onClick={() => setNewItemOpen(true)}>+ New item (not on the list yet){offline && " · Needs internet"}</button>
           </div>
         )}
-        renderTile={(p) => {
+        renderTile={(p, view) => {
           const n = inOrder(p.id);
           return (
-            <PickTile name={p.name} photoKey={p.photoKey} price={maybePrice(p.priceMinor)} countText={n > 0 ? `${n} in order` : undefined}
+            <PickTile layout={view === "list" ? "row" : "tile"} name={p.name} photoKey={p.photoKey} price={maybePrice(p.priceMinor)} countText={n > 0 ? `${n} in order` : undefined}
               stock={p.availableQuantity <= 0 ? "None in stock yet" : `${p.availableQuantity} in stock`}
               ariaLabel={`Add ${p.name}${n > 0 ? `, ${n} in this order` : ""}`} onClick={() => { noteUse("preorder", p.id); addProduct(p); }} />
           );
@@ -908,18 +911,19 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
             <button className="btn btn-success btn-lg w-100 py-2 fw-bold" disabled={!canSave} onClick={savePreorder}>
               <i className="bi bi-bag-check me-1"></i>{saveLabel}
             </button>
-            {saveHint && <div className="text-center text-muted mt-1">{saveHint}</div>}
+            {/* An empty order already says "Nothing yet. Tap items…" above: not twice. */}
+            {saveHint && buildCart.length > 0 && <div className="text-center text-muted mt-1">{saveHint}</div>}
           </div>
         )}
       </div>
     </section>
   );
 
-  // Sideways: who + products on the left, the order on the right. Upright: the order under the products. A phone keeps a sticky Save bar.
+  // Sideways: the products on the left; who it is for and the order on the right. Upright: the order under the products. A phone keeps a sticky Save bar.
   const renderBuild = () => wide ? (
     <div className="fit-row">
-      <div className="fit-col fit-main">{customerSection}{pickSection}</div>
-      <div className="fit-col fit-side">{orderSection}</div>
+      <div className="fit-col fit-main">{pickSection}</div>
+      <div className="fit-col fit-side">{customerSection}{orderSection}</div>
     </div>
   ) : (
     <div className="fit-col">

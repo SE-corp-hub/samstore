@@ -341,6 +341,8 @@ html[data-text-size] .btn:focus-visible { box-shadow: none; }
 .sell-fit .fit-card > .card-body { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .sell-fit .fit-card > .card-body > * { flex: 0 0 auto; }
 .sell-fit .fit-card .sale-lines { flex: 0 1 auto; min-height: 3.5rem; overflow-y: auto; overscroll-behavior: contain; }
+/* An empty order keeps no room for lines: the product list gets it. */
+.sell-fit .fit-card .sale-lines:empty { min-height: 0; }
 /* Back / Add to sale / Save / Finish sale stay in view at the bottom when a card has to scroll (Extra large text):
    inside a .fit-card its body scrolls; the pay card (.fit-pay) scrolls with the column's .fit-scroll box. */
 .sell-fit .fit-card .pos-actions, .sell-fit .fit-scroll > .fit-pay .pos-actions { position: sticky; bottom: 0; background: #fff; padding: 0.5rem 0 0; margin-bottom: -0.25rem; }
@@ -359,6 +361,54 @@ main:has(> * > .rice-ui > .sell-fit), main:has(> .rice-ui > .sell-fit) { padding
    line slides sideways instead of wrapping. */
 .sell-fit .finder-bar .finder-groups { flex-wrap: nowrap; overflow-x: auto; max-width: 100%; scrollbar-width: thin; }
 .sell-fit .finder-bar .finder-groups .btn { flex: 0 0 auto; padding-inline: 0.55rem; }
+/* With the counts ("Premium 8") the owner's six groups still fit on one line sideways. */
+.sell-fit .finder-bar .finder-groups .btn { padding-inline: 0.45rem; }
+.sell-fit .finder-n { margin-left: 0.15rem; padding: 0 0.3rem; min-width: 1.4em; }
+/* On a phone the List / Big switch sits at the end of the size buttons' line. */
+@media (max-width: 599.98px) { .finder-bar .finder-view { margin-left: auto; } }
+
+/* The List / Big switch after the size buttons, and the count on each group button ("Premium 9"). */
+.finder-bar .finder-view { display: flex; gap: 0; flex: 0 0 auto; }
+.finder-bar .finder-view .btn { display: inline-flex; align-items: center; gap: 0.35rem; padding-inline: 0.7rem; }
+.finder-bar .finder-view .btn:first-child { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.finder-bar .finder-view .btn:last-child { border-top-left-radius: 0; border-bottom-left-radius: 0; margin-left: -2px; }
+.finder-bar .finder-view .bi { font-size: 1.15em; }
+/* Pre-order's bar also holds its "2 Tap items to add" heading: there the switch shows its two pictures
+   only (it is set once and remembered), so it stays on the search line instead of taking a row. */
+.sell-fit .finder-bar:has(> h2) .finder-view-word { display: none; }
+.sell-fit .finder-bar:has(> h2) .finder-view .btn { min-width: 48px; justify-content: center; }
+.finder-n { display: inline-block; min-width: 1.6em; margin-left: 0.25rem; padding: 0 0.35rem; border-radius: 1rem; background: #eeebe6; color: #3a3632; font-size: 0.85em; font-weight: 700; font-variant-numeric: tabular-nums; }
+.btn-dark .finder-n { background: #fff; color: #1f1d1a; }
+/* Group headings stay at the top of the list box while it scrolls ("Premium · 9 items"). */
+.fit-scroll.finder-results .finder-heading { position: sticky; top: 0; z-index: 2; background: #fff; padding-top: 0.25rem; margin-top: 0; }
+.finder-results section + section .finder-heading, .finder-results section + .row, .finder-results section + .pick-rows { margin-top: 0.25rem; }
+.finder-heading-n { margin-left: auto; font-size: max(16px, 0.9rem); font-weight: 600; color: var(--sam-muted); }
+
+/* The price list: one row per product (small picture · name with what is left · price on the right),
+   two columns when there is room, about 3.6 rem tall — two to three times more items on the screen
+   than the big buttons. The whole row is the button (tap = one more, as on the big buttons). */
+.pick-rows { list-style: none; margin: 0 0 0.5rem; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 17rem), 1fr)); gap: 0.4rem; }
+.pick-rows > li { min-width: 0; }
+.pick-row {
+  width: 100%; min-height: 3.6rem; padding: 0.35rem 0.75rem; display: flex; align-items: center; gap: 0.6rem;
+  text-align: start; line-height: 1.2; font-weight: 600; color: var(--sam-text);
+  background: #fff; border: 2px solid #4a4844; border-radius: 0.6rem;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+.pick-row:hover { background: #f4efe7; }
+.pick-row:active { background: #e9e2d8; }
+.pick-row:focus-visible { outline: 3px solid var(--sam-primary); outline-offset: 2px; }
+.pick-row.in-sale { background: #e4f3ea; border-color: #1f6f3f; box-shadow: inset 0 0 0 1px #1f6f3f; }
+.pick-row .pick-thumb { flex: 0 0 auto; width: 2.6rem; height: 2.6rem; border-radius: 0.4rem; background: #fff; overflow: hidden; }
+.pick-row .pick-thumb img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.pick-row-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 0.1rem; }
+.pick-row .pick-name { font-size: 1rem; overflow-wrap: anywhere; }
+.pick-row-sub { display: flex; flex-wrap: wrap; align-items: center; gap: 0.15rem 0.5rem; }
+.pick-row .pick-count { margin: 0; padding: 0 0.5rem; }
+.pick-row .pick-stock.out { margin-top: 0; padding: 0 0.4rem; }
+.pick-row.in-sale .pick-stock.out { background: #fff; }
+.pick-row .pick-price { flex: 0 0 auto; font-size: 1.3rem; white-space: nowrap; }
+@media (prefers-reduced-motion: reduce) { .pick-row, .pick-tile { transition: none; } }
 
 /* Product buttons: four to a row on the tablet, 6 rem tall (the name, the price, what is left). */
 .sell-fit .pick-tile { min-height: 6rem; }

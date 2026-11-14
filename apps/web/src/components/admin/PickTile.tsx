@@ -9,7 +9,7 @@
 import { useState, type ReactNode } from "react";
 import { photoUrl } from "../../lib/product-photo";
 
-export default function PickTile({ name, photoKey, price, priceNote, countText, stock, stockOut = false, extra, ariaLabel, onClick }: {
+export default function PickTile({ name, photoKey, price, priceNote, countText, stock, stockOut = false, extra, ariaLabel, onClick, layout = "tile" }: {
   name: string;
   /** The product's picture (Products → Picture). None, or not loadable offline: the plain button. */
   photoKey?: string | null;
@@ -27,11 +27,30 @@ export default function PickTile({ name, photoKey, price, priceNote, countText, 
   extra?: ReactNode;
   ariaLabel: string;
   onClick: () => void;
+  /** "row": one line of the price list (small picture · name and what is left · price on the right). */
+  layout?: "tile" | "row";
 }) {
   const inSale = !!countText;
   const url = photoUrl(photoKey);
   const [failed, setFailed] = useState<string | null>(null);
   const photo = url && failed !== url ? url : null;
+  if (layout === "row") {
+    return (
+      <button type="button" className={`pick-row${inSale ? " in-sale" : ""}`} aria-pressed={inSale} aria-label={ariaLabel} onClick={onClick}>
+        {photo && <span className="pick-thumb" aria-hidden="true"><img src={photo} alt="" loading="lazy" decoding="async" draggable={false} onError={() => setFailed(photo)} /></span>}
+        <span className="pick-row-main">
+          <span className="pick-name">{name}{extra}</span>
+          {(inSale || stock) && (
+            <span className="pick-row-sub">
+              {inSale && <span className="pick-count"><i className="bi bi-check-lg" aria-hidden="true"></i>{countText}</span>}
+              {stock && <span className={`pick-stock${stockOut ? " out" : ""}`}>{stock}</span>}
+            </span>
+          )}
+        </span>
+        <span className="pick-price">{price}{priceNote && <span className="pick-price-note">{priceNote}</span>}</span>
+      </button>
+    );
+  }
   return (
     <button type="button" className={`pick-tile${inSale ? " in-sale" : ""}${photo ? " has-photo" : ""}`} aria-pressed={inSale} aria-label={ariaLabel} onClick={onClick}>
       {/* The picture is decoration: the button's name already says which rice it is. */}
