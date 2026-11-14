@@ -167,6 +167,15 @@ html[data-text-size] .btn-primary:disabled, html[data-text-size] .btn-primary.di
 }
 .screen-name { font-weight: 700; font-size: 1.1rem; line-height: 1.2; color: var(--sam-text); }
 .screen-hint { font-size: max(16px, 0.9rem); line-height: 1.25; color: var(--sam-muted); font-weight: 400; }
+/* POS and Pre-order: one slim line (small icon, the name, the pills), no hint line and no Menu button,
+   so the price list and the sale get the height. The pills and Lock keep their finger size. */
+.admin-topbar.topbar-slim { padding-top: 2px !important; padding-bottom: 2px !important; min-height: 0; }
+.topbar-slim .screen-hint { display: none; }
+.topbar-slim .screen-chip { width: 2rem; height: 2rem; font-size: 1.1rem; border-radius: 0.5rem; }
+.topbar-slim .screen-title { gap: 8px; }
+.topbar-slim .badge.rounded-pill { padding-top: 0.35rem !important; padding-bottom: 0.35rem !important; }
+/* A little less air above the selling screen under the slim bar. */
+.topbar-slim ~ main:has(.sell-fit) { padding-top: 0.4rem !important; }
 /* Phones: no room for the chip and the hint; the name wraps rather than clips, the pills may shrink. */
 @media (max-width: 575.98px) {
   .screen-hint, .screen-chip { display: none; }
