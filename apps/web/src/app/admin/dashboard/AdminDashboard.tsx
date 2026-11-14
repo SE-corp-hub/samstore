@@ -440,6 +440,8 @@ export default function AdminDashboard() {
   };
 
   // `desktop` = the sidebar of a PC with a mouse (hidden on every touch screen); the tablet drawer keeps the plain footer.
+  // The selling screens get a slim top bar with no Menu button, when the bottom bar ("More") is there to reach the rest.
+  const slimTop = (tab === "pos" || tab === "preorders") && BAR_ROLES.includes(role);
   const renderSidebar = (desktop: boolean) => (
     <div className="d-flex flex-column h-100">
       <div className="p-3 border-bottom">
@@ -530,11 +532,16 @@ export default function AdminDashboard() {
       {/* Main */}
       <div className="flex-grow-1 d-flex flex-column" style={{ minWidth: 0 }}>
         {/* Topbar */}
-        <nav className="admin-topbar navbar navbar-expand py-2">
+        {/* On the selling screens (POS, Pre-order) the bar is one slim line, so the price list gets the height,
+            and it has no Menu button: nothing to open by mistake in the middle of a sale. The Menu (every
+            screen, Text size, Switch user, Log out) is one tap away under "More" on the bottom bar. */}
+        <nav className={`admin-topbar navbar navbar-expand py-2${slimTop ? " topbar-slim" : ""}`}>
           <div className="container-fluid">
-            <button className="btn btn-outline-secondary btn-sm d-lg-none touch-show me-2" onClick={() => setMobileNav(true)} aria-label="Menu">
-              <i className="bi bi-list"></i>
-            </button>
+            {!slimTop && (
+              <button className="btn btn-outline-secondary btn-sm d-lg-none touch-show me-2" onClick={() => setMobileNav(true)} aria-label="Menu">
+                <i className="bi bi-list"></i>
+              </button>
+            )}
             {/* The screen's icon on its group colour, its name, and one line on what it is for. */}
             {(() => {
               const id = NAV_ID[tab] ?? tab;

@@ -52,6 +52,37 @@ export function groupsFor(names: string[]): Map<string, string> {
   return new Map(names.map((n) => [n, (count.get(groupOf(n)) ?? 0) > 1 ? groupOf(n) : "Other"]));
 }
 
+/**
+ * The groups the finder shows. The store's own groups (Products → Group: the owner's price-list
+ * sections, such as Premium, Imported, Local, 5kg) win when at least half of the products have one;
+ * a product without one goes under "Other". Otherwise the kind of rice from the name (groupsFor).
+ * Keyed by product name.
+ */
+export function finderGroups(items: { name: string; group?: string | null }[]): Map<string, string> {
+  const own = items.filter((i) => i.group && i.group.trim()).length;
+  if (items.length > 0 && own * 2 >= items.length) {
+    return new Map(items.map((i) => [i.name, i.group?.trim() || "Other"]));
+  }
+  return groupsFor(items.map((i) => i.name));
+}
+
+/** Group order on the buttons: words A–Z, then groups that are a size ("5kg"), "Other" last. */
+export function sortGroups(groups: Iterable<string>): string[] {
+  const rank = (g: string) => (g === "Other" ? 2 : /^\d/.test(g) ? 1 : 0);
+  return [...new Set(groups)].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b, undefined, { numeric: true }));
+}
+
+/** How the products show: "list" = rows like the printed price list (name · price · left), "tiles" = big
+    buttons with the picture. Remembered on this device. */
+export type FinderView = "list" | "tiles";
+const VIEW_KEY = "sam.finderView";
+export function savedView(): FinderView {
+  try { return window.localStorage.getItem(VIEW_KEY) === "tiles" ? "tiles" : "list"; } catch { return "list"; }
+}
+export function saveView(v: FinderView) {
+  try { window.localStorage.setItem(VIEW_KEY, v); } catch { /* convenience only */ }
+}
+
 /** How often each product was tapped on this device, so the usual ones come first. */
 const useKey = (list: string) => `product-use:${list}`;
 export function noteUse(list: string, productId: string) {

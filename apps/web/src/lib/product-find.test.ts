@@ -48,3 +48,17 @@ test("the pack size is read from the name, and two or more sizes get buttons", (
   assert.deepEqual(sizesFor(["Mango 5kg", "Mango 25kg", "Alsa 25 kg", "Sinandomeng (tingi)"]), ["25kg", "5kg"]);
   assert.deepEqual(sizesFor(["Alsa 25kg", "Riz 25kg"]), [], "one size only: no buttons");
 });
+
+test("the store's own groups win when most products have one", async () => {
+  const { finderGroups, sortGroups } = await import("./product-find");
+  const g = finderGroups([
+    { name: "Alsa 25kg", group: "Imported" }, { name: "Mango 5kg", group: "5kg" },
+    { name: "Riz Dinorado 25kg", group: "Premium" }, { name: "Odd rice", group: null },
+  ]);
+  assert.equal(g.get("Alsa 25kg"), "Imported");
+  assert.equal(g.get("Odd rice"), "Other");
+  assert.deepEqual(sortGroups(g.values()), ["Imported", "Premium", "5kg", "Other"]);
+  // Few products with a group: the kinds from the names, as before.
+  const k = finderGroups([{ name: "Crystal Dinorado 25kg" }, { name: "Riz Dinorado 25kg", group: "Premium" }, { name: "Mango 25kg" }, { name: "Alsa 25kg" }, { name: "Planters 25kg" }]);
+  assert.equal(k.get("Crystal Dinorado 25kg"), "Dinorado");
+});
