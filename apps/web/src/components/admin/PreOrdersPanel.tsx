@@ -844,7 +844,7 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
           const n = inOrder(p.id);
           return (
             <PickTile layout={view === "list" ? "row" : "tile"} name={p.name} photoKey={p.photoKey} price={maybePrice(p.priceMinor)} countText={n > 0 ? `${n} in order` : undefined}
-              stock={p.availableQuantity <= 0 ? "None in stock yet" : `${p.availableQuantity} in stock`}
+              stock={p.availableQuantity <= 0 ? (view === "list" ? "No stock yet" : "None in stock yet") : `${p.availableQuantity} in stock`}
               ariaLabel={`Add ${p.name}${n > 0 ? `, ${n} in this order` : ""}`} onClick={() => { noteUse("preorder", p.id); addProduct(p); }} />
           );
         }} />
@@ -947,6 +947,9 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
     </div>
   );
 
+  // An owner or manager with more than one store picks where a new pre-order belongs.
+  const storeChoice = subTab === "build" && !editingPre && !homeLocationId && locations.length > 1;
+  const storeOnTitle = storeChoice && wide;
   return (
     <div ref={fitRef} className="sell-screen tone-sell sell-fit">
       {/* One row: the title, Waiting / Done, and the one green button. */}
@@ -956,6 +959,11 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
         {subTab === "build" && (editingPre ? editingPre.locationName : homeLocationId ? storeHere?.name : null) && (
           <span className="badge text-bg-dark fs-6"><i className="bi bi-shop me-1" aria-hidden="true"></i>{editingPre ? editingPre.locationName : storeHere?.name}</span>
         )}
+        {/* Sideways the store buttons sit on this line (the price list below gets their row). They only work
+            before the first item anyway: once the order has items, the line just names the store. */}
+        {storeOnTitle && (buildCart.length > 0
+          ? <span className="badge text-bg-dark fs-6"><i className="bi bi-shop me-1" aria-hidden="true"></i>{storeHere?.code ? `${storeHere.code} · ` : ""}{storeHere?.name}</span>
+          : <StoreBar inline flush size="md" label="at" locations={locations} value={locationId} homeLocationId={null} onPick={pickStore} />)}
         {subTab !== "build" && (
           <div className="btn-group" role="group" aria-label="Pre-order list">
             <button type="button" className={`btn ${subTab === "list" ? "btn-dark" : "btn-outline-dark"}`} aria-pressed={subTab === "list"} onClick={() => setSubTab("list")}><i className="bi bi-hourglass-split me-1" aria-hidden="true"></i>Waiting ({drafts.length + here.length})</button>
@@ -971,7 +979,7 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
         )}
       </div>
 
-      {subTab === "build" && !editingPre && !homeLocationId && locations.length > 1 && (
+      {storeChoice && !storeOnTitle && (
         <StoreBar inline size="md" label="Pre-order at" locations={locations} value={locationId} homeLocationId={null} onPick={pickStore}
           locked={buildCart.length > 0} lockedNote="To change the store, clear the order first." />
       )}

@@ -3,9 +3,9 @@
 // The product buttons for POS and Pre-order, built for 30–50+ items. One bar holds the search box,
 // the size buttons and the List / Big switch; under it, one button per group (the owner's own price-list
 // sections from Products → Group — Premium, Imported, Local … — or the kind of rice from the name), each
-// with how many items it holds. "List" shows the products as rows like the printed price list (name,
-// price, what is left), two columns on a tablet, so two to three times more fit on the screen than the
-// big buttons. The group headings stay at the top of the box while it scrolls, so you always see where
+// with how many items it holds. "List" shows the products as rows like the printed price list (small
+// picture, name, what is left, price lined up on the right), two columns on a tablet; "Big" is the large
+// buttons with the picture on top. The group headings stay at the top of the box while it scrolls, so you always see where
 // you are. With `fit`, the results scroll in their own box under the bar, so the bar, the sale and the
 // buttons never leave the screen.
 
@@ -13,7 +13,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { finderGroups, matchesSearch, mostUsed, saveView, savedView, sizeOf, sizesFor, sortGroups, type FinderView } from "../../lib/product-find";
 import { useMediaQuery } from "../../lib/use-media-query";
 
-export default function ProductFinder<T extends { id: string; name: string; group?: string | null }>({ items, list, renderTile, colClass = "col-6 col-md-4 col-lg-3", clearSignal = 0, lead, footer, fit = false }: {
+export default function ProductFinder<T extends { id: string; name: string; group?: string | null; photoKey?: string | null }>({ items, list, renderTile, colClass = "col-6 col-md-4 col-lg-3", clearSignal = 0, lead, footer, fit = false }: {
   items: T[];
   /** Which list the "sold most" counts belong to (pos, preorder). */
   list: string;
@@ -55,8 +55,9 @@ export default function ProductFinder<T extends { id: string; name: string; grou
   const found = items.filter((i) => matchesSearch(i.name, q) && (!groupOn || groupOf(i.name) === groupOn) && (!sizeOn || sizeOf(i.name) === sizeOn)).sort(byName);
   const filtering = q.trim() !== "" || groupOn !== "" || sizeOn !== "";
   const oftenItems = often.map((id) => items.find((i) => i.id === id)).filter((i): i is T => !!i).slice(0, view === "list" ? 6 : 8);
+  const anyPhoto = items.some((i) => !!i.photoKey);
   const grid = (rows: T[]) => view === "list" ? (
-    <ul className="pick-rows">
+    <ul className={`pick-rows${anyPhoto ? " has-thumbs" : ""}`}>
       {rows.map((i) => <li key={i.id}>{renderTile(i, view)}</li>)}
     </ul>
   ) : (

@@ -27,27 +27,29 @@ export default function PickTile({ name, photoKey, price, priceNote, countText, 
   extra?: ReactNode;
   ariaLabel: string;
   onClick: () => void;
-  /** "row": one line of the price list (small picture · name and what is left · price on the right). */
+  /** "row": one line of the price list (small picture · name · on the right the price, with what is left under it). */
   layout?: "tile" | "row";
 }) {
   const inSale = !!countText;
   const url = photoUrl(photoKey);
   const [failed, setFailed] = useState<string | null>(null);
   const photo = url && failed !== url ? url : null;
+  // On the product buttons a whole-peso price needs no centavos: "₱1,200", but "₱52.50" stays.
+  const shown = price.replace(/\.00$/, "");
   if (layout === "row") {
     return (
       <button type="button" className={`pick-row${inSale ? " in-sale" : ""}`} aria-pressed={inSale} aria-label={ariaLabel} onClick={onClick}>
-        {photo && <span className="pick-thumb" aria-hidden="true"><img src={photo} alt="" loading="lazy" decoding="async" draggable={false} onError={() => setFailed(photo)} /></span>}
-        <span className="pick-row-main">
-          <span className="pick-name">{name}{extra}</span>
-          {(inSale || stock) && (
-            <span className="pick-row-sub">
-              {inSale && <span className="pick-count"><i className="bi bi-check-lg" aria-hidden="true"></i>{countText}</span>}
-              {stock && <span className={`pick-stock${stockOut ? " out" : ""}`}>{stock}</span>}
-            </span>
-          )}
+        {/* The picture's place is kept on every row once any rice on the list has a picture (.has-thumbs), so the names stay in one line down the list. */}
+        <span className={`pick-thumb${photo ? "" : " none"}`} aria-hidden="true">
+          {photo ? <img src={photo} alt="" loading="lazy" decoding="async" draggable={false} onError={() => setFailed(photo)} /> : <i className="bi bi-image"></i>}
         </span>
-        <span className="pick-price">{price}{priceNote && <span className="pick-price-note">{priceNote}</span>}</span>
+        <span className="pick-name">{name}{extra}</span>
+        {/* Right side, lined up down the list: the price, and under it what is left — or, once it is in the sale, how many. */}
+        <span className="pick-row-end">
+          <span className="pick-price">{shown}{priceNote && <span className="pick-price-note">{priceNote}</span>}</span>
+          {inSale ? <span className="pick-count"><i className="bi bi-check-lg" aria-hidden="true"></i>{countText}</span>
+            : stock && <span className={`pick-stock${stockOut ? " out" : ""}`}>{stock}</span>}
+        </span>
       </button>
     );
   }
@@ -57,7 +59,7 @@ export default function PickTile({ name, photoKey, price, priceNote, countText, 
       {photo && <span className="pick-photo" aria-hidden="true"><img src={photo} alt="" loading="lazy" decoding="async" draggable={false} onError={() => setFailed(photo)} /></span>}
       {inSale && <span className="pick-count"><i className="bi bi-check-lg" aria-hidden="true"></i>{countText}</span>}
       <span className="pick-name">{name}{extra}</span>
-      <span className="pick-price">{price}{priceNote && <span className="pick-price-note">{priceNote}</span>}</span>
+      <span className="pick-price">{shown}{priceNote && <span className="pick-price-note">{priceNote}</span>}</span>
       {stock && <span className={`pick-stock${stockOut ? " out" : ""}`}>{stock}</span>}
     </button>
   );

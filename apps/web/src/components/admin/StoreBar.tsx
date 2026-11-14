@@ -5,7 +5,7 @@
 
 export interface StoreOption { id: string; name: string; code?: string | null; type?: string }
 
-export default function StoreBar({ label = "Working at", locations: all, value, homeLocationId, onPick, locked = false, lockedNote, includeBuffer = false, inline = false, size = "lg" }: {
+export default function StoreBar({ label = "Working at", locations: all, value, homeLocationId, onPick, locked = false, lockedNote, includeBuffer = false, inline = false, size = "lg", flush = false }: {
   label?: string;
   locations: StoreOption[];
   value: string;
@@ -20,6 +20,8 @@ export default function StoreBar({ label = "Working at", locations: all, value, 
   inline?: boolean;
   /** `md` chips are 48 px tall (the touch minimum); `lg` are the roomier default. */
   size?: "lg" | "md";
+  /** Inline only: no space under the row, for when it sits inside another row (a screen's heading line). */
+  flush?: boolean;
 }) {
   const locations = includeBuffer ? all : all.filter((l) => l.type !== "BUFFER");
   const here = all.find((l) => l.id === value);
@@ -33,7 +35,7 @@ export default function StoreBar({ label = "Working at", locations: all, value, 
   ));
   if (inline) {
     return (
-      <div className="d-flex flex-wrap align-items-center gap-2 mb-2">
+      <div className={`d-flex flex-wrap align-items-center gap-2${flush ? "" : " mb-2"}`}>
         <span className="fw-semibold me-1">{label}</span>
         {homeLocationId ? (
           <><span className="badge text-bg-dark fs-6">{here?.name ?? "…"}</span><span className="small text-muted">your store, set by the owner</span></>

@@ -384,13 +384,14 @@ main:has(> * > .rice-ui > .sell-fit), main:has(> .rice-ui > .sell-fit) { padding
 .finder-results section + section .finder-heading, .finder-results section + .row, .finder-results section + .pick-rows { margin-top: 0.25rem; }
 .finder-heading-n { margin-left: auto; font-size: max(16px, 0.9rem); font-weight: 600; color: var(--sam-muted); }
 
-/* The price list: one row per product (small picture · name with what is left · price on the right),
-   two columns when there is room, about 3.6 rem tall — two to three times more items on the screen
-   than the big buttons. The whole row is the button (tap = one more, as on the big buttons). */
-.pick-rows { list-style: none; margin: 0 0 0.5rem; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 17rem), 1fr)); gap: 0.4rem; }
+/* The price list: one row per product — small picture · name · and on the right the price with what is
+   left under it (or "✓ 2 in sale"). Two columns when there is room. Every row is the same height whether
+   the name takes one line or two (about 3.2 rem, never under 44 px), so the list reads like a printed
+   price list. The whole row is the button (tap = one more, as on the big buttons). */
+.pick-rows { list-style: none; margin: 0 0 0.5rem; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 17rem), 1fr)); gap: 0.3rem 0.4rem; }
 .pick-rows > li { min-width: 0; }
 .pick-row {
-  width: 100%; min-height: 3.6rem; padding: 0.35rem 0.75rem; display: flex; align-items: center; gap: 0.6rem;
+  width: 100%; height: 100%; min-height: 3.2rem; padding: 0.2rem 0.65rem; display: flex; align-items: center; gap: 0.55rem;
   text-align: start; line-height: 1.2; font-weight: 600; color: var(--sam-text);
   background: #fff; border: 2px solid #4a4844; border-radius: 0.6rem;
   transition: background-color 120ms ease, border-color 120ms ease;
@@ -399,15 +400,21 @@ main:has(> * > .rice-ui > .sell-fit), main:has(> .rice-ui > .sell-fit) { padding
 .pick-row:active { background: #e9e2d8; }
 .pick-row:focus-visible { outline: 3px solid var(--sam-primary); outline-offset: 2px; }
 .pick-row.in-sale { background: #e4f3ea; border-color: #1f6f3f; box-shadow: inset 0 0 0 1px #1f6f3f; }
-.pick-row .pick-thumb { flex: 0 0 auto; width: 2.6rem; height: 2.6rem; border-radius: 0.4rem; background: #fff; overflow: hidden; }
+/* The small picture: 2.5 rem square, the whole picture on white. A rice without one keeps the same
+   place (a soft box) only when some rice on the list has a picture; with no pictures at all there is no box. */
+.pick-row .pick-thumb { flex: 0 0 auto; width: 2.5rem; height: 2.5rem; border-radius: 0.4rem; background: #fff; overflow: hidden; display: flex; align-items: center; justify-content: center; }
 .pick-row .pick-thumb img { width: 100%; height: 100%; object-fit: contain; display: block; }
-.pick-row-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 0.1rem; }
-.pick-row .pick-name { font-size: 1rem; overflow-wrap: anywhere; }
-.pick-row-sub { display: flex; flex-wrap: wrap; align-items: center; gap: 0.15rem 0.5rem; }
-.pick-row .pick-count { margin: 0; padding: 0 0.5rem; }
+.pick-row .pick-thumb.none { display: none; background: #f4efe7; color: #b9ae9f; font-size: 1.25rem; }
+.pick-rows.has-thumbs .pick-row { padding-left: 0.3rem; }
+.pick-rows.has-thumbs .pick-thumb.none { display: flex; }
+.pick-row.in-sale .pick-thumb.none { background: #fff; }
+.sale-card-title .sale-store i { font-size: 1em; }
+.pick-row .pick-name { flex: 1 1 auto; min-width: 0; font-size: 1rem; overflow-wrap: anywhere; }
+.pick-row-end { flex: 0 0 auto; display: flex; flex-direction: column; align-items: flex-end; gap: 0.05rem; text-align: end; }
+.pick-row .pick-price { font-size: 1.3rem; white-space: nowrap; }
+.pick-row .pick-stock { white-space: nowrap; }
+.pick-row .pick-count { margin: 0; padding: 0 0.5rem; white-space: nowrap; }
 .pick-row .pick-stock.out { margin-top: 0; padding: 0 0.4rem; }
-.pick-row.in-sale .pick-stock.out { background: #fff; }
-.pick-row .pick-price { flex: 0 0 auto; font-size: 1.3rem; white-space: nowrap; }
 @media (prefers-reduced-motion: reduce) { .pick-row, .pick-tile { transition: none; } }
 
 /* Product buttons: four to a row on the tablet, 6 rem tall (the name, the price, what is left). */

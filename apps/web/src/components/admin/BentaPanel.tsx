@@ -457,7 +457,7 @@ export default function BentaPanel() {
         return (
           <PickTile layout={view === "list" ? "row" : "tile"} name={i.name} photoKey={i.photoKey} price={peso(i.priceMinor)} priceNote={i.loose ? "/kg" : undefined}
             countText={n > 0 ? `${inText} in sale` : undefined}
-            stock={left <= 0 ? "None left here" : `${i.loose ? kg(left) : left} left`} stockOut={left <= 0}
+            stock={left <= 0 ? (view === "list" ? "None left" : "None left here") : `${i.loose ? kg(left) : left} left`} stockOut={left <= 0}
             extra={i.forReview ? <span className="badge text-bg-warning">To review</span> : undefined}
             ariaLabel={`Add ${i.loose ? "one kilo of " : ""}${i.name}${n > 0 ? `, ${inText} in this sale` : ""}`}
             onClick={() => void addOne(i)} />
@@ -536,10 +536,13 @@ export default function BentaPanel() {
   };
   // Pieces count one each; a kilo or peso line counts once.
   const cartCount = cart.reduce((n, l) => n + (l.mode === "PIECE" ? Number(l.value) || 0 : 1), 0);
+  const saleStore = locations.find((l) => l.id === locationId);
   const cartCard = cart.length > 0 && (
     <div className={`sale-card fit-card${fit || wide ? "" : " position-sticky bottom-0 sticky-above-bar shadow"}${fit && !wide ? " fit-bottom" : ""}`}>
       <div className="card-body">
         <div className="sale-card-title"><i className="bi bi-basket2-fill" aria-hidden="true"></i>This sale · {cartCount} {cartCount === 1 ? "item" : "items"}
+          {/* Sideways the store buttons step aside during a sale (they are locked then): the sale says where it is. */}
+          {wide && locations.length > 1 && saleStore && <span className="badge text-bg-dark ms-auto fs-6 fw-semibold sale-store"><i className="bi bi-shop me-1" aria-hidden="true"></i>{saleStore.code ? `${saleStore.code} · ` : ""}{saleStore.name}</span>}
           {promo.on && sacksForPromo > 0 && (promoAt.some((x) => x != null)
             ? <span className="badge text-bg-success ms-2">Promo −{peso(promo.offMinor)} each</span>
             : <span className="text-muted fw-normal ms-2">· {promo.minSacks - sacksForPromo} more {promo.minSacks - sacksForPromo === 1 ? "sack" : "sacks"} for the promo</span>)}
@@ -720,7 +723,6 @@ export default function BentaPanel() {
       {sideBySide ? (
         <div className="fit-row">
           <div className="fit-col fit-main">
-            {storeBar}
             {heldCard}
             {errAlert}
             {finder}
@@ -728,8 +730,13 @@ export default function BentaPanel() {
           <div className="fit-col fit-side">
             {stepsRow}
             {!editing && !checking && customerSelect}
+            {/* Sideways the store buttons sit here, on the empty side, so the price list on the left has the whole
+                height. They only work before a sale starts anyway; during a sale its title names the store. */}
             {quickCount || editCard || cartCard || (
-              <div className="card"><div className="card-body text-center text-muted py-4"><i className="bi bi-hand-index fs-1 d-block mb-2" aria-hidden="true"></i>Tap a product to start a sale.</div></div>
+              <>
+                {storeBar}
+                <div className="card"><div className="card-body text-center text-muted py-4"><i className="bi bi-hand-index fs-1 d-block mb-2" aria-hidden="true"></i>Tap a product to start a sale.</div></div>
+              </>
             )}
           </div>
         </div>
