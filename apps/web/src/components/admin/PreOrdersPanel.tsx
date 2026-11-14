@@ -15,7 +15,7 @@ import { toast } from "../../lib/toast";
 import ReceiptModal from "./ReceiptModal";
 import { PesoInput } from "../NumberBoxes";
 import { NewItemForm } from "./BentaPanel";
-import PriceReason, { reasonOk } from "./PriceReason";
+import { lastReason, reasonOk, ReasonButtons } from "./PriceReason";
 import { askBelowCost, saveUnitCost } from "./BelowCostDialog";
 import { isBelowCost, okKey } from "../../lib/below-cost";
 import { buildText, openTextApp } from "../../lib/text-message";
@@ -516,7 +516,8 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
   const setLinePrice = (l: CartLine, v: string) => {
     const m = v === "" ? undefined : Math.round(Number(v) * 100);
     const same = m === undefined || m === l.product.priceMinor;
-    changeLine(lineKey(l), (x) => ({ ...x, priceText: v, price: same || !Number.isFinite(m) ? undefined : m, reason: same ? undefined : x.reason }));
+    // A new price starts with a reason already chosen (the one picked last on this tablet), so Save works straight away.
+    changeLine(lineKey(l), (x) => ({ ...x, priceText: v, price: same || !Number.isFinite(m) ? undefined : m, reason: same ? undefined : reasonOk(x.reason) ? x.reason : lastReason() }));
   };
 
   const overridePart = (l: CartLine) => (l.price !== undefined && l.price !== l.product.priceMinor ? { unitPriceMinorOverride: l.price, priceOverrideReason: l.reason?.trim() } : {});
@@ -864,7 +865,8 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
           return (
             <div key={lineKey(l)} className="border-bottom py-2">
               <div className="d-flex justify-content-between align-items-baseline gap-2">
-                <div className="fw-semibold">{l.product.name}{onPromo && <span className="badge text-bg-success ms-1">promo</span>}</div>
+                <div className="fw-semibold">{l.product.name}{onPromo && <span className="badge text-bg-success ms-1">promo</span>}
+                  {changed && <span className="text-muted fw-normal text-nowrap"> · usual {toPesos(l.product.priceMinor)}</span>}</div>
                 <div className="fw-bold text-end text-nowrap" style={{ fontVariantNumeric: "tabular-nums" }}>{maybePrice(unitOf(pricedCart[idx]!) * l.quantity)}</div>
               </div>
               <div className="d-flex flex-wrap justify-content-between align-items-center gap-2 mt-2">
@@ -889,10 +891,10 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
                   {seesCost ? `Below the unit cost of ${toPesos(floorOf(l))}` : "Below cost: check with the owner"}
                 </div>
               )}
+              {/* A changed price: the reason as three buttons in one row, one already chosen (no drop-down to open). */}
               {changed && (
                 <div className="mt-2">
-                  <div className="small text-muted mb-1">Usual price {toPesos(l.product.priceMinor)}. Why the new price?</div>
-                  <PriceReason className="form-select" invalid={priceMissingReason(l)} value={l.reason ?? ""} onChange={(v) => changeLine(lineKey(l), (x) => ({ ...x, reason: v }))} />
+                  <ReasonButtons value={reasonOk(l.reason) ? l.reason! : ""} onChange={(v) => changeLine(lineKey(l), (x) => ({ ...x, reason: v }))} />
                 </div>
               )}
             </div>

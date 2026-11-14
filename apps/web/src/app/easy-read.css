@@ -429,6 +429,13 @@ main:has(> * > .rice-ui > .sell-fit), main:has(> .rice-ui > .sell-fit) { padding
 /* Product buttons: four to a row on the tablet, 6 rem tall (the name, the price, what is left). */
 .sell-fit .pick-tile { min-height: 6rem; }
 
+/* Why the new price: three buttons in one row (components/admin/PriceReason.tsx ReasonButtons), one always
+   chosen. They share the row evenly and wrap their words rather than clip at Extra large text. */
+.reason-buttons { display: flex; align-items: stretch; gap: 0.4rem; }
+.reason-buttons .reason-label { align-self: center; flex: 0 0 auto; font-weight: 600; }
+.reason-buttons .btn { flex: 1 1 0; min-width: 0; min-height: 48px; padding: 0.25rem 0.4rem; line-height: 1.15; font-weight: 600; white-space: normal; overflow-wrap: anywhere; }
+.sale-lines .reason-buttons .btn { min-height: 44px; }
+
 /* The number pad: 64 px keys; 48 px when the screen is short (the tablet sideways), so the whole pad,
    the amount and Back / Add to sale fit beside the product list. The keys are exactly their minimum
    height: a tight line box, so the digit's line does not push them taller. */

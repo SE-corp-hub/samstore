@@ -27,7 +27,7 @@ import NumPad from "./NumPad";
 import SignaturePad from "./SignaturePad";
 import QuickCount from "./QuickCount";
 import StoreBar from "./StoreBar";
-import PriceReason, { reasonOk } from "./PriceReason";
+import { lastReason, reasonOk, ReasonButtons } from "./PriceReason";
 import { askBelowCost, saveUnitCost } from "./BelowCostDialog";
 import { isBelowCost, okKey } from "../../lib/below-cost";
 import LocationPicker from "../LocationPicker";
@@ -255,7 +255,9 @@ export default function BentaPanel() {
   const startEdit = (l: CartLine, idx: number | null) => {
     const usual = byId.get(l.productId)?.priceMinor ?? 0;
     setPriceText(String((l.price ?? usual) / 100));
-    setEditing(l); setEditIdx(idx); setFromOpen(!!l.sourceLocationId);
+    // A price that already differs (e.g. "Fix selling price" from the below-cost question) gets a reason chosen too.
+    const differs = l.price !== undefined && l.price !== usual;
+    setEditing(differs && !reasonOk(l.reason) ? { ...l, reason: lastReason() } : l); setEditIdx(idx); setFromOpen(!!l.sourceLocationId);
   };
   const here = locations.find((l) => l.id === locationId);
   // "Take from another store" offers only the places the owner allowed, in the owner's order.
@@ -619,30 +621,30 @@ export default function BentaPanel() {
     const changed = editing.price !== undefined && editing.price !== it.priceMinor;
     const reasonGiven = !changed || reasonOk(editing.reason);
     const per = it.loose ? "per kilo" : it.gramsPerUnit ? "per sack" : "each";
-    const amount = editing.mode === "PIECE" ? `${editing.value} × ${it.name}` : editing.mode === "KILO" ? `${kg(c.grams ?? 0)} ${it.name}` : `₱${editing.value} of ${it.name}`;
+    // The title already names the rice: the line under it says only how many (short, so it stays one line at Extra large text).
+    const amount = editing.mode === "PIECE" ? `${editing.value} ×` : editing.mode === "KILO" ? kg(c.grams ?? 0) : `₱${editing.value} worth`;
+    const whole = (minor: number) => peso(minor).replace(/\.00$/, "");
     const typePrice = (v: string) => {
       setPriceText(v);
       const m = v === "" ? undefined : toMinor(v);
       const same = m === undefined || m === it.priceMinor;
-      setEditing({ ...editing, price: same ? undefined : m, reason: same ? undefined : editing.reason });
+      // A new price starts with a reason already chosen (the one picked last on this tablet), so Save works straight away.
+      setEditing({ ...editing, price: same ? undefined : m, reason: same ? undefined : reasonOk(editing.reason) ? editing.reason : lastReason() });
     };
     return (
       <div className="sale-card fit-card mx-auto w-100" style={{ maxWidth: 520 }}>
         <div className="card-body">
           <h2 className="h5 text-center mb-1">Change price · {it.name}</h2>
-          <div className="text-center mb-2" style={{ fontVariantNumeric: "tabular-nums" }}>{amount} · usual price <strong>{peso(it.priceMinor)}</strong> {per}</div>
-          <NumPad startFresh value={priceText} onChange={typePrice} decimals={2} label={`New price ${per}`} unit="₱" />
-          <div className="mt-1 fs-5 text-center" style={{ fontVariantNumeric: "tabular-nums" }}>
-            {c.totalMinor > 0 ? <>= <strong>{peso(c.totalMinor)}</strong> for this line</> : <span className="text-danger">Type the new price</span>}
+          {/* One line: how many, the usual price, and what the line comes to with the new price. */}
+          <div className="text-center mb-2" style={{ fontVariantNumeric: "tabular-nums" }}>
+            {amount} · usual <strong>{whole(it.priceMinor)}</strong> {per}
+            {changed && c.totalMinor > 0 && <> · line <strong>{whole(c.totalMinor)}</strong></>}
           </div>
-          {/* One line only (sideways the card has no room for two): the reason is asked once the price differs from the usual one. */}
-          <label className="form-label mb-1 mt-2 text-nowrap" htmlFor="bt-reason">Why the new price?{!changed && <span className="text-muted"> (not needed yet)</span>}</label>
-          <PriceReason id="bt-reason" className="form-select form-select-lg" value={editing.reason ?? ""} disabled={!changed} onChange={(v) => setEditing({ ...editing, reason: v })} />
-          {it.tracked && fromChoices.length > 1 && !fromOpen && !short && (
-            <div className="text-center mt-2">
-              <button type="button" className="btn btn-outline-primary" onClick={() => setFromOpen(true)}><i className="bi bi-shop me-1" aria-hidden="true"></i>Take from another store</button>
-            </div>
-          )}
+          <NumPad startFresh value={priceText} onChange={typePrice} decimals={2} label={`New price ${per}`} unit="₱" />
+          {c.totalMinor <= 0 && <div className="mt-1 text-center text-danger">Type the new price</div>}
+          {/* The reason: three buttons, one already chosen, in one row right under the pad (no drop-down, no
+              scrolling). Always there, so nothing moves when the first digit is typed; it is only saved with a new price. */}
+          <div className="mt-2"><ReasonButtons value={reasonOk(editing.reason) ? editing.reason! : lastReason()} onChange={(v) => setEditing({ ...editing, reason: v })} /></div>
           {it.tracked && (fromOpen || short) && (
             <div className="mt-2">
               <LocationPicker id="bt-from" size="md" label="Taken from (where the item comes from)" locations={fromChoices} value={from}
@@ -663,9 +665,13 @@ export default function BentaPanel() {
               {from === locationId && <button type="button" className="btn btn-dark btn-sm ms-2" onClick={() => setChecking({ productId: it.id, name: it.name })}>Any left? Count</button>}
             </div>
           )}
-          <div className="d-flex justify-content-between mt-2 pos-actions">
-            <button type="button" className="btn btn-outline-dark btn-lg" onClick={() => { setEditing(null); setEditIdx(null); }}>Back</button>
-            <button type="button" className="btn btn-success btn-lg px-5" disabled={c.totalMinor <= 0 || short || !reasonGiven}
+          <div className="d-flex align-items-stretch gap-2 mt-2 pos-actions">
+            <button type="button" className="btn btn-outline-dark btn-lg text-nowrap" onClick={() => { setEditing(null); setEditIdx(null); }}>Back</button>
+            {/* On the Back / Save line, so it costs no row of its own. */}
+            {it.tracked && fromChoices.length > 1 && !fromOpen && !short && (
+              <button type="button" className="btn btn-outline-primary text-nowrap" aria-label="Take from another store" onClick={() => setFromOpen(true)}><i className="bi bi-shop me-1" aria-hidden="true"></i>Other store</button>
+            )}
+            <button type="button" className="btn btn-success btn-lg flex-grow-1 text-nowrap" disabled={c.totalMinor <= 0 || short || !reasonGiven}
               onClick={async () => { const line = editing, at = editIdx; if (!(await passesCost(line, at))) return; setCart(at === null ? [...cart, line] : cart.map((x, j) => (j === at ? line : x))); setEditing(null); setEditIdx(null); setCleared((n) => n + 1); }}>{editIdx === null ? "Add to sale" : "Save"}</button>
             {/* editIdx is null only when the below-cost popup's "Fix selling price" opened this card for a product not in the sale yet. */}
           </div>
@@ -742,8 +748,10 @@ export default function BentaPanel() {
         </div>
       ) : (
         <div className="fit-col">
-          {stepsRow}
-          {storeBar}
+          {/* While the price card is open (or a count is asked), the steps and the store buttons step aside, so
+              the pad, the reason and Save fit without scrolling. Both are back as soon as it is closed. */}
+          {!(editing || checking) && stepsRow}
+          {!(editing || checking) && storeBar}
           {heldCard}
           {errAlert}
           {step === "pick" && !newItem && !editing && !checking && <>{finder}{cartCard}</>}
