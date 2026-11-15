@@ -31,7 +31,7 @@ import { OPEN_ORDER_EVENT, OPEN_ORDER_KEY } from "../../../lib/order-pulse";
 import { isScreenLocked, lockAgain, lockListFor, useFeatureLock } from "../../../lib/feature-lock";
 
 /** Rice Ops M10: the store screens get the large, high-contrast look (globals.css .rice-ui). */
-const RICE_TABS = new Set(["pos", "preorders", "orders", "utang", "utangrice", "agentorders", "agent", "approvals", "moves", "returns", "resack", "pasok", "purchaseorders", "bilangin", "storereport", "payable", "ulat", "drafts", "kargadors", "settings", "expenses", "cash", "storeprices", "storelink",
+const RICE_TABS = new Set(["pos", "preorders", "orders", "utang", "utangrice", "agentorders", "agent", "approvals", "moves", "returns", "resack", "pasok", "purchaseorders", "bilangin", "storereport", "profit", "payable", "ulat", "drafts", "kargadors", "settings", "expenses", "cash", "storeprices", "storelink",
   // 2026-11-12, step 4 of the app review: the last old-look screens get the same large, easy-read look.
   "products", "inventory", "warehouses", "customers", "overview", "reports"]);
 // The landing panel stays eager (it is the first paint); every other panel loads when
@@ -87,6 +87,7 @@ const AgentPanel = panel(() => import("../../../components/admin/AgentPanel"));
 const AgentOrdersPanel = panel(() => import("../../../components/admin/AgentOrdersPanel"));
 const BilanginPanel = panel(() => import("../../../components/admin/BilanginPanel"));
 const StoreReportPanel = panel(() => import("../../../components/admin/StoreReportPanel"));
+const ProfitPanel = panel(() => import("../../../components/admin/ProfitPanel"));
 const PayablePanel = panel(() => import("../../../components/admin/PayablePanel"));
 const PurchaseOrdersPanel = panel(() => import("../../../components/admin/PurchaseOrdersPanel"));
 const UlatPanel = panel(() => import("../../../components/admin/UlatPanel"));
@@ -431,6 +432,7 @@ export default function AdminDashboard() {
       case "agentorders": return <AgentOrdersPanel />;
       case "bilangin": return <BilanginPanel role={role} onNavigate={setTab} />;
       case "storereport": return <StoreReportPanel role={role} onNavigate={setTab} />;
+      case "profit": return <ProfitPanel onNavigate={setTab} />;
       case "payable": return <PayablePanel />;
       case "purchaseorders": return <PurchaseOrdersPanel />;
       case "ulat": return <UlatPanel role={role} onNavigate={setTab} />;

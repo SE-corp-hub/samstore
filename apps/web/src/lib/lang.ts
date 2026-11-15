@@ -22,6 +22,7 @@ const WORDS: Record<string, [tl: string, en: string]> = {
   "nav.pasok": ["Pasok at Susuriin", "Stock in & review"],
   "nav.bilangin": ["Bilangin", "Count"],
   "nav.storereport": ["Ulat ng tindahan", "Store report"],
+  "nav.profit": ["Kita", "Profit"],
   "nav.payable": ["Utang ng tindahan", "Store payable"],
   "nav.ulat": ["Pagsasara at stock", "Closing & stock"],
   "nav.drafts": ["Tapusin", "To finish"],

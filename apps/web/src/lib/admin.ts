@@ -222,6 +222,7 @@ export const NAV_GROUPS: NavGroup[] = [
     icon: "bi-bar-chart-line",
     items: [
       { id: "overview", label: "Reports", icon: "bi-speedometer2", hint: "Today, closing, each store and money" },
+      { id: "profit", label: "Profit", icon: "bi-graph-up-arrow", hint: "Each store's profit and the whole business" },
       { id: "storereport", label: "Store report", icon: "bi-shop", hint: "One store's sales and stock" },
       { id: "ulat", label: "Closing & stock", icon: "bi-bar-chart-line", hint: "Close the day, stock and this month" },
       { id: "reports", label: "Money reports", icon: "bi-file-bar-graph", hint: "Profit, income and loss, payments, customers" },
@@ -271,12 +272,13 @@ export const NAV_GROUPS: NavGroup[] = [
  */
 export const REPORT_SECTIONS: { id: string; label: string }[] = [
   { id: "overview", label: "Today" },
+  { id: "profit", label: "Profit" },
   { id: "ulat", label: "Closing & stock" },
   { id: "storereport", label: "Store report" },
   { id: "reports", label: "Money" },
 ];
 /** Screens a role may open that the menu and Home do not list (they open from another screen). */
-export const MENU_HIDDEN = new Set(["ulat", "storereport", "reports"]);
+export const MENU_HIDDEN = new Set(["profit", "ulat", "storereport", "reports"]);
 /** Is this screen one of the report sections? */
 export const isReportSection = (id: string) => REPORT_SECTIONS.some((s) => s.id === id);
 
@@ -301,7 +303,7 @@ export function toneFor(id: string): NavTone {
 
 // 2026-11-12 (one screen per job): Agent orders opens from Orders (a switch at the top), and Analytics
 // (platform-wide trends) is for the platform admin only; Purchases and Store Link are hidden (see NAV_GROUPS).
-const OWNER_TABS = ["overview", "pos", "preorders", "orders", "utang", "products", "inventory", "cash", "expenses", "team", "customers", "reports", "settings", "warehouses", "approvals", "moves", "returns", "resack", "drafts", "kargadors", "pasok", "purchaseorders", "utangrice", "bilangin", "storereport", "payable", "ulat", "export", "storeprices"];
+const OWNER_TABS = ["overview", "pos", "preorders", "orders", "utang", "products", "inventory", "cash", "expenses", "team", "customers", "reports", "settings", "warehouses", "approvals", "moves", "returns", "resack", "drafts", "kargadors", "pasok", "purchaseorders", "utangrice", "bilangin", "storereport", "profit", "payable", "ulat", "export", "storeprices"];
 
 /** Tab visibility per staff role (GET-level permissions from live API probes). */
 export const TABS_BY_ROLE: Record<string, string[]> = {
@@ -345,7 +347,7 @@ export function defaultTabFor(role: string): string {
 
 // Per-store build, step 6 (the wall): a login tied to one store does not get the screens that show
 // the whole business. The server refuses them too; this only keeps them out of the menu.
-const WHOLE_BUSINESS_TABS = ["purchaseorders", "reports", "analytics", "export"];
+const WHOLE_BUSINESS_TABS = ["purchaseorders", "reports", "analytics", "export", "profit"];
 const HOME_KEY = "sam.homeLocationId";
 const HEAD_KEY = "sam.isStoreHead";
 let homeLocationId: string | null | undefined;

@@ -37,7 +37,8 @@ export const SUGGESTED = {
 export const lockListFor = (role: string): "owner" | "staff" => (isOwnerRole(role) ? "owner" : "staff");
 
 /** Screens opened by two ids (the bottom bar's "utang" is the menu's "utangrice"). */
-const SAME_SCREEN: Record<string, string> = { utang: "utangrice" };
+// Profit is part of the store reports: locking Store report locks Profit too.
+const SAME_SCREEN: Record<string, string> = { utang: "utangrice", profit: "storereport" };
 
 export function isScreenLocked(lock: FeatureLock | null, role: string, screen: string): boolean {
   if (!lock?.on || !lock.hash) return false;
