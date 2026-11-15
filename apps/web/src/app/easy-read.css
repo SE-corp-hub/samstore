@@ -718,3 +718,27 @@ main:has(> * > .rice-ui > .sell-fit), main:has(> .rice-ui > .sell-fit) { padding
 @media (max-width: 759px) {
   .sell-fit .fit-col:not(.fit-main):not(.fit-side) > .fit-scroll.finder-results { min-height: max(6rem, calc(var(--fit-h, 0px) / 2 - 14rem)); }
 }
+
+/* ── Reports → Profit (ProfitPanel): whole business first, then one card per store. rem only, so Text size applies. ── */
+.profit-screen .profit-periods .btn { min-height: 2.75rem; min-width: 2.75rem; font-size: 1.05rem; }
+.profit-screen .profit-when { font-size: 1.1rem; font-weight: 600; }
+.profit-screen .profit-card { background: #fff; border: 1px solid #d9d2c7; border-radius: 0.75rem; padding: 1rem 1.1rem; }
+.profit-screen .profit-whole { border: 2px solid #563a98; background: #faf8fe; }
+.profit-screen .profit-num { font-variant-numeric: tabular-nums; white-space: nowrap; text-align: right; }
+.profit-screen .profit-net { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 0.25rem 1rem; padding-bottom: 0.6rem; margin-bottom: 0.6rem; border-bottom: 1px solid #d9d2c7; font-weight: 600; font-size: 1.1rem; }
+.profit-screen .profit-net.is-gain .profit-num { color: #1f6f3f; }
+.profit-screen .profit-net.is-loss .profit-num { color: #a3201b; }
+.profit-screen .profit-big { font-size: 2.4rem; font-weight: 800; line-height: 1.1; }
+.profit-screen .profit-mid { font-size: 1.75rem; font-weight: 800; line-height: 1.1; }
+.profit-screen .profit-line { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; padding: 0.2rem 0; }
+.profit-screen .profit-hint { display: block; font-size: 0.9rem; color: #5c5148; }
+.profit-screen .profit-how summary { min-height: 2.75rem; display: flex; align-items: center; font-weight: 600; color: #0b4f8a; cursor: pointer; }
+.profit-screen .profit-how summary:focus-visible { outline: 3px solid #c0421f; outline-offset: 2px; }
+.profit-screen .profit-how li { margin-bottom: 0.35rem; }
+/* Sideways: the whole business on one row (big net profit left, the lines right) so the store cards show without scrolling. */
+@media (min-width: 992px) {
+  .profit-screen .profit-whole-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); gap: 2rem; align-items: start; }
+  .profit-screen .profit-whole-body .profit-net { flex-direction: column; align-items: flex-start; border-bottom: 0; margin-bottom: 0; }
+}
+/* Store cards: "Net profit" above its number, so every card reads the same at any width or text size. */
+.profit-screen .profit-card:not(.profit-whole) .profit-net { flex-direction: column; align-items: flex-start; }
