@@ -543,7 +543,7 @@ export default function BentaPanel() {
   const upright = fit && !wide;
   const orderBig = orderBigOn && upright && cart.length > 0;
   const bigToggle = upright && (orderBig || cart.length >= 3) && (
-    <button type="button" className="btn btn-outline-dark order-big-toggle ms-auto" aria-pressed={orderBig} onClick={() => setOrderBig(!orderBig)}>
+    <button type="button" className="btn btn-outline-dark order-big-toggle ms-auto" onClick={() => setOrderBig(!orderBig)}>
       {orderBig
         ? <><i className="bi bi-list-ul me-1" aria-hidden="true"></i>Back to price list</>
         : <><i className="bi bi-arrows-expand me-1" aria-hidden="true"></i>See whole sale</>}

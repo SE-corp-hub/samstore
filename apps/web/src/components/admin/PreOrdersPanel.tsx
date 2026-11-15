@@ -866,7 +866,7 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
         <div className="d-flex align-items-center gap-2 mb-2">
           <h2 id="po-check" className="h5 mb-0 d-flex align-items-center"><Num n={3} />Check the order</h2>
           {upright && (orderBig || buildCart.length >= 3) && (
-            <button type="button" className="btn btn-outline-dark order-big-toggle ms-auto" aria-pressed={orderBig} onClick={() => setOrderBig(!orderBig)}>
+            <button type="button" className="btn btn-outline-dark order-big-toggle ms-auto" onClick={() => setOrderBig(!orderBig)}>
               {orderBig
                 ? <><i className="bi bi-list-ul me-1" aria-hidden="true"></i>Back to price list</>
                 : <><i className="bi bi-arrows-expand me-1" aria-hidden="true"></i>See whole order</>}
