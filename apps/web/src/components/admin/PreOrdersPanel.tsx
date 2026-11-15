@@ -20,6 +20,7 @@ import { askBelowCost, saveUnitCost } from "./BelowCostDialog";
 import { isBelowCost, okKey } from "../../lib/below-cost";
 import { buildText, openTextApp } from "../../lib/text-message";
 import { FIT, useMediaQuery, WIDE } from "../../lib/use-media-query";
+import { useLinesCap } from "../../lib/use-lines-cap";
 import { useFitHeight } from "../../lib/use-fit-height";
 import { quickCash } from "../../lib/quick-cash";
 import { peso } from "../../lib/number-format";
@@ -252,6 +253,8 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
   const lineOneRow = useMediaQuery("(min-width: 760px)") && upright;
   const [orderBigOn, setOrderBig] = useState(false);
   useEffect(() => { if (buildCart.length === 0) setOrderBig(false); }, [buildCart.length]);
+  // Upright the order shows 3 lines (they scroll), so the price list keeps its room; "See order" shows them all.
+  const linesRef = useLinesCap<HTMLDivElement>(upright && !orderBigOn, buildCart.length);
   const fitRef = useFitHeight<HTMLDivElement>(fit);
 
   /** ₱— when store hides per-product prices (subtotal/total still shown). */
@@ -808,24 +811,32 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
 
   // Part 1 in two short rows (the customer; or a new name and mobile). Sideways it sits above the order on the
   // right (as the customer does on POS), so the price list on the left gets the whole height.
+  // Upright on the tablet it is ONE row (1 · customer · or a new name · mobile), so the price list keeps half the screen.
+  const whoOneRow = lineOneRow;
+  const newCustomerInputs = (
+    <>
+      <input className="form-control" style={whoOneRow ? { flex: "1 1 8rem" } : { flex: "2 1 10rem", maxWidth: "18rem" }} aria-label="New customer's name" placeholder={wide || whoOneRow ? "Or new: name" : "Name"} value={buildNewName} onChange={(e) => setBuildNewName(e.target.value)} />
+      <input className="form-control" style={whoOneRow ? { flex: "1 1 8rem" } : { flex: "1 1 9rem", maxWidth: "14rem" }} inputMode="tel" aria-label="New customer's mobile number" placeholder={whoOneRow ? "Mobile" : "Mobile (optional)"} value={buildNewPhone} onChange={(e) => setBuildNewPhone(e.target.value)} />
+    </>
+  );
   const customerSection = (
     <section aria-labelledby="po-who">
       <div className="d-flex flex-wrap align-items-center gap-2 mb-2">
-        <h2 id="po-who" className="h5 mb-0 d-flex align-items-center text-nowrap"><Num n={1} />Who is it for?</h2>
+        <h2 id="po-who" className="h5 mb-0 d-flex align-items-center text-nowrap"><Num n={1} />{whoOneRow ? <span className="visually-hidden">Who is it for?</span> : "Who is it for?"}</h2>
         {editingPre ? (
           <div className="fs-5 fw-semibold">{editingPre.customerName || "—"}</div>
         ) : (
-          <select aria-label="Customer" className="form-select" style={{ flex: "1 1 14rem", maxWidth: "26rem" }} value={buildCustomerId} onChange={(e) => { setBuildCustomerId(e.target.value); if (e.target.value) { setBuildNewName(""); setBuildNewPhone(""); } }}>
-            <option value="">Choose a customer…</option>
+          <select aria-label="Customer" className="form-select" style={whoOneRow ? { flex: "2 1 12rem" } : { flex: "1 1 14rem", maxWidth: "26rem" }} value={buildCustomerId} onChange={(e) => { setBuildCustomerId(e.target.value); if (e.target.value) { setBuildNewName(""); setBuildNewPhone(""); } }}>
+            <option value="">{whoOneRow ? "Who is it for? Choose…" : "Choose a customer…"}</option>
             {buildCustomers.map((c) => <option key={c.id} value={c.id}>{c.name ?? c.email ?? c.phone ?? "Customer"}</option>)}
           </select>
         )}
+        {whoOneRow && !editingPre && !buildCustomerId && newCustomerInputs}
       </div>
-      {!editingPre && !buildCustomerId && (
+      {!whoOneRow && !editingPre && !buildCustomerId && (
         <div className="d-flex flex-wrap align-items-center gap-2 mb-2" style={{ paddingLeft: wide ? 0 : "2.5rem" }}>
           {!wide && <span className="text-muted text-nowrap">or a new customer:</span>}
-          <input className="form-control" style={{ flex: "2 1 10rem", maxWidth: "18rem" }} aria-label="New customer's name" placeholder={wide ? "Or a new customer: name" : "Name"} value={buildNewName} onChange={(e) => setBuildNewName(e.target.value)} />
-          <input className="form-control" style={{ flex: "1 1 9rem", maxWidth: "14rem" }} inputMode="tel" aria-label="New customer's mobile number" placeholder="Mobile (optional)" value={buildNewPhone} onChange={(e) => setBuildNewPhone(e.target.value)} />
+          {newCustomerInputs}
         </div>
       )}
     </section>
@@ -865,16 +876,16 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
       <div className="card-body">
         <div className="d-flex align-items-center gap-2 mb-2">
           <h2 id="po-check" className="h5 mb-0 d-flex align-items-center"><Num n={3} />Check the order</h2>
-          {upright && (orderBig || buildCart.length >= 3) && (
+          {upright && (orderBig || buildCart.length > 3) && (
             <button type="button" className="btn btn-outline-dark order-big-toggle ms-auto" onClick={() => setOrderBig(!orderBig)}>
               {orderBig
                 ? <><i className="bi bi-list-ul me-1" aria-hidden="true"></i>Back to price list</>
-                : <><i className="bi bi-arrows-expand me-1" aria-hidden="true"></i>See whole order</>}
+                : <><i className="bi bi-arrows-expand me-1" aria-hidden="true"></i>See order</>}
             </button>
           )}
         </div>
         {buildCart.length === 0 && <p className="text-muted text-center py-2 mb-0">Nothing yet. Tap items {wide ? "on the left" : "above"} (part 2).</p>}
-        <div className="sale-lines">
+        <div ref={linesRef} className="sale-lines">
         {buildCart.map((l, idx) => {
           const changed = l.price !== undefined && l.price !== l.product.priceMinor;
           const onPromo = promoAt[idx] != null;
@@ -904,7 +915,7 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
             </label>
           );
           return (
-            <div key={lineKey(l)} className="border-bottom py-2">
+            <div key={lineKey(l)} className={`border-bottom ${lineOneRow ? "py-1" : "py-2"}`}>
               {lineOneRow ? (
                 // Upright tablet: one row per line, so a long order shows twice as many lines.
                 <div className="po-line-row">
@@ -945,11 +956,15 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
         </div>
         {(wide || fit) && (
           <div className="pos-actions mt-2">
+            {/* Upright, what is still missing is written on the grey Save button itself (no extra row), so the
+                price list keeps half the screen. Sideways it is a line under the button. */}
             <button className="btn btn-success btn-lg w-100 py-2 fw-bold" disabled={!canSave} onClick={savePreorder}>
-              <i className="bi bi-bag-check me-1"></i>{saveLabel}
+              {upright && saveHint && buildCart.length > 0 && !canSave
+                ? <span className="fw-semibold">{saveHint}</span>
+                : <><i className="bi bi-bag-check me-1"></i>{saveLabel}</>}
             </button>
             {/* An empty order already says "Nothing yet. Tap items…" above: not twice. */}
-            {saveHint && buildCart.length > 0 && <div className="text-center text-muted mt-1">{saveHint}</div>}
+            {!upright && saveHint && buildCart.length > 0 && <div className="text-center text-muted mt-1">{saveHint}</div>}
           </div>
         )}
       </div>

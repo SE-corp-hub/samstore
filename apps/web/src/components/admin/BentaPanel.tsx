@@ -38,6 +38,7 @@ import { getPrinterSettings } from "../../lib/printer-settings";
 import { creditStatusWords } from "../../lib/credit-status";
 import { peso, kg } from "../../lib/number-format";
 import { FIT, useMediaQuery, WIDE } from "../../lib/use-media-query";
+import { useLinesCap } from "../../lib/use-lines-cap";
 import { useFitHeight } from "../../lib/use-fit-height";
 import { quickCash } from "../../lib/quick-cash";
 import Steps from "./Steps";
@@ -248,6 +249,8 @@ export default function BentaPanel() {
   // Upright, a long sale can take the whole screen ("See whole order"); "Back to price list" brings the list back.
   const [orderBigOn, setOrderBig] = useState(false);
   useEffect(() => { if (cart.length === 0) setOrderBig(false); }, [cart.length]);
+  // Upright the sale shows 3 lines (they scroll), so the price list keeps its room; "See cart" shows them all.
+  const linesRef = useLinesCap<HTMLUListElement>(fit && !wide && !orderBigOn && step === "pick", cart.length);
   const byId = useMemo(() => new Map(items.map((i) => [i.id, i])), [items]);
   /** How much of a product is already in this sale: pieces for sacks, grams for loose rice (all its lines together). */
   const inSale = (productId: string) => cart.filter((l) => l.productId === productId).reduce((n, l) => {
@@ -542,11 +545,11 @@ export default function BentaPanel() {
   // Pieces count one each; a kilo or peso line counts once.
   const upright = fit && !wide;
   const orderBig = orderBigOn && upright && cart.length > 0;
-  const bigToggle = upright && (orderBig || cart.length >= 3) && (
+  const bigToggle = upright && (orderBig || cart.length > 3) && (
     <button type="button" className="btn btn-outline-dark order-big-toggle ms-auto" onClick={() => setOrderBig(!orderBig)}>
       {orderBig
         ? <><i className="bi bi-list-ul me-1" aria-hidden="true"></i>Back to price list</>
-        : <><i className="bi bi-arrows-expand me-1" aria-hidden="true"></i>See whole sale</>}
+        : <><i className="bi bi-arrows-expand me-1" aria-hidden="true"></i>See cart</>}
     </button>
   );
   const cartCount = cart.reduce((n, l) => n + (l.mode === "PIECE" ? Number(l.value) || 0 : 1), 0);
@@ -563,7 +566,7 @@ export default function BentaPanel() {
             : <span className="text-muted fw-normal ms-2">· {promo.minSacks - sacksForPromo} more {promo.minSacks - sacksForPromo === 1 ? "sack" : "sacks"} for the promo</span>)}
           {bigToggle}
         </div>
-        <ul className="list-unstyled mb-2 sale-lines" style={{ fontVariantNumeric: "tabular-nums", maxHeight: fit || wide ? undefined : "32vh" }}>
+        <ul ref={linesRef} className="list-unstyled mb-2 sale-lines" style={{ fontVariantNumeric: "tabular-nums", maxHeight: fit || wide ? undefined : "32vh" }}>
           {cart.map((l, idx) => {
             const it = byId.get(l.productId);
             const c = computed[idx]!;

@@ -702,9 +702,19 @@ main:has(> * > .rice-ui > .sell-fit), main:has(> .rice-ui > .sell-fit) { padding
 
 /* Long order, tablet upright (2026-11-15): "See whole order" gives the sale / order card the whole column
    (the price list steps aside); "Back to price list" brings it back. Pre-order lines are one row upright. */
-.order-big-toggle { min-height: 44px; padding: 0.25rem 0.75rem; font-size: 1rem; font-weight: 600; white-space: nowrap; }
+.order-big-toggle { min-height: 44px; padding: 0.1rem 0.75rem; font-size: 1rem; font-weight: 600; white-space: nowrap; }
 .fit-col > .fit-bottom.order-big { flex: 1 1 auto; max-height: none; }
 .sell-fit .fit-card.order-big .sale-lines { flex: 1 1 auto; }
 .po-line-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.75rem; }
 .po-line-row .po-line-name { flex: 1 1 9rem; min-width: 0; }
 .po-line-row .po-line-amount { min-width: 6.5rem; }
+/* Upright the price list (search bar + products) keeps at least half of the screen (user, 2026-11-15): the
+   sale / order card gives way first (its lines scroll, Pay / Save stay). --fit-h comes from use-fit-height. */
+.sell-fit .fit-col > .fit-bottom:not(.order-big) { flex-shrink: 1; }
+.sell-fit .fit-col:not(.fit-main):not(.fit-side) > .fit-scroll.finder-results { flex: 1 1 0; min-height: max(6rem, calc(var(--fit-h, 0px) / 2 - 6rem)); }
+.sell-fit .fit-col > .fit-bottom:not(.order-big) > .card-body { padding-top: 0.6rem; padding-bottom: 0.6rem; }
+/* Narrow upright (bigger Android text, 615 px): sale lines are two rows tall there, so the list gives a bit
+   more back and at least one whole line of the sale stays in view. */
+@media (max-width: 759px) {
+  .sell-fit .fit-col:not(.fit-main):not(.fit-side) > .fit-scroll.finder-results { min-height: max(6rem, calc(var(--fit-h, 0px) / 2 - 14rem)); }
+}
