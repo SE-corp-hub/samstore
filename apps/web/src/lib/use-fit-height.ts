@@ -41,6 +41,8 @@ export function useFitHeight<T extends HTMLElement>(enabled: boolean) {
       }
       const h = Math.floor(window.innerHeight - top - below);
       el.style.height = h >= 360 ? `${h}px` : "";
+      // The screens use half of it: upright the price list keeps at least half (easy-read.css §9).
+      if (h >= 360) el.style.setProperty("--fit-h", `${h}px`); else el.style.removeProperty("--fit-h");
     };
     apply();
     // The body grows or shrinks when a bar above appears (offline, "uploading"), or when the tablet turns.
