@@ -245,6 +245,9 @@ export default function BentaPanel() {
   // Tablet or PC: the screen is exactly the space between the bars (no page scroll); only the product list scrolls.
   const fit = useMediaQuery(FIT);
   const fitRef = useFitHeight<HTMLDivElement>(fit && step !== "done");
+  // Upright, a long sale can take the whole screen ("See whole order"); "Back to price list" brings the list back.
+  const [orderBigOn, setOrderBig] = useState(false);
+  useEffect(() => { if (cart.length === 0) setOrderBig(false); }, [cart.length]);
   const byId = useMemo(() => new Map(items.map((i) => [i.id, i])), [items]);
   /** How much of a product is already in this sale: pieces for sacks, grams for loose rice (all its lines together). */
   const inSale = (productId: string) => cart.filter((l) => l.productId === productId).reduce((n, l) => {
@@ -537,17 +540,28 @@ export default function BentaPanel() {
     keyRef.current = null; setCart([]); setError(null); toast("Sale put on hold");
   };
   // Pieces count one each; a kilo or peso line counts once.
+  const upright = fit && !wide;
+  const orderBig = orderBigOn && upright && cart.length > 0;
+  const bigToggle = upright && (orderBig || cart.length >= 3) && (
+    <button type="button" className="btn btn-outline-dark order-big-toggle ms-auto" aria-pressed={orderBig} onClick={() => setOrderBig(!orderBig)}>
+      {orderBig
+        ? <><i className="bi bi-list-ul me-1" aria-hidden="true"></i>Back to price list</>
+        : <><i className="bi bi-arrows-expand me-1" aria-hidden="true"></i>See whole sale</>}
+    </button>
+  );
   const cartCount = cart.reduce((n, l) => n + (l.mode === "PIECE" ? Number(l.value) || 0 : 1), 0);
   const saleStore = locations.find((l) => l.id === locationId);
   const cartCard = cart.length > 0 && (
-    <div className={`sale-card fit-card${fit || wide ? "" : " position-sticky bottom-0 sticky-above-bar shadow"}${fit && !wide ? " fit-bottom" : ""}`}>
+    <div className={`sale-card fit-card${fit || wide ? "" : " position-sticky bottom-0 sticky-above-bar shadow"}${upright ? " fit-bottom" : ""}${orderBig ? " order-big" : ""}`}>
       <div className="card-body">
         <div className="sale-card-title"><i className="bi bi-basket2-fill" aria-hidden="true"></i>This sale · {cartCount} {cartCount === 1 ? "item" : "items"}
           {/* Sideways the store buttons step aside during a sale (they are locked then): the sale says where it is. */}
-          {wide && locations.length > 1 && saleStore && <span className="badge text-bg-dark ms-auto fs-6 fw-semibold sale-store"><i className="bi bi-shop me-1" aria-hidden="true"></i>{saleStore.code ? `${saleStore.code} · ` : ""}{saleStore.name}</span>}
+          {/* Upright too: the store row is hidden during a sale, so the badge (just the code there, e.g. "S1") names it. */}
+          {fit && locations.length > 1 && saleStore && <span className={`badge text-bg-dark fs-6 fw-semibold sale-store${wide ? " ms-auto" : ""}`}><i className="bi bi-shop me-1" aria-hidden="true"></i>{wide ? <>{saleStore.code ? `${saleStore.code} · ` : ""}{saleStore.name}</> : saleStore.code || saleStore.name}</span>}
           {promo.on && sacksForPromo > 0 && (promoAt.some((x) => x != null)
             ? <span className="badge text-bg-success ms-2">Promo −{peso(promo.offMinor)} each</span>
             : <span className="text-muted fw-normal ms-2">· {promo.minSacks - sacksForPromo} more {promo.minSacks - sacksForPromo === 1 ? "sack" : "sacks"} for the promo</span>)}
+          {bigToggle}
         </div>
         <ul className="list-unstyled mb-2 sale-lines" style={{ fontVariantNumeric: "tabular-nums", maxHeight: fit || wide ? undefined : "32vh" }}>
           {cart.map((l, idx) => {
@@ -750,11 +764,11 @@ export default function BentaPanel() {
         <div className="fit-col">
           {/* While the price card is open (or a count is asked), the steps and the store buttons step aside, so
               the pad, the reason and Save fit without scrolling. Both are back as soon as it is closed. */}
-          {!(editing || checking) && stepsRow}
-          {!(editing || checking) && storeBar}
+          {!(editing || checking || orderBig) && stepsRow}
+          {!(editing || checking || orderBig) && cart.length === 0 && storeBar}
           {heldCard}
           {errAlert}
-          {step === "pick" && !newItem && !editing && !checking && <>{finder}{cartCard}</>}
+          {step === "pick" && !newItem && !editing && !checking && <>{!orderBig && finder}{cartCard}</>}
           {step === "pick" && !newItem && (editing || checking) && <div className="fit-scroll">{quickCount || editCard}</div>}
           {step === "pick" && newItem && <div className="fit-scroll"><NewItemForm locationId={locationId} onCancel={() => setNewItem(false)} onDone={async () => { setNewItem(false); await loadCatalog(locationId); }} /></div>}
 

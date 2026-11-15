@@ -291,7 +291,7 @@ html[data-text-size] .btn:focus-visible { box-shadow: none; }
 /* The sale (or the order) on the right / at the bottom: a green frame, a title, the total last and largest. */
 .sale-card { background: #fff; border: 2px solid #1f6f3f; border-radius: 0.75rem; }
 .sale-card > .card-body { padding: 1rem; }
-.sale-card-title { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; font-size: 1rem; font-weight: 700; color: #1f6f3f; }
+.sale-card-title { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem 0.5rem; margin-bottom: 0.5rem; font-size: 1rem; font-weight: 700; color: #1f6f3f; }
 .sale-card-title i { font-size: 1.25rem; }
 .sale-line { display: flex; flex-wrap: wrap; align-items: center; column-gap: 0.5rem; row-gap: 0.35rem; padding: 0.4rem 0; border-bottom: 1px solid #e1d6c6; font-variant-numeric: tabular-nums; }
 /* The name keeps at least 9 rem; when the card is narrower, the − + and the amount drop to a second row, on the right. */
@@ -699,3 +699,12 @@ main:has(> * > .rice-ui > .sell-fit), main:has(> .rice-ui > .sell-fit) { padding
 .rice-ui .form-switch .form-check-label { white-space: nowrap; }
 /* Small button groups (view switches) keep 16 px text. */
 .rice-ui .btn-group-sm > .btn { font-size: 1rem; }
+
+/* Long order, tablet upright (2026-11-15): "See whole order" gives the sale / order card the whole column
+   (the price list steps aside); "Back to price list" brings it back. Pre-order lines are one row upright. */
+.order-big-toggle { min-height: 44px; padding: 0.25rem 0.75rem; font-size: 1rem; font-weight: 600; white-space: nowrap; }
+.fit-col > .fit-bottom.order-big { flex: 1 1 auto; max-height: none; }
+.sell-fit .fit-card.order-big .sale-lines { flex: 1 1 auto; }
+.po-line-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.75rem; }
+.po-line-row .po-line-name { flex: 1 1 9rem; min-width: 0; }
+.po-line-row .po-line-amount { min-width: 6.5rem; }

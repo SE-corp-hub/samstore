@@ -246,6 +246,12 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
   const wide = useMediaQuery(WIDE);
   // Tablet or PC: the screen is exactly the space between the bars (no page scroll); the list and the products scroll in their own boxes.
   const fit = useMediaQuery(FIT);
+  // Upright on the tablet each order line is one row (name, − n +, price, amount), and a long order can take the
+  // whole screen ("See whole order"); "Back to price list" brings the list back.
+  const upright = fit && !wide;
+  const lineOneRow = useMediaQuery("(min-width: 760px)") && upright;
+  const [orderBigOn, setOrderBig] = useState(false);
+  useEffect(() => { if (buildCart.length === 0) setOrderBig(false); }, [buildCart.length]);
   const fitRef = useFitHeight<HTMLDivElement>(fit);
 
   /** ₱— when store hides per-product prices (subtotal/total still shown). */
@@ -853,38 +859,67 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
   );
 
   // Part 3: the order. Its lines scroll; the total and Save stay in view.
+  const orderBig = orderBigOn && upright && buildCart.length > 0;
   const orderSection = (
-    <section className={`sale-card fit-card${fit && !wide ? " fit-bottom" : ""} mb-2`} aria-labelledby="po-check">
+    <section className={`sale-card fit-card${upright ? " fit-bottom" : ""}${orderBig ? " order-big" : ""} mb-2`} aria-labelledby="po-check">
       <div className="card-body">
-        <h2 id="po-check" className="h5 mb-2 d-flex align-items-center"><Num n={3} />Check the order</h2>
+        <div className="d-flex align-items-center gap-2 mb-2">
+          <h2 id="po-check" className="h5 mb-0 d-flex align-items-center"><Num n={3} />Check the order</h2>
+          {upright && (orderBig || buildCart.length >= 3) && (
+            <button type="button" className="btn btn-outline-dark order-big-toggle ms-auto" aria-pressed={orderBig} onClick={() => setOrderBig(!orderBig)}>
+              {orderBig
+                ? <><i className="bi bi-list-ul me-1" aria-hidden="true"></i>Back to price list</>
+                : <><i className="bi bi-arrows-expand me-1" aria-hidden="true"></i>See whole order</>}
+            </button>
+          )}
+        </div>
         {buildCart.length === 0 && <p className="text-muted text-center py-2 mb-0">Nothing yet. Tap items {wide ? "on the left" : "above"} (part 2).</p>}
         <div className="sale-lines">
         {buildCart.map((l, idx) => {
           const changed = l.price !== undefined && l.price !== l.product.priceMinor;
           const onPromo = promoAt[idx] != null;
+          const nameCell = (
+            <div className="fw-semibold po-line-name">{l.product.name}{onPromo && <span className="badge text-bg-success ms-1">promo</span>}
+              {changed && (lineOneRow
+                ? <div className="text-muted fw-normal small">usual {toPesos(l.product.priceMinor)}</div>
+                : <span className="text-muted fw-normal text-nowrap"> · usual {toPesos(l.product.priceMinor)}</span>)}</div>
+          );
+          const amountCell = <div className="fw-bold text-end text-nowrap po-line-amount" style={{ fontVariantNumeric: "tabular-nums" }}>{maybePrice(unitOf(pricedCart[idx]!) * l.quantity)}</div>;
+          const qtyCell = (
+            <div className="d-flex align-items-center gap-1" role="group" aria-label={`How many ${l.product.name}`}>
+              <button type="button" className={`btn qty-btn ${l.quantity === 1 ? "btn-outline-danger" : "btn-outline-dark"}`}
+                aria-label={l.quantity === 1 ? `Remove ${l.product.name}` : `One less ${l.product.name}`} onClick={() => setQty(l, l.quantity - 1)}>
+                {l.quantity === 1 ? <i className="bi bi-trash" aria-hidden="true"></i> : "−"}
+              </button>
+              <span className="qty-num" aria-live="polite">{l.quantity}</span>
+              <button type="button" className="btn btn-outline-dark qty-btn" aria-label={`One more ${l.product.name}`} onClick={() => setQty(l, l.quantity + 1)}>+</button>
+            </div>
+          );
+          // The price is always open here: change it right on the line.
+          const priceCell = (
+            <label className="d-flex align-items-center gap-2 mb-0">
+              <span className="text-muted">{lineOneRow ? "Each" : "Price each"}</span>
+              <PesoInput className={`form-control ${changed ? "border-warning bg-warning-subtle" : ""}`} style={{ width: lineOneRow ? 116 : 130 }} aria-label={`Price each of ${l.product.name}`}
+                value={l.priceText ?? (unitOf(pricedCart[idx]!) / 100).toFixed(2)} placeholder={(l.product.priceMinor / 100).toFixed(2)} onChange={(v) => setLinePrice(l, v)} />
+            </label>
+          );
           return (
             <div key={lineKey(l)} className="border-bottom py-2">
-              <div className="d-flex justify-content-between align-items-baseline gap-2">
-                <div className="fw-semibold">{l.product.name}{onPromo && <span className="badge text-bg-success ms-1">promo</span>}
-                  {changed && <span className="text-muted fw-normal text-nowrap"> · usual {toPesos(l.product.priceMinor)}</span>}</div>
-                <div className="fw-bold text-end text-nowrap" style={{ fontVariantNumeric: "tabular-nums" }}>{maybePrice(unitOf(pricedCart[idx]!) * l.quantity)}</div>
-              </div>
-              <div className="d-flex flex-wrap justify-content-between align-items-center gap-2 mt-2">
-                <div className="d-flex align-items-center gap-1" role="group" aria-label={`How many ${l.product.name}`}>
-                  <button type="button" className={`btn qty-btn ${l.quantity === 1 ? "btn-outline-danger" : "btn-outline-dark"}`}
-                    aria-label={l.quantity === 1 ? `Remove ${l.product.name}` : `One less ${l.product.name}`} onClick={() => setQty(l, l.quantity - 1)}>
-                    {l.quantity === 1 ? <i className="bi bi-trash" aria-hidden="true"></i> : "−"}
-                  </button>
-                  <span className="qty-num" aria-live="polite">{l.quantity}</span>
-                  <button type="button" className="btn btn-outline-dark qty-btn" aria-label={`One more ${l.product.name}`} onClick={() => setQty(l, l.quantity + 1)}>+</button>
+              {lineOneRow ? (
+                // Upright tablet: one row per line, so a long order shows twice as many lines.
+                <div className="po-line-row">
+                  {nameCell}{qtyCell}{priceCell}{amountCell}
                 </div>
-                {/* The price is always open here: change it right on the line. */}
-                <label className="d-flex align-items-center gap-2 mb-0">
-                  <span className="text-muted">Price each</span>
-                  <PesoInput className={`form-control ${changed ? "border-warning bg-warning-subtle" : ""}`} style={{ width: 130 }} aria-label={`Price each of ${l.product.name}`}
-                    value={l.priceText ?? (unitOf(pricedCart[idx]!) / 100).toFixed(2)} placeholder={(l.product.priceMinor / 100).toFixed(2)} onChange={(v) => setLinePrice(l, v)} />
-                </label>
-              </div>
+              ) : (
+                <>
+                  <div className="d-flex justify-content-between align-items-baseline gap-2">
+                    {nameCell}{amountCell}
+                  </div>
+                  <div className="d-flex flex-wrap justify-content-between align-items-center gap-2 mt-2">
+                    {qtyCell}{priceCell}
+                  </div>
+                </>
+              )}
               {lineBelow(pricedCart[idx]!) && (
                 <div className="small text-danger fw-semibold mt-1" role="status">
                   <i className="bi bi-exclamation-triangle-fill me-1" aria-hidden="true"></i>
@@ -930,7 +965,7 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
   ) : (
     <div className="fit-col">
       {customerSection}
-      {pickSection}
+      {!orderBig && pickSection}
       {orderSection}
       {!fit && (
         <div className="position-sticky bottom-0 sticky-above-bar sale-card shadow p-2 mb-2" style={{ zIndex: 5 }}>
@@ -951,7 +986,8 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
 
   // An owner or manager with more than one store picks where a new pre-order belongs.
   const storeChoice = subTab === "build" && !editingPre && !homeLocationId && locations.length > 1;
-  const storeOnTitle = storeChoice && wide;
+  // Upright too, once the order has items (the store is locked then): the badge on the title frees a row for the order.
+  const storeOnTitle = storeChoice && (wide || (fit && buildCart.length > 0));
   return (
     <div ref={fitRef} className="sell-screen tone-sell sell-fit">
       {/* One row: the title, Waiting / Done, and the one green button. */}
