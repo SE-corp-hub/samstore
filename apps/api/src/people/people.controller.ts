@@ -86,7 +86,14 @@ export class PeopleController {
   @Patch("people/:userId/details")
   async editPerson(@Req() req: Req_, @Param("userId") userId: string, @Body() body: Record<string, unknown>, @Headers("x-store-id") h?: string) {
     const { storeId, actor } = await this.ctx(req, h, TENANT_ROLES.MANAGE);
-    return unwrap(await this.people.editPerson(storeId, userId, { name: str(body?.name), phone: optNullStr(body?.phone) }, actor.userId));
+    return unwrap(await this.people.editPerson(storeId, userId, { name: str(body?.name), phone: optNullStr(body?.phone), email: optNullStr(body?.email) }, actor.userId));
+  }
+
+  /** POST /admin/people/:userId/password — owner chooses a login's password (works at once). */
+  @Post("people/:userId/password")
+  async setPassword(@Req() req: Req_, @Param("userId") userId: string, @Body() body: Record<string, unknown>, @Headers("x-store-id") h?: string) {
+    const { storeId, actor } = await this.ctx(req, h, TENANT_ROLES.MANAGE);
+    return unwrap(await this.people.setPassword(storeId, userId, str(body?.password) ?? "", actor.userId));
   }
 
   /** POST /admin/people/ready — owner makes a login to hand over later (temporary password shown once). */
@@ -100,7 +107,7 @@ export class PeopleController {
   @Post("people/:userId/hand-over")
   async handOver(@Req() req: Req_, @Param("userId") userId: string, @Body() body: Record<string, unknown>, @Headers("x-store-id") h?: string) {
     const { storeId, actor } = await this.ctx(req, h, TENANT_ROLES.MANAGE);
-    return unwrap(await this.people.handOverLogin(storeId, userId, { name: str(body?.name), phone: optNullStr(body?.phone) }, actor.userId));
+    return unwrap(await this.people.handOverLogin(storeId, userId, { name: str(body?.name), phone: optNullStr(body?.phone), email: optNullStr(body?.email), password: str(body?.password) }, actor.userId));
   }
 
   // ── kargadors ──

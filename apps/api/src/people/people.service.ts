@@ -79,9 +79,30 @@ function readablePassword(): string {
  * The name and mobile a store may write on a login. Only for an account that is this store's alone
  * (M11: a store must not rename someone who also works elsewhere), and a mobile nobody else uses.
  */
-async function personDetails(storeId: string, userId: string, input: { name?: string; phone?: string | null }, nameRequired: boolean): Promise<PeopleResult<{ name?: string; phone?: string | null }>> {
+/** A sign-in email the owner chose: lower case, no spaces, one @ (it need not be a real mailbox). */
+export function cleanSignInName(raw: string): string | null {
+  const v = raw.trim().toLowerCase();
+  return v.length <= 100 && /^[^\s@]{1,60}@[^\s@]{1,60}$/.test(v) ? v : null;
+}
+
+/** A password the owner chose for a login. */
+export function passwordProblem(pw: string): string | null {
+  if (pw.length < 8) return "The password needs at least 8 characters";
+  if (pw.length > 72) return "The password is too long (72 characters at most)";
+  if (pw.trim() !== pw) return "The password cannot start or end with a space";
+  return null;
+}
+
+async function personDetails(storeId: string, userId: string, input: { name?: string; phone?: string | null; email?: string | null }, nameRequired: boolean): Promise<PeopleResult<{ name?: string; phone?: string | null; email?: string }>> {
   if (!(await accountBelongsToStore(prisma, userId, storeId))) return forbidden("This person also works in another store. They change their own name and number.");
-  const out: { name?: string; phone?: string | null } = {};
+  const out: { name?: string; phone?: string | null; email?: string } = {};
+  if (input.email !== undefined && input.email !== null && input.email.trim() !== "") {
+    const email = cleanSignInName(input.email);
+    if (!email) return fail("validation", "Type the sign-in email like name@store (no spaces)");
+    const taken = await prisma.user.findFirst({ where: { email: { equals: email, mode: "insensitive" } }, select: { id: true } });
+    if (taken && taken.id !== userId) return fail("validation", "That email is already used by another login");
+    out.email = email;
+  }
   if (input.name !== undefined || nameRequired) {
     const name = (input.name ?? "").trim().replace(/\s+/g, " ");
     if (name.length < 2 || name.length > 60) return fail("validation", "Type the person's name");
@@ -96,7 +117,7 @@ async function personDetails(storeId: string, userId: string, input: { name?: st
   } else if (input.phone === null || input.phone === "") {
     // Taking the number away is only possible while there is another way to sign in.
     const u = await prisma.user.findUnique({ where: { id: userId }, select: { email: true } });
-    if (!u?.email) return fail("validation", "This login signs in with its mobile number. Type the new number.");
+    if (!u?.email && !out.email) return fail("validation", "This login signs in with its mobile number. Type the new number.");
     out.phone = null;
   }
   return { ok: true, value: out };
@@ -411,41 +432,66 @@ export class PeopleService {
   async handOverLogin(
     storeId: string,
     userId: string,
-    input: { name?: string; phone?: string | null },
+    input: { name?: string; phone?: string | null; email?: string | null; password?: string },
     actorId: string,
-  ): Promise<PeopleResult<{ userId: string; name: string; signInWith: string; tempPassword: string }>> {
+  ): Promise<PeopleResult<{ userId: string; name: string; signInWith: string; tempPassword: string; mustChangePassword: boolean }>> {
     const m = await prisma.userStore.findUnique({ where: { userId_storeId: { userId, storeId } }, select: { status: true, readyLabel: true, user: { select: { email: true, phone: true } } } });
     if (!m || m.status !== "ACTIVE") return notFound("That person is not in this store");
     if (!m.readyLabel) return conflict("This login was already handed over. Use Edit name to change it.");
     const who = await personDetails(storeId, userId, input, true);
     if (!who.ok) return who;
-    const tempPassword = readablePassword();
+    // The owner may choose the password; otherwise a readable one, changed at first sign-in.
+    const chosen = input.password !== undefined && input.password !== "";
+    if (chosen) { const problem = passwordProblem(input.password!); if (problem) return fail("validation", problem); }
+    const tempPassword = chosen ? input.password! : readablePassword();
     const passwordHash = await bcrypt.hash(tempPassword, 12);
     await prisma.$transaction(async (tx) => {
-      await tx.user.update({ where: { id: userId }, data: { ...who.value, passwordHash, mustChangePassword: true, pinHash: null, pinFailedCount: 0, pinLockedUntil: null, loginFailedCount: 0, loginLockedUntil: null, tokenVersion: { increment: 1 } } });
+      await tx.user.update({ where: { id: userId }, data: { ...who.value, passwordHash, mustChangePassword: !chosen, pinHash: null, pinFailedCount: 0, pinLockedUntil: null, loginFailedCount: 0, loginLockedUntil: null, tokenVersion: { increment: 1 } } });
       await tx.userStore.update({ where: { userId_storeId: { userId, storeId } }, data: { readyLabel: null } });
       await tx.passwordResetHistory.create({ data: { userId, storeId, resetBy: actorId } });
       await tx.auditLog.create({ data: { storeId, actorType: "USER", actorId, action: "member.ready.handover", entityType: "User", entityId: userId, before: { readyLabel: m.readyLabel }, after: { name: who.value.name, phoneSet: !!who.value.phone } } });
     });
     await bustTokenVersion(userId);
     await bustMemberships();
-    return { ok: true, value: { userId, name: who.value.name!, signInWith: who.value.phone ?? m.user.phone ?? m.user.email ?? "", tempPassword } };
+    return { ok: true, value: { userId, name: who.value.name!, signInWith: who.value.email ?? who.value.phone ?? m.user.phone ?? m.user.email ?? "", tempPassword, mustChangePassword: !chosen } };
   }
 
   /** The owner corrects a login's name or mobile number (not the owner's own: that is in Settings). */
-  async editPerson(storeId: string, userId: string, input: { name?: string; phone?: string | null }, actorId: string): Promise<PeopleResult<{ userId: string; name: string | null; phone: string | null }>> {
-    const m = await prisma.userStore.findUnique({ where: { userId_storeId: { userId, storeId } }, select: { status: true, role: true, user: { select: { name: true, phone: true } } } });
+  async editPerson(storeId: string, userId: string, input: { name?: string; phone?: string | null; email?: string | null }, actorId: string): Promise<PeopleResult<{ userId: string; name: string | null; phone: string | null; email: string | null }>> {
+    const m = await prisma.userStore.findUnique({ where: { userId_storeId: { userId, storeId } }, select: { status: true, role: true, user: { select: { name: true, phone: true, email: true } } } });
     if (!m || m.status !== "ACTIVE") return notFound("That person is not in this store");
     if (m.role === "OWNER") return forbidden("The owner changes their own name in Settings");
     const who = await personDetails(storeId, userId, input, false);
     if (!who.ok) return who;
     if (Object.keys(who.value).length === 0) return fail("validation", "Nothing to change");
     const after = await prisma.$transaction(async (tx) => {
-      const u = await tx.user.update({ where: { id: userId }, data: who.value, select: { name: true, phone: true } });
-      await tx.auditLog.create({ data: { storeId, actorType: "USER", actorId, action: "member.people.edit", entityType: "User", entityId: userId, before: { name: m.user.name, phone: m.user.phone }, after: { name: u.name, phone: u.phone } } });
+      const u = await tx.user.update({ where: { id: userId }, data: who.value, select: { name: true, phone: true, email: true } });
+      await tx.auditLog.create({ data: { storeId, actorType: "USER", actorId, action: "member.people.edit", entityType: "User", entityId: userId, before: { name: m.user.name, phone: m.user.phone, email: m.user.email }, after: { name: u.name, phone: u.phone, email: u.email } } });
       return u;
     });
     return { ok: true, value: { userId, ...after } };
+  }
+
+  /**
+   * The owner chooses a login's password (not the owner's own: that is in Settings). It works at once,
+   * with no change asked at first sign-in, and whoever was signed in with the old one is signed out.
+   */
+  async setPassword(storeId: string, userId: string, password: string, actorId: string): Promise<PeopleResult<{ userId: string }>> {
+    if (userId === actorId) return forbidden("Change your own password in Settings");
+    const m = await prisma.userStore.findUnique({ where: { userId_storeId: { userId, storeId } }, select: { status: true, role: true } });
+    if (!m || m.status !== "ACTIVE") return notFound("That person is not in this store");
+    if (m.role === "OWNER") return forbidden("The owner changes their own password in Settings");
+    if (!(await accountBelongsToStore(prisma, userId, storeId))) return forbidden("This person also works in another store. They change their own password.");
+    const problem = passwordProblem(password ?? "");
+    if (problem) return fail("validation", problem);
+    const passwordHash = await bcrypt.hash(password, 12);
+    await prisma.$transaction(async (tx) => {
+      await tx.user.update({ where: { id: userId }, data: { passwordHash, mustChangePassword: false, loginFailedCount: 0, loginLockedUntil: null, tokenVersion: { increment: 1 } } });
+      await tx.passwordResetHistory.create({ data: { userId, storeId, resetBy: actorId } });
+      await tx.auditLog.create({ data: { storeId, actorType: "USER", actorId, action: "member.password.set", entityType: "User", entityId: userId, after: { chosenByOwner: true } } });
+    });
+    await bustTokenVersion(userId);
+    return { ok: true, value: { userId } };
   }
 
   /** A person changes their own PIN by proving the current PIN (or password if no PIN yet). */

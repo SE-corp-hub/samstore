@@ -101,3 +101,36 @@ test("the owner corrects a login's name and mobile", async () => {
   assert.equal(await bcrypt.compare(a.tempPassword, u.passwordHash), true);
   assert.equal(u.tokenVersion, 0);
 });
+
+test("the owner chooses a login's email and password", async () => {
+  const fx = await fixture();
+  const made = must(await people.createReadyLogin(fx.storeId, { label: "Lipa counter", homeLocationId: fx.lipa }, fx.owner));
+  const email = `${run}-${seq}-lipa@bahaytindahan`;
+
+  // The sign-in email: any name@place with no spaces, kept in small letters, never one another login uses.
+  assert.equal((await people.editPerson(fx.storeId, made.userId, { email: "lipa counter@shop" }, fx.owner)).ok, false, "no spaces");
+  assert.equal((await people.editPerson(fx.storeId, made.userId, { email: "lipa" }, fx.owner)).ok, false, "needs an @");
+  assert.equal((await people.editPerson(fx.storeId, made.userId, { email: `${run}-${seq}-owner@rdy.test` }, fx.owner)).ok, false, "not the owner's email");
+  const edited = must(await people.editPerson(fx.storeId, made.userId, { email: `  ${email.toUpperCase()} ` }, fx.owner));
+  assert.equal(edited.email, email);
+
+  // The password: at least 8 characters, works at once with no change asked, signs the old holder out.
+  const before = await prisma.user.findUniqueOrThrow({ where: { id: made.userId } });
+  assert.equal((await people.setPassword(fx.storeId, made.userId, "short", fx.owner)).ok, false);
+  assert.equal((await people.setPassword(fx.storeId, made.userId, " spaced-out ", fx.owner)).ok, false);
+  must(await people.setPassword(fx.storeId, made.userId, "Bigas-Lipa-2026", fx.owner));
+  const after = await prisma.user.findUniqueOrThrow({ where: { id: made.userId } });
+  assert.equal(await bcrypt.compare("Bigas-Lipa-2026", after.passwordHash), true);
+  assert.deepEqual([after.mustChangePassword, after.tokenVersion], [false, before.tokenVersion + 1]);
+
+  // Never the owner's own password here (that is in Settings).
+  assert.equal((await people.setPassword(fx.storeId, fx.owner, "Owner-pass-2026", fx.owner)).ok, false);
+
+  // Handing over with a chosen email and password: no temporary password, no change asked.
+  const bt = must(await people.createReadyLogin(fx.storeId, { label: "Lipa head", homeLocationId: fx.lipa, isLocationHead: true }, fx.owner));
+  assert.equal((await people.handOverLogin(fx.storeId, bt.userId, { name: "Maria", password: "1234567" }, fx.owner)).ok, false, "too short");
+  const given = must(await people.handOverLogin(fx.storeId, bt.userId, { name: "Maria", email: `${run}-${seq}-maria@lipa`, password: "Maria-Lipa-2026" }, fx.owner));
+  assert.deepEqual([given.signInWith, given.tempPassword, given.mustChangePassword], [`${run}-${seq}-maria@lipa`, "Maria-Lipa-2026", false]);
+  const maria = await prisma.user.findUniqueOrThrow({ where: { id: bt.userId } });
+  assert.equal(maria.mustChangePassword, false);
+});
