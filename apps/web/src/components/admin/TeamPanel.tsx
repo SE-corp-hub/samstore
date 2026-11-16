@@ -50,8 +50,8 @@ export default function TeamPanel() {
   const [readyError, setReadyError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   /** Shown once, until the owner says it is written down. */
-  const [slip, setSlip] = useState<{ title: string; signIn: string; password: string } | null>(null);
-  const [details, setDetails] = useState<{ userId: string; mode: "handover" | "edit"; label: string; name: string; phone: string } | null>(null);
+  const [slip, setSlip] = useState<{ title: string; signIn: string; password: string; chosen?: boolean } | null>(null);
+  const [details, setDetails] = useState<{ userId: string; mode: "handover" | "edit"; label: string; name: string; phone: string; email: string; password: string } | null>(null);
   const [detailsError, setDetailsError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -112,15 +112,29 @@ export default function TeamPanel() {
     if (!details) return;
     setDetailsError(null); setNotice(null); setError(null);
     if (details.name.trim().length < 2) { setDetailsError("Type the person's name."); return; }
+    const email = details.email.trim().toLowerCase();
+    if (email && !/^[^\s@]+@[^\s@]+$/.test(email)) { setDetailsError("Type the sign-in email like lipa@bahaytindahan, with no spaces."); return; }
+    const password = details.password;
+    if (password && password.length < 8) { setDetailsError("The password needs at least 8 characters."); return; }
+    if (password && password.trim() !== password) { setDetailsError("The password cannot start or end with a space."); return; }
     setBusy(true);
-    const body = { name: details.name, ...(details.phone.trim() ? { phone: details.phone.trim() } : {}) };
-    const r = details.mode === "handover"
-      ? await send(`/admin/people/${details.userId}/hand-over`, "POST", body)
-      : await send(`/admin/people/${details.userId}/details`, "PATCH", body);
-    setBusy(false);
-    if (!r.ok) { setDetailsError(r.message); return; }
-    if (details.mode === "handover") setSlip({ title: `"${details.label}" now belongs to ${r.data.name}`, signIn: r.data.signInWith, password: r.data.tempPassword });
-    else setNotice("Name and number saved.");
+    const body = { name: details.name, ...(details.phone.trim() ? { phone: details.phone.trim() } : {}), ...(email ? { email } : {}) };
+    if (details.mode === "handover") {
+      const r = await send(`/admin/people/${details.userId}/hand-over`, "POST", { ...body, ...(password ? { password } : {}) });
+      setBusy(false);
+      if (!r.ok) { setDetailsError(r.message); return; }
+      setSlip({ title: `"${details.label}" now belongs to ${r.data.name}`, signIn: r.data.signInWith, password: r.data.tempPassword, chosen: r.data.mustChangePassword === false });
+    } else {
+      const r = await send(`/admin/people/${details.userId}/details`, "PATCH", body);
+      if (!r.ok) { setBusy(false); setDetailsError(r.message); return; }
+      if (password) {
+        const p = await send(`/admin/people/${details.userId}/password`, "POST", { password });
+        if (!p.ok) { setBusy(false); setDetailsError(`The name and email were saved, but not the password: ${p.message}`); await load(); return; }
+      }
+      setBusy(false);
+      const signIn = r.data.email ?? r.data.phone ?? "";
+      setNotice(password ? `Saved. ${r.data.name} signs in with ${signIn} and the password you typed.` : `Saved. ${r.data.name} signs in with ${signIn}.`);
+    }
     setDetails(null);
     await load();
   };
@@ -261,14 +275,14 @@ export default function TeamPanel() {
         <div className="card border-warning border-2 mb-4" role="alert">
           <div className="card-body">
             <h2 className="h5">{slip.title}</h2>
-            <p className="mb-2">Write these down now. The password is shown only this once.</p>
+            <p className="mb-2">{slip.chosen ? "Write these down now." : "Write these down now. The password is shown only this once."}</p>
             <dl className="row mb-2 fs-5">
               <dt className="col-sm-4 fw-normal">Sign in with</dt>
               <dd className="col-sm-8 fw-bold text-break" id="tm-slip-signin">{slip.signIn}</dd>
-              <dt className="col-sm-4 fw-normal">Temporary password</dt>
+              <dt className="col-sm-4 fw-normal">{slip.chosen ? "Password" : "Temporary password"}</dt>
               <dd className="col-sm-8 fw-bold text-break" id="tm-slip-password" style={{ fontFamily: "ui-monospace, monospace", letterSpacing: "0.05em" }}>{slip.password}</dd>
             </dl>
-            <p className="text-muted mb-3">At the first sign-in the app asks for a new password. After that you can set a PIN for the tablet.</p>
+            <p className="text-muted mb-3">{slip.chosen ? "This password works now. You can set a PIN for the tablet too." : "At the first sign-in the app asks for a new password. After that you can set a PIN for the tablet."}</p>
             <button type="button" className="btn btn-success btn-lg" onClick={() => setSlip(null)}><i className="bi bi-check-lg me-1" aria-hidden="true"></i>I wrote it down</button>
           </div>
         </div>
@@ -310,9 +324,14 @@ export default function TeamPanel() {
                       <div className="fw-semibold">{m.readyLabel}{m.isLocationHead ? " · Head" : ""} <span className="badge text-bg-warning ms-1">Waiting to be handed over</span></div>
                       <div className="small text-muted text-break">{locLabel(m.homeLocationId)} · signs in with {m.email ?? m.phone}</div>
                     </div>
-                    <button type="button" className="btn btn-outline-success" style={{ minHeight: 48 }} onClick={() => { setDetails({ userId: m.userId, mode: "handover", label: m.readyLabel ?? "", name: "", phone: "" }); setDetailsError(null); }}>
-                      <i className="bi bi-person-check me-1" aria-hidden="true"></i>Hand over
-                    </button>
+                    <div className="d-flex flex-wrap gap-2">
+                      <button type="button" className="btn btn-outline-secondary" style={{ minHeight: 48 }} onClick={() => { setDetails({ userId: m.userId, mode: "edit", label: m.readyLabel ?? "", name: m.name ?? m.readyLabel ?? "", phone: m.phone ?? "", email: m.email ?? "", password: "" }); setDetailsError(null); }}>
+                        <i className="bi bi-key me-1" aria-hidden="true"></i>Email and password
+                      </button>
+                      <button type="button" className="btn btn-outline-success" style={{ minHeight: 48 }} onClick={() => { setDetails({ userId: m.userId, mode: "handover", label: m.readyLabel ?? "", name: "", phone: "", email: m.email ?? "", password: "" }); setDetailsError(null); }}>
+                        <i className="bi bi-person-check me-1" aria-hidden="true"></i>Hand over
+                      </button>
+                    </div>
                   </li>
                 ))}
               </ul>
@@ -324,8 +343,8 @@ export default function TeamPanel() {
       {details && (
         <form onSubmit={saveDetails} className="card mb-4 border-success" noValidate>
           <div className="card-body">
-            <h2 className="h6">{details.mode === "handover" ? `Hand over "${details.label}"` : `Name and number of ${details.label}`}</h2>
-            {details.mode === "handover" && <p className="small text-muted mb-2">The login gets the person&apos;s name and a new temporary password. Whoever used it before is signed out, and the old PIN stops working.</p>}
+            <h2 className="h6">{details.mode === "handover" ? `Hand over "${details.label}"` : `Login of ${details.label}`}</h2>
+            {details.mode === "handover" && <p className="small text-muted mb-2">The login gets the person&apos;s name and a new password. Whoever used it before is signed out, and the old PIN stops working.</p>}
             <div className="row g-2" style={{ maxWidth: 640 }}>
               <div className="col-sm-6">
                 <label className="form-label small mb-1" htmlFor="tm-det-name">Name of the person</label>
@@ -337,6 +356,18 @@ export default function TeamPanel() {
               </div>
             </div>
             <div className="form-text" id="tm-det-help">With a mobile number the person can sign in with that number and a PIN.</div>
+            <div className="row g-2 mt-1" style={{ maxWidth: 640 }}>
+              <div className="col-sm-6">
+                <label className="form-label small mb-1" htmlFor="tm-det-email">Sign-in email</label>
+                <input id="tm-det-email" className="form-control form-control-lg" type="text" inputMode="email" autoComplete="off" autoCapitalize="none" spellCheck={false} maxLength={100} placeholder="lipa@bahaytindahan" value={details.email} onChange={(e) => { setDetails({ ...details, email: e.target.value }); setDetailsError(null); }} aria-describedby="tm-det-email-help" />
+                <div className="form-text" id="tm-det-email-help">Any name@place with no spaces. It does not have to be a real mailbox.</div>
+              </div>
+              <div className="col-sm-6">
+                <label className="form-label small mb-1" htmlFor="tm-det-password">{details.mode === "handover" ? "Password (empty = the app makes one)" : "New password (empty = keep it)"}</label>
+                <input id="tm-det-password" className="form-control form-control-lg" type="text" autoComplete="off" autoCapitalize="none" spellCheck={false} maxLength={72} value={details.password} onChange={(e) => { setDetails({ ...details, password: e.target.value }); setDetailsError(null); }} aria-describedby="tm-det-password-help" style={{ fontFamily: "ui-monospace, monospace" }} />
+                <div className="form-text" id="tm-det-password-help">At least 8 characters. It works at once; whoever was signed in with the old one is signed out.</div>
+              </div>
+            </div>
             {detailsError && <div className="text-danger fw-semibold mt-1" role="alert">{detailsError}</div>}
             <div className="d-flex gap-2 mt-3">
               <button className="btn btn-success btn-lg" type="submit" disabled={busy}>{busy ? "Saving…" : details.mode === "handover" ? "Hand over" : "Save"}</button>
@@ -443,8 +474,8 @@ export default function TeamPanel() {
                         )}
                         {m.role !== "OWNER" && (
                           <>
-                            <button className="btn btn-sm btn-outline-secondary text-nowrap" onClick={() => { setDetails({ userId: m.userId, mode: "edit", label: m.name ?? "this login", name: m.name ?? "", phone: m.phone ?? "" }); setDetailsError(null); window.scrollTo({ top: 0, behavior: "smooth" }); }}>
-                              <i className="bi bi-pencil me-1" aria-hidden="true"></i>Edit name
+                            <button className="btn btn-sm btn-outline-secondary text-nowrap" onClick={() => { setDetails({ userId: m.userId, mode: "edit", label: m.name ?? "this login", name: m.name ?? "", phone: m.phone ?? "", email: m.email ?? "", password: "" }); setDetailsError(null); window.scrollTo({ top: 0, behavior: "smooth" }); }}>
+                              <i className="bi bi-pencil me-1" aria-hidden="true"></i>Edit login
                             </button>
                             <button
                               className="btn btn-sm btn-outline-secondary text-nowrap"
