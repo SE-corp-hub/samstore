@@ -952,6 +952,23 @@ export class AdminController {
         return { ...result.value, storeId };
   }
 
+  /** PATCH /admin/store-name — the owner renames the business (the name at the top of the menu). */
+  @Patch("store-name")
+  async renameStore(
+    @Req() req: Request & { user?: AuthPrincipal },
+    @Body() body: { name?: unknown },
+    @Headers("x-store-id") headerStoreId?: string,
+  ) {
+    const user = req.user;
+    requireUser(user);
+    const { storeId, role } = await resolveTenant(user, headerStoreId, TENANT_ROLES.MANAGE);
+    if (role !== "OWNER" && role !== "PLATFORM_ADMIN") throw new HttpException({ type: "forbidden", message: "Only the owner can change the business name" }, HttpStatus.FORBIDDEN);
+    const result = await this.settingsAdmin.rename(storeId, typeof body?.name === "string" ? body.name : "", user!.sub);
+    if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
+    await cacheBust(cacheKey("settings", storeId));
+    return { ...result.value, storeId };
+  }
+
   /**
    * GET /admin/feature-lock — the PIN lock: which screens ask for the lock PIN, for the owner and
    * for staff, plus the salted hash the tablet checks the PIN against (so it works offline).

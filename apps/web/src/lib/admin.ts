@@ -408,3 +408,6 @@ export async function fetchAdminOrders(token: string): Promise<AdminOrder[]> {
     createdAt: o.createdAt,
   }));
 }
+
+/** Tells the menu to load the store list again (its name at the top) after the business is renamed. */
+export const STORES_CHANGED_EVENT = "samstore:stores-changed";
