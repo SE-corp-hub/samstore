@@ -528,8 +528,10 @@ export default function AdminDashboard() {
         <>
           <div className="modal fade show d-block d-lg-none touch-show-block" tabIndex={-1} role="dialog" aria-modal="true" aria-label="Menu"
             onClick={(e) => { if (e.target === e.currentTarget) setMobileNav(false); }} onKeyDown={(e) => { if (e.key === "Escape") setMobileNav(false); }}>
-            <div className="modal-dialog modal-dialog-scrollable" style={{ maxWidth: "min(320px, 85vw)", margin: 0 }}>
-              <div className="modal-content admin-sidebar admin-drawer rounded-0 border-end min-vh-100" style={{ minHeight: "100vh" }}>
+            {/* The drawer is exactly one screen tall and scrolls by itself (admin-drawer in globals.css), so the
+                last screens, Text size, Switch user and Log out can always be reached with a finger, at any text size. */}
+            <div className="modal-dialog admin-drawer-dialog" style={{ maxWidth: "min(320px, 85vw)", margin: 0 }}>
+              <div className="modal-content admin-sidebar admin-drawer rounded-0 border-end">
                 {renderSidebar(false)}
               </div>
             </div>

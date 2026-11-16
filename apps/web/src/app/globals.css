@@ -402,3 +402,16 @@ textarea,
 /* Printer card inside Settings: switches as big as the other groups'. */
 .settings-screen .card .form-switch { padding-left: 4rem; min-height: 2.25rem; display: flex; align-items: center; }
 .settings-screen .card .form-switch .form-check-input { width: 3.25rem; height: 1.75rem; margin: 0 0.75rem 0 -4rem; flex-shrink: 0; }
+
+/* Menu drawer (phones and tablets): one screen tall, and the whole drawer scrolls with a finger, so every
+   screen in the list plus Text size, Switch user and Log out can be reached, upright, sideways and at
+   Extra large text. dvh follows the browser bar on Chrome; vh is the fallback for older browsers. */
+.admin-shell .admin-drawer-dialog { height: 100vh; height: 100dvh; }
+.admin-shell .admin-drawer {
+  height: 100vh; height: 100dvh; max-height: 100vh; max-height: 100dvh;
+  overflow-y: auto; overflow-x: hidden;
+  overscroll-behavior: contain; -webkit-overflow-scrolling: touch; touch-action: pan-y;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.admin-shell .admin-drawer > .d-flex { height: auto !important; min-height: 100%; }
+.admin-shell .admin-drawer nav { flex: 1 0 auto; overflow: visible !important; }
