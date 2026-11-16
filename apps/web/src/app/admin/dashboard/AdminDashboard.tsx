@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   getAdminToken, getAdminStoreId, setAdminStoreId, getAdminRole, clearAdminSession,
-  NAV_GROUPS, MENU_HIDDEN, REPORT_SECTIONS, isReportSection, allowedTabs, setHomeLocation, adminHeaders, defaultTabFor, isOwnerRole, handleUnauthorized, navItemFor, navGroupFor, toneFor,
+  NAV_GROUPS, MENU_HIDDEN, REPORT_SECTIONS, isReportSection, allowedTabs, setHomeLocation, adminHeaders, defaultTabFor, isOwnerRole, handleUnauthorized, STORES_CHANGED_EVENT, navItemFor, navGroupFor, toneFor,
 } from "../../../lib/admin";
 import dynamic from "next/dynamic";
 import { API_URL } from "../../../config";
@@ -271,6 +271,13 @@ export default function AdminDashboard() {
     void loadStores();
   }, [router, loadStores, setTab]);
 
+  // Settings → Business name: show the new name at the top of the menu straight away.
+  useEffect(() => {
+    const again = () => { void loadStores(); };
+    window.addEventListener(STORES_CHANGED_EVENT, again);
+    return () => window.removeEventListener(STORES_CHANGED_EVENT, again);
+  }, [loadStores]);
+
   // Back / Forward on the tablet: show the screen the address now names.
   useEffect(() => {
     const onPop = () => {
@@ -451,7 +458,7 @@ export default function AdminDashboard() {
           <i className="bi bi-shop fs-6"></i>
           {active?.name ?? "Store Admin"}
         </div>
-        {active && <small>{active.slug}</small>}
+        {active && role === "PLATFORM_ADMIN" && <small>{active.slug}</small>}
       </div>
       <nav className="flex-grow-1 overflow-auto py-2">
         {visibleGroups.map((g) => (

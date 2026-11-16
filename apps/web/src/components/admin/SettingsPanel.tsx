@@ -10,7 +10,7 @@
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { API_URL } from "../../config";
-import { adminHeaders, getAdminStoreId, getAuthItem, isOwnerRole, setAuthItem } from "../../lib/admin";
+import { adminHeaders, getAdminStoreId, getAuthItem, isOwnerRole, setAuthItem, STORES_CHANGED_EVENT } from "../../lib/admin";
 import { toast } from "../../lib/toast";
 import { askConfirm } from "../../lib/ask";
 import { cachedGet, savedCopy, useOffline } from "../../lib/offlineCache";
@@ -102,7 +102,7 @@ function formFrom(s: StoreSettings["settings"]): Form {
 }
 
 type ServerGroup = "counter" | "credit" | "receipt" | "shop" | "messenger";
-type Group = "printer" | ServerGroup | "lock" | "account";
+type Group = "business" | "printer" | ServerGroup | "lock" | "account";
 
 /** What each group sends when saved. Also used to tell whether a group has unsaved changes. */
 const PAYLOAD: Record<ServerGroup, (f: Form) => Record<string, unknown>> = {
@@ -149,6 +149,7 @@ function problems(g: ServerGroup, f: Form): Partial<Record<keyof Form, string>> 
 }
 
 const GROUPS: { id: Group; icon: string; title: string; server: boolean }[] = [
+  { id: "business", icon: "bi-shop-window", title: "Business name", server: true },
   { id: "printer", icon: "bi-printer", title: "Printer and receipt text", server: false },
   { id: "counter", icon: "bi-shop", title: "Selling at the counter", server: true },
   { id: "credit", icon: "bi-journal-text", title: "Credit (utang)", server: true },
@@ -316,6 +317,7 @@ export default function SettingsPanel({ role = "" }: { role?: string }) {
     void printerTick;
     if (!saved) return "";
     switch (g) {
+      case "business": return data?.name ?? "";
       case "printer": { const p = getPrinterSettings(); return `${p.widthMm} mm · ${p.autoPrint ? "prints after each sale" : "print by hand"}${p.bluetooth ? " · Bluetooth" : ""}`; }
       case "counter": return `${toMinor(saved.dailyTarget) > 0 ? `Target ${peso(toMinor(saved.dailyTarget))}` : "No daily target"} · ${saved.requireOpenShift ? "open the drawer first" : "sell any time"}`;
       case "credit": return toMinor(saved.creditLimit) > 0 ? `New customers ${peso(toMinor(saved.creditLimit))} · ${saved.creditTermDays} days to pay` : `No default limit · ${saved.creditTermDays} days to pay`;
@@ -376,6 +378,9 @@ export default function SettingsPanel({ role = "" }: { role?: string }) {
     if (!form) return null;
     const p = g in PAYLOAD ? problems(g as ServerGroup, form) : {};
     switch (g) {
+      case "business":
+        return <BusinessNameSection current={data?.name ?? ""} canChange={isOwnerRole(role) || role === "PLATFORM_ADMIN"} offline={offline}
+          onSaved={(name) => { setData((d) => (d ? { ...d, name } : d)); window.dispatchEvent(new Event(STORES_CHANGED_EVENT)); }} />;
       case "printer":
         return <div onChange={() => setPrinterTick((n) => n + 1)} onClick={() => setPrinterTick((n) => n + 1)}><PrinterSettingsCard storeName={data?.name} /></div>;
       case "counter":
@@ -649,6 +654,49 @@ export default function SettingsPanel({ role = "" }: { role?: string }) {
           {detail}
         </>
       ) : menu)}
+    </div>
+  );
+}
+
+/** The business name at the top of the menu. Each location's own receipt name is in Menu → Locations. */
+function BusinessNameSection({ current, canChange, offline, onSaved }: { current: string; canChange: boolean; offline: boolean; onSaved: (name: string) => void }) {
+  const [name, setName] = useState(current);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { setName(current); }, [current]);
+  const clean = name.trim().replace(/\s+/g, " ");
+  const problem = clean.length < 2 ? "Type the business name." : clean.length > 60 ? "60 letters at most." : null;
+
+  const save = async () => {
+    if (problem) { setMsg({ ok: false, text: problem }); return; }
+    setBusy(true); setMsg(null);
+    try {
+      const res = await fetch(`${API_URL}/admin/store-name`, {
+        method: "PATCH", headers: { "Content-Type": "application/json", ...adminHeaders() },
+        body: JSON.stringify({ name: clean }),
+      });
+      const d = await res.json();
+      if (!res.ok) { setMsg({ ok: false, text: d?.message ?? d?.errors?.join(", ") ?? "Did not save. Try again." }); return; }
+      setName(d.name);
+      setMsg({ ok: true, text: `Saved. The business is now called ${d.name}.` });
+      onSaved(d.name);
+    } catch {
+      setMsg({ ok: false, text: "No internet. Nothing was saved." });
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <div className="border rounded-3 p-3 mb-3 bg-white">
+      <Field id="biz-name" label="Business name" help="Shown at the top of the menu, and on receipts of a location that has no receipt name of its own (Menu → Locations).">
+        <input id="biz-name" className="form-control form-control-lg" maxLength={60} value={name} disabled={!canChange} onChange={(e) => { setName(e.target.value); setMsg(null); }} placeholder="Bogs and Lucy Rice Store" />
+      </Field>
+      {!canChange && <p className="text-muted mb-2">Only the owner can change the business name.</p>}
+      {msg && <div className={`alert ${msg.ok ? "alert-success" : "alert-danger"} py-2`} role="status">{msg.text}</div>}
+      {canChange && (
+        <button type="button" className="btn btn-success btn-lg" disabled={busy || offline || clean === current} onClick={() => void save()}>
+          {busy ? "Saving…" : "Save business name"}
+        </button>
+      )}
     </div>
   );
 }

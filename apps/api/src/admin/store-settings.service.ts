@@ -210,6 +210,25 @@ export class StoreSettingsService {
     return { ok: true, value: { id: storeId } };
   }
 
+  /**
+   * The business name the owner sees at the top of the menu and on receipts that have no store name
+   * of their own. The store's code (slug) stays the same: links and tools use it.
+   */
+  async rename(storeId: string, rawName: string, actorId: string): Promise<AdminResult<{ id: string; name: string }>> {
+    const name = (rawName ?? "").trim().replace(/\s+/g, " ");
+    if (name.length < 2 || name.length > 60) {
+      return { ok: false, error: { type: "validation", errors: ["Type the business name (2 to 60 letters)"] } };
+    }
+    const store = await prisma.store.findUnique({ where: { id: storeId }, select: { name: true } });
+    if (!store) return { ok: false, error: { type: "not_found", message: "Store not found" } };
+    if (store.name === name) return { ok: true, value: { id: storeId, name } };
+    await prisma.$transaction([
+      prisma.store.update({ where: { id: storeId }, data: { name } }),
+      prisma.auditLog.create({ data: { storeId, actorType: "USER", actorId, action: "store.rename", entityType: "Store", entityId: storeId, before: { name: store.name }, after: { name } } }),
+    ]);
+    return { ok: true, value: { id: storeId, name } };
+  }
+
   /** P8 — store link branding: accent color, banner text, share message, logo. */
   async updateLink(storeId: string, input: { accentColor?: string; bannerText?: string | null; shareMessage?: string | null; logoUrl?: string | null }): Promise<AdminResult<{ id: string }>> {
     const store = await prisma.store.findUnique({ where: { id: storeId } });

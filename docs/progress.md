@@ -1,5 +1,12 @@
 # PINDIAN — Progress Log
 
+## Owner can rename the business (2026-11-16)
+
+The menu top still said "TEST Bigasan" / "test-bigasan" after the owner renamed themselves: that is the business (Store) name, which had no place to change it.
+- New Settings group **Business name** (first in the list). Owner only (`PATCH /admin/store-name`, 2 to 60 letters, audit `store.rename`). The menu top updates at once (`STORES_CHANGED_EVENT` in `lib/admin.ts` reloads the store list).
+- The store code (slug) is unchanged on purpose: links and tools (`--store test-bigasan`) use it. It is no longer shown under the name in the menu, except for a platform admin.
+- Test: `apps/api/src/admin/business-name.test.ts`.
+
 ## Owner can save their own name and sign-in email (2026-11-16)
 
 Settings → My account did not show the saved name (the box always started empty, so a saved name looked lost), refused a sign-in email without a dot, and asked for an email even to change only the name. Now:
