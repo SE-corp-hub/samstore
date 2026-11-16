@@ -27,6 +27,7 @@ import NumPad from "./NumPad";
 import SignaturePad from "./SignaturePad";
 import QuickCount from "./QuickCount";
 import StoreBar from "./StoreBar";
+import StartChoices, { ChosenRow } from "./StartChoices";
 import { lastReason, reasonOk, ReasonButtons } from "./PriceReason";
 import { askBelowCost, saveUnitCost } from "./BelowCostDialog";
 import { isBelowCost, okKey } from "../../lib/below-cost";
@@ -101,13 +102,18 @@ function saveHolds(h: Held[]) { try { window.localStorage.setItem(holdKey(), JSO
 const cartKey = () => {
   try { return `rice-benta-cart:${getAdminStoreId() ?? ""}`; } catch { return "rice-benta-cart"; }
 };
-function savedCart(): { locationId: string; cart: CartLine[]; key: string | null } | null {
+function savedCart(): { locationId: string; cart: CartLine[]; key: string | null; who?: string } | null {
   try {
     const raw = window.sessionStorage.getItem(cartKey());
     const v = raw ? JSON.parse(raw) : null;
     return v && Array.isArray(v.cart) && typeof v.locationId === "string" ? v : null;
   } catch { return null; }
 }
+
+/** The owner (or a manager) must choose the store and the customer for every sale: nothing is pre-chosen. */
+const choosesEachSale = (role: string | undefined) => ["OWNER", "MANAGER", "PLATFORM_ADMIN"].includes(role ?? "");
+/** "Who is buying" when nobody's name is needed: a walk-in pays the store's prices. */
+const WALK_IN = "walkin";
 
 export default function BentaPanel() {
   const [locations, setLocations] = useState<Loc[]>([]);
@@ -128,7 +134,7 @@ export default function BentaPanel() {
   const [tendered, setTendered] = useState("");
   const [reference, setReference] = useState("");
   const [parts, setParts] = useState<SplitPart[]>([{ method: "cash", amount: "", reference: "" }, { method: "gcash", amount: "", reference: "" }]);
-  const [customerId, setCustomerId] = useState("");
+  const [customerId, setCustomerId] = useState(() => { const w = savedCart()?.who; return savedCart()?.cart.length && w && w !== WALK_IN ? w : ""; });
   const [customerSig, setCustomerSig] = useState<string | null>(null);
   const [newCust, setNewCust] = useState(false);       // the "New customer" mini form in the credit step
   const [paper, setPaper] = useState(false);
@@ -149,7 +155,8 @@ export default function BentaPanel() {
   // What the done screen needs to text the customer, kept after the cart is cleared.
   const [textInfo, setTextInfo] = useState<{ customerId: string; name: string | null; phone: string | null; balanceAfterMinor: number } | null>(null);
   const [textPhone, setTextPhone] = useState("");
-  const [priceCustomer, setPriceCustomer] = useState(""); // a customer picked at the counter: their special prices apply
+  // A customer picked at the counter: their special prices apply (a sale kept on this tablet keeps its customer).
+  const [priceCustomer, setPriceCustomer] = useState(() => { const w = savedCart()?.who; return savedCart()?.cart.length && w && w !== WALK_IN ? w : ""; });
   const [specialCount, setSpecialCount] = useState(0);
   // Less used choices stay folded away until asked for, so the screen shows one clear next step.
   const [morePay, setMorePay] = useState(false);
@@ -158,6 +165,11 @@ export default function BentaPanel() {
   const [seesCost, setSeesCost] = useState(false);
   const [promo, setPromo] = useState<QuotaPromo>(PROMO_OFF); // the owner's quota promo (Settings), saved with the price list
   const keptBelow = useRef(new Set<string>()); // below-cost prices someone chose to sell at anyway
+  // Owner: "Start a sale" asks the store and who is buying first; both start empty for every sale.
+  const [mustChoose, setMustChoose] = useState(() => choosesEachSale(savedCopy<{ role?: string }>("/admin/me/rice")?.role));
+  const [storePicked, setStorePicked] = useState(() => !!savedCart()?.cart.length);
+  const [walkIn, setWalkIn] = useState(() => (savedCart()?.cart.length ? (savedCart()?.who ?? WALK_IN) === WALK_IN : false));
+  const [startOpen, setStartOpen] = useState(() => !savedCart()?.cart.length);
 
   const catalogAsk = useRef(0); // only the latest location asked for may fill the screen
   /** The price list of a location: the copy saved on this tablet at once, then the server's. Returns the location shown. */
@@ -181,15 +193,37 @@ export default function BentaPanel() {
     return shown;
   }, []);
 
-  // Choosing a customer at the start of a sale puts their special prices on the product buttons.
-  const pickPriceCustomer = async (id: string) => {
-    setPriceCustomer(id); setCustomerId(id); setCustomerSig(null); setSpecialCount(0);
-    await loadCatalog(locationId);
+  /** A customer's special prices on the product buttons (after the store's price list is on screen). */
+  const putSpecialPrices = async (id: string) => {
     if (!id) return;
     const d = await cachedGet<{ prices?: { productId: string; priceMinor: number }[] }>(`/admin/benta/customer-prices?customerId=${encodeURIComponent(id)}`);
     const m = new Map((d?.prices ?? []).map((x) => [x.productId, x.priceMinor]));
     setItems((prev) => prev.map((i) => (m.has(i.id) ? { ...i, priceMinor: m.get(i.id)! } : i)));
     setSpecialCount(m.size);
+  };
+  // Choosing a customer at the start of a sale puts their special prices on the product buttons.
+  const pickPriceCustomer = async (id: string) => {
+    setPriceCustomer(id); setCustomerId(id); setCustomerSig(null); setSpecialCount(0);
+    await loadCatalog(locationId);
+    await putSpecialPrices(id);
+  };
+  // "Start a sale": both answers given, the price list shows by itself (no extra tap).
+  const startStore = async (id: string) => {
+    setStorePicked(true);
+    if (walkIn || priceCustomer) setStartOpen(false);
+    if (id === locationId) return;
+    await loadCatalog(id);
+    await putSpecialPrices(priceCustomer);
+  };
+  const startWho = (who: string) => {
+    if (who === WALK_IN) {
+      setWalkIn(true);
+      if (priceCustomer) void pickPriceCustomer("");
+    } else {
+      setWalkIn(false);
+      void pickPriceCustomer(who);
+    }
+    if (who && storePicked) setStartOpen(false);
   };
 
   useEffect(() => {
@@ -204,21 +238,26 @@ export default function BentaPanel() {
       const firstAsk = catalogAsk.current;
       void savedThenFresh<{ name?: string }>("/admin/settings", (d) => setStoreName(d?.name ?? ""));
       void savedThenFresh<{ customers?: Customer[] }>("/admin/customers", (cs) => setCustomers((cs?.customers ?? []) as Customer[]));
-      const me = await cachedGet<{ homeLocationId?: string | null }>("/admin/me/rice");
+      const me = await cachedGet<{ homeLocationId?: string | null; role?: string }>("/admin/me/rice");
       setHomeLocationId(me?.homeLocationId ?? null);
+      if (me) setMustChoose(choosesEachSale(me.role) && !me.homeLocationId);
       const want = where(me?.homeLocationId);
       const shown = await catalog;
+      // A sale kept on this tablet for a customer: their special prices back on the buttons.
+      const keptWho = kept?.cart.length && kept.who && kept.who !== WALK_IN ? kept.who : "";
       // The saved guess was wrong (home location changed): show the right one, unless staff already picked a location.
       if (catalogAsk.current === firstAsk && want !== guess && want !== shown) await loadCatalog(want);
+      if (keptWho) await putSpecialPrices(keptWho);
     })().catch(() => setError("Could not load"));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once, when the screen opens
   }, [loadCatalog]);
 
   useEffect(() => {
     try {
       if (cart.length === 0) window.sessionStorage.removeItem(cartKey());
-      else if (locationId) window.sessionStorage.setItem(cartKey(), JSON.stringify({ locationId, cart, key: keyRef.current }));
+      else if (locationId) window.sessionStorage.setItem(cartKey(), JSON.stringify({ locationId, cart, key: keyRef.current, who: priceCustomer || WALK_IN }));
     } catch { /* convenience only */ }
-  }, [cart, locationId]);
+  }, [cart, locationId, priceCustomer]);
 
   const checkDrawer = useCallback(async () => {
     const r = await cachedGet<{ session?: unknown; required?: boolean }>("/admin/registers/current");
@@ -292,6 +331,8 @@ export default function BentaPanel() {
     setPriceCustomer(""); setSpecialCount(0);
     setCart([]); setStep("pick"); setPay(null); setTendered(""); setReference(""); setParts([{ method: "cash", amount: "", reference: "" }, { method: "gcash", amount: "", reference: "" }]); setCustomerId(""); setCustomerSig(null);
     setPaper(false); setMorePay(false); setSlipNo(""); setSlipTime(""); setSlipPhoto(null); setStaffSig(null); setError(null);
+    // The next sale starts with nothing chosen again: the owner answers "which store" and "who" each time.
+    setStorePicked(false); setWalkIn(false); setStartOpen(true);
   };
 
   const allPay = morePay || pay === "maya" || pay === "bank" || pay === "split";
@@ -560,7 +601,7 @@ export default function BentaPanel() {
         <div className="sale-card-title"><i className="bi bi-basket2-fill" aria-hidden="true"></i>This sale · {cartCount} {cartCount === 1 ? "item" : "items"}
           {/* Sideways the store buttons step aside during a sale (they are locked then): the sale says where it is. */}
           {/* Upright too: the store row is hidden during a sale, so the badge (just the code there, e.g. "S1") names it. */}
-          {fit && locations.length > 1 && saleStore && <span className={`badge text-bg-dark fs-6 fw-semibold sale-store${wide ? " ms-auto" : ""}`}><i className="bi bi-shop me-1" aria-hidden="true"></i>{wide ? <>{saleStore.code ? `${saleStore.code} · ` : ""}{saleStore.name}</> : saleStore.code || saleStore.name}</span>}
+          {fit && locations.length > 1 && saleStore && !(mustChoose && !orderBig) && <span className={`badge text-bg-dark fs-6 fw-semibold sale-store${wide ? " ms-auto" : ""}`}><i className="bi bi-shop me-1" aria-hidden="true"></i>{wide ? <>{saleStore.code ? `${saleStore.code} · ` : ""}{saleStore.name}</> : saleStore.code || saleStore.name}</span>}
           {promo.on && sacksForPromo > 0 && (promoAt.some((x) => x != null)
             ? <span className="badge text-bg-success ms-2">Promo −{peso(promo.offMinor)} each</span>
             : <span className="text-muted fw-normal ms-2">· {promo.minSacks - sacksForPromo} more {promo.minSacks - sacksForPromo === 1 ? "sack" : "sacks"} for the promo</span>)}
@@ -701,7 +742,35 @@ export default function BentaPanel() {
   const sideBySide = wide && step === "pick" && !newItem;
   const padSide = pay === "cash" || pay === "utang" || pay === "split"; // the pay step has a second column: the number pad, the signature, or the parts of a split
   // Held sales: the button only shows when there is one to come back to.
-  const heldBtn = holds.some((h) => h.locationId === locationId) && (
+  // Owner: "Start a sale" (which store, who is buying) takes the price list's place until both are answered.
+  const storeKnown = storePicked || locations.length <= 1;
+  const whoKnown = walkIn || !!priceCustomer;
+  const asking = mustChoose && step === "pick" && !newItem && cart.length === 0 && (startOpen || !storeKnown || !whoKnown);
+  const whoName = priceCustomer ? (customers.find((c) => c.id === priceCustomer)?.name ?? customers.find((c) => c.id === priceCustomer)?.phone ?? "Customer") : "Walk-in";
+  const startCard = asking && (
+    <StartChoices title="Start a sale" storeQuestion="Selling at which store?" locations={locations} storeId={storeKnown ? locationId : ""} onStore={(id) => void startStore(id)}
+      whoQuestion="Who is buying?" whoDone={whoKnown} ready={storeKnown && whoKnown} goLabel="Tap the rice" onGo={() => { setStorePicked(true); setStartOpen(false); }}>
+      <div className="start-choices">
+        <button type="button" className={`btn btn-lg start-choice walkin ${walkIn ? "btn-dark" : "btn-outline-dark"}`} aria-pressed={walkIn} onClick={() => startWho(WALK_IN)}>
+          {walkIn && <i className="bi bi-check-circle-fill me-2" aria-hidden="true"></i>}
+          <span>Walk-in<small>No name needed · store prices</small></span>
+        </button>
+        {customers.length > 0 && (
+          <select className={`form-select form-select-lg start-cust${priceCustomer ? " chosen" : ""}`} aria-label="A customer from the list" value={priceCustomer} onChange={(e) => startWho(e.target.value)}>
+            <option value="">Choose a customer…</option>
+            {customers.map((c) => <option key={c.id} value={c.id}>{c.name ?? c.phone ?? "—"}</option>)}
+          </select>
+        )}
+      </div>
+      {priceCustomer && <div className="text-muted mt-2">{specialCount > 0 ? `${specialCount} special ${specialCount === 1 ? "price" : "prices"} for ${whoName}.` : `No special prices for ${whoName}: store prices apply.`}</div>}
+    </StartChoices>
+  );
+  // After choosing: one line naming the store and the customer; Change goes back while the sale is empty.
+  const chosenRow = mustChoose && !asking && (
+    <ChosenRow store={locations.find((l) => l.id === locationId)} who={whoName} compact={!wide}
+      onChange={cart.length === 0 && step === "pick" ? () => setStartOpen(true) : undefined} />
+  );
+  const heldBtn = !asking && holds.some((h) => h.locationId === locationId) && (
     <button type="button" className="btn btn-warning" onClick={() => setShowHeld(!showHeld)}>
       <i className="bi bi-pause-circle me-1"></i>Held sales ({holds.filter((h) => h.locationId === locationId).length})
     </button>
@@ -737,7 +806,7 @@ export default function BentaPanel() {
     <div className="d-flex flex-wrap align-items-center gap-2 mb-2">
       <Steps className="mb-0 me-auto" items={["Pick items", "Pay", "Done"]} current={step === "pay" ? 1 : 0} />
       {heldBtn}
-      {!sideBySide && step === "pick" && !newItem && !editing && !checking && customerSelect}
+      {!sideBySide && step === "pick" && !newItem && !editing && !checking && (mustChoose ? chosenRow : customerSelect)}
     </div>
   );
   return (
@@ -748,17 +817,17 @@ export default function BentaPanel() {
           <div className="fit-col fit-main">
             {heldCard}
             {errAlert}
-            {finder}
+            {startCard || finder}
           </div>
           <div className="fit-col fit-side">
             {stepsRow}
-            {!editing && !checking && customerSelect}
+            {!editing && !checking && (mustChoose ? chosenRow && <div className="mb-2">{chosenRow}</div> : customerSelect)}
             {/* Sideways the store buttons sit here, on the empty side, so the price list on the left has the whole
                 height. They only work before a sale starts anyway; during a sale its title names the store. */}
             {quickCount || editCard || cartCard || (
               <>
-                {storeBar}
-                <div className="card"><div className="card-body text-center text-muted py-4"><i className="bi bi-hand-index fs-1 d-block mb-2" aria-hidden="true"></i>Tap a product to start a sale.</div></div>
+                {!mustChoose && storeBar}
+                <div className="card"><div className="card-body text-center text-muted py-4"><i className="bi bi-hand-index fs-1 d-block mb-2" aria-hidden="true"></i>{asking ? "First choose the store and who is buying (on the left)." : "Tap a product to start a sale."}</div></div>
               </>
             )}
           </div>
@@ -768,10 +837,10 @@ export default function BentaPanel() {
           {/* While the price card is open (or a count is asked), the steps and the store buttons step aside, so
               the pad, the reason and Save fit without scrolling. Both are back as soon as it is closed. */}
           {!(editing || checking || orderBig) && stepsRow}
-          {!(editing || checking || orderBig) && cart.length === 0 && storeBar}
+          {!(editing || checking || orderBig) && cart.length === 0 && !mustChoose && storeBar}
           {heldCard}
           {errAlert}
-          {step === "pick" && !newItem && !editing && !checking && <>{!orderBig && finder}{cartCard}</>}
+          {step === "pick" && !newItem && !editing && !checking && <>{!orderBig && (startCard || finder)}{cartCard}</>}
           {step === "pick" && !newItem && (editing || checking) && <div className="fit-scroll">{quickCount || editCard}</div>}
           {step === "pick" && newItem && <div className="fit-scroll"><NewItemForm locationId={locationId} onCancel={() => setNewItem(false)} onDone={async () => { setNewItem(false); await loadCatalog(locationId); }} /></div>}
 
