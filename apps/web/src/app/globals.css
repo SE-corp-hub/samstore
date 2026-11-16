@@ -295,6 +295,8 @@ textarea,
 .staff-bar button i { font-size: 1.5rem; line-height: 1; }
 .staff-bar button.active { background: #1f1d1a; color: #fff; }
 .staff-bar button:focus-visible { outline: 3px solid #0b4f8a; outline-offset: -3px; }
+/* A phone has no room for a seventh button (words would clip): Move stock stays one tap away in More there. */
+@media (max-width: 575.98px) { .staff-bar button.bar-wide-only { display: none; } }
 @media (max-width: 991.98px) {
   /* Keep the last content row clear of the fixed bar. */
   main.has-staff-bar { padding-bottom: calc(80px + env(safe-area-inset-bottom)) !important; --staff-bar-h: calc(66px + env(safe-area-inset-bottom)); }
