@@ -742,3 +742,28 @@ main:has(> * > .rice-ui > .sell-fit), main:has(> .rice-ui > .sell-fit) { padding
 }
 /* Store cards: "Net profit" above its number, so every card reads the same at any width or text size. */
 .profit-screen .profit-card:not(.profit-whole) .profit-net { flex-direction: column; align-items: flex-start; }
+
+/* §14 Start a sale / pre-order (2026-11-16). The owner chooses the store and who is buying before the price
+   list shows; nothing is pre-chosen. Chosen = dark (the toggle colour), with a tick; the one green button
+   goes to the price list. Afterwards one short line (.chosen-row) says where and who, with Change. */
+.start-card { background: #fff; border: 1px solid #d9d1c5; border-radius: 0.75rem; padding: 1rem 1.25rem; max-width: 52rem; margin: 0 auto 0.5rem; }
+.start-q { margin-bottom: 1.25rem; }
+.start-q-title { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.6rem; font-weight: 700; color: var(--sam-text); }
+.start-num { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; width: 2rem; height: 2rem; border-radius: 50%;
+  background: #fff; border: 2px solid #4a4844; color: var(--sam-text); font-weight: 700; font-size: 1rem; }
+.start-num.done { background: #1F6F3F; border-color: #1F6F3F; color: #fff; }
+.start-choices { display: grid; grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr)); gap: 0.6rem; }
+.start-choice { min-height: 3.5rem; display: flex; align-items: center; justify-content: flex-start; text-align: start; font-weight: 600; line-height: 1.2; white-space: normal; }
+.start-code { display: inline-block; min-width: 2.2rem; margin-right: 0.5rem; padding: 0 0.35rem; border-radius: 0.35rem; border: 1px solid currentColor; font-size: 0.9em; text-align: center; }
+.start-choice.walkin { font-weight: 700; }
+.start-choice small { display: block; font-weight: 400; font-size: max(16px, 0.85rem); opacity: 0.9; }
+.start-cust { min-height: 3.5rem; font-weight: 600; }
+html[data-text-size] .start-cust.chosen, .start-cust.chosen { border: 3px solid #2b2a28; background-color: #f4efe7; font-weight: 700; }
+.start-or { color: var(--sam-muted); font-weight: 600; margin: 0.6rem 0 0.4rem; }
+.start-go { min-height: 3.5rem; }
+.start-go:disabled { font-weight: 600 !important; }
+.chosen-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; min-width: 0; }
+.chosen-chip { display: inline-flex; align-items: center; gap: 0.35rem; min-height: 2.75rem; padding: 0.25rem 0.7rem; border-radius: 0.5rem;
+  background: #2b2a28; color: #fff; font-weight: 600; max-width: 100%; overflow-wrap: anywhere; }
+.chosen-chip.chosen-who { background: #fff; color: var(--sam-text); border: 2px solid #2b2a28; }
+.chosen-change { min-height: 2.75rem; }

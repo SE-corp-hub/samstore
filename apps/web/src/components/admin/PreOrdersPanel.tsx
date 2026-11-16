@@ -27,6 +27,7 @@ import { peso } from "../../lib/number-format";
 import ProductFinder from "./ProductFinder";
 import PickTile from "./PickTile";
 import StoreBar, { type StoreOption } from "./StoreBar";
+import StartChoices, { ChosenRow } from "./StartChoices";
 import { noteUse } from "../../lib/product-find";
 import { printSlip, type Slip } from "../../lib/slip-print";
 import { cachedGet, offlineRef, savedCopy, savedThenFresh, useOffline } from "../../lib/offlineCache";
@@ -217,7 +218,10 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
   const [locations, setLocations] = useState<StoreOption[]>([]);
   const [locationId, setLocationId] = useState("");
   const [homeLocationId, setHomeLocationId] = useState<string | null>(null);
-  const [isOwner, setIsOwner] = useState(false);
+  const [isOwner, setIsOwner] = useState(() => ["OWNER", "MANAGER", "PLATFORM_ADMIN"].includes(savedCopy<{ role?: string }>("/admin/me/rice")?.role ?? ""));
+  // Owner: "Start a pre-order" asks the store and the customer first; both start empty for every new pre-order.
+  const [storePicked, setStorePicked] = useState(false);
+  const [startOpen, setStartOpen] = useState(true);
   const [atStore, setAtStore] = useState<{ price: Map<string, number>; stock: Map<string, number> }>({ price: new Map(), stock: new Map() });
   const locRef = useRef<string | undefined>(undefined);
   const catalogAsk = useRef(0); // only the latest store asked for may fill the screen
@@ -362,8 +366,10 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
   const clearBuild = () => {
     setBuildCart([]); setBuildCustomerId(""); setBuildNewName(""); setBuildNewPhone("");
     setNewItemOpen(false); setEditingPre(null);
+    setStorePicked(false); setStartOpen(true);
   };
-  const newPreorder = () => { if (editingPre) clearBuild(); setError(null); setSubTab("build"); };
+  // A new pre-order starts with nothing chosen (an order already started is kept as it was).
+  const newPreorder = () => { if (editingPre || buildCart.length === 0) clearBuild(); setError(null); setSubTab("build"); };
   const backToList = () => { if (editingPre) clearBuild(); setNewItemOpen(false); setError(null); setSubTab("list"); };
 
   /** The catalog (or variant) price a line is compared against. */
@@ -971,17 +977,53 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
     </section>
   );
 
+  // Owner: "Start a pre-order" (which store, who it is for) takes the price list's place until both are answered.
+  const mustChoose = isOwner && !homeLocationId && !editingPre;
+  const storeKnown = storePicked || locations.length <= 1;
+  const whoKnown = !!buildCustomerId || !!buildNewName.trim();
+  const asking = mustChoose && subTab === "build" && !newItemOpen && buildCart.length === 0 && (startOpen || !storeKnown || !whoKnown);
+  const startStore = (id: string) => {
+    setStorePicked(true); setError(null);
+    if (buildCustomerId) setStartOpen(false);
+    if (id !== locationId) void loadBuilder(id);
+  };
+  const whoName = buildCustomerId ? (buildCustomers.find((c) => c.id === buildCustomerId)?.name ?? "Customer") : buildNewName.trim() || "—";
+  const startCard = asking && (
+    <StartChoices title="Start a pre-order" storeQuestion="Pre-order at which store?" locations={locations} storeId={storeKnown ? locationId : ""} onStore={startStore}
+      whoQuestion="Who is it for?" whoDone={whoKnown} ready={storeKnown && whoKnown} goLabel="Tap the rice" onGo={() => { setStorePicked(true); setStartOpen(false); }}>
+      <select aria-label="Customer" className={`form-select form-select-lg start-cust${buildCustomerId ? " chosen" : ""}`} style={{ maxWidth: "30rem" }} value={buildCustomerId}
+        onChange={(e) => { setBuildCustomerId(e.target.value); if (e.target.value) { setBuildNewName(""); setBuildNewPhone(""); if (storeKnown) setStartOpen(false); } }}>
+        <option value="">Choose a customer…</option>
+        {buildCustomers.map((c) => <option key={c.id} value={c.id}>{c.name ?? c.email ?? c.phone ?? "Customer"}</option>)}
+      </select>
+      {!buildCustomerId && (
+        <>
+          <div className="start-or">or a new customer:</div>
+          <div className="d-flex flex-wrap gap-2">
+            <input className="form-control form-control-lg" style={{ flex: "2 1 12rem", maxWidth: "20rem" }} aria-label="New customer's name" placeholder="Name" value={buildNewName} onChange={(e) => setBuildNewName(e.target.value)} />
+            <input className="form-control form-control-lg" style={{ flex: "1 1 10rem", maxWidth: "14rem" }} inputMode="tel" aria-label="New customer's mobile number" placeholder="Mobile (optional)" value={buildNewPhone} onChange={(e) => setBuildNewPhone(e.target.value)} />
+          </div>
+        </>
+      )}
+    </StartChoices>
+  );
+  // After choosing: one line naming the store and the customer in place of part 1; Change goes back while the order is empty.
+  const chosenSection = mustChoose && !asking && (
+    <div className="mb-2"><ChosenRow store={storeHere} who={whoName} compact={!wide} onChange={buildCart.length === 0 ? () => setStartOpen(true) : undefined} /></div>
+  );
+  const whoSection = mustChoose ? chosenSection : customerSection;
+
   // Sideways: the products on the left; who it is for and the order on the right. Upright: the order under the products. A phone keeps a sticky Save bar.
   const renderBuild = () => wide ? (
     <div className="fit-row">
-      <div className="fit-col fit-main">{pickSection}</div>
-      <div className="fit-col fit-side">{customerSection}{orderSection}</div>
+      <div className="fit-col fit-main">{startCard || pickSection}</div>
+      <div className="fit-col fit-side">{whoSection}{orderSection}</div>
     </div>
   ) : (
     <div className="fit-col">
-      {customerSection}
-      {!orderBig && pickSection}
-      {orderSection}
+      {whoSection}
+      {startCard || (!orderBig && pickSection)}
+      {!asking && orderSection}
       {!fit && (
         <div className="position-sticky bottom-0 sticky-above-bar sale-card shadow p-2 mb-2" style={{ zIndex: 5 }}>
           <div className="d-flex align-items-center gap-2">
@@ -1000,7 +1042,8 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
   );
 
   // An owner or manager with more than one store picks where a new pre-order belongs.
-  const storeChoice = subTab === "build" && !editingPre && !homeLocationId && locations.length > 1;
+  // The owner chooses it on "Start a pre-order" instead (nothing pre-chosen there).
+  const storeChoice = subTab === "build" && !editingPre && !homeLocationId && locations.length > 1 && !mustChoose;
   // Upright too, once the order has items (the store is locked then): the badge on the title frees a row for the order.
   const storeOnTitle = storeChoice && (wide || (fit && buildCart.length > 0));
   return (
