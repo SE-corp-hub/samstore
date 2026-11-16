@@ -373,20 +373,28 @@ export class AuthService {
   /** v6: update the logged-in user's own profile (name/email). Email uniqueness check in service. */
   async updateProfile(input: {
     userId: string;
-    email: string;
+    email?: string | null;
     name?: string | null;
-  }): Promise<AuthResult<{ id: string; email: string; name: string | null }>> {
-    const email = input.email?.trim().toLowerCase() ?? "";
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      return { ok: false, error: { type: "validation", errors: ["A valid email is required"] } };
+  }): Promise<AuthResult<{ id: string; email: string | null; name: string | null }>> {
+    const current = await prisma.user.findUnique({ where: { id: input.userId }, select: { email: true, name: true } });
+    if (!current) return { ok: false, error: { type: "not_found", message: "Account not found" } };
+    // The same sign-in name rule as the logins the owner makes on Team: name@place, no dot needed.
+    const typed = (input.email ?? "").trim().toLowerCase();
+    let email = current.email;
+    if (typed && typed !== current.email) {
+      if (typed.length > 100 || !/^[^\s@]{1,60}@[^\s@]{1,60}$/.test(typed)) {
+        return { ok: false, error: { type: "validation", errors: ["Type the sign-in email like name@store (no spaces)"] } };
+      }
+      const taken = await prisma.user.findFirst({ where: { email: { equals: typed, mode: "insensitive" } }, select: { id: true } });
+      if (taken && taken.id !== input.userId) {
+        return { ok: false, error: { type: "conflict", message: "That email is already used by another login. Choose another." } };
+      }
+      email = typed;
     }
-    const existing = await this.repo.findByEmail(email);
-    if (existing && existing.id !== input.userId) {
-      return { ok: false, error: { type: "conflict", message: "Email already in use by another account" } };
-    }
-    const admin = this.adminRepo();
-    await admin.updateProfile(input.userId, input.name?.trim() ? input.name.trim() : null, email);
-    return { ok: true, value: { id: input.userId, email, name: input.name?.trim() || null } };
+    const name = (input.name ?? "").trim().replace(/\s+/g, " ");
+    if (name.length > 60) return { ok: false, error: { type: "validation", errors: ["The name is too long (60 letters at most)"] } };
+    await prisma.user.update({ where: { id: input.userId }, data: { name: name || null, email } });
+    return { ok: true, value: { id: input.userId, email, name: name || null } };
   }
 
   /**

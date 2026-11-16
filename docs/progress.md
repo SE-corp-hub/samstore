@@ -1,5 +1,14 @@
 # PINDIAN — Progress Log
 
+## Owner can save their own name and sign-in email (2026-11-16)
+
+Settings → My account did not show the saved name (the box always started empty, so a saved name looked lost), refused a sign-in email without a dot, and asked for an email even to change only the name. Now:
+- `GET /admin/me` also returns the saved `name`, `email` and `phone`; My account fills the boxes from it.
+- `PATCH /admin/auth/profile`: the email is optional (blank keeps the current one) and follows the Team login rule (`name@place`, no dot needed, no spaces, unique ignoring case). The name is trimmed, 60 letters at most.
+- Change password now proves the SAVED sign-in (email, else phone), never whatever is typed in the email box.
+- The save message says the new name and, when changed, the email to sign in with next time.
+- Test: `apps/api/src/auth/own-profile.test.ts`.
+
 ## Shop locations finished, import files ready (2026-10-23, morning)
 
 Done on the shop database by Claude through the Sam PC (read-only report first, then applied, then a read-only report again):

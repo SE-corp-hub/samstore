@@ -93,7 +93,8 @@ export class AdminController {
     const user = req.user;
     requireUser(user);
     if (!user) throw new HttpException({ type: "unauthorized", message: "Not authenticated" }, HttpStatus.UNAUTHORIZED);
-    return { id: user.sub, email: user.email, role: user.role, storeId: user.storeId ?? null };
+    const saved = await prisma.user.findUnique({ where: { id: user.sub }, select: { name: true, email: true, phone: true } });
+    return { id: user.sub, email: saved?.email ?? user.email, name: saved?.name ?? null, phone: saved?.phone ?? null, role: user.role, storeId: user.storeId ?? null };
   }
 
   /** GET /admin/stores/mine — the user's stores (for the switcher). */
@@ -302,7 +303,7 @@ export class AdminController {
     if (!user) throw new HttpException({ type: "unauthorized", message: "Not authenticated" }, HttpStatus.UNAUTHORIZED);
     const result = await this.auth.updateProfile({
       userId: user.sub,
-      email: body?.email ?? "",
+      email: typeof body?.email === "string" ? body.email : null,
       name: typeof body?.name === "string" ? body.name : null,
     });
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
