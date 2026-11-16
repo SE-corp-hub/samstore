@@ -93,19 +93,21 @@ const PurchaseOrdersPanel = panel(() => import("../../../components/admin/Purcha
 const UlatPanel = panel(() => import("../../../components/admin/UlatPanel"));
 
 /**
- * Bottom bar for counter staff: the five jobs they do all day, one tap each, plus
+ * Bottom bar for counter staff: the six jobs they do all day, one tap each, plus
  * "More" for the full menu. Phones and tablets held either way (hidden only on a PC with a mouse, where the sidebar shows). It only changes what is easy to
  * reach: the server still decides what each role may do.
  */
-const STAFF_BAR: { id: string; label: string; icon: string }[] = [
+const STAFF_BAR: { id: string; label: string; icon: string; wideOnly?: boolean }[] = [
   { id: "pos", label: "POS", icon: "bi-basket" },
   { id: "preorders", label: "Pre-order", icon: "bi-bag-check" },
   { id: "resack", label: "Resack", icon: "bi-arrow-repeat" },
   { id: "utang", label: "Credit", icon: "bi-journal-text" },
   { id: "orders", label: "Orders", icon: "bi-receipt" },
+  // 2026-11-16: Move stock (Stock group, blue) added last so the five old buttons keep their place.
+  { id: "moves", label: "Move", icon: "bi-arrow-left-right", wideOnly: true }, // on a narrow phone it stays in More
 ];
 
-/** Roles that get the bottom bar: the same five jobs for staff, manager and owner. */
+/** Roles that get the bottom bar: the same six jobs for staff, manager and owner. */
 const BAR_ROLES = ["STAFF", "MANAGER", "OWNER", "STORE_OWNER"];
 /** Menu ids that open the same screen as a bar button. */
 const BAR_ALIAS: Record<string, string> = { utangrice: "utang", agentorders: "orders" };
@@ -645,7 +647,7 @@ export default function AdminDashboard() {
               <button
                 key={b.id}
                 type="button"
-                className={`tone-${toneFor(NAV_ID[b.id] ?? b.id)}${(BAR_ALIAS[tab] ?? tab) === b.id ? " active" : ""}`}
+                className={`tone-${toneFor(NAV_ID[b.id] ?? b.id)}${b.wideOnly ? " bar-wide-only" : ""}${(BAR_ALIAS[tab] ?? tab) === b.id ? " active" : ""}`}
                 aria-current={(BAR_ALIAS[tab] ?? tab) === b.id ? "page" : undefined}
                 onClick={() => { userNavigated.current = true; setTab(b.id); setMobileNav(false); }}
               >
