@@ -659,21 +659,38 @@ function AccountSection() {
   const [pwMsg, setPwMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [pwBusy, setPwBusy] = useState(false);
   const [profName, setProfName] = useState("");
-  const [profEmail, setProfEmail] = useState(getAuthItem("samstore.admin.email") ?? "");
+  const [profEmail, setProfEmail] = useState("");
+  // What is saved now: the password change proves the SAVED sign-in, never the box being typed in.
+  const [saved, setSaved] = useState<{ name: string; email: string; phone: string } | null>(null);
+  const [loadMsg, setLoadMsg] = useState<string | null>(null);
   const [profMsg, setProfMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [profBusy, setProfBusy] = useState(false);
 
+  useEffect(() => {
+    let live = true;
+    void fetch(`${API_URL}/admin/me`, { headers: adminHeaders() })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((d: { name?: string | null; email?: string | null; phone?: string | null }) => {
+        if (!live) return;
+        const now = { name: d.name ?? "", email: d.email ?? "", phone: d.phone ?? "" };
+        setSaved(now); setProfName(now.name); setProfEmail(now.email);
+      })
+      .catch(() => { if (live) setLoadMsg("Could not load your name and email. Check the internet, then open Settings again."); });
+    return () => { live = false; };
+  }, []);
+
   const changePw = async () => {
     if (newPw.length < 8) { setPwMsg({ ok: false, text: "The new password needs at least 8 characters." }); return; }
+    const signIn = saved?.email || saved?.phone || getAuthItem("samstore.admin.email") || "";
     setPwBusy(true); setPwMsg(null);
     try {
       const res = await fetch(`${API_URL}/auth/change-password`, {
         method: "POST", headers: { "Content-Type": "application/json", ...adminHeaders() },
-        body: JSON.stringify({ email: profEmail, currentPassword: curPw, newPassword: newPw }),
+        body: JSON.stringify({ email: signIn, currentPassword: curPw, newPassword: newPw }),
       });
       const d = await res.json();
-      if (!res.ok) { setPwMsg({ ok: false, text: d?.message ?? "Did not change. Try again." }); return; }
-      setPwMsg({ ok: true, text: "Password changed." });
+      if (!res.ok) { setPwMsg({ ok: false, text: d?.message ?? d?.errors?.join(", ") ?? "Did not change. Try again." }); return; }
+      setPwMsg({ ok: true, text: `Password changed. Next time sign in with ${signIn} and the new password.` });
       setCurPw(""); setNewPw("");
       if (typeof d?.token === "string") setAuthItem("samstore.admin.token", d.token);
     } catch {
@@ -682,17 +699,24 @@ function AccountSection() {
   };
 
   const saveProfile = async () => {
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(profEmail)) { setProfMsg({ ok: false, text: "Enter a valid email." }); return; }
+    const email = profEmail.trim().toLowerCase();
+    const name = profName.trim();
+    if (!saved) { setProfMsg({ ok: false, text: "Your details are still loading. Wait a moment, then save." }); return; }
+    if (email && !/^[^\s@]+@[^\s@]+$/.test(email)) { setProfMsg({ ok: false, text: "Type the sign-in email like name@store (no spaces)." }); return; }
+    if (!name) { setProfMsg({ ok: false, text: "Type your name." }); return; }
     setProfBusy(true); setProfMsg(null);
     try {
       const res = await fetch(`${API_URL}/admin/auth/profile`, {
         method: "PATCH", headers: { "Content-Type": "application/json", ...adminHeaders() },
-        body: JSON.stringify({ email: profEmail.trim(), name: profName.trim() || null }),
+        body: JSON.stringify({ email: email || null, name }),
       });
       const d = await res.json();
       if (!res.ok) { setProfMsg({ ok: false, text: d?.message ?? d?.errors?.join(", ") ?? "Did not save. Try again." }); return; }
-      setProfMsg({ ok: true, text: "Saved." });
-      setAuthItem("samstore.admin.email", d.email);
+      const now = { name: d.name ?? "", email: d.email ?? "", phone: saved.phone };
+      setSaved(now); setProfName(now.name); setProfEmail(now.email);
+      const changedLogin = now.email && now.email !== saved.email;
+      setProfMsg({ ok: true, text: changedLogin ? `Saved. Your name is ${now.name}. From now on sign in with ${now.email}.` : `Saved. Your name is ${now.name}.` });
+      if (now.email) setAuthItem("samstore.admin.email", now.email);
     } catch {
       setProfMsg({ ok: false, text: "No internet. Nothing was saved." });
     } finally { setProfBusy(false); }
@@ -702,14 +726,15 @@ function AccountSection() {
     <>
       <div className="border rounded-3 p-3 mb-3 bg-white">
         <h3 className="h6 text-uppercase text-muted">My name and email</h3>
+        {loadMsg && <div className="alert alert-warning py-2" role="status">{loadMsg}</div>}
         <Field id="ac-name" label="Name">
           <input id="ac-name" className="form-control form-control-lg" autoComplete="name" value={profName} onChange={(e) => setProfName(e.target.value)} placeholder="Your name" />
         </Field>
-        <Field id="ac-email" label="Email">
-          <input id="ac-email" className="form-control form-control-lg" type="email" autoComplete="email" value={profEmail} onChange={(e) => setProfEmail(e.target.value)} placeholder="you@store.com" />
+        <Field id="ac-email" label="Sign-in email" help="You sign in with this. It can be any name@place, like bogsandlucy@store.">
+          <input id="ac-email" className="form-control form-control-lg" type="text" inputMode="email" autoCapitalize="none" autoCorrect="off" spellCheck={false} autoComplete="username" value={profEmail} onChange={(e) => setProfEmail(e.target.value)} placeholder="name@store" />
         </Field>
         {profMsg && <div className={`alert ${profMsg.ok ? "alert-success" : "alert-danger"} py-2`} role="status">{profMsg.text}</div>}
-        <button type="button" className="btn btn-success btn-lg" disabled={profBusy} onClick={() => void saveProfile()}>{profBusy ? "Saving…" : "Save name and email"}</button>
+        <button type="button" className="btn btn-success btn-lg" disabled={profBusy || !saved} onClick={() => void saveProfile()}>{profBusy ? "Saving…" : "Save name and email"}</button>
       </div>
       <div className="border rounded-3 p-3 mb-3 bg-white">
         <h3 className="h6 text-uppercase text-muted">Change password</h3>
