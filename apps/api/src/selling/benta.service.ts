@@ -47,6 +47,7 @@ import {
 } from "../people/people.service.js";
 import { txOptions } from "../persistence/tx-options.js";
 import { shelvesFor } from "../domain/sources.js";
+import { findOrMakeQuickCustomer } from "../pos/quick-customer.js";
 
 export type BentaResult<T> = { ok: true; value: T } | { ok: false; error: ApiError };
 type Tx = Prisma.TransactionClient;
@@ -85,6 +86,9 @@ export interface BentaInput {
   customerId?: string;
   /** Optional name on a cash sale. */
   customerName?: string;
+  /** A customer added at the counter with no internet (not on the list yet): found or made by name when the sale arrives. */
+  newCustomerName?: string;
+  newCustomerPhone?: string;
   signatures?: SignatureInput[];
   /** Galing sa papel: encode a paper slip (number + the real time it happened). */
   paperSlip?: { slipNo?: unknown; occurredAt?: unknown };
@@ -341,6 +345,8 @@ export class BentaService {
       if (barred) throw new SellingError(`${loc.name} may not take rice from ${remotes.get(barred)!.name}. The owner sets this in Menu, Locations.`);
 
       // A customer picked at the counter may have special prices; they beat the store's price (not a manual change, so no reason is needed).
+      // A new customer typed at the counter while offline: put on the list now (same name = same customer, so a retry makes no second one).
+      if (!input.customerId && input.newCustomerName?.trim()) input = { ...input, customerId: (await findOrMakeQuickCustomer(storeId, input.newCustomerName, input.newCustomerPhone)) ?? undefined };
       const pcust = input.customerId ? await prisma.storeCustomer.findFirst({ where: { storeId, id: input.customerId }, include: { customer: { select: { name: true } } } }) : null;
       const special = pcust ? new Map((await prisma.customerPrice.findMany({ where: { storeId, storeCustomerId: pcust.id, productId: { in: ids } }, select: { productId: true, priceMinor: true } })).map((x) => [x.productId, x.priceMinor])) : new Map<string, number>();
       const priced: (PricedLine & { product: P; catalogUnitPriceMinor: number; overridden: boolean; overrideReason: string | null; sourceLocationId: string | null })[] = [];

@@ -11,6 +11,7 @@ import { coverShortage } from "../domain/buffer.js";
 import { isTracked } from "../domain/stock-tracking.js";
 import { prisma } from "../persistence/prisma-repositories.js";
 import { cacheBust, cacheKey } from "../persistence/ttl-cache.js";
+import { findOrMakeQuickCustomer } from "./quick-customer.js";
 import { deductStock, restoreStock as restoreStockLedger } from "../domain/movements.js";
 import { pickDeductionLevel } from "../domain/stock-location.js";
 import { RegisterService } from "../registers/register.service.js";
@@ -260,24 +261,9 @@ export class PosService {
     return { storeCustomerId: null, displayName: "Walk-in" };
   }
 
-  /** V1: create (or reuse by phone) a store customer without a login account. */
+  /** A store customer without a login account: the same name (or mobile) is reused, never made twice. */
   async quickCustomer(storeId: string, name: string, phone?: string): Promise<string | null> {
-    const cleanName = name?.trim();
-    if (!cleanName) return null;
-    let customer: any = null;
-    if (phone?.trim()) {
-      customer = await prisma.customer.findFirst({ where: { phone: phone.trim() } });
-    }
-    if (!customer) {
-      customer = await prisma.customer.create({ data: { name: cleanName, phone: phone?.trim() ?? null, email: null, passwordHash: null } });
-    }
-    const sc = await prisma.storeCustomer.upsert({
-      where: { storeId_customerId: { storeId, customerId: customer.id } },
-      update: {},
-      create: { storeId, customerId: customer.id },
-    });
-    await cacheBust(cacheKey("customers", storeId));
-    return sc.id;
+    return findOrMakeQuickCustomer(storeId, name, phone);
   }
 
   private async makeOrder(tx: any, storeId: string, actorId: string, data: {

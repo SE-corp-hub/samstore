@@ -27,7 +27,7 @@ import { peso } from "../../lib/number-format";
 import ProductFinder from "./ProductFinder";
 import PickTile from "./PickTile";
 import StoreBar, { type StoreOption } from "./StoreBar";
-import StartChoices, { ChosenRow } from "./StartChoices";
+import StartChoices, { ChosenRow, NewCustomerChoice, sameName } from "./StartChoices";
 import { noteUse } from "../../lib/product-find";
 import { printSlip, type Slip } from "../../lib/slip-print";
 import { cachedGet, offlineRef, savedCopy, savedThenFresh, useOffline } from "../../lib/offlineCache";
@@ -984,27 +984,30 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
   const asking = mustChoose && subTab === "build" && !newItemOpen && buildCart.length === 0 && (startOpen || !storeKnown || !whoKnown);
   const startStore = (id: string) => {
     setStorePicked(true); setError(null);
-    if (buildCustomerId) setStartOpen(false);
+    if (buildCustomerId || buildNewName.trim()) setStartOpen(false);
     if (id !== locationId) void loadBuilder(id);
   };
   const whoName = buildCustomerId ? (buildCustomers.find((c) => c.id === buildCustomerId)?.name ?? "Customer") : buildNewName.trim() || "—";
   const startCard = asking && (
     <StartChoices title="Start a pre-order" storeQuestion="Pre-order at which store?" locations={locations} storeId={storeKnown ? locationId : ""} onStore={startStore}
       whoQuestion="Who is it for?" whoDone={whoKnown} ready={storeKnown && whoKnown} goLabel="Tap the rice" onGo={() => { setStorePicked(true); setStartOpen(false); }}>
-      <select aria-label="Customer" className={`form-select form-select-lg start-cust${buildCustomerId ? " chosen" : ""}`} style={{ maxWidth: "30rem" }} value={buildCustomerId}
-        onChange={(e) => { setBuildCustomerId(e.target.value); if (e.target.value) { setBuildNewName(""); setBuildNewPhone(""); if (storeKnown) setStartOpen(false); } }}>
-        <option value="">Choose a customer…</option>
-        {buildCustomers.map((c) => <option key={c.id} value={c.id}>{c.name ?? c.email ?? c.phone ?? "Customer"}</option>)}
-      </select>
-      {!buildCustomerId && (
-        <>
-          <div className="start-or">or a new customer:</div>
-          <div className="d-flex flex-wrap gap-2">
-            <input className="form-control form-control-lg" style={{ flex: "2 1 12rem", maxWidth: "20rem" }} aria-label="New customer's name" placeholder="Name" value={buildNewName} onChange={(e) => setBuildNewName(e.target.value)} />
-            <input className="form-control form-control-lg" style={{ flex: "1 1 10rem", maxWidth: "14rem" }} inputMode="tel" aria-label="New customer's mobile number" placeholder="Mobile (optional)" value={buildNewPhone} onChange={(e) => setBuildNewPhone(e.target.value)} />
-          </div>
-        </>
-      )}
+      <div className="start-choices">
+        {buildCustomers.length > 0 && (
+          <select aria-label="Customer" className={`form-select form-select-lg start-cust${buildCustomerId ? " chosen" : ""}`} value={buildCustomerId}
+            onChange={(e) => { setBuildCustomerId(e.target.value); if (e.target.value) { setBuildNewName(""); setBuildNewPhone(""); if (storeKnown) setStartOpen(false); } }}>
+            <option value="">Choose a customer…</option>
+            {buildCustomers.map((c) => <option key={c.id} value={c.id}>{c.name ?? c.email ?? c.phone ?? "Customer"}</option>)}
+          </select>
+        )}
+        {/* Not on the list: the name (and mobile, if any) goes with the pre-order, and the server adds the customer — with no internet too. */}
+        <NewCustomerChoice chosenName={!buildCustomerId && buildNewName.trim() ? buildNewName.trim() : undefined} onAdd={async (name, phone) => {
+          const known = buildCustomers.find((c) => sameName(c.name, name));
+          if (known) { setBuildCustomerId(known.id); setBuildNewName(""); setBuildNewPhone(""); toast(`${known.name ?? name} is already on the list — chosen`); }
+          else { setBuildCustomerId(""); setBuildNewName(name); setBuildNewPhone(phone); }
+          if (storeKnown) setStartOpen(false);
+          return null;
+        }} />
+      </div>
     </StartChoices>
   );
   // After choosing: one line naming the store and the customer in place of part 1; Change goes back while the order is empty.

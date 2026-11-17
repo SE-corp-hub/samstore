@@ -27,7 +27,7 @@ import NumPad from "./NumPad";
 import SignaturePad from "./SignaturePad";
 import QuickCount from "./QuickCount";
 import StoreBar from "./StoreBar";
-import StartChoices, { ChosenRow } from "./StartChoices";
+import StartChoices, { ChosenRow, NewCustomerChoice, sameName } from "./StartChoices";
 import { lastReason, reasonOk, ReasonButtons } from "./PriceReason";
 import { askBelowCost, saveUnitCost } from "./BelowCostDialog";
 import { isBelowCost, okKey } from "../../lib/below-cost";
@@ -114,6 +114,9 @@ function savedCart(): { locationId: string; cart: CartLine[]; key: string | null
 const choosesEachSale = (role: string | undefined) => ["OWNER", "MANAGER", "PLATFORM_ADMIN"].includes(role ?? "");
 /** "Who is buying" when nobody's name is needed: a walk-in pays the store's prices. */
 const WALK_IN = "walkin";
+/** A customer added at the counter with no internet: "new:<name>" until the sale reaches the server, which adds them then. */
+const NEW_ID = "new:";
+const isNewId = (id: string) => id.startsWith(NEW_ID);
 
 export default function BentaPanel() {
   const [locations, setLocations] = useState<Loc[]>([]);
@@ -195,7 +198,7 @@ export default function BentaPanel() {
 
   /** A customer's special prices on the product buttons (after the store's price list is on screen). */
   const putSpecialPrices = async (id: string) => {
-    if (!id) return;
+    if (!id || isNewId(id)) return; // a customer just added has no special prices yet
     const d = await cachedGet<{ prices?: { productId: string; priceMinor: number }[] }>(`/admin/benta/customer-prices?customerId=${encodeURIComponent(id)}`);
     const m = new Map((d?.prices ?? []).map((x) => [x.productId, x.priceMinor]));
     setItems((prev) => prev.map((i) => (m.has(i.id) ? { ...i, priceMinor: m.get(i.id)! } : i)));
@@ -203,7 +206,9 @@ export default function BentaPanel() {
   };
   // Choosing a customer at the start of a sale puts their special prices on the product buttons.
   const pickPriceCustomer = async (id: string) => {
+    const hadSpecial = specialCount > 0;
     setPriceCustomer(id); setCustomerId(id); setCustomerSig(null); setSpecialCount(0);
+    if (isNewId(id) && !hadSpecial) return; // just added: no special prices, the store prices already on screen stay
     await loadCatalog(locationId);
     await putSpecialPrices(id);
   };
@@ -224,6 +229,33 @@ export default function BentaPanel() {
       void pickPriceCustomer(who);
     }
     if (who && storePicked) setStartOpen(false);
+  };
+  /** "New customer" in "Who is buying?": put on the list at once when online; with no internet the name goes with the sale. */
+  const addNewCustomer = async (name: string, phone: string): Promise<string | null> => {
+    const known = customers.find((c) => !isNewId(c.id) && sameName(c.name, name));
+    if (known) { startWho(known.id); toast(`${known.name ?? name} is already on the list — chosen`); return null; }
+    const row = (id: string): Customer => ({ id, name, phone: phone || null, creditApproved: false, creditLimitMinor: 0, creditBalanceMinor: 0 });
+    if (!offline) {
+      const stop = new AbortController();
+      const timer = setTimeout(() => stop.abort(), 8000); // a sleeping server: keep the name on the tablet instead of waiting
+      try {
+        const res = await fetch(`${API_URL}/admin/pos/quick-customer`, { method: "POST", headers: { "Content-Type": "application/json", ...adminHeaders() }, body: JSON.stringify({ name, phone: phone || undefined }), signal: stop.signal });
+        const d = (await res.json().catch(() => null)) as ApiBody | null;
+        if (res.ok && d?.id) {
+          const id = String(d.id);
+          setCustomers((cs) => (cs.some((c) => c.id === id) ? cs : [...cs, row(id)].sort((a, b) => (a.name ?? "").localeCompare(b.name ?? ""))));
+          startWho(id);
+          toast(`Added: ${name}`);
+          return null;
+        }
+        if (res.status >= 400 && res.status < 500) return errText(d, "Could not add this customer");
+      } catch { /* no signal: keep the name on the tablet */ } finally { clearTimeout(timer); }
+    }
+    const id = `${NEW_ID}${name}`;
+    setCustomers((cs) => (cs.some((c) => c.id === id) ? cs : [...cs, row(id)]));
+    startWho(id);
+    toast(`${name} is chosen. They go on the customer list when the internet is back.`);
+    return null;
   };
 
   useEffect(() => {
@@ -328,6 +360,8 @@ export default function BentaPanel() {
     keyRef.current = null;
     try { window.sessionStorage.removeItem(cartKey()); } catch { /* convenience only */ }
     if (priceCustomer) void loadCatalog(locationId);
+    // A customer added with no internet: once online, the list from the server has them for real.
+    if (isNewId(priceCustomer) && !offline) void savedThenFresh<{ customers?: Customer[] }>("/admin/customers", (cs) => { if (cs?.customers) setCustomers(cs.customers as Customer[]); });
     setPriceCustomer(""); setSpecialCount(0);
     setCart([]); setStep("pick"); setPay(null); setTendered(""); setReference(""); setParts([{ method: "cash", amount: "", reference: "" }, { method: "gcash", amount: "", reference: "" }]); setCustomerId(""); setCustomerSig(null);
     setPaper(false); setMorePay(false); setSlipNo(""); setSlipTime(""); setSlipPhoto(null); setStaffSig(null); setError(null);
@@ -363,7 +397,9 @@ export default function BentaPanel() {
         method: pay, tenderedMinor: pay === "cash" && tendered ? toMinor(tendered) : undefined, reference: needsRef(pay) ? reference.trim() : undefined,
         ...(pay === "split" ? { tenders: parts.map((x) => ({ method: x.method, amountMinor: toMinor(x.amount || "0"), reference: x.method === "cash" ? undefined : x.reference.trim() })) } : {}),
       },
-      customerId: pay === "utang" ? customerId : priceCustomer || undefined,
+      ...(pay !== "utang" && isNewId(priceCustomer)
+        ? { newCustomerName: customers.find((c) => c.id === priceCustomer)?.name ?? priceCustomer.slice(NEW_ID.length), newCustomerPhone: customers.find((c) => c.id === priceCustomer)?.phone ?? undefined }
+        : { customerId: pay === "utang" ? customerId : priceCustomer || undefined }),
       paperSlip: paper ? { slipNo: slipNo.trim(), occurredAt: new Date(slipTime).toISOString() } : undefined,
       signatures,
       soldAt: new Date().toISOString(), // a sale that waits offline keeps its real time
@@ -746,7 +782,7 @@ export default function BentaPanel() {
   const storeKnown = storePicked || locations.length <= 1;
   const whoKnown = walkIn || !!priceCustomer;
   const asking = mustChoose && step === "pick" && !newItem && cart.length === 0 && (startOpen || !storeKnown || !whoKnown);
-  const whoName = priceCustomer ? (customers.find((c) => c.id === priceCustomer)?.name ?? customers.find((c) => c.id === priceCustomer)?.phone ?? "Customer") : "Walk-in";
+  const whoName = priceCustomer ? (customers.find((c) => c.id === priceCustomer)?.name ?? customers.find((c) => c.id === priceCustomer)?.phone ?? (isNewId(priceCustomer) ? priceCustomer.slice(NEW_ID.length) : "Customer")) : "Walk-in";
   const startCard = asking && (
     <StartChoices title="Start a sale" storeQuestion="Selling at which store?" locations={locations} storeId={storeKnown ? locationId : ""} onStore={(id) => void startStore(id)}
       whoQuestion="Who is buying?" whoDone={whoKnown} ready={storeKnown && whoKnown} goLabel="Tap the rice" onGo={() => { setStorePicked(true); setStartOpen(false); }}>
@@ -758,11 +794,13 @@ export default function BentaPanel() {
         {customers.length > 0 && (
           <select className={`form-select form-select-lg start-cust${priceCustomer ? " chosen" : ""}`} aria-label="A customer from the list" value={priceCustomer} onChange={(e) => startWho(e.target.value)}>
             <option value="">Choose a customer…</option>
-            {customers.map((c) => <option key={c.id} value={c.id}>{c.name ?? c.phone ?? "—"}</option>)}
+            {customers.map((c) => <option key={c.id} value={c.id}>{c.name ?? c.phone ?? "—"}{isNewId(c.id) ? " (new)" : ""}</option>)}
           </select>
         )}
+        <NewCustomerChoice onAdd={addNewCustomer} />
       </div>
-      {priceCustomer && <div className="text-muted mt-2">{specialCount > 0 ? `${specialCount} special ${specialCount === 1 ? "price" : "prices"} for ${whoName}.` : `No special prices for ${whoName}: store prices apply.`}</div>}
+      {priceCustomer && isNewId(priceCustomer) && <div className="text-muted mt-2">New customer: saved on this tablet, added to the list when the sale is sent.</div>}
+      {priceCustomer && !isNewId(priceCustomer) && <div className="text-muted mt-2">{specialCount > 0 ? `${specialCount} special ${specialCount === 1 ? "price" : "prices"} for ${whoName}.` : `No special prices for ${whoName}: store prices apply.`}</div>}
     </StartChoices>
   );
   // After choosing: one line naming the store and the customer; Change goes back while the sale is empty.
