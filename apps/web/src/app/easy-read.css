@@ -767,3 +767,11 @@ html[data-text-size] .start-cust.chosen, .start-cust.chosen { border: 3px solid 
   background: #2b2a28; color: #fff; font-weight: 600; max-width: 100%; overflow-wrap: anywhere; }
 .chosen-chip.chosen-who { background: #fff; color: var(--sam-text); border: 2px solid #2b2a28; }
 .chosen-change { min-height: 2.75rem; }
+
+/* §15 New customer from "Who is buying?" (2026-11-17). A green outline choice beside Walk-in and the list (green = add
+   something new); tapped, the name box opens across the whole row with Cancel and "Add and choose". */
+.start-choice.new-cust i { font-size: 1.35em; }
+.new-cust-form { grid-column: 1 / -1; background: #f3f8f4; border: 2px solid #1F6F3F; border-radius: 0.75rem; padding: 0.9rem 1rem; }
+.new-cust-actions { display: flex; flex-wrap: wrap; gap: 0.6rem; margin-top: 0.9rem; }
+.new-cust-actions .btn { min-height: 3.25rem; flex: 1 1 10rem; }
+.new-cust-actions .btn-success { flex: 2 1 12rem; }
