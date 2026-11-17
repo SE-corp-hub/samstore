@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { peso } from "../../lib/number-format";
 
 export type CheckLine = {
@@ -13,6 +13,19 @@ export type CheckLine = {
   totalMinor: number;
   /** Short coloured notes on the line: a changed price, a promo, below cost. */
   notes?: { text: string; tone: "warning" | "success" | "danger" | "info" }[];
+  /** Change the line right here (2026-11-17: the sale card is small while picking). */
+  qty?: number | string;
+  /** "sack" / "kilo" / "piece" for the button names. */
+  unitWord?: string;
+  onMinus?: () => void;
+  onPlus?: () => void;
+  /** At one left, "−" becomes the trash can. */
+  canMinus?: boolean;
+  onRemove?: () => void;
+  /** Price: opens the screen's own price card… */
+  onPrice?: () => void;
+  /** …or a price box shown under the line (Pre-order). */
+  priceEditor?: ReactNode;
 };
 
 /**
@@ -43,6 +56,7 @@ export default function OrderCheck({
   // A long order scrolls: say so, until the last line has been seen.
   const listRef = useRef<HTMLOListElement>(null);
   const [more, setMore] = useState(false);
+  const [openPrice, setOpenPrice] = useState<string | null>(null);
   useEffect(() => {
     const el = listRef.current;
     if (!el) return;
@@ -68,6 +82,34 @@ export default function OrderCheck({
             )}
           </span>
           <span className="check-amount">{money(l.totalMinor)}</span>
+          {(l.onMinus || l.onPlus || l.onPrice || l.priceEditor) && (
+            <span className="check-edit">
+              {l.onPlus && (
+                <span className="qty" role="group" aria-label={`How many ${l.name}`}>
+                  <button type="button" className={`btn qty-btn ${l.canMinus ? "btn-outline-dark" : "btn-outline-danger"}`} disabled={busy}
+                    aria-label={l.canMinus ? `One ${l.unitWord ?? ""} less ${l.name}` : `Remove ${l.name}`}
+                    onClick={() => (l.canMinus ? l.onMinus?.() : l.onRemove?.())}>
+                    {l.canMinus ? "−" : <i className="bi bi-trash" aria-hidden="true"></i>}
+                  </button>
+                  <span className="qty-num" aria-live="polite">{l.qty}</span>
+                  <button type="button" className="btn btn-outline-dark qty-btn" disabled={busy} aria-label={`One ${l.unitWord ?? ""} more ${l.name}`} onClick={l.onPlus}>+</button>
+                </span>
+              )}
+              {(l.onPrice || l.priceEditor) && (
+                <button type="button" className={`btn line-edit ${openPrice === l.key ? "btn-dark" : "btn-outline-primary"}`} disabled={busy}
+                  aria-expanded={l.priceEditor ? openPrice === l.key : undefined} aria-label={`Change price of ${l.name}`}
+                  onClick={() => (l.priceEditor ? setOpenPrice(openPrice === l.key ? null : l.key) : l.onPrice?.())}>
+                  <i className="bi bi-tag me-1" aria-hidden="true"></i>{l.priceEditor && openPrice === l.key ? "Done" : "Price"}
+                </button>
+              )}
+              {l.onRemove && l.canMinus && (
+                <button type="button" className="btn btn-outline-danger line-remove" disabled={busy} aria-label={`Remove ${l.name}`} onClick={l.onRemove}>
+                  <i className="bi bi-trash" aria-hidden="true"></i>
+                </button>
+              )}
+            </span>
+          )}
+          {l.priceEditor && openPrice === l.key && <div className="check-price">{l.priceEditor}</div>}
         </li>
       ))}
     </ol>

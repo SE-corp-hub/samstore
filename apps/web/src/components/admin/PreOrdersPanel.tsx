@@ -259,6 +259,7 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
   const [orderBigOn, setOrderBig] = useState(false);
   // "Check the order": Save first shows the whole order on one card; its green button saves.
   const [checkOpen, setCheckOpen] = useState(false);
+  useEffect(() => { if (checkOpen && buildCart.length === 0) setCheckOpen(false); }, [checkOpen, buildCart.length]);
   useEffect(() => { if (buildCart.length === 0) setOrderBig(false); }, [buildCart.length]);
   // Upright the order shows 3 lines (they scroll), so the price list keeps its room; "See order" shows them all.
   const linesRef = useLinesCap<HTMLDivElement>(upright && !orderBigOn, buildCart.length);
@@ -576,10 +577,12 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
   // Save a new ON_HOLD pre-order, or the changed lines of the one being edited; then back to the list.
   const savePreorder = async () => {
     if (buildCart.length === 0) { setError("Tap at least one item."); return; }
+    // The usual checks run again on the Check card's green button: a price may have been changed there.
+    // (A below-cost price already kept is not asked again.)
+    if (!(await passesCost())) return;
+    if (buildCart.some(priceMissingReason)) { setError("Pick a reason for every price you changed."); return; }
     if (!checkOpen) {
-      // First tap: the usual checks, then the whole order on one card to read back to the customer.
-      if (!(await passesCost())) return;
-      if (buildCart.some(priceMissingReason)) { setError("Pick a reason for every price you changed."); return; }
+      // First tap: the whole order on one card to read back to the customer.
       if (!editingPre && !buildCustomerId && !buildNewName.trim()) { setError("Choose a customer or type a new name."); return; }
       setError(null); setCheckOpen(true);
       return;
@@ -1038,7 +1041,25 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
         if (promoAt[idx] != null) notes.push({ text: "Promo price", tone: "success" });
         else if (l.price !== undefined && l.price !== l.product.priceMinor) notes.push({ text: `New price · usual ${maybePrice(l.product.priceMinor)}`, tone: "warning" });
         if (lineBelow(l)) notes.push({ text: "Below cost", tone: "danger" });
-        return { key: lineKey(l), name: l.product.name, qtyText: String(l.quantity), eachText: `${maybePrice(unit)} each`, totalMinor: unit * l.quantity, notes };
+        const orig = buildCart[idx]!;
+        const changed = orig.price !== undefined && orig.price !== orig.product.priceMinor;
+        return {
+          key: lineKey(l), name: l.product.name, qtyText: String(l.quantity), eachText: `${maybePrice(unit)} each`, totalMinor: unit * l.quantity, notes,
+          // Change it right here: − / +, the trash can, and Price opens the price box with its reason under the line.
+          qty: l.quantity, unitWord: "", canMinus: l.quantity > 1,
+          onMinus: () => setQty(orig, orig.quantity - 1), onPlus: () => setQty(orig, orig.quantity + 1), onRemove: () => setQty(orig, 0),
+          priceEditor: hidePrice ? undefined : (
+            <div>
+              <label className="d-flex align-items-center gap-2 mb-0">
+                <span className="fw-semibold">Price each</span>
+                <PesoInput className={`form-control form-control-lg ${changed ? "border-warning bg-warning-subtle" : ""}`} style={{ width: 160 }} aria-label={`Price each of ${l.product.name}`}
+                  value={orig.priceText ?? (unit / 100).toFixed(2)} placeholder={(orig.product.priceMinor / 100).toFixed(2)} onChange={(v) => setLinePrice(orig, v)} />
+                <span className="text-muted">usual {toPesos(orig.product.priceMinor)}</span>
+              </label>
+              {changed && <div className="mt-2"><ReasonButtons value={reasonOk(orig.reason) ? orig.reason! : ""} onChange={(v) => changeLine(lineKey(orig), (x) => ({ ...x, reason: v }))} /></div>}
+            </div>
+          ),
+        };
       })} />
   );
   const renderBuild = () => checkOpen ? <div className="fit-col">{checkCard}</div> : wide ? (

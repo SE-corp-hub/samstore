@@ -322,6 +322,8 @@ export default function BentaPanel() {
   const fitRef = useFitHeight<HTMLDivElement>(fit && step !== "done");
   // Upright, a long sale can take the whole screen ("See whole order"); "Back to price list" brings the list back.
   const [orderBigOn, setOrderBig] = useState(false);
+  // Every line taken out on the Check card: back to the price list.
+  useEffect(() => { if (step === "check" && cart.length === 0) setStep("pick"); }, [step, cart.length]);
   useEffect(() => { if (cart.length === 0) setOrderBig(false); }, [cart.length]);
   // Upright the sale shows 3 lines (they scroll), so the price list keeps its room; "See cart" shows them all.
   const linesRef = useLinesCap<HTMLUListElement>(fit && !wide && !orderBigOn && step === "pick", cart.length);
@@ -857,8 +859,15 @@ export default function BentaPanel() {
         else if (l.price !== undefined && it && l.price !== it.priceMinor) notes.push({ text: `New price · usual ${peso(it.priceMinor)}`, tone: "warning" });
         if (it && isBelowCost(unit, it.floorMinor)) notes.push({ text: "Below cost", tone: "danger" });
         if (l.sourceLocationId) notes.push({ text: `From ${code(l.sourceLocationId)}`, tone: "info" });
+        const orig = cart[idx]!;
+        const edit = orig.mode !== "PESO";
         return {
           key: `${idx}-${l.productId}`, name: it?.name ?? "Item", totalMinor: c.totalMinor, notes,
+          // Change it right here: − / + (one sack or one kilo), the trash can, and Price (the same price card as while picking).
+          qty: l.mode === "PIECE" ? l.value : kg(c.grams ?? 0), unitWord: l.mode === "KILO" ? "kilo" : sackish ? "sack" : "piece",
+          canMinus: edit && (l.mode === "PIECE" ? n > 1 : (c.grams ?? 0) > 1000),
+          onMinus: edit ? () => bump(idx, -1) : undefined, onPlus: edit ? () => bump(idx, 1) : undefined,
+          onRemove: () => setCart(cart.filter((_, j) => j !== idx)), onPrice: () => startEdit(orig, idx),
           qtyText: l.mode === "PIECE" ? `${n} ${sackish ? (n === 1 ? "sack" : "sacks") : (n === 1 ? "piece" : "pieces")}` : l.mode === "KILO" ? kg(c.grams ?? 0) : `₱${l.value} worth`,
           eachText: l.mode === "PESO" ? `${peso(unit)} per kilo` : `${peso(unit)} ${l.mode === "KILO" ? "per kilo" : sackish ? "per sack" : "each"}`,
         };
@@ -913,7 +922,7 @@ export default function BentaPanel() {
           {step === "pick" && !newItem && (editing || checking) && <div className="fit-scroll">{quickCount || editCard}</div>}
           {step === "pick" && newItem && <div className="fit-scroll"><NewItemForm locationId={locationId} onCancel={() => setNewItem(false)} onDone={async () => { setNewItem(false); await loadCatalog(locationId); }} /></div>}
 
-          {checkCard}
+          {step === "check" && (editing || checking) ? <div className="fit-scroll">{quickCount || editCard}</div> : !editing && !checking && checkCard}
           {step === "pay" && (
             <div className="fit-scroll">
           <div className="sale-card fit-pay mx-auto w-100" style={{ maxWidth: padSide ? 920 : 560 }}>

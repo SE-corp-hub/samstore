@@ -788,7 +788,7 @@ html[data-text-size] .start-cust.chosen, .start-cust.chosen { border: 3px solid 
 .order-check .check-who dd { margin: 0; font-weight: 700; font-size: 1.15rem; overflow-wrap: anywhere; }
 .order-check .check-lines { overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
   border-top: 1px solid #e1d6c6; font-variant-numeric: tabular-nums; }
-.order-check .check-line { display: flex; align-items: flex-start; gap: 0.6rem; padding: 0.55rem 0.25rem; border-bottom: 1px solid #e1d6c6; }
+.order-check .check-line { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 0.6rem; padding: 0.55rem 0.25rem; border-bottom: 1px solid #e1d6c6; }
 .order-check .check-line:nth-child(even) { background: #fbf8f3; }
 .order-check .check-no { flex: 0 0 auto; width: 1.8rem; height: 1.8rem; border-radius: 50%; border: 2px solid #4a4844; display: inline-flex;
   align-items: center; justify-content: center; font-weight: 700; font-size: max(16px, 0.85rem); margin-top: 0.1rem; }
@@ -822,3 +822,11 @@ html[data-text-size] .start-cust.chosen, .start-cust.chosen { border: 3px solid 
 .order-check .sale-total .amount { font-size: 2.2rem; }
 /* Not on a fitted screen (phone): the page scrolls as usual. */
 .sell-screen:not(.sell-fit) .order-check .check-lines { max-height: none; overflow: visible; }
+/* §16b Change the order right on the Check card: − n + , Price and the trash can under each line (the sale card
+   is small while picking). The row starts under the name (past the line number). */
+.order-check .check-what { flex: 1 1 10rem; }
+.order-check .check-edit { flex: 1 0 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; padding-left: 2.4rem; }
+.order-check .check-edit .qty { display: flex; align-items: center; gap: 0.4rem; }
+.order-check .check-edit .line-edit, .order-check .check-edit .line-remove { min-height: 3rem; min-width: 3rem; white-space: nowrap; }
+.order-check .check-edit .line-remove { margin-left: auto; }
+.order-check .check-price { flex: 1 0 100%; padding-left: 2.4rem; }
