@@ -145,7 +145,7 @@ export default function BentaPanel() {
   const [slipTime, setSlipTime] = useState("");
   const [slipPhoto, setSlipPhoto] = useState<string | null>(null);
   const [staffSig, setStaffSig] = useState<string | null>(null);
-  const [last, setLast] = useState<{ status: "COMPLETED" | "WAITING_OWNER" | "DECLINED"; /** Saved on this tablet, not sent yet. */ offline?: boolean; smsStatus: string | null; orderNumber: string; totalMinor: number; changeMinor: number; lines: { name: string; soldBy: string | null; quantity: number; grams: number | null; lineTotalMinor: number }[]; releases: { docNumber: string }[]; zeroCheck: { productId: string; name: string }[]; belowCost?: string[] } | null>(null);
+  const [last, setLast] = useState<{ status: "COMPLETED" | "WAITING_OWNER" | "DECLINED"; /** Saved on this tablet, not sent yet. */ offline?: boolean; /** Printed on the receipt; empty = walk-in. */ customerName?: string | null; smsStatus: string | null; orderNumber: string; totalMinor: number; changeMinor: number; lines: { name: string; soldBy: string | null; quantity: number; grams: number | null; lineTotalMinor: number }[]; releases: { docNumber: string }[]; zeroCheck: { productId: string; name: string }[]; belowCost?: string[] } | null>(null);
   const [checking, setChecking] = useState<{ productId: string; name: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -300,6 +300,7 @@ export default function BentaPanel() {
 
   const receiptSlip = (l: NonNullable<typeof last>) => ({
     storeName: storeName || "SAM STORE", locationId, title: "SALES RECEIPT", reference: l.orderNumber, when: new Date().toLocaleString("en-PH"),
+    lines: [{ label: "Customer", value: l.customerName || "Walk-in" }],
     rows: l.lines.map((x) => ({ name: x.name, qty: `${x.soldBy === "PIECE" || !x.grams ? `${x.quantity}` : kg(x.grams)}  ${peso(x.lineTotalMinor)}` })),
     totals: [{ label: "TOTAL", value: peso(l.totalMinor) }, ...(l.changeMinor > 0 ? [{ label: "Change", value: peso(l.changeMinor) }] : [])],
     footer: l.status === "WAITING_OWNER" ? "Waiting for owner approval" : l.offline ? "Saved offline · Salamat po!" : "Salamat po!",
@@ -386,6 +387,9 @@ export default function BentaPanel() {
     const signatures: Record<string, unknown>[] = [];
     if (pay === "utang" && customerSig) signatures.push({ signerKind: "CUSTOMER", signerName: customer?.name ?? "Customer", imagePng: customerSig });
     if (paper && staffSig && slipPhoto) signatures.push({ signerKind: "STAFF", imagePng: staffSig }, { signerKind: "SLIP_PHOTO", imagePng: slipPhoto });
+    // The buyer's name for the receipt (a customer added with no internet is still "new:<name>" here).
+    const buyerId = pay === "utang" ? customerId : priceCustomer;
+    const buyerName = buyerId ? (customers.find((c) => c.id === buyerId)?.name?.trim() || (isNewId(buyerId) ? buyerId.slice(NEW_ID.length) : null)) : null;
     const body = {
       idempotencyKey: keyRef.current, locationId,
       lines: priced.map((l) => ({
@@ -416,7 +420,7 @@ export default function BentaPanel() {
             const c = lineOf(it, l);
             return { name: it?.name ?? "Item", soldBy: l.mode === "PIECE" ? "PIECE" : "WEIGHT", quantity: c.units, grams: c.grams, lineTotalMinor: c.totalMinor };
           }),
-          releases: [], zeroCheck: [],
+          releases: [], zeroCheck: [], customerName: buyerName,
         });
         setTextInfo(null);
         keyRef.current = null;
@@ -430,7 +434,7 @@ export default function BentaPanel() {
         setError(errText(d, "The sale did not go through"));
         return;
       }
-      setLast(d as unknown as NonNullable<typeof last>);
+      setLast({ ...(d as unknown as NonNullable<typeof last>), customerName: buyerName });
       setTextInfo(pay === "utang" && customer ? { customerId: customer.id, name: customer.name, phone: customer.phone, balanceAfterMinor: customer.creditBalanceMinor + total } : null);
       setTextPhone(customer?.phone ?? "");
       toast(d.status === "WAITING_OWNER" ? `Waiting for the owner: ${String(d.orderNumber)}` : `Sold: ${String(d.orderNumber)}`);

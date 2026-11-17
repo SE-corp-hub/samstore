@@ -87,6 +87,7 @@ function receiptSlip(d: ReceiptData, header: string | null | undefined, footer: 
   return {
     storeName: d.storeName, locationId: d.locationId, contact: d.receiptContact || undefined, title: "RECEIPT", reference: d.orderNumber, when: new Date(d.createdAt).toLocaleString("en-PH"),
     header: header || (d.vat?.tin ? `TIN ${d.vat.tin}` : null),
+    lines: [{ label: "Customer", value: d.customerName?.trim() || "Walk-in" }],
     rows: d.items.map((i) => ({ name: i.productName, qty: `${i.quantity} × ${pesos(i.unitPriceMinor)} = ${pesos(i.lineTotalMinor)}` })),
     totals,
     signatures: d.signatureData ? [{ role: "Customer", name: d.customerName || "Customer", imageData: d.signatureData }] : [],
