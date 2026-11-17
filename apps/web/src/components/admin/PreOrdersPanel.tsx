@@ -34,6 +34,7 @@ import { cachedGet, offlineRef, savedCopy, savedThenFresh, useOffline } from "..
 import { QUEUE_EVENT, queuedSteps, sendStep } from "../../lib/offlineQueue";
 import { PROMO_OFF, PROMO_REASON, promoFrom, promoPrices, promoSacks, type QuotaPromo } from "../../lib/quota-promo";
 import { newSaleKey } from "../../lib/saleKey";
+import OrderCheck, { type CheckLine } from "./OrderCheck";
 
 const PREORDER_PATH = "/admin/pos/preorder";
 /** Pre-orders saved on this tablet with no internet, not on the server yet (shown with Print only). */
@@ -256,6 +257,9 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
   const upright = fit && !wide;
   const lineOneRow = useMediaQuery("(min-width: 760px)") && upright;
   const [orderBigOn, setOrderBig] = useState(false);
+  // "Check the order": Save first shows the whole order on one card; its green button saves.
+  const [checkOpen, setCheckOpen] = useState(false);
+  useEffect(() => { if (checkOpen && buildCart.length === 0) setCheckOpen(false); }, [checkOpen, buildCart.length]);
   useEffect(() => { if (buildCart.length === 0) setOrderBig(false); }, [buildCart.length]);
   // Upright the order shows 3 lines (they scroll), so the price list keeps its room; "See order" shows them all.
   const linesRef = useLinesCap<HTMLDivElement>(upright && !orderBigOn, buildCart.length);
@@ -365,12 +369,12 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
 
   const clearBuild = () => {
     setBuildCart([]); setBuildCustomerId(""); setBuildNewName(""); setBuildNewPhone("");
-    setNewItemOpen(false); setEditingPre(null);
+    setNewItemOpen(false); setEditingPre(null); setCheckOpen(false);
     setStorePicked(false); setStartOpen(true);
   };
   // A new pre-order starts with nothing chosen (an order already started is kept as it was).
   const newPreorder = () => { if (editingPre || buildCart.length === 0) clearBuild(); setError(null); setSubTab("build"); };
-  const backToList = () => { if (editingPre) clearBuild(); setNewItemOpen(false); setError(null); setSubTab("list"); };
+  const backToList = () => { if (editingPre) clearBuild(); setNewItemOpen(false); setCheckOpen(false); setError(null); setSubTab("list"); };
 
   /** The catalog (or variant) price a line is compared against. */
   const catalogPriceFor = (productId: string, variantId?: string | null) => {
@@ -573,8 +577,16 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
   // Save a new ON_HOLD pre-order, or the changed lines of the one being edited; then back to the list.
   const savePreorder = async () => {
     if (buildCart.length === 0) { setError("Tap at least one item."); return; }
+    // The usual checks run again on the Check card's green button: a price may have been changed there.
+    // (A below-cost price already kept is not asked again.)
     if (!(await passesCost())) return;
     if (buildCart.some(priceMissingReason)) { setError("Pick a reason for every price you changed."); return; }
+    if (!checkOpen) {
+      // First tap: the whole order on one card to read back to the customer.
+      if (!editingPre && !buildCustomerId && !buildNewName.trim()) { setError("Choose a customer or type a new name."); return; }
+      setError(null); setCheckOpen(true);
+      return;
+    }
     setBuildBusy(true); setError(null);
     try {
       let res: Response;
@@ -1017,7 +1029,40 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
   const whoSection = mustChoose ? chosenSection : customerSection;
 
   // Sideways: the products on the left; who it is for and the order on the right. Upright: the order under the products. A phone keeps a sticky Save bar.
-  const renderBuild = () => wide ? (
+  const checkCard = (
+    <OrderCheck wide={wide} money={maybePrice} storeName={(editingPre ? editingPre.locationName : storeHere ? `${storeHere.code ? `${storeHere.code} · ` : ""}${storeHere.name}` : null) || null}
+      who={editingPre ? (editingPre.customerName || "—") : whoName} totalMinor={buildSubtotal} itemsText={`${itemsInOrder} item${itemsInOrder === 1 ? "" : "s"}`}
+      goLabel={editingPre ? "Correct — Save changes" : "Correct — Save pre-order"} busy={buildBusy}
+      onBack={() => { setCheckOpen(false); setError(null); }} onGo={() => void savePreorder()}
+      note={offline && !editingPre ? "No internet: saved on this tablet and sent later." : null}
+      lines={pricedCart.map((l, idx) => {
+        const unit = unitOf(l);
+        const notes: CheckLine["notes"] = [];
+        if (promoAt[idx] != null) notes.push({ text: "Promo price", tone: "success" });
+        else if (l.price !== undefined && l.price !== l.product.priceMinor) notes.push({ text: `New price · usual ${maybePrice(l.product.priceMinor)}`, tone: "warning" });
+        if (lineBelow(l)) notes.push({ text: "Below cost", tone: "danger" });
+        const orig = buildCart[idx]!;
+        const changed = orig.price !== undefined && orig.price !== orig.product.priceMinor;
+        return {
+          key: lineKey(l), name: l.product.name, qtyText: String(l.quantity), eachText: `${maybePrice(unit)} each`, totalMinor: unit * l.quantity, notes,
+          // Change it right here: − / +, the trash can, and Price opens the price box with its reason under the line.
+          qty: l.quantity, unitWord: "", canMinus: l.quantity > 1,
+          onMinus: () => setQty(orig, orig.quantity - 1), onPlus: () => setQty(orig, orig.quantity + 1), onRemove: () => setQty(orig, 0),
+          priceEditor: hidePrice ? undefined : (
+            <div>
+              <label className="d-flex align-items-center gap-2 mb-0">
+                <span className="fw-semibold">Price each</span>
+                <PesoInput className={`form-control form-control-lg ${changed ? "border-warning bg-warning-subtle" : ""}`} style={{ width: 160 }} aria-label={`Price each of ${l.product.name}`}
+                  value={orig.priceText ?? (unit / 100).toFixed(2)} placeholder={(orig.product.priceMinor / 100).toFixed(2)} onChange={(v) => setLinePrice(orig, v)} />
+                <span className="text-muted">usual {toPesos(orig.product.priceMinor)}</span>
+              </label>
+              {changed && <div className="mt-2"><ReasonButtons value={reasonOk(orig.reason) ? orig.reason! : ""} onChange={(v) => changeLine(lineKey(orig), (x) => ({ ...x, reason: v }))} /></div>}
+            </div>
+          ),
+        };
+      })} />
+  );
+  const renderBuild = () => checkOpen ? <div className="fit-col">{checkCard}</div> : wide ? (
     <div className="fit-row">
       <div className="fit-col fit-main">{startCard || pickSection}</div>
       <div className="fit-col fit-side">{whoSection}{orderSection}</div>

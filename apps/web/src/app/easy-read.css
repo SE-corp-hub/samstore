@@ -775,3 +775,58 @@ html[data-text-size] .start-cust.chosen, .start-cust.chosen { border: 3px solid 
 .new-cust-actions { display: flex; flex-wrap: wrap; gap: 0.6rem; margin-top: 0.9rem; }
 .new-cust-actions .btn { min-height: 3.25rem; flex: 1 1 10rem; }
 .new-cust-actions .btn-success { flex: 2 1 12rem; }
+
+/* §16 Check the order (2026-11-17). Before Pay (POS) and Save (Pre-order) the whole order shows on one card:
+   store, customer, every line (how many × price each = amount) and the total, so the seller reads it back.
+   Only the list scrolls; the total and Back / the green button stay in view. Sideways: list left, total right. */
+.order-check { width: 100%; max-width: 64rem; margin: 0 auto; }
+.fit-col > .order-check { flex: 0 1 auto; } /* as tall as the order, never taller than the screen */
+.order-check .check-title { font-size: 1.35rem; font-weight: 800; margin: 0 0 0.5rem; }
+.order-check .check-who { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.5rem; }
+.order-check .check-who > div { flex: 1 1 12rem; min-width: 0; background: #f4efe7; border-radius: 0.5rem; padding: 0.4rem 0.75rem; }
+.order-check .check-who dt { font-weight: 600; color: var(--sam-muted); font-size: max(16px, 0.9rem); }
+.order-check .check-who dd { margin: 0; font-weight: 700; font-size: 1.15rem; overflow-wrap: anywhere; }
+.order-check .check-lines { overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
+  border-top: 1px solid #e1d6c6; font-variant-numeric: tabular-nums; }
+.order-check .check-line { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 0.6rem; padding: 0.55rem 0.25rem; border-bottom: 1px solid #e1d6c6; }
+.order-check .check-line:nth-child(even) { background: #fbf8f3; }
+.order-check .check-no { flex: 0 0 auto; width: 1.8rem; height: 1.8rem; border-radius: 50%; border: 2px solid #4a4844; display: inline-flex;
+  align-items: center; justify-content: center; font-weight: 700; font-size: max(16px, 0.85rem); margin-top: 0.1rem; }
+.order-check .check-what { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
+.order-check .check-name { font-weight: 700; font-size: 1.1rem; overflow-wrap: anywhere; }
+.order-check .check-qty { color: var(--sam-text); }
+.order-check .check-qty strong { font-size: 1.1rem; }
+.order-check .check-notes { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-top: 0.2rem; }
+.order-check .check-notes .badge { font-size: max(15px, 0.8rem); font-weight: 600; }
+.order-check .check-amount { flex: 0 0 auto; font-weight: 800; font-size: 1.15rem; text-align: right; min-width: 6rem; }
+.order-check .check-note { color: var(--sam-muted); margin-top: 0.35rem; }
+.order-check .check-actions { display: flex; flex-wrap: wrap; gap: 0.6rem; margin-top: 0.6rem; }
+.order-check .check-actions .btn { min-height: 3.5rem; }
+.order-check .check-actions .btn-outline-dark { flex: 1 1 10rem; }
+.order-check .check-actions .check-go { flex: 2 1 14rem; font-size: 1.25rem; }
+/* Sideways: two columns inside the card; the list column scrolls, the right column is fixed. */
+.sell-fit .order-check .check-list-box, .sell-fit .order-check .check-cols { flex: 1 1 auto; min-height: 5rem; }
+.order-check .check-list-box { position: relative; display: flex; flex-direction: column; min-height: 0; }
+.order-check .check-list-box > .check-lines { flex: 1 1 auto; min-height: 0; }
+.order-check .check-more { position: absolute; left: 0; right: 0; bottom: 0; padding: 0.35rem; text-align: center; font-weight: 700;
+  color: #0B4F8A; background: linear-gradient(rgba(255,255,255,0.75), #fff 40%); pointer-events: none; }
+.order-check .check-lines:focus-visible { outline: 3px solid var(--sam-primary); outline-offset: 2px; }
+.order-check .check-cols { display: flex; gap: 1.25rem; flex: 1 1 auto; min-height: 0; }
+.order-check .check-left { flex: 1 1 58%; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
+.order-check .check-right { flex: 0 0 40%; min-width: 0; display: flex; flex-direction: column; }
+.order-check.wide .check-who { flex-direction: column; }
+.order-check.wide .check-who > div { flex: 0 0 auto; }
+.order-check.wide .check-actions { flex-direction: column; }
+.order-check.wide .check-actions .btn { flex: 0 0 auto; width: 100%; }
+.order-check.wide .check-actions .check-go { order: -1; min-height: 4rem; }
+.order-check .sale-total .amount { font-size: 2.2rem; }
+/* Not on a fitted screen (phone): the page scrolls as usual. */
+.sell-screen:not(.sell-fit) .order-check .check-lines { max-height: none; overflow: visible; }
+/* §16b Change the order right on the Check card: − n + , Price and the trash can under each line (the sale card
+   is small while picking). The row starts under the name (past the line number). */
+.order-check .check-what { flex: 1 1 10rem; }
+.order-check .check-edit { flex: 1 0 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; padding-left: 2.4rem; }
+.order-check .check-edit .qty { display: flex; align-items: center; gap: 0.4rem; }
+.order-check .check-edit .line-edit, .order-check .check-edit .line-remove { min-height: 3rem; min-width: 3rem; white-space: nowrap; }
+.order-check .check-edit .line-remove { margin-left: auto; }
+.order-check .check-price { flex: 1 0 100%; padding-left: 2.4rem; }

@@ -43,6 +43,7 @@ import { useLinesCap } from "../../lib/use-lines-cap";
 import { useFitHeight } from "../../lib/use-fit-height";
 import { quickCash } from "../../lib/quick-cash";
 import Steps from "./Steps";
+import OrderCheck, { type CheckLine } from "./OrderCheck";
 import ProductFinder from "./ProductFinder";
 import PickTile from "./PickTile";
 import { noteUse } from "../../lib/product-find";
@@ -65,6 +66,7 @@ interface CartLine { productId: string; mode: Mode; value: string; sourceLocatio
 interface Held { id: string; label: string; at: number; locationId: string; cart: CartLine[] }
 type Pay = "cash" | "gcash" | "maya" | "bank" | "split" | "utang";
 const PAY_LABEL: Record<Pay, string> = { cash: "Cash", gcash: "GCash", maya: "Maya", bank: "Bank transfer", split: "Split", utang: "Credit" };
+const STEPS = ["Pick items", "Check", "Pay", "Done"];
 const PAY_ICON: Record<Pay, string> = { cash: "bi-cash", gcash: "bi-phone", maya: "bi-phone", bank: "bi-bank", split: "bi-pie-chart", utang: "bi-journal-text" };
 interface SplitPart { method: "cash" | "gcash" | "maya" | "bank"; amount: string; reference: string }
 const needsRef = (m: Pay) => m === "gcash" || m === "maya" || m === "bank";
@@ -132,7 +134,7 @@ export default function BentaPanel() {
   const [editIdx, setEditIdx] = useState<number | null>(null); // which cart line is being edited (null = adding a new one)
   const [holds, setHolds] = useState<Held[]>(() => loadHolds());
   const [showHeld, setShowHeld] = useState(false);
-  const [step, setStep] = useState<"pick" | "pay" | "done">("pick");
+  const [step, setStep] = useState<"pick" | "check" | "pay" | "done">("pick");
   const [pay, setPay] = useState<Pay | null>(null);
   const [tendered, setTendered] = useState("");
   const [reference, setReference] = useState("");
@@ -320,6 +322,8 @@ export default function BentaPanel() {
   const fitRef = useFitHeight<HTMLDivElement>(fit && step !== "done");
   // Upright, a long sale can take the whole screen ("See whole order"); "Back to price list" brings the list back.
   const [orderBigOn, setOrderBig] = useState(false);
+  // Every line taken out on the Check card: back to the price list.
+  useEffect(() => { if (step === "check" && cart.length === 0) setStep("pick"); }, [step, cart.length]);
   useEffect(() => { if (cart.length === 0) setOrderBig(false); }, [cart.length]);
   // Upright the sale shows 3 lines (they scroll), so the price list keeps its room; "See cart" shows them all.
   const linesRef = useLinesCap<HTMLUListElement>(fit && !wide && !orderBigOn && step === "pick", cart.length);
@@ -454,7 +458,7 @@ export default function BentaPanel() {
   if (step === "done" && last) {
     return (
       <div className="sell-screen tone-sell mx-auto" style={{ maxWidth: 520 }}>
-        <Steps items={["Pick items", "Pay", "Done"]} current={2} />
+        <Steps items={STEPS} current={3} />
         {last.status === "WAITING_OWNER" ? (
           <div className="alert alert-warning">
             <div className="h4 mb-1">Waiting for the owner</div>
@@ -614,8 +618,9 @@ export default function BentaPanel() {
   };
   const goPay = async () => {
     for (let i = 0; i < priced.length; i++) if (!(await passesCost(priced[i]!, i))) return;
-    if (!pay) setPay("cash");
-    setStep("pay");
+    // First the whole order on one card ("Check the order"), read back to the customer; then Pay.
+    setError(null);
+    setStep("check");
   };
   const holdSale = () => {
     const first = byId.get(cart[0]!.productId)?.name ?? "Sale";
@@ -837,6 +842,37 @@ export default function BentaPanel() {
       </ul>
     </div></div>
   );
+  // "Check the order": every line, the store and who is buying, before the pay step.
+  const checkCard = step === "check" && (
+    <OrderCheck wide={wide} storeName={saleStore ? `${saleStore.code ? `${saleStore.code} · ` : ""}${saleStore.name}` : null} who={whoName}
+      totalMinor={total} itemsText={`${cartCount} ${cartCount === 1 ? "item" : "items"}`} goLabel={`Correct — Pay ${peso(total)}`}
+      onBack={() => setStep("pick")} onGo={() => { if (!pay) setPay("cash"); setStep("pay"); }}
+      note={offline ? "No internet: the sale is saved on this tablet and sent later." : null}
+      lines={priced.map((l, idx) => {
+        const it = byId.get(l.productId);
+        const c = computed[idx]!;
+        const unit = l.price ?? it?.priceMinor ?? 0;
+        const sackish = !!it?.gramsPerUnit;
+        const n = Number(l.value) || 0;
+        const notes: CheckLine["notes"] = [];
+        if (promoAt[idx] != null) notes.push({ text: "Promo price", tone: "success" });
+        else if (l.price !== undefined && it && l.price !== it.priceMinor) notes.push({ text: `New price · usual ${peso(it.priceMinor)}`, tone: "warning" });
+        if (it && isBelowCost(unit, it.floorMinor)) notes.push({ text: "Below cost", tone: "danger" });
+        if (l.sourceLocationId) notes.push({ text: `From ${code(l.sourceLocationId)}`, tone: "info" });
+        const orig = cart[idx]!;
+        const edit = orig.mode !== "PESO";
+        return {
+          key: `${idx}-${l.productId}`, name: it?.name ?? "Item", totalMinor: c.totalMinor, notes,
+          // Change it right here: − / + (one sack or one kilo), the trash can, and Price (the same price card as while picking).
+          qty: l.mode === "PIECE" ? l.value : kg(c.grams ?? 0), unitWord: l.mode === "KILO" ? "kilo" : sackish ? "sack" : "piece",
+          canMinus: edit && (l.mode === "PIECE" ? n > 1 : (c.grams ?? 0) > 1000),
+          onMinus: edit ? () => bump(idx, -1) : undefined, onPlus: edit ? () => bump(idx, 1) : undefined,
+          onRemove: () => setCart(cart.filter((_, j) => j !== idx)), onPrice: () => startEdit(orig, idx),
+          qtyText: l.mode === "PIECE" ? `${n} ${sackish ? (n === 1 ? "sack" : "sacks") : (n === 1 ? "piece" : "pieces")}` : l.mode === "KILO" ? kg(c.grams ?? 0) : `₱${l.value} worth`,
+          eachText: l.mode === "PESO" ? `${peso(unit)} per kilo` : `${peso(unit)} ${l.mode === "KILO" ? "per kilo" : sackish ? "per sack" : "each"}`,
+        };
+      })} />
+  );
   // The store chips are locked during a sale, so the pay step does without them.
   const storeBar = step === "pick" && !newItem && (
     <StoreBar inline size="md" label="Selling at" locations={locations} value={locationId} homeLocationId={homeLocationId} locked={cart.length > 0}
@@ -846,7 +882,7 @@ export default function BentaPanel() {
   // Sideways, the steps sit above the sale; they step aside while the number pad needs the whole column.
   const stepsRow = !(sideBySide && (editing || checking)) && (
     <div className="d-flex flex-wrap align-items-center gap-2 mb-2">
-      <Steps className="mb-0 me-auto" items={["Pick items", "Pay", "Done"]} current={step === "pay" ? 1 : 0} />
+      <Steps className="mb-0 me-auto" items={STEPS} current={step === "pay" ? 2 : step === "check" ? 1 : 0} />
       {heldBtn}
       {!sideBySide && step === "pick" && !newItem && !editing && !checking && (mustChoose ? chosenRow : customerSelect)}
     </div>
@@ -886,6 +922,7 @@ export default function BentaPanel() {
           {step === "pick" && !newItem && (editing || checking) && <div className="fit-scroll">{quickCount || editCard}</div>}
           {step === "pick" && newItem && <div className="fit-scroll"><NewItemForm locationId={locationId} onCancel={() => setNewItem(false)} onDone={async () => { setNewItem(false); await loadCatalog(locationId); }} /></div>}
 
+          {step === "check" && (editing || checking) ? <div className="fit-scroll">{quickCount || editCard}</div> : !editing && !checking && checkCard}
           {step === "pay" && (
             <div className="fit-scroll">
           <div className="sale-card fit-pay mx-auto w-100" style={{ maxWidth: padSide ? 920 : 560 }}>
@@ -1030,7 +1067,7 @@ export default function BentaPanel() {
               )}
 
               <div className="d-flex gap-2 mt-2 pos-actions">
-                <button type="button" className="btn btn-outline-dark btn-lg" disabled={busy} onClick={() => setStep("pick")}>Back</button>
+                <button type="button" className="btn btn-outline-dark btn-lg" disabled={busy} onClick={() => setStep("check")}>Back</button>
                 <button type="button" className="btn btn-success btn-lg flex-fill py-3 fw-bold sale-pay" disabled={!canSubmit} onClick={() => void submit()}>{busy ? "Please wait…" : "Finish sale"}</button>
               </div>
               {pay === "cash" && !tendered && <div className="text-center text-muted mt-1">{drawerOpen === false && shiftRequired ? "Open the cash drawer first." : "Tap Exact or enter the cash received first."}</div>}
