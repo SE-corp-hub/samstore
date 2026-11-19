@@ -157,10 +157,38 @@ export default function AdminDashboard() {
     } catch { /* an odd browser: the screen still opens */ }
   }, []);
   const [mobileNav, setMobileNav] = useState(false);
+  // The Menu drawer stays on screen for a moment after it is closed, so it can slide away (motion.css).
+  const [drawerShown, setDrawerShown] = useState(false);
+  const menuBtnRef = useRef<HTMLButtonElement>(null);
+  const menuCloseRef = useRef<HTMLButtonElement>(null);
+  const swipeFrom = useRef<{ x: number; y: number } | null>(null);
+  useEffect(() => {
+    if (mobileNav) { setDrawerShown(true); return; }
+    if (!drawerShown) return;
+    const still = typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    const timer = setTimeout(() => setDrawerShown(false), still ? 0 : 200);
+    return () => clearTimeout(timer);
+  }, [mobileNav, drawerShown]);
+  // Keyboard users land on Close when the Menu opens, and go back to the Menu button when it closes.
+  const closeMenu = useCallback(() => {
+    setMobileNav(false);
+    if (menuBtnRef.current && menuBtnRef.current.offsetParent !== null) menuBtnRef.current.focus({ preventScroll: true });
+  }, []);
+  useEffect(() => {
+    if (!mobileNav) return;
+    menuCloseRef.current?.focus({ preventScroll: true });
+    // The open screen's row is in view when the Menu opens (the list is longer than the screen).
+    document.querySelector<HTMLElement>(".menu-panel .nav-link.active")?.scrollIntoView({ block: "center" });
+  }, [mobileNav]);
   // Whether we know which stores this account can reach. Without this the shell
   // renders while the answer is still "none", and every tab answers 403.
   const [storesStatus, setStoresStatus] = useState<"loading" | "ready" | "error">("loading");
   const [waking, setWaking] = useState(false); // the sleeping beta server is starting up
+  // Each time another screen opens, its title and content fade in once (two same-looking animations take turns,
+  // so the fade plays again without re-making the screen).
+  const [shown, setShown] = useState({ tab: "overview", n: 0 });
+  if (shown.tab !== tab) setShown({ tab, n: shown.n + 1 });
+  const enterClass = shown.n % 2 ? "screen-in-a" : "screen-in-b";
   const offline = useOffline();
   const locked = offline && !OFFLINE_READY.has(tab);
   // PIN lock: screens the owner locked show the PIN pad instead, until the right PIN (works offline).
@@ -455,13 +483,26 @@ export default function AdminDashboard() {
   const slimTop = (tab === "pos" || tab === "preorders") && BAR_ROLES.includes(role);
   const renderSidebar = (desktop: boolean) => (
     <div className="d-flex flex-column h-100">
-      <div className="p-3 border-bottom">
-        <div className="fw-bold h6 mb-0 d-flex align-items-center gap-2">
-          <i className="bi bi-shop fs-6"></i>
-          {active?.name ?? "Store Admin"}
+      {desktop ? (
+        <div className="p-3 border-bottom">
+          <div className="fw-bold h6 mb-0 d-flex align-items-center gap-2">
+            <i className="bi bi-shop fs-6"></i>
+            {active?.name ?? "Store Admin"}
+          </div>
+          {active && role === "PLATFORM_ADMIN" && <small>{active.slug}</small>}
         </div>
-        {active && role === "PLATFORM_ADMIN" && <small>{active.slug}</small>}
-      </div>
+      ) : (
+        <div className="menu-head">
+          <span className="menu-brand" aria-hidden="true"><i className="bi bi-shop"></i></span>
+          <div className="min-w-0 flex-grow-1">
+            <div className="menu-brand-name">{active?.name ?? "Store Admin"}</div>
+            <div className="menu-brand-sub">{active && role === "PLATFORM_ADMIN" ? active.slug : "Menu"}</div>
+          </div>
+          <button ref={menuCloseRef} type="button" className="menu-close" onClick={closeMenu} aria-label="Close menu">
+            <i className="bi bi-x-lg" aria-hidden="true"></i>
+          </button>
+        </div>
+      )}
       <nav className="flex-grow-1 overflow-auto py-2">
         {visibleGroups.map((g) => (
           <div key={g.group} className={`mb-2 tone-${g.tone}`}>
@@ -503,15 +544,20 @@ export default function AdminDashboard() {
           </div>
         </div>
       ) : (
-        <div className="p-3 border-top">
-          <div className="mb-3"><TextSizePicker /></div>
-          <div className="small fw-semibold">{email || "Admin"}</div>
-          <div className="small mb-2">{role} · {active?.name}</div>
-          <button className="btn btn-outline-secondary w-100 mb-2" onClick={() => void switchUser()}>
-            <i className="bi bi-arrow-left-right me-1"></i>Switch user (PIN)
+        <div className="menu-foot">
+          <TextSizePicker />
+          <div className="menu-who">
+            <span className="menu-avatar" aria-hidden="true">{(email || "A").trim().charAt(0).toUpperCase()}</span>
+            <div className="min-w-0">
+              <div className="menu-who-name">{email || "Admin"}</div>
+              <div className="menu-who-role">{role}{active?.name ? ` · ${active.name}` : ""}</div>
+            </div>
+          </div>
+          <button type="button" className="btn menu-act w-100" onClick={() => void switchUser()}>
+            <i className="bi bi-arrow-left-right" aria-hidden="true"></i>Switch user (PIN)
           </button>
-          <button className="btn btn-outline-danger w-100" onClick={() => void askLogout()}>
-            <i className="bi bi-box-arrow-right me-1"></i>Log out
+          <button type="button" className="btn menu-act menu-act-out w-100" onClick={() => void askLogout()}>
+            <i className="bi bi-box-arrow-right" aria-hidden="true"></i>Log out
           </button>
         </div>
       )}
@@ -526,20 +572,25 @@ export default function AdminDashboard() {
       </aside>
 
       {/* Drawer: phones and tablets (either way), from the menu button; same dark look as the sidebar */}
-      {mobileNav && (
-        <>
-          <div className="modal fade show d-block d-lg-none touch-show-block" tabIndex={-1} role="dialog" aria-modal="true" aria-label="Menu"
-            onClick={(e) => { if (e.target === e.currentTarget) setMobileNav(false); }} onKeyDown={(e) => { if (e.key === "Escape") setMobileNav(false); }}>
-            {/* The drawer is exactly one screen tall and scrolls by itself (admin-drawer in globals.css), so the
-                last screens, Text size, Switch user and Log out can always be reached with a finger, at any text size. */}
-            <div className="modal-dialog admin-drawer-dialog" style={{ maxWidth: "min(320px, 85vw)", margin: 0 }}>
-              <div className="modal-content admin-sidebar admin-drawer rounded-0 border-end">
-                {renderSidebar(false)}
-              </div>
-            </div>
+      {(mobileNav || drawerShown) && (
+        <div className={`menu-layer d-lg-none touch-show-block${mobileNav ? "" : " is-closing"}`} role="dialog" aria-modal="true" aria-label="Menu"
+          onKeyDown={(e) => { if (e.key === "Escape") closeMenu(); }}>
+          <div className="menu-backdrop" onClick={closeMenu}></div>
+          {/* The drawer is exactly one screen tall and scrolls by itself (admin-drawer in globals.css), so the
+              last screens, Text size, Switch user and Log out can always be reached with a finger, at any text size.
+              A swipe to the left closes it, like the tap outside. */}
+          <div className="menu-panel admin-sidebar admin-drawer"
+            onTouchStart={(e) => { const p = e.touches[0]; swipeFrom.current = p ? { x: p.clientX, y: p.clientY } : null; }}
+            onTouchEnd={(e) => {
+              const from = swipeFrom.current; const p = e.changedTouches[0];
+              swipeFrom.current = null;
+              if (!from || !p) return;
+              const dx = p.clientX - from.x; const dy = p.clientY - from.y;
+              if (dx < -70 && Math.abs(dx) > Math.abs(dy) * 2) closeMenu();
+            }}>
+            {renderSidebar(false)}
           </div>
-          <div className="modal-backdrop fade show d-lg-none touch-show-block" onClick={() => setMobileNav(false)}></div>
-        </>
+        </div>
       )}
 
       {/* Main */}
@@ -551,8 +602,12 @@ export default function AdminDashboard() {
         <nav className={`admin-topbar navbar navbar-expand py-2${slimTop ? " topbar-slim" : ""}`}>
           <div className="container-fluid">
             {!slimTop && (
-              <button className="btn btn-outline-secondary btn-sm d-lg-none touch-show me-2" onClick={() => setMobileNav(true)} aria-label="Menu">
-                <i className="bi bi-list"></i>
+              <button ref={menuBtnRef} type="button" className="menu-open d-lg-none touch-show me-2" onClick={() => setMobileNav(true)}
+                aria-label="Menu" aria-haspopup="dialog" aria-expanded={mobileNav}>
+                <span className="menu-open-in">
+                  <span className="menu-bars" aria-hidden="true"><span></span><span></span><span></span></span>
+                  <span className="menu-open-word" aria-hidden="true">Menu</span>
+                </span>
               </button>
             )}
             {/* The screen's icon on its group colour, its name, and one line on what it is for. */}
@@ -564,7 +619,7 @@ export default function AdminDashboard() {
               const icon = role === "DELIVERY" ? "bi-truck" : tab === "home" ? "bi-grid-3x3-gap" : (n?.icon ?? "bi-speedometer2");
               const hint = tab === "home" ? "Every screen, grouped by what it is for" : n?.hint;
               return (
-                <div className={`screen-title ${group ? `tone-${group.tone}` : "tone-setup"}`}>
+                <div className={`screen-title ${enterClass} ${group ? `tone-${group.tone}` : "tone-setup"}`}>
                   <span className="screen-chip" aria-hidden="true"><i className={`bi ${icon}`}></i></span>
                   <div className="min-w-0">
                     <div className="screen-name">{name}</div>
@@ -609,7 +664,7 @@ export default function AdminDashboard() {
           }} />
         )}
 
-        <main className={`container-fluid py-4 flex-grow-1${BAR_ROLES.includes(role) ? " has-staff-bar" : ""}`} style={{ background: "#faf7f2" }}>
+        <main className={`container-fluid py-4 flex-grow-1${BAR_ROLES.includes(role) ? " has-staff-bar" : ""}`} style={{ background: "var(--sam-bg)" }}>
           {showPinPad && pinLock.lock ? (
             <LockScreen
               lock={pinLock.lock}
@@ -635,20 +690,33 @@ export default function AdminDashboard() {
               </div>
             ) : null;
           })()}
-          <fieldset disabled={locked} className="border-0 p-0 m-0" style={{ minWidth: 0 }}>
+          <fieldset disabled={locked} className={`border-0 p-0 m-0 screen-body ${enterClass}`} style={{ minWidth: 0 }}>
             {RICE_TABS.has(tab) ? <div className="rice-ui p-2 rounded">{renderTab()}</div> : renderTab()}
           </fieldset>
           </>}
         </main>
 
-        {BAR_ROLES.includes(role) && (
-          <nav className="staff-bar d-lg-none" aria-label="Main actions">
-            {STAFF_BAR.filter((b) => allowed.includes(b.id)).map((b) => (
+        {BAR_ROLES.includes(role) && (() => {
+          // The dark pill slides to the open button (motion.css). On a narrow phone the wide-only buttons
+          // are hidden, so the pill gets its own count and place there.
+          const items = STAFF_BAR.filter((b) => allowed.includes(b.id));
+          const narrow = items.filter((b) => !b.wideOnly);
+          const cur = BAR_ALIAS[tab] ?? tab;
+          const at = items.findIndex((b) => b.id === cur);
+          const atNarrow = narrow.findIndex((b) => b.id === cur);
+          const more = at < 0;
+          const pill = {
+            "--bar-n": items.length + 1, "--bar-i": more ? items.length : at,
+            "--bar-n-narrow": narrow.length + 1, "--bar-i-narrow": atNarrow < 0 ? narrow.length : atNarrow,
+          } as React.CSSProperties;
+          return (
+          <nav className="staff-bar d-lg-none" aria-label="Main actions" style={pill}>
+            {items.map((b) => (
               <button
                 key={b.id}
                 type="button"
-                className={`tone-${toneFor(NAV_ID[b.id] ?? b.id)}${b.wideOnly ? " bar-wide-only" : ""}${(BAR_ALIAS[tab] ?? tab) === b.id ? " active" : ""}`}
-                aria-current={(BAR_ALIAS[tab] ?? tab) === b.id ? "page" : undefined}
+                className={`tone-${toneFor(NAV_ID[b.id] ?? b.id)}${b.wideOnly ? " bar-wide-only" : ""}${cur === b.id ? " active" : ""}`}
+                aria-current={cur === b.id ? "page" : undefined}
                 onClick={() => { userNavigated.current = true; setTab(b.id); setMobileNav(false); }}
               >
                 <i className={`bi ${b.icon}`}></i>
@@ -657,15 +725,16 @@ export default function AdminDashboard() {
             ))}
             <button
               type="button"
-              className={!STAFF_BAR.some((b) => b.id === (BAR_ALIAS[tab] ?? tab)) ? "active" : ""}
-              aria-current={!STAFF_BAR.some((b) => b.id === (BAR_ALIAS[tab] ?? tab)) ? "page" : undefined}
+              className={`${more ? "active" : ""}${!more && atNarrow < 0 ? " active-narrow" : ""}`}
+              aria-current={more ? "page" : undefined}
               onClick={() => { userNavigated.current = true; setTab("home"); setMobileNav(false); }}
             >
               <i className="bi bi-grid-3x3-gap"></i>
               <span>More</span>
             </button>
           </nav>
-        )}
+          );
+        })()}
       </div>
     </div>
   );

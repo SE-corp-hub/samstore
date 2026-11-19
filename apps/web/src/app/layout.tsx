@@ -5,6 +5,7 @@ import "./globals.css";
 import "./polish.css";
 import "./easy-read.css";
 import "./desktop.css";
+import "./motion.css";
 import PwaRegister from "../components/PwaRegister";
 
 export const metadata: Metadata = {
