@@ -1,0 +1,251 @@
+/* ───────────── Premium menu, bars and motion (2026-11-19) ─────────────
+   Loaded last. Looks and movement only: no screen changes what it does.
+   - Menu button: a dark, labelled button a finger cannot miss.
+   - Menu drawer: slides in from the left with a soft backdrop, icons on tinted chips, a Close button
+     that stays at the top, and a tidy footer (who is signed in, Text size, Switch user, Log out).
+   - Bottom bar: a dark pill slides to the open button. The bar keeps its exact height (66 / 74 px),
+     because POS and Pre-order measure it to fit the tablet (lib/use-fit-height.ts).
+   - Other screens: the opened screen fades in, pop-ups rise in, buttons give under the finger.
+   The tablet is slow, so only `transform` and `opacity` ever move, nothing loops, and everything is short.
+   Whole-screen fades use opacity ONLY: a transform on a wrapper would shift what POS / Pre-order measure,
+   and would trap their fixed pop-ups. With "reduce motion" on, nothing moves at all. */
+
+:root {
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+  --sam-coffee: #2b2118;
+  --sam-coffee-up: #36291d;
+}
+
+/* ── 1. Menu button (top bar). `touch-show` forces inline-block, so the row layout lives on the inner span. */
+.menu-open {
+  flex: 0 0 auto; min-height: 48px; padding: 0 0.9rem 0 0.8rem;
+  background: var(--sam-coffee); color: #fff; border: 0; border-radius: 0.8rem;
+  font-size: 1rem; font-weight: 700; line-height: 1;
+  box-shadow: 0 1px 2px rgba(43, 33, 24, 0.25), 0 4px 10px rgba(43, 33, 24, 0.16);
+  -webkit-tap-highlight-color: transparent;
+}
+.menu-open-in { display: flex; align-items: center; gap: 0.6rem; min-height: 48px; }
+.menu-bars { display: flex; flex-direction: column; justify-content: center; gap: 5px; width: 22px; }
+.menu-bars > span { display: block; height: 3px; border-radius: 2px; background: #fff; }
+.menu-open:active { background: #1f1710; }
+.menu-open:focus-visible { outline: 3px solid var(--sam-primary); outline-offset: 2px; }
+@media (hover: hover) and (pointer: fine) { .menu-open:hover { background: var(--sam-coffee-up); } }
+/* Upright tablet: the word sits under the three lines, so the button stays narrow and the screen's
+   name and hint keep their room at every text size. */
+@media (max-width: 991.98px) {
+  .admin-topbar .menu-open { padding: 0 4px; margin-right: 4px !important; }
+  .menu-open-in { flex-direction: column; justify-content: center; gap: 3px; }
+  .menu-bars { gap: 4px; }
+  .menu-open-word { font-size: 16px; line-height: 1.05; letter-spacing: -0.01em; }
+  .admin-topbar .screen-title { gap: 8px; }
+}
+/* Phones and narrow screens: the three lines only (the button still says "Menu" to a screen reader). */
+@media (max-width: 699.98px) {
+  .admin-topbar .menu-open { padding: 0 11px; margin-right: 8px !important; }
+  .menu-open-word { display: none; }
+}
+
+/* ── 2. Menu drawer. */
+.menu-layer { position: fixed; inset: 0; z-index: 1055; }
+.menu-backdrop { position: absolute; inset: 0; background: rgba(28, 20, 12, 0.5); }
+.admin-shell .menu-panel {
+  position: absolute; top: 0; left: 0; width: min(340px, 86vw);
+  background: linear-gradient(180deg, #36291d 0%, #2b2118 38%, #241b13 100%);
+  border-radius: 0 1.25rem 1.25rem 0;
+  box-shadow: 8px 0 40px rgba(0, 0, 0, 0.35);
+  outline: 0;
+}
+/* Top of the drawer: the business, and Close. It stays put while the list scrolls under it. */
+.menu-head {
+  position: sticky; top: 0; z-index: 2;
+  display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem 0.75rem 0.75rem 1rem;
+  background: #36291d; border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+.menu-brand {
+  flex: 0 0 auto; width: 2.75rem; height: 2.75rem; border-radius: 0.85rem;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--sam-primary); color: #fff; font-size: 1.35rem;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+.menu-brand-name { font-weight: 700; font-size: 1.1rem; line-height: 1.2; color: #fff; overflow-wrap: anywhere; }
+.menu-brand-sub { font-size: max(16px, 0.9rem); line-height: 1.25; color: var(--sam-sidebar-muted); }
+.menu-close {
+  flex: 0 0 auto; width: 48px; height: 48px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(255, 255, 255, 0.1); color: #fff; border: 0; font-size: 1.15rem;
+  -webkit-tap-highlight-color: transparent;
+}
+.menu-close:active { background: rgba(255, 255, 255, 0.22); }
+.menu-close:focus-visible { outline: 3px solid #ffd98a; outline-offset: 2px; }
+@media (hover: hover) and (pointer: fine) { .menu-close:hover { background: rgba(255, 255, 255, 0.18); } }
+
+/* The list: each icon sits on a soft chip in its group colour; the open screen stays terracotta. */
+.admin-sidebar .tone-sell { --tone-chip: rgba(228, 243, 234, 0.13); }
+.admin-sidebar .tone-money { --tone-chip: rgba(255, 243, 214, 0.13); }
+.admin-sidebar .tone-stock { --tone-chip: rgba(227, 240, 251, 0.13); }
+.admin-sidebar .tone-report { --tone-chip: rgba(236, 230, 247, 0.13); }
+.admin-sidebar .tone-setup { --tone-chip: rgba(238, 235, 230, 0.13); }
+.admin-sidebar .nav-link {
+  /* w-100 plus a side margin ran the pill off the right edge: the width now leaves both margins. */
+  width: calc(100% - 1.2rem) !important;
+  border-radius: 0.8rem; margin: 2px 0.6rem; padding: 0.35rem 0.6rem;
+  transition: background-color 150ms ease-out, color 150ms ease-out, transform 140ms var(--ease-out);
+  -webkit-tap-highlight-color: transparent;
+}
+.admin-sidebar .nav-link > i:first-child {
+  width: 2rem; height: 2rem; border-radius: 0.6rem; margin-right: 0.2rem;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--tone-chip, rgba(255, 255, 255, 0.1));
+}
+.admin-sidebar .nav-link:active { background: rgba(255, 255, 255, 0.12); }
+.admin-sidebar .nav-link.active {
+  font-weight: 700; background: var(--sam-primary);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.14);
+}
+.admin-sidebar .nav-link.active > i:first-child { background: rgba(255, 255, 255, 0.2); }
+/* A hairline between the groups. */
+.admin-sidebar nav > div + div { margin-top: 0.6rem; padding-top: 0.5rem; border-top: 1px solid rgba(255, 255, 255, 0.09); }
+/* PC sidebar: the same chips, a touch smaller, so its rows keep their 44 px. */
+@media (hover: hover) and (pointer: fine) {
+  .admin-shell aside.admin-sidebar .nav-link > i:first-child { width: 1.85rem; height: 1.85rem; }
+}
+
+/* Bottom of the drawer: Text size, who is signed in, Switch user, Log out. */
+.menu-foot {
+  display: flex; flex-direction: column; gap: 0.75rem;
+  padding: 1rem; border-top: 1px solid rgba(255, 255, 255, 0.12); background: rgba(0, 0, 0, 0.16);
+}
+.menu-who { display: flex; align-items: center; gap: 0.75rem; min-width: 0; }
+.menu-avatar {
+  flex: 0 0 auto; width: 2.75rem; height: 2.75rem; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: #f4ede2; color: var(--sam-coffee); font-weight: 700; font-size: 1.2rem;
+}
+.menu-who-name { font-weight: 700; color: #fff; line-height: 1.25; overflow-wrap: anywhere; }
+.menu-who-role { font-size: max(16px, 0.9rem); color: var(--sam-sidebar-muted); line-height: 1.25; overflow-wrap: anywhere; }
+.admin-shell .menu-act {
+  min-height: 52px; display: flex; align-items: center; justify-content: center; gap: 0.6rem;
+  border: 2px solid rgba(244, 237, 226, 0.75); border-radius: 0.8rem;
+  background: transparent; color: #fff; font-weight: 700;
+}
+.admin-shell .menu-act:active, .admin-shell .menu-act:focus-visible { background: rgba(255, 255, 255, 0.14); border-color: #fff; color: #fff; }
+.admin-shell .menu-act-out { border-color: #ffb4a8; color: #ffd2ca; }
+.admin-shell .menu-act-out:active, .admin-shell .menu-act-out:focus-visible { background: #a3201b; border-color: #a3201b; color: #fff; }
+.admin-shell .menu-act:focus-visible { outline: 3px solid #ffd98a; outline-offset: 2px; }
+@media (hover: hover) and (pointer: fine) {
+  .admin-shell .menu-act:hover { background: rgba(255, 255, 255, 0.14); border-color: #fff; color: #fff; }
+  .admin-shell .menu-act-out:hover { background: #a3201b; border-color: #a3201b; color: #fff; }
+}
+
+/* ── 3. Bottom bar: softer edge, a dark pill behind the open button (it slides when another one opens).
+   Height is unchanged: 1 px line + 1 px padding = the 2 px line it had. */
+.staff-bar {
+  background: #fff; border-top: 1px solid #d5cabb; padding-top: 1px;
+  box-shadow: 0 -6px 20px rgba(43, 33, 24, 0.09);
+}
+.staff-bar::before {
+  content: ""; position: absolute; left: 0; top: 6px; bottom: calc(5px + env(safe-area-inset-bottom));
+  width: calc(100% / var(--bar-n, 7));
+  transform: translateX(calc(var(--bar-i, 0) * 100%));
+  border: 0 solid transparent; border-width: 0 5px; background: var(--sam-coffee); background-clip: padding-box;
+  border-radius: 1.4rem;
+  pointer-events: none;
+}
+.staff-bar button { position: relative; -webkit-tap-highlight-color: transparent; }
+.staff-bar button.active { background: transparent; color: #fff; }
+.staff-bar button.active i { color: var(--tone-bg, #fff); }
+.staff-bar button.active .bar-lock { color: #ffd98a !important; }
+@media (max-width: 575.98px) {
+  .staff-bar::before { width: calc(100% / var(--bar-n-narrow, 6)); transform: translateX(calc(var(--bar-i-narrow, 0) * 100%)); }
+  /* Move stock has no button on a phone: More shows as the open one there. */
+  .staff-bar button.active-narrow { color: #fff; }
+  .staff-bar button.active-narrow i { color: #fff; }
+}
+
+/* ── 4. Home ("More"): calmer tiles with the icon on a chip, still a clear dark-enough edge and a colour stripe. */
+.staff-tile {
+  border: 2px solid #8c857c; border-left: 8px solid var(--tone, #1f1d1a); border-radius: 1rem;
+  box-shadow: 0 1px 2px rgba(43, 33, 24, 0.06), 0 6px 16px rgba(43, 33, 24, 0.07);
+  -webkit-tap-highlight-color: transparent;
+}
+.staff-tile > i:first-child {
+  width: 3rem; height: 3rem; border-radius: 0.9rem;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--tone-bg, #eeebe6); font-size: 1.75rem;
+}
+.staff-tile:hover > i:first-child, .staff-tile:active > i:first-child { background: rgba(255, 255, 255, 0.18); }
+
+/* ── 5. Movement. Everything below is off when the tablet asks for less motion. */
+@media (prefers-reduced-motion: no-preference) {
+  /* Under the finger: buttons give a little, then spring back. */
+  .admin-shell .btn {
+    transition: background-color 150ms ease-out, border-color 150ms ease-out, color 150ms ease-out,
+      box-shadow 150ms ease-out, transform 140ms var(--ease-out);
+  }
+  .admin-shell .btn:active:not(:disabled):not(.disabled) { transform: scale(0.97); }
+  html[data-text-size] .modal .btn { transition: background-color 150ms ease-out, border-color 150ms ease-out, color 150ms ease-out, transform 140ms var(--ease-out); }
+  html[data-text-size] .modal .btn:active:not(:disabled):not(.disabled) { transform: scale(0.97); }
+  .menu-open, .menu-close { transition: background-color 150ms ease-out, transform 140ms var(--ease-out); }
+  .menu-open:active, .menu-close:active { transform: scale(0.95); }
+  .admin-sidebar .nav-link:active { transform: scale(0.98); }
+  .staff-tile, .pick-tile, .pick-row {
+    transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease, transform 140ms var(--ease-out);
+  }
+  .staff-tile:active, .pick-tile:active, .pick-row:active { transform: scale(0.98); }
+
+  /* Menu drawer: slides in, the groups follow one after another; it leaves faster than it came. */
+  .menu-backdrop { animation: sam-fade-in 240ms ease-out backwards; }
+  .menu-panel { animation: sam-drawer-in 320ms var(--ease-drawer) backwards; }
+  .menu-panel nav > div { animation: sam-rise-x 320ms var(--ease-out) backwards; }
+  .menu-panel nav > div:nth-child(1) { animation-delay: 70ms; }
+  .menu-panel nav > div:nth-child(2) { animation-delay: 105ms; }
+  .menu-panel nav > div:nth-child(3) { animation-delay: 140ms; }
+  .menu-panel nav > div:nth-child(4) { animation-delay: 175ms; }
+  .menu-panel nav > div:nth-child(n + 5) { animation-delay: 210ms; }
+  .menu-layer.is-closing { pointer-events: none; }
+  .menu-layer.is-closing .menu-backdrop { animation: sam-fade-out 190ms ease-out forwards; }
+  .menu-layer.is-closing .menu-panel { animation: sam-drawer-out 190ms var(--ease-drawer) forwards; }
+  .menu-layer.is-closing .menu-panel nav > div { animation: none; }
+
+  /* Bottom bar: the pill glides to the open button. */
+  .staff-bar::before { transition: transform 300ms var(--ease-drawer); }
+  /* The words change colour a moment later, when the pill is (nearly) under them. */
+  .staff-bar button { transition: color 130ms ease-out 80ms, transform 140ms var(--ease-out); }
+  .staff-bar button i { transition: color 130ms ease-out 80ms; }
+  .staff-bar button:active { transform: scale(0.94); }
+
+  /* A screen opens: the title steps in, the content fades in (opacity only, see the note at the top). */
+  .screen-title.screen-in-a { animation: sam-title-a 220ms var(--ease-out) backwards; }
+  .screen-title.screen-in-b { animation: sam-title-b 220ms var(--ease-out) backwards; }
+  .screen-body.screen-in-a { animation: sam-screen-a 200ms ease-out backwards; }
+  .screen-body.screen-in-b { animation: sam-screen-b 200ms ease-out backwards; }
+
+  /* Home: the groups arrive one after another. */
+  .rice-ui > .home-group { animation: sam-rise 320ms var(--ease-out) backwards; }
+  .rice-ui > .home-group:nth-of-type(2) { animation-delay: 45ms; }
+  .rice-ui > .home-group:nth-of-type(3) { animation-delay: 90ms; }
+  .rice-ui > .home-group:nth-of-type(4) { animation-delay: 135ms; }
+  .rice-ui > .home-group:nth-of-type(n + 5) { animation-delay: 180ms; }
+
+  /* Pop-ups rise in over a backdrop that fades in (no scaling: a signature pad or number pad inside
+     must keep its true size from the first frame). */
+  html[data-text-size] .modal.d-block > .modal-dialog { animation: sam-pop-in 220ms var(--ease-out) backwards; }
+  html[data-text-size] .modal-backdrop.show { animation: sam-backdrop-in 180ms ease-out backwards; }
+  html[data-text-size] .toast.show { animation: sam-rise 240ms var(--ease-out) backwards; }
+  /* Log in: the card arrives once. */
+  .admin-login .card { animation: sam-rise 360ms var(--ease-out) backwards; }
+
+  @keyframes sam-fade-in { from { opacity: 0; } }
+  @keyframes sam-fade-out { to { opacity: 0; } }
+  @keyframes sam-backdrop-in { from { opacity: 0; } }
+  @keyframes sam-drawer-in { from { transform: translateX(-100%); } }
+  @keyframes sam-drawer-out { to { transform: translateX(-100%); } }
+  @keyframes sam-rise-x { from { opacity: 0; transform: translateX(-12px); } }
+  @keyframes sam-rise { from { opacity: 0; transform: translateY(10px); } }
+  @keyframes sam-pop-in { from { opacity: 0; transform: translateY(12px); } }
+  @keyframes sam-title-a { from { opacity: 0; transform: translateY(5px); } }
+  @keyframes sam-title-b { from { opacity: 0; transform: translateY(5px); } }
+  @keyframes sam-screen-a { from { opacity: 0; } }
+  @keyframes sam-screen-b { from { opacity: 0; } }
+}
