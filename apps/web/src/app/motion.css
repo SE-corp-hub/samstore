@@ -13,24 +13,34 @@
 :root {
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
   --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
-  --sam-coffee: #2b2118;
-  --sam-coffee-up: #36291d;
+  /* Navigation colours, in one place (Menu button, bottom-bar pill, Menu drawer, PC sidebar, page).
+     2026-11-19: rice-field green, a deeper shade than the green "go" buttons, so it reads as the frame
+     of the app and never as a button to press; terracotta stays "you are here" on top of it. */
+  --nav-ink: #173f2b;        /* Menu button and the bottom-bar pill (white on it: 11.5:1) */
+  --nav-ink-up: #1f5138;     /* hover */
+  --nav-ink-press: #11301f;  /* pressed */
+  --nav-shadow: 23, 63, 43;  /* r, g, b of the soft shadows */
+  --drawer-1: #21533a; --drawer-2: #183f2c; --drawer-3: #123222; /* drawer, top to bottom */
+  --drawer-head: #21533a;
+  --sam-sidebar: #183f2c;    /* PC sidebar matches the drawer */
+  --sam-bg: #f4efe4;         /* page: warm rice cream, so the white cards stand out */
+  --sam-coffee: var(--nav-ink);
 }
 
 /* ── 1. Menu button (top bar). `touch-show` forces inline-block, so the row layout lives on the inner span. */
 .menu-open {
   flex: 0 0 auto; min-height: 48px; padding: 0 0.9rem 0 0.8rem;
-  background: var(--sam-coffee); color: #fff; border: 0; border-radius: 0.8rem;
+  background: var(--nav-ink); color: #fff; border: 0; border-radius: 0.8rem;
   font-size: 1rem; font-weight: 700; line-height: 1;
-  box-shadow: 0 1px 2px rgba(43, 33, 24, 0.25), 0 4px 10px rgba(43, 33, 24, 0.16);
+  box-shadow: 0 1px 2px rgba(var(--nav-shadow), 0.25), 0 4px 10px rgba(var(--nav-shadow), 0.16);
   -webkit-tap-highlight-color: transparent;
 }
 .menu-open-in { display: flex; align-items: center; gap: 0.6rem; min-height: 48px; }
 .menu-bars { display: flex; flex-direction: column; justify-content: center; gap: 5px; width: 22px; }
 .menu-bars > span { display: block; height: 3px; border-radius: 2px; background: #fff; }
-.menu-open:active { background: #1f1710; }
+.menu-open:active { background: var(--nav-ink-press); }
 .menu-open:focus-visible { outline: 3px solid var(--sam-primary); outline-offset: 2px; }
-@media (hover: hover) and (pointer: fine) { .menu-open:hover { background: var(--sam-coffee-up); } }
+@media (hover: hover) and (pointer: fine) { .menu-open:hover { background: var(--nav-ink-up); } }
 /* Upright tablet: the word sits under the three lines, so the button stays narrow and the screen's
    name and hint keep their room at every text size. */
 @media (max-width: 991.98px) {
@@ -48,10 +58,10 @@
 
 /* ── 2. Menu drawer. */
 .menu-layer { position: fixed; inset: 0; z-index: 1055; }
-.menu-backdrop { position: absolute; inset: 0; background: rgba(28, 20, 12, 0.5); }
+.menu-backdrop { position: absolute; inset: 0; background: rgba(12, 28, 20, 0.5); }
 .admin-shell .menu-panel {
   position: absolute; top: 0; left: 0; width: min(340px, 86vw);
-  background: linear-gradient(180deg, #36291d 0%, #2b2118 38%, #241b13 100%);
+  background: linear-gradient(180deg, var(--drawer-1) 0%, var(--drawer-2) 38%, var(--drawer-3) 100%);
   border-radius: 0 1.25rem 1.25rem 0;
   box-shadow: 8px 0 40px rgba(0, 0, 0, 0.35);
   outline: 0;
@@ -60,7 +70,7 @@
 .menu-head {
   position: sticky; top: 0; z-index: 2;
   display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem 0.75rem 0.75rem 1rem;
-  background: #36291d; border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  background: var(--drawer-head); border-bottom: 1px solid rgba(255, 255, 255, 0.12);
 }
 .menu-brand {
   flex: 0 0 auto; width: 2.75rem; height: 2.75rem; border-radius: 0.85rem;
@@ -148,7 +158,7 @@
   content: ""; position: absolute; left: 0; top: 6px; bottom: calc(5px + env(safe-area-inset-bottom));
   width: calc(100% / var(--bar-n, 7));
   transform: translateX(calc(var(--bar-i, 0) * 100%));
-  border: 0 solid transparent; border-width: 0 5px; background: var(--sam-coffee); background-clip: padding-box;
+  border: 0 solid transparent; border-width: 0 5px; background: var(--nav-ink); background-clip: padding-box;
   border-radius: 1.4rem;
   pointer-events: none;
 }

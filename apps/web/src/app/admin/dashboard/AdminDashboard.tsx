@@ -664,7 +664,7 @@ export default function AdminDashboard() {
           }} />
         )}
 
-        <main className={`container-fluid py-4 flex-grow-1${BAR_ROLES.includes(role) ? " has-staff-bar" : ""}`} style={{ background: "#faf7f2" }}>
+        <main className={`container-fluid py-4 flex-grow-1${BAR_ROLES.includes(role) ? " has-staff-bar" : ""}`} style={{ background: "var(--sam-bg)" }}>
           {showPinPad && pinLock.lock ? (
             <LockScreen
               lock={pinLock.lock}
