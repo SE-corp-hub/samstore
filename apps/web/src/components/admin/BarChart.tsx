@@ -15,9 +15,9 @@ export default function BarChart({ data, color = "var(--sam-primary)", max }: Ba
       {data.map((d, i) => {
         const h = maxValue > 0 ? Math.max(2, Math.round((d.value / maxValue) * 160)) : 2;
         return (
-          <div key={i} className="d-flex flex-column justify-content-end flex-grow-1 text-center" title={`${d.label}: ${d.valueLabel ?? d.value}`}>
+          <div key={i} className="d-flex flex-column justify-content-end flex-grow-1 text-center" style={{ flexBasis: 0, minWidth: 0 }} title={`${d.label}: ${d.valueLabel ?? d.value}`}>
             <div style={{ height: h, background: color, borderRadius: "4px 4px 0 0", minWidth: 12 }} />
-            <div className="text-muted mt-1" style={{ fontSize: "1rem", whiteSpace: "nowrap" }}>{d.label}</div>
+            <div className="text-muted mt-1" style={{ fontSize: "1rem", lineHeight: 1.15, overflowWrap: "normal" }}>{d.label}</div>
           </div>
         );
       })}

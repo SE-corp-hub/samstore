@@ -109,10 +109,10 @@ export default function ReportsPanel() {
 
   return (
     <div>
-      <div className="d-flex justify-content-between align-items-center mb-3">
+      <div className="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
         <h1 className="h4 mb-0"><i className="bi bi-graph-up me-2" aria-hidden="true"></i>Money reports</h1>
-        <div className="d-flex gap-2">
-          <select className="form-select form-select-sm" style={{ width: 150 }} aria-label="Period" value={days} onChange={(e) => setDays(parseInt(e.target.value, 10))}>
+        <div className="d-flex flex-wrap gap-2">
+          <select className="form-select form-select-sm" style={{ width: "auto" }} aria-label="Period" value={days} onChange={(e) => setDays(parseInt(e.target.value, 10))}>
             <option value={7}>Last 7 days</option>
             <option value={30}>Last 30 days</option>
             <option value={90}>Last 90 days</option>
