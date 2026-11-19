@@ -1,0 +1,64 @@
+/* Layout fixes (2026-11-19, user: "analyze every screen, some overlapping and other not align, im using
+   huawei se 11 tablet, make sure it has fix, and responsive on other sizes"). Loaded LAST (after motion.css).
+   Only placement, spacing and wrapping: no colours of the menu, no new screens. Each rule says what it fixes. */
+
+/* 1. Screens that sat in the middle with a wide empty strip on the left (Move stock, Customer returns,
+   Store payable, Supplier orders, Profit, Store report): start at the same left edge as every other screen,
+   under the screen's tabs. They keep their reading width. */
+.admin-shell .rice-ui > .container,
+.admin-shell .rice-ui > .container-fluid {
+  margin-left: 0; margin-right: 0; padding-left: 0; padding-right: 0;
+}
+
+/* 2. Drop-downs with a fixed pixel width cut their own words at bigger text ("Last 30 day…"). */
+.admin-shell select.form-select[style*="width"] { min-width: max-content; }
+
+/* 3. Rows of labelled boxes (Add a porter, Add a person, Add a location …): when one label wraps to two
+   lines, its box no longer drops below the others: every box sits on the same line. */
+.admin-shell .rice-ui .row:has(> [class*="col"] > .form-label) > [class*="col"]:has(> .form-label + .form-control:last-child),
+.admin-shell .rice-ui .row:has(> [class*="col"] > .form-label) > [class*="col"]:has(> .form-label + .form-select:last-child) {
+  display: flex; flex-direction: column; justify-content: flex-end;
+}
+
+/* 4. Tick boxes: the edge was too faint to see (1.3 : 1). A clear 2 px edge (3.6 : 1), same size. */
+.admin-shell .form-check-input:not(:checked) { border: 2px solid #8c857c; }
+
+/* 5. POS / Pre-order, sideways at Extra large: the four steps (Pick items · Check · Pay · Done) broke
+   onto two lines, "Done" alone under the rest. Keep them on one line in the side column. */
+.sell-fit .fit-side .steps, .sell-fit .steps.me-auto { flex-wrap: nowrap; gap: 0.6rem !important; justify-content: flex-start; min-width: 0; }
+.sell-fit .fit-side .steps > li, .sell-fit .steps.me-auto > li { gap: 0.35rem !important; white-space: nowrap; }
+.sell-fit .fit-side .steps > li > span:first-child, .sell-fit .steps.me-auto > li > span:first-child { width: 30px !important; height: 30px !important; flex: 0 0 auto; }
+
+/* 6. "Start a sale / pre-order": the grey/green button at the bottom was cut off by the bottom of the screen
+   (sideways, Large and Extra large). It now stays in view at the bottom of the card while the choices scroll. */
+.sell-fit .fit-scroll > .start-card { margin-bottom: 0; }
+.sell-fit .fit-scroll > .start-card .start-go {
+  position: sticky; bottom: 0; z-index: 2;
+  box-shadow: 0 -0.6rem 0 0.1rem #fff;
+}
+.sell-fit .fit-scroll > .start-card .start-go:disabled { opacity: 1; }
+
+/* 7. Menu button, upright: the word "Menu" touched the sides of its outline. */
+@media (min-width: 700px) and (max-width: 991.98px) {
+  .admin-topbar .menu-open { padding: 0 7px; }
+}
+
+/* 8. Bottom bar: the see-through glass let buttons and words under it show through, so they looked as if
+   they overlapped the bar. Still light and frosted, just enough that nothing reads through. */
+.staff-bar { background: rgba(255, 255, 255, 0.95); }
+
+/* 9. Phones at Large / Extra large text: "Pre-order" broke onto two lines in the bottom bar, the bar grew
+   taller than the room the screens keep for it, and the Pay / Save bars that stick above it slid under it
+   (their last line was hidden). The words stay on one line and shrink a little to fit the phone's width. */
+@media (max-width: 575.98px) {
+  .staff-bar button { white-space: nowrap; font-size: min(0.8rem, 3.4vw); letter-spacing: -0.01em; }
+}
+
+/* 10. Pay / Hold on a phone: the amount broke in the middle ("₱5,020.0" / "0"). A number never breaks. */
+.admin-shell .sale-pay, .admin-shell .pos-actions .btn { overflow-wrap: normal; word-break: keep-all; }
+/* Hold keeps its icon beside the word, so Pay gets the room for its amount. */
+.admin-shell .sale-card .btn-outline-dark.btn-lg:has(> .bi-pause-circle) { white-space: nowrap; flex: 0 0 auto; }
+@media (max-width: 575.98px) {
+  .admin-shell .sale-card .btn-outline-dark.btn-lg:has(> .bi-pause-circle) { padding-left: 0.6rem; padding-right: 0.6rem; }
+  .admin-shell .sale-card .sale-pay { padding-left: 0.5rem; padding-right: 0.5rem; font-size: 1.15rem; }
+}

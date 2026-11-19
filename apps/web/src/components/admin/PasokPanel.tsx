@@ -213,7 +213,7 @@ export default function PasokPanel({ role }: { role?: string; onNavigate?: (tab:
             }
             return (
               <div key={i} className="row g-2 mb-2 align-items-end">
-                <div className="col-12 col-sm-6">
+                <div className="col-12 col-sm-5">
                   <select className="form-select form-select-lg" aria-label={`Product ${i + 1}`} value={r.productId} onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, productId: e.target.value } : x)))}>
                     <option value="">Choose…</option>
                     {products.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
@@ -222,7 +222,7 @@ export default function PasokPanel({ role }: { role?: string; onNavigate?: (tab:
                 <div className="col-5 col-sm-3">
                   <input className="form-control form-control-lg text-center" aria-label={isLoose(p) ? "How many kilos" : "How many"} placeholder={isLoose(p) ? "kilos" : "how many"} inputMode="decimal" value={r.amount} onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, amount: num(e.target.value) } : x)))} />
                 </div>
-                <div className="col-5 col-sm-2">
+                <div className="col-5 col-sm-3">
                   <input className="form-control form-control-lg text-center" aria-label="Cost each" placeholder="₱ cost" inputMode="decimal" value={r.cost} onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, cost: num(e.target.value) } : x)))} />
                 </div>
                 <div className="col-2 col-sm-1">{rows.length > 1 && <button type="button" className="btn btn-link text-danger" aria-label="Remove" onClick={() => setRows(rows.filter((_, j) => j !== i))}>×</button>}</div>
@@ -246,11 +246,11 @@ export default function PasokPanel({ role }: { role?: string; onNavigate?: (tab:
         <div className="list-group" style={{ maxWidth: 620 }}>
           {docs.map((d) => (
             <div key={d.id} className="list-group-item d-flex justify-content-between align-items-center gap-2">
-              <div>
+              <div style={{ minWidth: 0, overflowWrap: "anywhere" }}>
                 <div className="fw-semibold">{d.docNumber}{d.supplierName ? ` · ${d.supplierName}` : ""}</div>
                 <div className="small text-muted">{d.lines.map((l) => `${l.loose ? kg(l.quantity) : l.quantity} ${l.name}`).join(", ")} · {new Date(d.createdAt).toLocaleString("en-PH")}</div>
               </div>
-              <button type="button" className="btn btn-outline-dark btn-sm text-nowrap" onClick={() => printSlip(slipOf(d))}><i className="bi bi-receipt me-1"></i>Receipt</button>
+              <button type="button" className="btn btn-outline-dark btn-sm text-nowrap flex-shrink-0" onClick={() => printSlip(slipOf(d))}><i className="bi bi-receipt me-1"></i>Receipt</button>
             </div>
           ))}
         </div>
