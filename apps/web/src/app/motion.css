@@ -325,3 +325,41 @@
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
   .admin-shell .menu-panel { background: #faf7f2; }
 }
+
+/* ── Side menu on a wide screen (PC, or the tablet's browser in desktop mode), 2026-11-19: the same
+   no-colour look as the tablet drawer (user: "when desktop mode, upright menu should also no color ... the
+   background"): the app's cream, dark ink words, group colours only on the icon chips. */
+.admin-shell aside.admin-sidebar {
+  background: #fbf8f3; color: var(--sam-text);
+  border-right: 1px solid rgba(51, 38, 29, 0.14) !important;
+  box-shadow: 4px 0 18px rgba(43, 33, 24, 0.05);
+}
+aside.admin-sidebar .fw-bold { color: var(--sam-text); }
+aside.admin-sidebar small, aside.admin-sidebar .small { color: var(--sam-muted) !important; }
+aside.admin-sidebar .border-bottom, aside.admin-sidebar .border-top { border-color: rgba(51, 38, 29, 0.12) !important; }
+aside.admin-sidebar .nav-group-label { color: var(--tone, var(--sam-muted)); }
+aside.admin-sidebar .nav-group-label::before { background: var(--tone, var(--sam-muted)); }
+aside.admin-sidebar .nav-link { color: var(--sam-text); }
+aside.admin-sidebar .nav-link > i:first-child { background: var(--tone-bg, #eeebe6); color: var(--tone, var(--sam-text)); }
+aside.admin-sidebar .nav-link:hover, aside.admin-sidebar .nav-link:active { background: rgba(51, 38, 29, 0.07); color: var(--sam-text); }
+aside.admin-sidebar .nav-link.active, aside.admin-sidebar .nav-link.active:hover { color: #fff; background: var(--sam-primary); box-shadow: 0 4px 14px rgba(192, 66, 31, 0.22); }
+aside.admin-sidebar .nav-link.active > i:first-child { background: rgba(255, 255, 255, 0.22); color: #fff; }
+aside.admin-sidebar .nav-link .nav-lock { color: #6f4800; }
+aside.admin-sidebar .nav-link.active .nav-lock { color: #ffd98a; }
+aside.admin-sidebar nav > div + div { border-top-color: rgba(51, 38, 29, 0.1); }
+aside.admin-sidebar .text-size-picker { color: var(--sam-text); }
+aside.admin-sidebar .text-size-option.active { color: #fff; }
+@media (hover: hover) and (pointer: fine) {
+  .admin-shell aside.admin-sidebar nav { scrollbar-color: rgba(51, 38, 29, 0.3) transparent; }
+  .admin-shell aside.admin-sidebar .nav-link:focus-visible { outline-color: var(--sam-primary); }
+  .admin-shell aside.admin-sidebar .side-foot { background: #f4efe7; }
+  .admin-shell aside.admin-sidebar .text-size-option:not(.active):hover { background: rgba(51, 38, 29, 0.07); }
+  .admin-shell aside.admin-sidebar .side-who > i { color: var(--sam-muted); }
+  .admin-shell aside.admin-sidebar .side-email { color: var(--sam-text); }
+  .admin-shell aside.admin-sidebar .side-role { color: var(--sam-muted); }
+  .admin-shell aside.admin-sidebar .side-btn { color: var(--sam-text); border-color: #8c857c; background: #fff; }
+  .admin-shell aside.admin-sidebar .side-btn:hover { background: #fff; border-color: var(--sam-text); color: var(--sam-text); }
+  .admin-shell aside.admin-sidebar .side-btn-out { color: #a3201b; border-color: #a3201b; }
+  .admin-shell aside.admin-sidebar .side-btn-out:hover { background: #a3201b; border-color: #a3201b; color: #fff; }
+  .admin-shell aside.admin-sidebar .side-btn:focus-visible { outline-color: var(--sam-primary); }
+}
