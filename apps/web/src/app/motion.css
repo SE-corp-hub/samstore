@@ -14,15 +14,14 @@
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
   --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
   /* Navigation colours, in one place (Menu button, bottom-bar pill, Menu drawer, PC sidebar, page).
-     2026-11-19: rice-field green, a deeper shade than the green "go" buttons, so it reads as the frame
-     of the app and never as a button to press; terracotta stays "you are here" on top of it. */
-  --nav-ink: #173f2b;        /* Menu button and the bottom-bar pill (white on it: 11.5:1) */
-  --nav-ink-up: #1f5138;     /* hover */
-  --nav-ink-press: #11301f;  /* pressed */
-  --nav-shadow: 23, 63, 43;  /* r, g, b of the soft shadows */
-  --drawer-1: #21533a; --drawer-2: #183f2c; --drawer-3: #123222; /* drawer, top to bottom */
-  --drawer-head: #21533a;
-  --sam-sidebar: #183f2c;    /* PC sidebar matches the drawer */
+     2026-11-19: the app's own dark ink and cream, no colour of their own (the user's choice). */
+  --nav-ink: #33261d;        /* Menu button and the bottom-bar pill (white on it: 11.5:1) */
+  --nav-ink-up: #4a3a2c;     /* hover */
+  --nav-ink-press: #1f1710;  /* pressed */
+  --nav-shadow: 43, 33, 24;  /* r, g, b of the soft shadows */
+  --drawer-1: #36291d; --drawer-2: #2b2118; --drawer-3: #241b13; /* drawer, top to bottom */
+  --drawer-head: #36291d;
+  --sam-sidebar: #2b2118;    /* PC sidebar keeps the coffee it always had */
   --sam-bg: #f4efe4;         /* page: warm rice cream, so the white cards stand out */
   --sam-coffee: var(--nav-ink);
 }
@@ -263,21 +262,21 @@
 /* ── Transparent look (2026-11-19): outlined Menu button, frosted menu and bottom bar. */
 .menu-open { background: transparent; color: var(--nav-ink); border: 2px solid var(--nav-ink); box-shadow: none; }
 .menu-bars > span { background: var(--nav-ink); }
-.menu-open:active { background: rgba(23, 63, 43, 0.12); }
-@media (hover: hover) and (pointer: fine) { .menu-open:hover { background: rgba(23, 63, 43, 0.08); } }
+.menu-open:active { background: rgba(51, 38, 29, 0.10); }
+@media (hover: hover) and (pointer: fine) { .menu-open:hover { background: rgba(51, 38, 29, 0.06); } }
 .menu-backdrop { background: rgba(12, 28, 20, 0.22); }
 .admin-shell .menu-panel {
-  background: rgba(23, 63, 43, 0.84);
+  background: rgba(250, 247, 242, 0.86);
   -webkit-backdrop-filter: blur(16px) saturate(140%); backdrop-filter: blur(16px) saturate(140%);
   border-right: 1px solid rgba(255, 255, 255, 0.18);
 }
 .menu-head { background: rgba(255, 255, 255, 0.06); -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px); }
 .menu-foot { background: rgba(0, 0, 0, 0.12); }
 .staff-bar {
-  background: rgba(255, 255, 255, 0.74); border-top: 1px solid rgba(23, 63, 43, 0.18);
+  background: rgba(255, 255, 255, 0.74); border-top: 1px solid rgba(51, 38, 29, 0.14);
   -webkit-backdrop-filter: blur(8px) saturate(160%); backdrop-filter: blur(8px) saturate(160%);
 }
-.staff-bar::before { background: rgba(23, 63, 43, 0.12); border-color: transparent; box-shadow: inset 0 0 0 2px rgba(23, 63, 43, 0.55); background-clip: padding-box; }
+.staff-bar::before { background: rgba(51, 38, 29, 0.10); border-color: transparent; box-shadow: inset 0 0 0 2px rgba(51, 38, 29, 0.5); background-clip: padding-box; }
 .staff-bar button.active, .staff-bar button.active-narrow { color: var(--nav-ink); }
 .staff-bar button.active i, .staff-bar button.active-narrow i { color: var(--tone, var(--nav-ink)); }
 .staff-bar button.active .bar-lock { color: #6f4800 !important; }
@@ -285,4 +284,44 @@
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
   .admin-shell .menu-panel { background: var(--drawer-2); }
   .staff-bar { background: #fff; }
+}
+
+/* ── Menu drawer with no colour of its own (2026-11-19, user: "dont add color on the menu, just transparent
+   or color of the system"): light frosted glass in the app's own cream, dark ink words, the group colours
+   only on the small icon chips, terracotta still marks the open screen. Tablet drawer only (.menu-panel). */
+.menu-backdrop { background: rgba(43, 33, 24, 0.18); }
+.admin-shell .menu-panel {
+  background: rgba(250, 247, 242, 0.86); color: var(--sam-text);
+  -webkit-backdrop-filter: blur(18px) saturate(150%); backdrop-filter: blur(18px) saturate(150%);
+  border-right: 1px solid rgba(255, 255, 255, 0.7);
+  box-shadow: 8px 0 40px rgba(43, 33, 24, 0.18);
+}
+.menu-panel .menu-head { background: rgba(255, 255, 255, 0.55); border-bottom: 1px solid rgba(51, 38, 29, 0.1); }
+.menu-panel .menu-brand-name, .menu-panel .fw-bold { color: var(--sam-text); }
+.menu-panel .menu-brand-sub, .menu-panel .menu-who-role { color: var(--sam-muted); }
+.menu-panel .menu-close { background: rgba(51, 38, 29, 0.08); color: var(--sam-text); }
+.menu-panel .menu-close:active { background: rgba(51, 38, 29, 0.16); }
+.menu-panel .menu-close:focus-visible { outline-color: var(--sam-primary); }
+.menu-panel .nav-group-label { color: var(--tone, var(--sam-muted)); }
+.menu-panel .nav-group-label::before { background: var(--tone, var(--sam-muted)); }
+.menu-panel .nav-link { color: var(--sam-text); }
+.menu-panel .nav-link > i:first-child { background: var(--tone-bg, #eeebe6); color: var(--tone, var(--sam-text)); }
+.menu-panel .nav-link:active { background: rgba(51, 38, 29, 0.08); }
+.menu-panel .nav-link.active { color: #fff; box-shadow: 0 4px 14px rgba(192, 66, 31, 0.25); }
+.menu-panel .nav-link.active > i:first-child { background: rgba(255, 255, 255, 0.22); color: #fff; }
+.menu-panel .nav-link .nav-lock { color: #6f4800; }
+.menu-panel .nav-link.active .nav-lock { color: #ffd98a; }
+.menu-panel nav > div + div { border-top-color: rgba(51, 38, 29, 0.1); }
+.menu-panel .menu-foot { background: rgba(255, 255, 255, 0.45); border-top: 1px solid rgba(51, 38, 29, 0.1); }
+.menu-panel .text-size-picker { color: var(--sam-text); }
+.menu-panel .text-size-option.active { color: #fff; }
+.menu-panel .menu-avatar { background: #33261d; color: #fff; }
+.menu-panel .menu-who-name { color: var(--sam-text); }
+.admin-shell .menu-panel .menu-act { border-color: #8c857c; color: var(--sam-text); background: rgba(255, 255, 255, 0.6); }
+.admin-shell .menu-panel .menu-act:active, .admin-shell .menu-panel .menu-act:focus-visible { background: #fff; border-color: var(--sam-text); color: var(--sam-text); }
+.admin-shell .menu-panel .menu-act-out { border-color: #a3201b; color: #a3201b; }
+.admin-shell .menu-panel .menu-act-out:active, .admin-shell .menu-panel .menu-act-out:focus-visible { background: #a3201b; border-color: #a3201b; color: #fff; }
+.admin-shell .menu-panel .menu-act:focus-visible { outline-color: var(--sam-primary); }
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .admin-shell .menu-panel { background: #faf7f2; }
 }
