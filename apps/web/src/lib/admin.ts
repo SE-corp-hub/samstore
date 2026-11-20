@@ -394,12 +394,12 @@ export function allowedTabs(role: string): string[] {
   if (!isStoreLogin(role)) return tabs;
   const own = tabs.filter((t) => !WHOLE_BUSINESS_TABS.includes(t));
   // The head of a store also gets the screen for that store's own prices.
-  return role === "STAFF" && isStoreHead() ? [...own, "storeprices", "storelock", "mystore"] : own;
+  return role === "STAFF" && isStoreHead() ? [...own, "storeprices", "storelock", "mystore", "team"] : own;
 }
 
 /** Screens a login tied to one store can open (what a store's own PIN lock can lock). */
 export function storeLoginTabs(): string[] {
-  const all = new Set([...(TABS_BY_ROLE.STAFF ?? []), ...(TABS_BY_ROLE.SALES_AGENT ?? []), "storeprices", "storelock", "mystore"]);
+  const all = new Set([...(TABS_BY_ROLE.STAFF ?? []), ...(TABS_BY_ROLE.SALES_AGENT ?? []), "storeprices", "storelock", "mystore", "team"]);
   return [...all].filter((t) => !WHOLE_BUSINESS_TABS.includes(t));
 }
 

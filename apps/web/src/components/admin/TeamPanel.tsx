@@ -6,7 +6,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { API_URL } from "../../config";
-import { adminHeaders, getAdminRole, roleCan } from "../../lib/admin";
+import { adminHeaders, getAdminRole, getHomeLocation, isStoreHead, roleCan } from "../../lib/admin";
 import { askConfirm } from "../../lib/ask";
 
 interface Member {
@@ -44,7 +44,14 @@ export default function TeamPanel() {
   const [tempPassword, setTempPassword] = useState<string | null>(null);
   const [pinFor, setPinFor] = useState<string | null>(null);
   const [pinValue, setPinValue] = useState("");
-  const canManage = roleCan(getAdminRole(), "manageTeam");
+  const role = getAdminRole();
+  const owner = roleCan(role, "manageTeam");
+  // 2026-11-20: a manager (every store) and a store head (its own store) look after counter logins:
+  // add them, fix name, PIN and password, unlock. Only the owner gives roles, chooses heads and removes.
+  const home = getHomeLocation();
+  const head = role === "STAFF" && isStoreHead() && !!home;
+  const canManage = owner || role === "MANAGER" || head;
+  const mayEdit = (m: Member) => owner || (m.role === "STAFF" && !m.isLocationHead && !!m.homeLocationId && (role === "MANAGER" || m.homeLocationId === home));
   // Step 8: logins made ahead and handed over later.
   const [ready, setReady] = useState({ label: "", homeLocationId: "", head: false });
   const [readyError, setReadyError] = useState<string | null>(null);
@@ -66,16 +73,20 @@ export default function TeamPanel() {
       const team = (await teamRes.json()).members as Member[];
       const people = peopleRes.ok ? ((await peopleRes.json()).members as Member[]) : [];
       const byId = new Map(people.map((p) => [p.userId, p]));
-      setMembers(team.map((m) => ({ ...m, ...(byId.get(m.userId) ?? {}) })));
-      if (locRes.ok) setLocations(((await locRes.json()).warehouses as Location[]).filter((l) => l.isActive));
+      const all = team.map((m) => ({ ...m, ...(byId.get(m.userId) ?? {}) }));
+      // The head of a store sees the people of that store.
+      setMembers(head ? all.filter((m) => m.homeLocationId === home) : all);
+      if (locRes.ok) setLocations(((await locRes.json()).warehouses as Location[]).filter((l) => l.isActive && (!head || l.id === home)));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Load failed");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [head, home]);
 
   useEffect(() => { load(); }, [load]);
+  // A store head adds people to their own store only.
+  useEffect(() => { if (head && home) { setForm((f) => ({ ...f, homeLocationId: home })); setReady((x) => ({ ...x, homeLocationId: home })); } }, [head, home]);
 
   const locLabel = (id: string | null | undefined) => {
     if (!id) return "All locations";
@@ -103,7 +114,7 @@ export default function TeamPanel() {
     setBusy(false);
     if (!r.ok) { setReadyError(r.message); return; }
     setSlip({ title: `Ready login "${r.data.label}" is made`, signIn: r.data.signInName, password: r.data.tempPassword });
-    setReady({ label: "", homeLocationId: "", head: false });
+    setReady({ label: "", homeLocationId: head && home ? home : "", head: false });
     await load();
   };
 
@@ -165,7 +176,7 @@ export default function TeamPanel() {
         return;
       }
       if (data?.tempPassword) setTempPassword(data.tempPassword);
-      setForm({ phone: "", email: "", name: "", role: "STAFF", homeLocationId: "" });
+      setForm({ phone: "", email: "", name: "", role: "STAFF", homeLocationId: head && home ? home : "" });
       setNotice("Added. Set a PIN so they can log in on their own phone.");
       await load();
     } catch (err) {
@@ -246,27 +257,32 @@ export default function TeamPanel() {
                 <label className="form-label small mb-1" htmlFor="tm-name">Name</label>
                 <input id="tm-name" className="form-control" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
               </div>
+              {owner ? (
+                <div className="col-md-2">
+                  <label className="form-label small mb-1" htmlFor="tm-role">Role</label>
+                  <select id="tm-role" className="form-select" value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>
+                    {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
+                  </select>
+                </div>
+              ) : null}
               <div className="col-md-2">
-                <label className="form-label small mb-1" htmlFor="tm-role">Role</label>
-                <select id="tm-role" className="form-select" value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>
-                  {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
-                </select>
-              </div>
-              <div className="col-md-2">
-                <label className="form-label small mb-1" htmlFor="tm-home">Location</label>
-                <select id="tm-home" className="form-select" value={form.homeLocationId} onChange={(e) => setForm({ ...form, homeLocationId: e.target.value })}>
-                  <option value="">All</option>
-                  {locations.map((l) => <option key={l.id} value={l.id}>{locLabel(l.id)}</option>)}
-                </select>
+                <label className="form-label small mb-1" htmlFor="tm-home">{owner ? "Location" : "Store"}</label>
+                {head ? <div id="tm-home" className="form-control bg-light">{locLabel(home)}</div> : (
+                  <select id="tm-home" className="form-select" value={form.homeLocationId} onChange={(e) => setForm({ ...form, homeLocationId: e.target.value })}>
+                    <option value="">{owner ? "All" : "Choose…"}</option>
+                    {locations.map((l) => <option key={l.id} value={l.id}>{locLabel(l.id)}</option>)}
+                  </select>
+                )}
               </div>
             </div>
             <button className="btn btn-success mt-3" type="submit" disabled={inviting || (!form.phone.trim() && !form.email.trim())}>
               {inviting ? "Adding…" : "Add"}
             </button>
-            <p className="text-muted small mt-2 mb-0">
+            {!owner && <p className="text-muted small mt-2 mb-0">You add counter (STAFF) logins{head ? " for your store" : ""}. Only the owner gives other roles or makes someone the head of a store.</p>}
+            {owner && <p className="text-muted small mt-2 mb-0">
               <strong>MANAGER</strong> runs the store · <strong>STAFF</strong> sells, releases and receives at their location · <strong>SALES_AGENT</strong> takes orders · <strong>DELIVERY</strong> courier app only.
               Owners and managers work at every location.
-            </p>
+            </p>}
           </div>
         </form>
       )}
@@ -300,17 +316,19 @@ export default function TeamPanel() {
               </div>
               <div className="col-md-3">
                 <label className="form-label small mb-1" htmlFor="tm-ready-store">Store</label>
-                <select id="tm-ready-store" className="form-select" value={ready.homeLocationId} onChange={(e) => setReady({ ...ready, homeLocationId: e.target.value })}>
-                  <option value="">Choose…</option>
-                  {locations.map((l) => <option key={l.id} value={l.id}>{locLabel(l.id)}</option>)}
-                </select>
+                {head ? <div id="tm-ready-store" className="form-control bg-light">{locLabel(home)}</div> : (
+                  <select id="tm-ready-store" className="form-select" value={ready.homeLocationId} onChange={(e) => setReady({ ...ready, homeLocationId: e.target.value })}>
+                    <option value="">Choose…</option>
+                    {locations.map((l) => <option key={l.id} value={l.id}>{locLabel(l.id)}</option>)}
+                  </select>
+                )}
               </div>
-              <div className="col-md-auto">
+              {owner && <div className="col-md-auto">
                 <label className="exp-check" htmlFor="tm-ready-head">
                   <input id="tm-ready-head" type="checkbox" className="form-check-input" checked={ready.head} onChange={(e) => setReady({ ...ready, head: e.target.checked })} />
                   <span>Head of this store</span>
                 </label>
-              </div>
+              </div>}
               <div className="col-md-auto">
                 <button className="btn btn-success" type="submit" disabled={busy} style={{ minHeight: 48 }}>{busy ? "Making…" : "Make the login"}</button>
               </div>
@@ -324,14 +342,14 @@ export default function TeamPanel() {
                       <div className="fw-semibold">{m.readyLabel}{m.isLocationHead ? " · Head" : ""} <span className="badge text-bg-warning ms-1">Waiting to be handed over</span></div>
                       <div className="small text-muted text-break">{locLabel(m.homeLocationId)} · signs in with {m.email ?? m.phone}</div>
                     </div>
-                    <div className="d-flex flex-wrap gap-2">
+                    {mayEdit(m) && <div className="d-flex flex-wrap gap-2">
                       <button type="button" className="btn btn-outline-secondary" style={{ minHeight: 48 }} onClick={() => { setDetails({ userId: m.userId, mode: "edit", label: m.readyLabel ?? "", name: m.name ?? m.readyLabel ?? "", phone: m.phone ?? "", email: m.email ?? "", password: "" }); setDetailsError(null); }}>
                         <i className="bi bi-key me-1" aria-hidden="true"></i>Email and password
                       </button>
                       <button type="button" className="btn btn-outline-success" style={{ minHeight: 48 }} onClick={() => { setDetails({ userId: m.userId, mode: "handover", label: m.readyLabel ?? "", name: "", phone: "", email: m.email ?? "", password: "" }); setDetailsError(null); }}>
                         <i className="bi bi-person-check me-1" aria-hidden="true"></i>Hand over
                       </button>
-                    </div>
+                    </div>}
                   </li>
                 ))}
               </ul>
@@ -424,14 +442,14 @@ export default function TeamPanel() {
                   <td>
                     <select
                       className="form-select form-select-sm" style={{ width: 140 }} aria-label={`Role of ${m.name ?? m.userId}`}
-                      value={m.role} disabled={!canManage || m.role === "OWNER"}
+                      value={m.role} disabled={!owner || m.role === "OWNER"}
                       onChange={(e) => changeRole(m.userId, e.target.value)}
                     >
                       {(m.role === "OWNER" ? ["OWNER"] : ROLES).map((r) => <option key={r} value={r}>{r}</option>)}
                     </select>
                   </td>
                   <td>
-                    {canManage && m.role !== "OWNER" && m.role !== "MANAGER" ? (
+                    {owner && m.role !== "OWNER" && m.role !== "MANAGER" ? (
                       <>
                         <select
                           className="form-select form-select-sm" style={{ width: 170 }} aria-label={`Home location of ${m.name ?? m.userId}`}
@@ -452,6 +470,14 @@ export default function TeamPanel() {
                           </label>
                         )}
                       </>
+                    ) : role === "MANAGER" && mayEdit(m) ? (
+                      <select
+                        className="form-select form-select-sm" style={{ width: 170 }} aria-label={`Store of ${m.name ?? m.userId}`}
+                        value={m.homeLocationId ?? ""}
+                        onChange={(e) => e.target.value && patchPerson(m.userId, { homeLocationId: e.target.value }, "Store saved.")}
+                      >
+                        {locations.map((l) => <option key={l.id} value={l.id}>{locLabel(l.id)}</option>)}
+                      </select>
                     ) : (
                       <span className="small">{m.role === "OWNER" || m.role === "MANAGER" ? "All locations" : locLabel(m.homeLocationId)}{m.isLocationHead ? " · Head" : ""}</span>
                     )}
@@ -462,7 +488,7 @@ export default function TeamPanel() {
                       : <span className="badge text-bg-secondary">None yet</span>}
                   </td>
                   <td className="text-end">
-                    {canManage && (
+                    {canManage && mayEdit(m) && (
                       <div className="d-flex flex-wrap gap-1 justify-content-end">
                         <button className="btn btn-sm btn-outline-success text-nowrap" onClick={() => { setPinFor(m.userId); setPinValue(""); }}>
                           <i className="bi bi-123 me-1"></i>{m.hasPin ? "Change PIN" : "Set PIN"}
@@ -477,7 +503,7 @@ export default function TeamPanel() {
                             <button className="btn btn-sm btn-outline-secondary text-nowrap" onClick={() => { setDetails({ userId: m.userId, mode: "edit", label: m.name ?? "this login", name: m.name ?? "", phone: m.phone ?? "", email: m.email ?? "", password: "" }); setDetailsError(null); window.scrollTo({ top: 0, behavior: "smooth" }); }}>
                               <i className="bi bi-pencil me-1" aria-hidden="true"></i>Edit login
                             </button>
-                            <button
+                            {owner && <><button
                               className="btn btn-sm btn-outline-secondary text-nowrap"
                               onClick={async () => {
                                 const res = await fetch(`${API_URL}/admin/team/${m.userId}/reset-password`, {
@@ -493,7 +519,7 @@ export default function TeamPanel() {
                             </button>
                             <button className="btn btn-sm btn-outline-danger" onClick={() => deactivate(m.userId)} title="Remove from team" aria-label={`Remove ${m.name ?? "member"}`}>
                               <i className="bi bi-person-x"></i>
-                            </button>
+                            </button></>}
                           </>
                         )}
                       </div>

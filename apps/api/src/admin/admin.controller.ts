@@ -39,7 +39,7 @@ import { StoreAdminService } from "./store-admin.service.js";
 import { AnalyticsService } from "./analytics.service.js";
 import { TeamService } from "./team.service.js";
 import { WarehouseService } from "./warehouse.service.js";
-import { canManageLocation, isHeadOf, loadActor, locationRefusal } from "../people/people.service.js";
+import { canManageLocation, isHeadOf, loadActor, locationRefusal, teamRefusal } from "../people/people.service.js";
 import { mergeSwitches, switchesAt, SWITCH_KEYS } from "../day/store-switches.js";
 import { signaturesFrom } from "../people/signature-input.js";
 import { LoyaltyService } from "../loyalty/loyalty.service.js";
@@ -1829,7 +1829,10 @@ export class AdminController {
   ) {
     const user = req.user;
     requireUser(user);
-    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.MANAGE);
+    const { storeId, role } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
+    // The owner adds anyone; a manager or a store head adds counter (STAFF) logins for their own stores.
+    const why = teamRefusal(await loadActor(storeId, user.sub, role), null, { role: body?.role, homeLocationId: typeof body?.homeLocationId === "string" ? body.homeLocationId : null });
+    if (why) throw new HttpException({ type: "forbidden", message: why }, HttpStatus.FORBIDDEN);
     const result = await this.team.invite(
       storeId,
       typeof body?.email === "string" ? body.email : "",
