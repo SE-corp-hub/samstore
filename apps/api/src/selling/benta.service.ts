@@ -227,7 +227,7 @@ export class BentaService {
   async catalog(storeId: string, actor: Actor, locationId: string | undefined) {
     return this.run(async () => {
       const wanted = locationId || actor.homeLocationId || null;
-      const [warehouses, products, prices, levels, sold, costMode, promo, categories] = await Promise.all([
+      const [warehouses, products, prices, levels, sold, costMode, promo, categories, racks] = await Promise.all([
         prisma.warehouse.findMany({ where: { storeId }, select: { id: true, name: true, code: true, type: true, isActive: true, isDefault: true, consignment: true, sellPerKilo: true }, orderBy: [{ isDefault: "desc" }, { name: "asc" }] }),
         prisma.product.findMany({ where: { storeId, isActive: true, reviewStatus: { not: "MERGED" } }, select: productSelect, orderBy: { name: "asc" } }),
         // The asked-for location's prices; with none asked, every location's (the default is picked below).
@@ -238,7 +238,13 @@ export class BentaService {
         prisma.storeSettings.findUnique({ where: { storeId }, select: { quotaPromoEnabled: true, quotaPromoMinSacks: true, quotaPromoOffMinor: true, quotaPromoCategoryIds: true } }),
         // Products → Group names (the owner's price-list sections): the group buttons on the product list.
         prisma.category.findMany({ where: { storeId }, select: { id: true, name: true } }),
+        // Display racks: the sacks that can fill each kilo rice (besides its own sack).
+        prisma.rackSack.findMany({ where: { storeId }, orderBy: { createdAt: "asc" }, select: { kiloProductId: true, sackProductId: true } }),
       ]);
+      const rackOf = new Map<string, string[]>();
+      for (const r of racks) rackOf.set(r.kiloProductId, [...(rackOf.get(r.kiloProductId) ?? []), r.sackProductId]);
+      /** Every sack that can fill a kilo rice: its own sack first, then the rack's. */
+      const sacksFor = (p: { id: string; kiloOfId: string | null }) => [...new Set([...(p.kiloOfId ? [p.kiloOfId] : []), ...(rackOf.get(p.id) ?? [])])];
       const groupName = new Map(categories.map((c) => [c.id, c.name]));
       // Same choice as location(): the one asked for, else the person's home, else the store default.
       const main = warehouses.find((w) => w.isDefault);
@@ -269,7 +275,8 @@ export class BentaService {
         .map((p) => ({
           id: p.id, name: p.name, sku: p.sku, photoKey: p.photoKey, categoryId: p.categoryId, group: p.categoryId ? groupName.get(p.categoryId) ?? null : null, loose: isLoose(p), gramsPerUnit: p.stockBaseUnit === "g" ? p.stockBaseQuantity : null,
           priceMinor: priceAt(p.priceMinor, priceBy.get(p.id)), mainPriceMinor: p.priceMinor, forReview: p.reviewStatus === "FOR_REVIEW", kiloOfId: p.kiloOfId,
-          stock: stockBy.get(p.id) ?? {}, tracked: p.trackStock !== false && (stockBy.has(p.id) || !!p.kiloOfId), sold30d: sold[p.id] ?? 0,
+          sackIds: isLoose(p) ? sacksFor(p) : [],
+          stock: stockBy.get(p.id) ?? {}, tracked: p.trackStock !== false && (stockBy.has(p.id) || !!p.kiloOfId || rackOf.has(p.id)), sold30d: sold[p.id] ?? 0,
           floorMinor: effectiveCost(costMode, shelfCost.get(p.id), p.costMinor ?? 0),
           /** The lowest price staff may change a line to: the owner's lowest price, else the cost above. */
           lowestMinor: typeof p.floorPriceMinor === "number" ? p.floorPriceMinor : effectiveCost(costMode, shelfCost.get(p.id), p.costMinor ?? 0),

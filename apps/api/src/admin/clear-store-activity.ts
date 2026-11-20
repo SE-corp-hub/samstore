@@ -30,7 +30,7 @@ export const KEEP_TABLES = [
   "CustomerPrice", "DeliveryZone", "Kargador", "LocationPrice", "Message", "MessengerPage",
   "MessengerUser", "NotificationLog", "PasswordResetHistory", "PaymentMethod", "PriceHistory",
   "Product", "ProductAddon", "ProductAddonOption", "ProductImage", "ProductPhoto", "ProductRelation",
-  "ProductVariant", "PublicStoreLink", "Register", "RolePermission", "SecurityIncident", "SmsMessage",
+  "ProductVariant", "PublicStoreLink", "RackSack", "Register", "RolePermission", "SecurityIncident", "SmsMessage",
   "StoreCounter", "StoreCustomer", "StoreCustomerAddress", "StoreMembership", "StoreSettings",
   "StoreStatusHistory", "Supplier", "UserStore", "Voucher", "Warehouse",
 ] as const;

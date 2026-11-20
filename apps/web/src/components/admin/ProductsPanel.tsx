@@ -27,15 +27,19 @@ function AlsoPerKilo({ sack, onChanged }: { sack: AdminProduct; onChanged: () =>
   const [item, setItem] = useState(sack.kiloItem ?? null);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
+  const [stuck, setStuck] = useState<string | null>(null);
   const on = !!item?.isActive;
-  const flip = async (next: boolean) => {
+  const flip = async (next: boolean, force = false) => {
     setBusy(true); setProblem(null);
     try {
       const res = await fetch(`${API_URL}/admin/products/${encodeURIComponent(sack.id)}/kilo-item`, {
-        method: "POST", headers: { "Content-Type": "application/json", ...adminHeaders() }, body: JSON.stringify({ on: next }),
+        method: "POST", headers: { "Content-Type": "application/json", ...adminHeaders() }, body: JSON.stringify({ on: next, force: next ? undefined : force }),
       });
       const d = await res.json().catch(() => null);
+      // Kilos still on the rack: say so, and offer "Hide anyway".
+      if (res.status === 409) { setStuck(d?.message ?? "Kilos are still left."); return; }
       if (!res.ok) { setProblem(d?.errors?.join(", ") ?? d?.message ?? "Did not save. Try again."); return; }
+      setStuck(null);
       setItem(d?.kiloItem ?? null);
       toast(next ? `${d?.kiloItem?.name ?? "Kilo rice"} added` : "Kilo rice hidden", "success");
       onChanged();
@@ -54,6 +58,82 @@ function AlsoPerKilo({ sack, onChanged }: { sack: AdminProduct; onChanged: () =>
           ? <>Sold as its own item: <strong>{item.name}</strong> at {peso(item.priceMinor)} a kilo. To change the kilo price, edit that item in Products.</>
           : "On: adds a kilo item for this rice, priced at the sack price ÷ kilos, rounded up, + ₱2. It shows only at stores with Sell per kilo here on (Settings → This store)."}
       </div>
+      {busy && <div className="small mt-1" role="status">Saving…</div>}
+      {problem && <div className="alert alert-danger py-1 px-2 mt-1 mb-0 small" role="alert">{problem}</div>}
+      {stuck && (
+        <div className="alert alert-warning py-2 px-2 mt-1 mb-0" role="alert">
+          <div className="mb-2">{stuck}</div>
+          <div className="d-flex gap-2">
+            <button type="button" className="btn btn-outline-dark" disabled={busy} onClick={() => setStuck(null)}>Keep selling per kilo</button>
+            <button type="button" className="btn btn-outline-danger" disabled={busy} onClick={() => void flip(false, true)}>Hide anyway</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Display rack (2026-11-20): a kilo rice with one price (e.g. "Rack ₱50") that staff fill from any of the
+ * ticked sacks with "Open sacks" on the POS. Any loose rice can be a rack, also one made by hand earlier.
+ * Saved at once. Its own sack ("Also sell per kilo") always counts and is not listed here.
+ */
+function RackSacks({ kilo, onChanged }: { kilo: AdminProduct; onChanged: () => void }) {
+  const [ticked, setTicked] = useState<string[]>(kilo.rackSackIds ?? []);
+  // Every rice (the Products list may be narrowed by a search).
+  const [all, setAll] = useState<AdminProduct[]>([]);
+  useEffect(() => {
+    let live = true;
+    fetch(`${API_URL}/admin/products`, { headers: adminHeaders() })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (live && d?.products) setAll([...d.products].sort((a: AdminProduct, b: AdminProduct) => a.name.localeCompare(b.name))); })
+      .catch(() => {});
+    return () => { live = false; };
+  }, []);
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+  const own = kilo.kiloOfId ? all.find((p) => p.id === kilo.kiloOfId) : undefined;
+  const options = all.filter((p) => canSellPerKilo(p) && p.isActive && p.id !== kilo.kiloOfId);
+  const save = async (next: string[]) => {
+    setBusy(true); setProblem(null);
+    try {
+      const res = await fetch(`${API_URL}/admin/products/${encodeURIComponent(kilo.id)}/rack-sacks`, {
+        method: "PUT", headers: { "Content-Type": "application/json", ...adminHeaders() }, body: JSON.stringify({ sackIds: next }),
+      });
+      const d = await res.json().catch(() => null);
+      if (!res.ok) { setProblem(d?.errors?.join(", ") ?? d?.message ?? "Did not save. Try again."); return; }
+      setTicked(next);
+      onChanged();
+    } catch {
+      setProblem("No internet. Nothing was saved. Try again when the tablet is online.");
+    } finally { setBusy(false); }
+  };
+  return (
+    <div className="border rounded p-2 mb-2" style={{ background: "var(--bs-tertiary-bg, #f7f5f2)" }}>
+      <div className="fw-semibold mb-1">Sacks that go in this rack</div>
+      <div className="small text-muted mb-2">
+        Tick every rice staff may pour into <strong>{kilo.name}</strong>. On the POS, <strong>Open sacks</strong> asks which one. The kilo cost becomes the average of what goes in.
+        {own && <> Its own sack, <strong>{own.name}</strong>, always counts.</>}
+      </div>
+      {all.length === 0
+        ? <div className="small" role="status">Loading the rice…</div>
+        : options.length === 0
+        ? <div className="small">No sacks of 10 kg or more to choose from.</div>
+        : (
+          <div className="d-grid gap-1" style={{ maxHeight: "16rem", overflowY: "auto" }}>
+            {options.map((p) => {
+              const id = `rack-${p.id}`;
+              const on = ticked.includes(p.id);
+              return (
+                <div key={p.id} className="form-check">
+                  <input className="form-check-input" type="checkbox" id={id} checked={on} disabled={busy}
+                    onChange={() => void save(on ? ticked.filter((x) => x !== p.id) : [...ticked, p.id])} />
+                  <label className="form-check-label" htmlFor={id}>{p.name}</label>
+                </div>
+              );
+            })}
+          </div>
+        )}
       {busy && <div className="small mt-1" role="status">Saving…</div>}
       {problem && <div className="alert alert-danger py-1 px-2 mt-1 mb-0 small" role="alert">{problem}</div>}
     </div>
@@ -84,6 +164,8 @@ export interface AdminProduct {
   kiloOfId?: string | null;
   /** A sack rice: its kilo item ("Also sell per kilo"), or null. */
   kiloItem?: { id: string; name: string; isActive: boolean; priceMinor: number } | null;
+  /** A kilo rice (display rack): the other sacks that can fill it. */
+  rackSackIds?: string[];
   related: { id: string; name: string; priceMinor: number; isActive: boolean }[];
   upsell: { id: string; name: string; priceMinor: number; isActive: boolean }[];
   category: { id: string; name: string; slug: string } | null;
@@ -493,6 +575,7 @@ export default function ProductsPanel() {
                       {p.stockConversionFamily && <span className="badge text-bg-info ms-1">{p.stockConversionFamily}</span>}
                       {p.soldByWeight && <span className="badge text-bg-secondary ms-1" title="Sold by weight">per kilo</span>}
                       {p.kiloItem?.isActive && <span className="badge text-bg-success ms-1" title={`Also sold per kilo: ${p.kiloItem.name}`}>+ per kilo</span>}
+                      {p.soldByWeight && (p.rackSackIds?.length ?? 0) + (p.kiloOfId ? 1 : 0) > 1 && <span className="badge text-bg-success ms-1">Rack · {(p.rackSackIds?.length ?? 0) + (p.kiloOfId ? 1 : 0)} rice</span>}
                       {p.trackStock === false && <span className="badge text-bg-warning ms-1" title="Sells at any time — stock is not counted">Not tracked</span>}
                       {isBelowCost(p.priceMinor, p.costMinor) && <span className="badge text-bg-danger ms-1">Below cost</span>}
                       <div className="small text-muted fw-normal d-lg-none">{p.sku}</div>
@@ -616,6 +699,8 @@ export default function ProductsPanel() {
                       )}
                     </div>
                     {modal.editing && canSellPerKilo(modal.editing) && <AlsoPerKilo sack={modal.editing} onChanged={() => void load()} />}
+                    {modal.editing?.soldByWeight && <RackSacks kilo={modal.editing} onChanged={() => void load()} />}
+                    {!modal.editing && form.soldByWeight && <div className="small text-muted mb-2">After saving, open this rice again to choose the sacks that go in its rack.</div>}
                     {modal.editing && <PriceHistoryList productId={modal.editing.id} />}
                     <div className="row">
                       <div className="col-6 mb-2">
