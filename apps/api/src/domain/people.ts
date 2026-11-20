@@ -168,7 +168,7 @@ export function counterKind(prefix: DocPrefix): string {
 
 // ─────────────────────────────── Approvals ───────────────────────────────
 
-export const APPROVAL_KINDS = ["LOSS_OVER_TOLERANCE", "UTANG_OVER_LIMIT", "MANUAL_ITEM", "WRITE_OFF", "VOID", "TRANSFER", "STOCK_OVERRIDE", "TRANSIT_SHORT", "REFUND", "COUNT"] as const;
+export const APPROVAL_KINDS = ["LOSS_OVER_TOLERANCE", "UTANG_OVER_LIMIT", "MANUAL_ITEM", "WRITE_OFF", "VOID", "TRANSFER", "STOCK_OVERRIDE", "TRANSIT_SHORT", "REFUND", "COUNT", "EXPENSE"] as const;
 export type ApprovalKind = (typeof APPROVAL_KINDS)[number];
 
 /** Default deciders per kind. Losses are the store owner's call (operator decision). */
@@ -183,6 +183,7 @@ export const DEFAULT_APPROVERS: Record<ApprovalKind, string[]> = {
   TRANSIT_SHORT: ["OWNER"], // M3: rice lost on a trip (Kulang sa lipat)
   REFUND: ["OWNER", "MANAGER"], // M3: refused delivery / returned rice — settle the money
   COUNT: ["OWNER"], // M8: a full count's adjustments post when the owner approves
+  EXPENSE: ["OWNER", "MANAGER"], // staff took more than the day's limit out of the drawer: it counts when approved
 };
 
 /** May `role` decide an approval that lists `approverRoles`? Platform admin never decides store business. */

@@ -236,7 +236,7 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
     [rawProducts, atStore],
   );
   // Unit cost per product (from the counter list, saved for offline) and whether this login may see it.
-  const [floors, setFloors] = useState<Map<string, { floorMinor: number; ownShelfCost: boolean; unit: string }>>(new Map());
+  const [floors, setFloors] = useState<Map<string, { floorMinor: number; lowestMinor?: number; ownShelfCost: boolean; unit: string }>>(new Map());
   const [seesCost, setSeesCost] = useState(false);
   const keptBelow = useRef(new Set<string>()); // below-cost prices someone chose to keep
   const [buildCustomers, setBuildCustomers] = useState<PosCustomer[]>([]);
@@ -312,7 +312,7 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
   const loadBuilder = useCallback(async (loc: string | undefined = locRef.current): Promise<Map<string, number> | null> => {
     type Cat = {
       location?: { id: string }; locations?: StoreOption[]; seesCost?: boolean; quotaPromo?: Parameters<typeof promoFrom>[0];
-      products?: { id: string; priceMinor?: number; tracked?: boolean; stock?: Record<string, number>; floorMinor?: number; ownShelfCost?: boolean; loose?: boolean; gramsPerUnit?: number | null; categoryId?: string | null }[];
+      products?: { id: string; priceMinor?: number; tracked?: boolean; stock?: Record<string, number>; floorMinor?: number; lowestMinor?: number; ownShelfCost?: boolean; loose?: boolean; gramsPerUnit?: number | null; categoryId?: string | null }[];
     };
     const ask = ++catalogAsk.current;
     let prices: Map<string, number> | null = null;
@@ -326,7 +326,7 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
       setAtStore({ price: prices, stock: new Map(cat.products.filter((x) => x.tracked && x.stock).map((x) => [x.id, x.stock![at] ?? 0])) });
       setPromo(promoFrom(cat.quotaPromo));
       setPromoInfo(new Map(cat.products.map((x) => [x.id, { categoryId: x.categoryId ?? null, isSack: !x.loose && !!x.gramsPerUnit }])));
-      setFloors(new Map(cat.products.map((x) => [x.id, { floorMinor: x.floorMinor ?? 0, ownShelfCost: !!x.ownShelfCost, unit: x.loose ? "kilo" : x.gramsPerUnit ? "sack" : "piece" }])));
+      setFloors(new Map(cat.products.map((x) => [x.id, { floorMinor: x.floorMinor ?? 0, lowestMinor: x.lowestMinor, ownShelfCost: !!x.ownShelfCost, unit: x.loose ? "kilo" : x.gramsPerUnit ? "sack" : "piece" }])));
       setSeesCost(cat.seesCost === true);
     };
     try {
@@ -552,9 +552,13 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
     for (const l of pricedCart) {
       let floor = floorOf(l);
       const unit = unitOf(l);
-      while (isBelowCost(unit, floor) && !keptBelow.current.has(okKey(l.product.id, unit, floor))) {
+      // A NEW pre-order by staff: a changed price may go down to the lowest price only (the server refuses lower).
+      // (Changing an order keeps the prices already on it, so that is left to the server.)
+      const low = !seesCost && !editingPre && !l.variantId && unit !== l.product.priceMinor ? floors.get(l.product.id)?.lowestMinor ?? floor : 0;
+      const tooLow = low > 0 && unit < low;
+      while (tooLow || (isBelowCost(unit, floor) && !keptBelow.current.has(okKey(l.product.id, unit, floor)))) {
         const pick = await askBelowCost({
-          name: l.product.name, priceMinor: unit, costMinor: floor, unit: floors.get(l.product.id)?.unit, showCost: seesCost, proceed: "Save anyway",
+          name: l.product.name, priceMinor: unit, costMinor: tooLow ? low : floor, noProceed: tooLow, unit: floors.get(l.product.id)?.unit, showCost: seesCost, proceed: "Save anyway",
           canChangeCost: !seesCost ? false : offline ? "Needs internet" : floors.get(l.product.id)?.ownShelfCost ? "This location has its own cost. Change it in Inventory." : true,
         });
         if (!pick) return false;

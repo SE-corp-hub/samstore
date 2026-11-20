@@ -131,7 +131,7 @@ test("one whole day at Bogs and Lucy, Bahay Tindahan and Lipa", async () => {
   assert.deepEqual([receipt.storeName, receipt.receiptFooter], ["Lipa Rice Store", "Salamat po!"]);
 
   // ── Expenses and cash, each store its own ──
-  must(await expenses.create(storeId, btCounter, { category: "transport", amountMinor: 20_000, paidFromDrawer: true })); // Bahay Tindahan ₱200, from the drawer
+  must(await expenses.create(storeId, btCounter, { category: "transport", amountMinor: 20_000, note: "tricycle", paidFromDrawer: true })); // Bahay Tindahan ₱200, from the drawer
   must(await expenses.create(storeId, lipaHead, { category: "supplies", amountMinor: 15_000 })); //                       Lipa ₱150
   must(await expenses.create(storeId, owner, { category: "rent", amountMinor: 100_000, locationId: null })); //            whole business ₱1,000
   must(await cash.handOver(storeId, btCounter, { amountMinor: 200_000, note: "to Lucy at noon" })); //                     Bahay Tindahan hands over ₱2,000

@@ -6,6 +6,7 @@ import { cacheBust, cacheKey } from "../persistence/ttl-cache.js";
 import { deductStock, InsufficientStockError, restoreStock } from "../domain/movements.js";
 import { dispositionForOrderStatus, hasActiveReservation, moveOrderReservation, settleForStatus } from "../domain/stock-settlement.js";
 import { resolveLinePrice } from "../domain/price-override.js";
+import { lowestPriceRefusal } from "../selling/lowest-price.js";
 import { assertTransition, paymentEffectFor, type OrderState } from "../domain/order-state.js";
 import { computeOrderTotals } from "../domain/pricing.js";
 import { taxColumnsFor } from "../domain/tax-store.js";
@@ -143,7 +144,7 @@ export class OrderAdminService {
    * Stock follows the edit: an order that still HOLDS stock (online / SE Corp Hub checkout) moves its hold to
    * the new lines; any other order gives back its old lines and takes the new ones (stock delta).
    */
-  async replaceOrderItems(storeId: string, orderId: string, items: OrderEditLine[], actorId: string | null = null): Promise<AdminResult<{ id: string; status: string; totalMinor: number }>> {
+  async replaceOrderItems(storeId: string, orderId: string, items: OrderEditLine[], actorId: string | null = null, /** The login changing the order (the screen always sends it): staff may change a price only down to the lowest price. */ role?: string): Promise<AdminResult<{ id: string; status: string; totalMinor: number }>> {
     if (!Array.isArray(items) || items.length === 0) {
       return { ok: false, error: { type: "validation", errors: ["At least one item with positive quantity is required"] } };
     }
@@ -203,6 +204,13 @@ export class OrderAdminService {
         lineTotalMinor: price.unitPriceMinor * it.quantity, priceOverridden: price.overridden, priceOverrideReason: price.reason,
         catalogUnitPriceMinor: price.overridden ? price.catalogUnitPriceMinor : null,
       });
+    }
+    if (role !== undefined) {
+      const tooLow = await lowestPriceRefusal(prisma, {
+        storeId, role, locationId: order.sellingLocationId, kept: new Map(oldItems.filter((o) => o.priceOverridden && o.productId).map((o) => [o.productId!, o.unitPriceMinor])),
+        lines: newLines.map((l) => ({ productId: l.productId, name: l.productName, unitPriceMinor: l.unitPriceMinor, overridden: l.priceOverridden })),
+      });
+      if (tooLow) return { ok: false, error: { type: "validation", errors: [tooLow] } };
     }
     // Totals (no delivery fee change: keep the order's original decision; recompute lines only)
     const totals = computeOrderTotals({ lines: newLines.map((l) => ({ unitPriceMinor: l.unitPriceMinor, quantity: l.quantity })) });

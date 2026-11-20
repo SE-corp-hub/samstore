@@ -327,7 +327,7 @@ export default function OrdersPanel() {
         if (!res.ok) { setError(data?.message ?? `${kind} failed`); return; }
         setConfirmAction(null);
         setReason("");
-        toast(kind === "voidHold" ? "Held order voided — stock restored" : kind === "void" ? "Sale voided — stock restored" : "Sale refunded and cancelled");
+        toast(kind === "voidHold" ? "Held order voided — stock restored" : kind === "void" ? "Sale voided — stock restored" : "Sale refunded — money given back, stock restored");
         void load();
       } catch (e) {
         setError(e instanceof Error ? e.message : `${kind} failed`);
@@ -1042,7 +1042,7 @@ export default function OrdersPanel() {
                       ? "This discards the held order and restores stock."
                       : confirmAction.kind === "void"
                         ? "This reverses the sale and restores stock."
-                        : "This records a refund and cancels the order. Stock is not restored."}
+                        : "This takes back the whole sale: the money goes back the way it was paid, credit comes off what the customer owes, and the rice goes back into stock."}
                   </p>
                   <input className="form-control form-control-sm" placeholder="Reason (optional)" value={reason} onChange={(e) => setReason(e.target.value)} />
                 </div>

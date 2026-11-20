@@ -35,6 +35,7 @@ const KIND_LABEL: Record<string, string> = {
   TRANSIT_SHORT: "Short on the way",
   REFUND: "Customer return",
   COUNT: "Count",
+  EXPENSE: "Expense from the drawer",
 };
 const STATUS: Record<string, [string, string]> = {
   PENDING: ["text-bg-warning", "Waiting"],
