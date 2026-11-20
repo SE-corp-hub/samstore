@@ -48,7 +48,11 @@ export interface DayFigures {
   sales: { count: number; grossMinor: number; takenBackCount: number; takenBackMinor: number; netMinor: number; cashMinor: number; gcashMinor: number; creditMinor: number; otherMinor: number; encodedLater: number };
   receipts: { first: string | null; last: string | null };
   creditCollectedMinor: number;
-  cash: { floatMinor: number; inMinor: number; givenBackMinor: number; paidOutMinor: number; handedOverMinor: number; shouldBeMinor: number; countedMinor: number | null; differenceMinor: number | null };
+  cash: { floatMinor: number; inMinor: number; givenBackMinor: number; paidOutMinor: number; handedOverMinor: number; shouldBeMinor: number; countedMinor: number | null; differenceMinor: number | null;
+    /** Of the handed over: cash of the owner's own sales that the owner kept (never in the drawer). Missing on Z-reads made before 2026-11-20. */
+    ownerKeptMinor?: number };
+  /** Sales the owner (or a manager) rang at this store this day, and whose cash the owner kept. */
+  ownerSales?: { orderNumber: string; at: string; totalMinor: number; method: string; ownerKeptMinor: number; by: string }[];
   gcash: { inMinor: number; givenBackMinor: number; shouldBeMinor: number; countedMinor: number | null; differenceMinor: number | null };
   cashOut: { what: string; amountMinor: number; at: string }[];
   cashCounts: Record<string, number> | null;
@@ -176,9 +180,20 @@ export class DayCloseService {
       prisma.order.findFirst({ where: { storeId, sellingLocationId: loc.id, occurredAt: range }, orderBy: { occurredAt: "asc" }, select: { orderNumber: true } }),
       prisma.order.findFirst({ where: { storeId, sellingLocationId: loc.id, occurredAt: range }, orderBy: { occurredAt: "desc" }, select: { orderNumber: true } }),
       prisma.expense.findMany({ where: { storeId, locationId: loc.id, paidFromDrawer: true, voidedAt: null, spentAt: range }, select: { category: true, note: true, amountMinor: true, spentAt: true }, orderBy: { spentAt: "asc" } }),
-      prisma.cashHandover.findMany({ where: { storeId, locationId: loc.id, businessDate: date, voidedAt: null }, select: { amountMinor: true, note: true, createdAt: true }, orderBy: { createdAt: "asc" } }),
+      prisma.cashHandover.findMany({ where: { storeId, locationId: loc.id, businessDate: date, voidedAt: null }, select: { amountMinor: true, note: true, createdAt: true, orderId: true }, orderBy: { createdAt: "asc" } }),
     ]);
-    const names = await this.names([session.openedBy]);
+    // The owner's own sales here today: rung by an owner/manager login, or the owner kept the cash.
+    const dayOrders = await prisma.order.findMany({
+      where: { storeId, sellingLocationId: loc.id, occurredAt: range, status: { not: "CANCELLED" } },
+      select: { id: true, orderNumber: true, occurredAt: true, totalMinor: true, paymentMethod: true, statusHistory: { select: { actorId: true }, orderBy: { createdAt: "asc" }, take: 1 } },
+      orderBy: { occurredAt: "asc" },
+    });
+    const ringers = [...new Set(dayOrders.map((o) => o.statusHistory[0]?.actorId).filter((x): x is string => !!x))];
+    const bosses = new Set(ringers.length ? (await prisma.userStore.findMany({ where: { storeId, userId: { in: ringers }, role: { in: ["OWNER", "MANAGER"] } }, select: { userId: true } })).map((u) => u.userId) : []);
+    const keptBy = new Map<string, number>();
+    for (const h of handovers) if (h.orderId) keptBy.set(h.orderId, (keptBy.get(h.orderId) ?? 0) + h.amountMinor);
+    const ownerOrders = dayOrders.filter((o) => keptBy.has(o.id) || bosses.has(o.statusHistory[0]?.actorId ?? ""));
+    const names = await this.names([session.openedBy, ...ownerOrders.map((o) => o.statusHistory[0]?.actorId)]);
     const gcashIn = gIn._sum.amountMinor ?? 0;
     const gcashBack = gBack.reduce((s, p) => s + Math.abs(p.amountMinor), 0);
     const float = session.openingFloatMinor;
@@ -194,11 +209,16 @@ export class DayCloseService {
       cash: {
         floatMinor: float, inMinor: t.cash.inMinor, givenBackMinor: t.cash.givenBackMinor, paidOutMinor: t.cash.paidOutMinor, handedOverMinor: t.cash.handedOverMinor,
         shouldBeMinor: float + t.cash.expectedMinor, countedMinor: null, differenceMinor: null,
+        ownerKeptMinor: [...keptBy.values()].reduce((a, b) => a + b, 0),
       },
+      ownerSales: ownerOrders.map((o) => ({
+        orderNumber: o.orderNumber, at: (o.occurredAt ?? new Date()).toISOString(), totalMinor: o.totalMinor, method: o.paymentMethod ?? "",
+        ownerKeptMinor: keptBy.get(o.id) ?? 0, by: names.get(o.statusHistory[0]?.actorId ?? "") ?? "Owner",
+      })),
       gcash: { inMinor: gcashIn, givenBackMinor: gcashBack, shouldBeMinor: gcashIn - gcashBack, countedMinor: null, differenceMinor: null },
       cashOut: [
         ...expenses.map((e) => ({ what: `Expense: ${e.note?.trim() || e.category}`, amountMinor: e.amountMinor, at: e.spentAt.toISOString() })),
-        ...handovers.map((h) => ({ what: `Handed to the owner${h.note ? `: ${h.note}` : ""}`, amountMinor: h.amountMinor, at: h.createdAt.toISOString() })),
+        ...handovers.map((h) => ({ what: h.orderId ? `${h.note ?? "Owner's sale"}: the owner kept the cash` : `Handed to the owner${h.note ? `: ${h.note}` : ""}`, amountMinor: h.amountMinor, at: h.createdAt.toISOString() })),
       ],
       cashCounts: null, keepFloatMinor: null, varianceReason: null, note: null, reopened: null,
     };

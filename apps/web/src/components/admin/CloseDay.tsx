@@ -17,7 +17,7 @@ import { useOffline } from "../../lib/offlineCache";
 import { peso } from "../../lib/number-format";
 import { printSlip } from "../../lib/slip-print";
 import { toast } from "../../lib/toast";
-import { DENOMINATIONS, dayText, timeText, VARIANCE_REASONS, zLabel, zSlip, type DayFigures } from "../../lib/day";
+import { DENOMINATIONS, dayText, handedOnly, ownerKept, payWord, timeText, VARIANCE_REASONS, zLabel, zSlip, type DayFigures } from "../../lib/day";
 import SignaturePad from "./SignaturePad";
 import Steps from "./Steps";
 
@@ -27,6 +27,23 @@ const toMinor = (s: string) => Math.round(Number(s.replace(/,/g, "") || "0") * 1
 const errText = (d: { message?: string; errors?: string[] } | null, fallback: string) => d?.errors?.join(", ") || d?.message || fallback;
 const diffWords = (m: number) => (m === 0 ? "Correct" : m < 0 ? `Short ${peso(-m)}` : `Over ${peso(m)}`);
 const diffClass = (m: number) => (m === 0 ? "day-ok" : m < 0 ? "day-short" : "day-over");
+
+/** The owner's own sales at this store this day: which ones, and whether the owner kept the cash. */
+export function OwnerSales({ z }: { z: DayFigures }) {
+  const list = z.ownerSales ?? [];
+  return (
+    <div className="owner-sales mt-3">
+      <h3 className="h6 mb-1"><i className="bi bi-person-check me-1" aria-hidden="true"></i>Owner&apos;s sales here ({list.length})</h3>
+      {list.map((o) => (
+        <div key={o.orderNumber} className="d-flex justify-content-between gap-3 py-1 border-bottom">
+          <span>{o.orderNumber} · {payWord(o.method)} · {timeText(o.at)}<br />
+            <span className={o.ownerKeptMinor ? "day-over" : "text-muted"}>{o.ownerKeptMinor ? `Owner kept ${peso(o.ownerKeptMinor)} cash` : ["cash", "split"].includes(o.method.toLowerCase()) ? "Cash in the drawer" : "No cash"}</span></span>
+          <strong className="text-end">{peso(o.totalMinor)}</strong>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 /** The figures of a Z-read or X-read, as a list on screen. */
 export function ZView({ z, kind }: { z: DayFigures; kind: "X" | "Z" }) {
@@ -53,7 +70,8 @@ export function ZView({ z, kind }: { z: DayFigures; kind: "X" | "Z" }) {
       {row("Cash in", peso(z.cash.inMinor))}
       {z.cash.givenBackMinor > 0 && row("Given back", `−${peso(z.cash.givenBackMinor)}`)}
       {z.cash.paidOutMinor > 0 && row("Expenses from the drawer", `−${peso(z.cash.paidOutMinor)}`)}
-      {z.cash.handedOverMinor > 0 && row("Handed to the owner", `−${peso(z.cash.handedOverMinor)}`)}
+      {ownerKept(z) > 0 && row("Owner kept (own sales)", `−${peso(ownerKept(z))}`)}
+      {handedOnly(z) > 0 && row("Handed to the owner", `−${peso(handedOnly(z))}`)}
       {row("Cash should be", peso(z.cash.shouldBeMinor), true)}
       {z.cash.countedMinor !== null && row("Cash counted", peso(z.cash.countedMinor), true)}
       {z.cash.differenceMinor !== null && <div className={`py-1 fw-bold ${diffClass(z.cash.differenceMinor)}`}>Cash: {diffWords(z.cash.differenceMinor)}</div>}
@@ -62,6 +80,7 @@ export function ZView({ z, kind }: { z: DayFigures; kind: "X" | "Z" }) {
       {z.gcash.countedMinor !== null && row("GCash counted", peso(z.gcash.countedMinor), true)}
       {z.gcash.differenceMinor !== null && <div className={`py-1 fw-bold ${diffClass(z.gcash.differenceMinor)}`}>GCash: {diffWords(z.gcash.differenceMinor)}</div>}
       {z.varianceReason && row("Reason", z.varianceReason)}
+      {!!z.ownerSales?.length && <OwnerSales z={z} />}
       {z.keepFloatMinor !== null && row("Change fund kept for tomorrow", peso(z.keepFloatMinor))}
       {kind === "X" && <p className="small text-muted mt-2 mb-0">X-read: the day is still open. Nothing was closed.</p>}
     </div>
@@ -366,10 +385,12 @@ export default function CloseDay({ locationId, storeName, placeName, heldCount, 
                 {sumRow("Cash in", peso(fig.cash.inMinor))}
                 {fig.cash.givenBackMinor > 0 && sumRow("Given back", `−${peso(fig.cash.givenBackMinor)}`)}
                 {fig.cash.paidOutMinor > 0 && sumRow("Expenses", `−${peso(fig.cash.paidOutMinor)}`)}
-                {fig.cash.handedOverMinor > 0 && sumRow("To the owner", `−${peso(fig.cash.handedOverMinor)}`)}
+                {ownerKept(fig) > 0 && sumRow("Owner kept (own sales)", `−${peso(ownerKept(fig))}`)}
+                {handedOnly(fig) > 0 && sumRow("To the owner", `−${peso(handedOnly(fig))}`)}
                 {sumRow("Cash should be", peso(fig.cash.shouldBeMinor), "fw-bold zc-rule")}
                 {sumRow("Cash counted", peso(countedMinor), "fw-bold")}
                 <div className={`zc-variance ${diffClass(cashDiff)}`} aria-live="polite"><span>Cash</span><strong>{diffWords(cashDiff)}</strong></div>
+                {!!fig.ownerSales?.length && <OwnerSales z={fig} />}
 
               </section>
             </div>

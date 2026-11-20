@@ -39,6 +39,7 @@ after(async () => {
     await prisma.stockMovement.deleteMany({ where });
     await prisma.order.deleteMany({ where });
     await prisma.cashMovement.deleteMany({ where });
+    await prisma.cashHandover.deleteMany({ where });
     await prisma.registerSession.deleteMany({ where });
     await prisma.register.deleteMany({ where });
     await prisma.storeCounter.deleteMany({ where });
@@ -180,4 +181,31 @@ test("switch off: sell with no day; an offline cash sale keeps its sale time in 
     const pay = await prisma.payment.findFirstOrThrow({ where: { storeId: fx.storeId, order: { orderNumber: off.orderNumber } } });
     assert.equal(pay.receivedAt.getTime(), soldAt.getTime());
   }
+});
+
+test("The owner sells at a store and keeps the cash: the drawer does not expect it; the Z-read lists it", async () => {
+  const counter = new BentaService();
+  const day = new DayCloseService();
+  const fx = await fixture(true);
+  must(await day.open(fx.storeId, fx.owner, { locationId: fx.bt, openingFloatMinor: 50_000 }));
+  const ownerSell = (cashToOwner: boolean) => counter.sell(fx.storeId, fx.owner, { idempotencyKey: key(), locationId: fx.bt, lines: [{ productId: fx.rice, quantity: 1 }], payment: { method: "cash" }, cashToOwner } as never);
+  const kept = must(await ownerSell(true));
+  must(await ownerSell(false));
+  // Staff asking for it is ignored (only the owner may keep a sale's cash).
+  must(await day.open(fx.storeId, fx.staff, { openingFloatMinor: 0 }));
+  must(await counter.sell(fx.storeId, fx.staff, { idempotencyKey: key(), lines: [{ productId: fx.rice, quantity: 1 }], payment: { method: "cash" }, cashToOwner: true } as never));
+  const s1 = must(await day.xread(fx.storeId, fx.staff, {}));
+  assert.equal(s1.cash.shouldBeMinor, 130_000, "staff cannot send the cash to the owner");
+  assert.equal(s1.cash.ownerKeptMinor, 0);
+
+  const x = must(await day.xread(fx.storeId, fx.owner, { locationId: fx.bt }));
+  assert.equal(x.sales.count, 2);
+  assert.equal(x.sales.cashMinor, 260_000, "both sales are Bahay Tindahan's sales");
+  assert.equal(x.cash.ownerKeptMinor, 130_000);
+  assert.equal(x.cash.shouldBeMinor, 50_000 + 130_000, "change fund + only the cash that went in the drawer");
+  assert.equal(x.ownerSales?.length, 2);
+  assert.equal(x.ownerSales?.find((o) => o.orderNumber === kept.orderNumber)?.ownerKeptMinor, 130_000);
+  const z = must(await day.close(fx.storeId, fx.owner, { locationId: fx.bt, cashCountedMinor: 180_000, gcashCountedMinor: 0, signatures: SIG }));
+  assert.equal(z.cash.differenceMinor, 0, "balances with the owner's cash out of the drawer");
+  assert.equal(z.ownerSales?.length, 2, "frozen on the Z-read");
 });

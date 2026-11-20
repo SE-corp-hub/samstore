@@ -24,7 +24,9 @@ export interface DayFigures {
   sales: { count: number; grossMinor: number; takenBackCount: number; takenBackMinor: number; netMinor: number; cashMinor: number; gcashMinor: number; creditMinor: number; otherMinor: number; encodedLater: number };
   receipts: { first: string | null; last: string | null };
   creditCollectedMinor: number;
-  cash: { floatMinor: number; inMinor: number; givenBackMinor: number; paidOutMinor: number; handedOverMinor: number; shouldBeMinor: number; countedMinor: number | null; differenceMinor: number | null };
+  cash: { floatMinor: number; inMinor: number; givenBackMinor: number; paidOutMinor: number; handedOverMinor: number; shouldBeMinor: number; countedMinor: number | null; differenceMinor: number | null; ownerKeptMinor?: number };
+  /** Sales the owner rang at this store this day, and the cash the owner kept (missing on older Z-reads). */
+  ownerSales?: { orderNumber: string; at: string; totalMinor: number; method: string; ownerKeptMinor: number; by: string }[];
   gcash: { inMinor: number; givenBackMinor: number; shouldBeMinor: number; countedMinor: number | null; differenceMinor: number | null };
   cashOut: { what: string; amountMinor: number; at: string }[];
   cashCounts: Record<string, number> | null;
@@ -84,6 +86,12 @@ export async function loadDay(locationId: string, opts: { savedOnly?: boolean } 
   return s;
 }
 
+/** Cash of the owner's own sales that the owner kept (it never went in the drawer). */
+export const ownerKept = (z: DayFigures) => z.cash.ownerKeptMinor ?? 0;
+/** Cash handed over to the owner from the drawer (the owner's kept sales left out). */
+export const handedOnly = (z: DayFigures) => Math.max(0, z.cash.handedOverMinor - ownerKept(z));
+export const payWord = (m: string) => ({ cash: "Cash", gcash: "GCash", utang: "Credit", maya: "Maya", bank: "Bank", split: "Split" } as Record<string, string>)[m.toLowerCase()] ?? m;
+
 /** The Z-read (or X-read) on the receipt printer. */
 export function zSlip(z: DayFigures, storeName: string, kind: "Z" | "X"): Slip {
   const diff = (m: number | null) => (m === null ? "" : m === 0 ? "Correct" : m < 0 ? `Short ${peso(-m)}` : `Over ${peso(m)}`);
@@ -108,7 +116,8 @@ export function zSlip(z: DayFigures, storeName: string, kind: "Z" | "X"): Slip {
     { name: "Cash in", qty: peso(z.cash.inMinor) },
     ...(z.cash.givenBackMinor ? [{ name: "Given back", qty: `-${peso(z.cash.givenBackMinor)}` }] : []),
     ...(z.cash.paidOutMinor ? [{ name: "Expenses", qty: `-${peso(z.cash.paidOutMinor)}` }] : []),
-    ...(z.cash.handedOverMinor ? [{ name: "To the owner", qty: `-${peso(z.cash.handedOverMinor)}` }] : []),
+    ...(ownerKept(z) ? [{ name: "Owner kept (own sales)", qty: `-${peso(ownerKept(z))}` }] : []),
+    ...(handedOnly(z) ? [{ name: "To the owner", qty: `-${peso(handedOnly(z))}` }] : []),
     { name: "Cash should be", qty: peso(z.cash.shouldBeMinor) },
     ...(z.cash.countedMinor !== null ? [{ name: "Cash counted", qty: peso(z.cash.countedMinor) }, { name: "Cash", qty: diff(z.cash.differenceMinor) }] : []),
     { name: "— GCASH —", qty: "" },
@@ -116,6 +125,10 @@ export function zSlip(z: DayFigures, storeName: string, kind: "Z" | "X"): Slip {
     ...(z.gcash.countedMinor !== null ? [{ name: "GCash counted", qty: peso(z.gcash.countedMinor) }, { name: "GCash", qty: diff(z.gcash.differenceMinor) }] : []),
     ...(z.varianceReason ? [{ name: "Reason", qty: z.varianceReason }] : []),
     ...(z.keepFloatMinor !== null ? [{ name: "Change fund kept", qty: peso(z.keepFloatMinor) }] : []),
+    ...(z.ownerSales?.length ? [
+      { name: `— OWNER'S SALES (${z.ownerSales.length}) —`, qty: "" },
+      ...z.ownerSales.map((o) => ({ name: `${o.orderNumber} ${payWord(o.method)}${o.ownerKeptMinor ? " (owner kept)" : ""}`, qty: peso(o.totalMinor) })),
+    ] : []),
   ];
   return {
     storeName, locationId: z.location.id, title: kind === "Z" ? `Z-READ ${zLabel(z.zNumber)}` : "X-READ (day still open)",

@@ -1292,12 +1292,15 @@ model CashHandover {
   note         String?
   handedById   String
   receivedById String?
+  /// The owner's own sale whose cash the owner kept (POS "I keep it"): written at the sale, same amount.
+  orderId      String?
   voidedAt     DateTime?
   voidedById   String?
   voidReason   String?
   createdAt    DateTime  @default(now())
 
   @@index([storeId, locationId, businessDate])
+  @@index([orderId])
 }
 
 // ─────────────────────────────── Purchases / replenishment ───────────────────────────────

@@ -119,7 +119,7 @@ export class BentaController {
       customerId: str(body?.customerId), customerName: str(body?.customerName),
       newCustomerName: str(body?.newCustomerName), newCustomerPhone: str(body?.newCustomerPhone), signatures: signaturesFrom(body?.signatures),
       paperSlip: paper ? { slipNo: paper.slipNo, occurredAt: paper.occurredAt } : undefined,
-      soldAt: body?.soldAt,
+      soldAt: body?.soldAt, cashToOwner: body?.cashToOwner === true,
     }));
   }
 

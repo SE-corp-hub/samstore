@@ -26,3 +26,7 @@ CREATE UNIQUE INDEX "RegisterSession_one_open_per_register" ON "RegisterSession"
 -- One open day per store at a time, and a Z number is never given twice at one store.
 CREATE UNIQUE INDEX "RegisterSession_one_open_day_per_location" ON "RegisterSession" ("storeId", "locationId") WHERE "status" = 'OPEN' AND "locationId" IS NOT NULL;
 CREATE UNIQUE INDEX "RegisterSession_z_number_per_location" ON "RegisterSession" ("storeId", "locationId", "zNumber") WHERE "zNumber" IS NOT NULL;
+
+-- The owner's own sale whose cash the owner kept: the hand-over row points at the sale.
+ALTER TABLE "CashHandover" ADD COLUMN IF NOT EXISTS "orderId" TEXT;
+CREATE INDEX IF NOT EXISTS "CashHandover_orderId_idx" ON "CashHandover"("orderId");
