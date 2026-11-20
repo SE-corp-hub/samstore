@@ -153,6 +153,9 @@ export default function BentaPanel() {
   const [staffSig, setStaffSig] = useState<string | null>(null);
   const [last, setLast] = useState<{ status: "COMPLETED" | "WAITING_OWNER" | "DECLINED"; /** Saved on this tablet, not sent yet. */ offline?: boolean; /** Printed on the receipt; empty = walk-in. */ customerName?: string | null; smsStatus: string | null; orderNumber: string; totalMinor: number; changeMinor: number; lines: { name: string; soldBy: string | null; quantity: number; grams: number | null; lineTotalMinor: number }[]; releases: { docNumber: string }[]; zeroCheck: { productId: string; name: string }[]; belowCost?: string[] } | null>(null);
   const [checking, setChecking] = useState<{ productId: string; name: string } | null>(null);
+  // "Open a sack" (sell per kilo): the kilo rice whose sack to open; `addAfter` = a tap on it asked for one more kilo.
+  const [opening, setOpening] = useState<{ kiloId: string; addAfter: boolean } | null>(null);
+  const [openBusy, setOpenBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [newItem, setNewItem] = useState(false);
@@ -170,6 +173,9 @@ export default function BentaPanel() {
   // Less used choices stay folded away until asked for, so the screen shows one clear next step.
   const [morePay, setMorePay] = useState(false);
   const [priceText, setPriceText] = useState(""); // what is typed on the price pad while a line is open
+  // Kilo rice: the line's amount typed on the pad (kilos, or pesos worth) instead of its price.
+  const [editWhat, setEditWhat] = useState<"price" | "kilos">("price");
+  const [amountText, setAmountText] = useState("");
   const [fromOpen, setFromOpen] = useState(false);
   const [seesCost, setSeesCost] = useState(false);
   const [promo, setPromo] = useState<QuotaPromo>(PROMO_OFF); // the owner's quota promo (Settings), saved with the price list
@@ -348,7 +354,12 @@ export default function BentaPanel() {
     setPriceText(String((l.price ?? usual) / 100));
     // A price that already differs (e.g. "Fix selling price" from the below-cost question) gets a reason chosen too.
     const differs = l.price !== undefined && l.price !== usual;
-    setEditing(differs && !reasonOk(l.reason) ? { ...l, reason: lastReason() } : l); setEditIdx(idx); setFromOpen(!!l.sourceLocationId);
+    setEditing(differs && !reasonOk(l.reason) ? { ...l, reason: lastReason() } : l); setEditIdx(idx); setFromOpen(!!l.sourceLocationId); setEditWhat("price");
+  };
+  /** The kilos on a kilo-rice line: type 2.5 kg, or "₱100 worth". */
+  const startKilos = (l: CartLine, idx: number) => {
+    setAmountText(l.mode === "PIECE" ? "1" : l.value);
+    setEditing(l); setEditIdx(idx); setFromOpen(false); setEditWhat("kilos");
   };
   const here = locations.find((l) => l.id === locationId);
   // "Take from another store" offers only the places the owner allowed, in the owner's order.
@@ -609,22 +620,30 @@ export default function BentaPanel() {
     }
     return -1;
   };
-  /** One tap on a product: one more sack (or one more kilo of loose rice) in the sale. The first tap checks the price against the cost. */
-  const addOne = async (it: Item) => {
+  /** A kilo rice's own sack (on this list), when it has one. */
+  const sackOf = (it: Item | undefined) => (it?.kiloOfId ? byId.get(it.kiloOfId) : undefined);
+  /** Kilos of a kilo rice still on this store's shelf after this sale (grams). */
+  const kilosLeft = (it: Item) => (it.stock[locationId] ?? 0) - inSale(it.id);
+  /**
+   * One tap on a product: one more sack (or one more kilo of loose rice) in the sale. The first tap checks the price against the cost.
+   * Kilo rice with less than a kilo left asks first: open one of its sacks? (`force` = "Sell anyway").
+   */
+  const addOne = async (it: Item, force = false) => {
     noteUse("pos", it.id);
     setError(null);
+    if (!force && it.loose && sackOf(it) && kilosLeft(it) < 1000) { setOpening({ kiloId: it.id, addAfter: true }); return; }
     const at = tapLineIdx(it);
-    if (at >= 0) { bump(at, 1); return; }
+    if (at >= 0) { bump(at, 1, 1); return; }
     const line: CartLine = { productId: it.id, mode: it.loose ? "KILO" : "PIECE", value: "1", sourceLocationId: null };
     if (!(await passesCost(line, null))) return;
     setCart((c) => [...c, line]);
     setCleared((n) => n + 1);
   };
-  /** − / + on a sale line: one sack, or one kilo. At zero the line goes out. */
-  const bump = (idx: number, delta: number) => {
+  /** − / + on a sale line: one sack, or ½ kilo of kilo rice (a tap on the product adds a whole kilo). At zero the line goes out. */
+  const bump = (idx: number, delta: number, kiloStep = 0.5) => {
     setCart((c) => c.flatMap((l, j) => {
       if (j !== idx || l.mode === "PESO") return [l];
-      const next = l.mode === "KILO" ? Math.round((Number(l.value) || 0) * 1000 + delta * 1000) / 1000 : (Number(l.value) || 0) + delta;
+      const next = l.mode === "KILO" ? Math.round((Number(l.value) || 0) * 1000 + delta * kiloStep * 1000) / 1000 : (Number(l.value) || 0) + delta;
       if (next <= 0) return [];
       return [{ ...l, value: l.mode === "KILO" ? String(next) : String(Math.round(next)) }];
     }));
@@ -670,15 +689,21 @@ export default function BentaPanel() {
             const it = byId.get(l.productId);
             const c = computed[idx]!;
             const name = it?.name ?? "Item";
-            const unitWord = l.mode === "KILO" ? "kilo" : it?.gramsPerUnit ? "sack" : "piece";
-            // A kilo line counts in whole kilos; a line sold by pesos (an older held sale) has no −/+, only the trash can.
+            const unitWord = l.mode === "KILO" ? "half kilo" : it?.gramsPerUnit ? "sack" : "piece";
+            // A kilo line goes by ½ kg on − / +; tap the kilos to type them (2.5 kg) or the pesos ("₱100 worth").
+            // A line sold by pesos has no − / +, only the trash can and its kilos to tap.
             const qtyText = l.mode === "PIECE" ? l.value : kg(c.grams ?? 0);
-            const canMinus = l.mode !== "PESO" && (l.mode === "PIECE" ? Number(l.value) > 1 : (c.grams ?? 0) > 1000);
+            const canMinus = l.mode !== "PESO" && (l.mode === "PIECE" ? Number(l.value) > 1 : (c.grams ?? 0) > 500);
             return (
               <li key={idx} className="sale-line">
                 <span className="name">
                   {name}
                   {l.mode === "PESO" && <span className="text-muted"> (₱{l.value})</span>}
+                  {it?.loose && sackOf(it) && kilosLeft(it) < 0 && (
+                    <button type="button" className="btn btn-sm btn-outline-success ms-1 open-sack-btn" onClick={() => setOpening({ kiloId: it.id, addAfter: false })}>
+                      <i className="bi bi-box-arrow-up me-1" aria-hidden="true"></i>Open a sack
+                    </button>
+                  )}
                   {l.sourceLocationId && <span className="badge text-bg-info ms-1">from {code(l.sourceLocationId)}</span>}
                   {l.price !== undefined && <span className="badge text-bg-warning ms-1">new price</span>}
                   {promoAt[idx] != null && <span className="badge text-bg-success ms-1">promo</span>}
@@ -701,7 +726,9 @@ export default function BentaPanel() {
                       <i className="bi bi-trash" aria-hidden="true"></i>
                     </button>
                   )}
-                  <span className="qty-num" aria-live="polite">{qtyText}</span>
+                  {it?.loose ? (
+                    <button type="button" className="btn btn-link qty-num qty-kilos" aria-label={`Type the kilos or pesos of ${name}: now ${qtyText}`} onClick={() => startKilos(l, idx)}>{qtyText}</button>
+                  ) : <span className="qty-num" aria-live="polite">{qtyText}</span>}
                   {l.mode !== "PESO" && <button type="button" className="btn btn-outline-dark qty-btn" aria-label={`One ${unitWord} more ${name}`} onClick={() => bump(idx, 1)}>+</button>}
                 </span>
                 <span className="amount">{peso(c.totalMinor)}</span>
@@ -724,8 +751,89 @@ export default function BentaPanel() {
     <QuickCount productId={checking.productId} name={checking.name} loose={!!byId.get(checking.productId)?.loose} locationId={locationId}
       onCancel={() => setChecking(null)} onDone={async () => { setChecking(null); await loadCatalog(locationId); }} />
   );
+  /** Open one sack of a kilo rice's own rice at this store: 1 sack off the shelf, its kilos (25 kg) on. Works offline (sent later). */
+  const openSack = async (kilo: Item, addAfter: boolean) => {
+    const sack = sackOf(kilo);
+    if (!sack || !sack.gramsPerUnit) return;
+    const grams = sack.gramsPerUnit;
+    setOpenBusy(true); setError(null);
+    try {
+      const r = await sendStep("/admin/resacks/open-for-kilos", { locationId, kiloProductId: kilo.id }, `Open a sack: ${sack.name}`);
+      if (r.status === "sent" && !r.ok) { setError(errText(r.data as ApiBody | null, "Could not open the sack. Try again.")); return; }
+      setItems((prev) => prev.map((x) => (x.id === kilo.id ? { ...x, tracked: true, stock: { ...x.stock, [locationId]: (x.stock[locationId] ?? 0) + grams } }
+        : x.id === sack.id ? { ...x, stock: { ...x.stock, [locationId]: (x.stock[locationId] ?? 0) - 1 } } : x)));
+      toast(`1 sack opened: ${kg(grams)} more ${kilo.name}${r.status === "queued" ? " (sent when the internet is back)" : ""}`, "success");
+      setOpening(null);
+      if (addAfter) await addOne(kilo, true);
+    } finally { setOpenBusy(false); }
+  };
+  const openCard = opening && (() => {
+    const kilo = byId.get(opening.kiloId);
+    const sack = sackOf(kilo);
+    if (!kilo || !sack) return null;
+    const left = Math.max(0, kilosLeft(kilo));
+    const sacksHere = sack.stock[locationId] ?? 0;
+    return (
+      <div className="sale-card fit-card mx-auto w-100" style={{ maxWidth: 520 }}>
+        <div className="card-body">
+          <h2 className="h4 text-center mb-2">Open a sack?</h2>
+          <p className="text-center mb-2">{left > 0 ? <>Only <strong>{kg(left)}</strong></> : <strong>No kilos</strong>} of {kilo.name} left at {here?.name ?? "this store"}.</p>
+          <p className="text-center mb-3">Open 1 sack of <strong>{sack.name}</strong> for {kg(sack.gramsPerUnit ?? 0)} more. {sacksHere > 0 ? `${sacksHere} ${sacksHere === 1 ? "sack" : "sacks"} here now.` : "The count shows no sack here, but you can still open one."}</p>
+          <div className="d-grid gap-2">
+            <button type="button" className="btn btn-success btn-lg py-3 fw-bold" disabled={openBusy} onClick={() => void openSack(kilo, opening.addAfter)}>
+              <i className="bi bi-box-arrow-up me-2" aria-hidden="true"></i>{openBusy ? "Opening…" : "Yes, open a sack"}
+            </button>
+            <div className="d-flex gap-2">
+              <button type="button" className="btn btn-outline-dark btn-lg flex-fill" disabled={openBusy} onClick={() => setOpening(null)}>Back</button>
+              {opening.addAfter && <button type="button" className="btn btn-outline-dark btn-lg flex-fill" disabled={openBusy} onClick={() => { setOpening(null); void addOne(kilo, true); }}>Sell anyway</button>}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  })();
+  // Kilo rice: how much on one line, typed on the big pad: kilos (2.5) or pesos worth (₱100).
+  const kilosCard = editing && editWhat === "kilos" && (() => {
+    const it = byId.get(editing.productId);
+    if (!it) return null;
+    const byPeso = editing.mode === "PESO";
+    const line: CartLine = { ...editing, mode: byPeso ? "PESO" : "KILO", value: amountText };
+    const c = lineOf(it, line);
+    const unit = editing.price ?? it.priceMinor;
+    const ok = c.totalMinor > 0 && (c.grams ?? 0) > 0;
+    const switchTo = (mode: "KILO" | "PESO") => {
+      if (mode === line.mode) return;
+      // Keep the same rice: 2 kg becomes ₱108 worth, ₱100 worth becomes 1.852 kg.
+      setAmountText(mode === "PESO" ? String(c.totalMinor > 0 ? c.totalMinor / 100 : "") : c.grams ? String(c.grams / 1000) : "");
+      setEditing({ ...editing, mode });
+    };
+    const lead = (
+      <div className="btn-group" role="group" aria-label="Kilos or pesos">
+        <button type="button" className={`btn ${byPeso ? "btn-outline-dark" : "btn-dark"}`} aria-pressed={!byPeso} onClick={() => switchTo("KILO")}>Kilos</button>
+        <button type="button" className={`btn ${byPeso ? "btn-dark" : "btn-outline-dark"}`} aria-pressed={byPeso} onClick={() => switchTo("PESO")}>₱ worth</button>
+      </div>
+    );
+    return (
+      <div className="sale-card fit-card mx-auto w-100" style={{ maxWidth: 520 }}>
+        <div className="card-body">
+          <h2 className="h5 text-center mb-1">How much · {it.name}</h2>
+          <div className="text-center mb-2" style={{ fontVariantNumeric: "tabular-nums" }}>
+            {peso(unit).replace(/\.00$/, "")} per kilo
+            {ok && <> · <strong>{kg(c.grams ?? 0)}</strong> = <strong>{peso(c.totalMinor)}</strong></>}
+          </div>
+          <NumPad startFresh value={amountText} onChange={setAmountText} decimals={byPeso ? 2 : 3} label={byPeso ? "Pesos worth" : "Kilos"} unit={byPeso ? "₱" : "kg"} lead={lead} />
+          {!ok && <div className="mt-1 text-center text-danger">{byPeso ? "Type how many pesos" : "Type the kilos"}</div>}
+          <div className="d-flex align-items-stretch gap-2 mt-2 pos-actions">
+            <button type="button" className="btn btn-outline-dark btn-lg text-nowrap" onClick={() => { setEditing(null); setEditIdx(null); }}>Back</button>
+            <button type="button" className="btn btn-success btn-lg flex-grow-1 text-nowrap" disabled={!ok}
+              onClick={() => { const at = editIdx; if (at === null) return; setCart(cart.map((x, j) => (j === at ? line : x))); setEditing(null); setEditIdx(null); }}>Save</button>
+          </div>
+        </div>
+      </div>
+    );
+  })();
   // "Price" on a sale line: only the price (the big pad, no keyboard) and the reason. How many is − / + on the line.
-  const editCard = editing && (() => {
+  const editCard = kilosCard || editing && (() => {
     const it = byId.get(editing.productId);
     if (!it) return null;
     const c = lineOf(it, editing);
@@ -877,8 +985,8 @@ export default function BentaPanel() {
         return {
           key: `${idx}-${l.productId}`, name: it?.name ?? "Item", totalMinor: c.totalMinor, notes,
           // Change it right here: − / + (one sack or one kilo), the trash can, and Price (the same price card as while picking).
-          qty: l.mode === "PIECE" ? l.value : kg(c.grams ?? 0), unitWord: l.mode === "KILO" ? "kilo" : sackish ? "sack" : "piece",
-          canMinus: edit && (l.mode === "PIECE" ? n > 1 : (c.grams ?? 0) > 1000),
+          qty: l.mode === "PIECE" ? l.value : kg(c.grams ?? 0), unitWord: l.mode === "KILO" ? "half kilo" : sackish ? "sack" : "piece",
+          canMinus: edit && (l.mode === "PIECE" ? n > 1 : (c.grams ?? 0) > 500),
           onMinus: edit ? () => bump(idx, -1) : undefined, onPlus: edit ? () => bump(idx, 1) : undefined,
           onRemove: () => setCart(cart.filter((_, j) => j !== idx)), onPrice: () => startEdit(orig, idx),
           qtyText: l.mode === "PIECE" ? `${n} ${sackish ? (n === 1 ? "sack" : "sacks") : (n === 1 ? "piece" : "pieces")}` : l.mode === "KILO" ? kg(c.grams ?? 0) : `₱${l.value} worth`,
@@ -893,16 +1001,16 @@ export default function BentaPanel() {
   );
   const errAlert = error && <div className="alert alert-danger py-2" role="alert">{error}</div>;
   const dayBlocked = dayState === "blocked" && !asking;
-  const dayBar = !asking && step === "pick" && !newItem && !editing && !checking && (
+  const dayBar = !asking && step === "pick" && !newItem && !editing && !checking && !opening && (
     <DayBar locationId={locationId} storeName={storeName} heldCount={holds.length} onState={setDayState} compact={!wide} />
   );
   const pickArea = startCard || (dayBlocked ? null : finder);
   // Sideways, the steps sit above the sale; they step aside while the number pad needs the whole column.
-  const stepsRow = !(sideBySide && (editing || checking)) && (
+  const stepsRow = !(sideBySide && (editing || checking || opening)) && (
     <div className="d-flex flex-wrap align-items-center gap-2 mb-2">
       <Steps className="mb-0 me-auto" items={STEPS} current={step === "pay" ? 2 : step === "check" ? 1 : 0} />
       {heldBtn}
-      {!sideBySide && step === "pick" && !newItem && !editing && !checking && (mustChoose ? chosenRow : customerSelect)}
+      {!sideBySide && step === "pick" && !newItem && !editing && !checking && !opening && (mustChoose ? chosenRow : customerSelect)}
     </div>
   );
   return (
@@ -918,10 +1026,10 @@ export default function BentaPanel() {
           </div>
           <div className="fit-col fit-side">
             {stepsRow}
-            {!editing && !checking && (mustChoose ? chosenRow && <div className="mb-2">{chosenRow}</div> : customerSelect)}
+            {!editing && !checking && !opening && (mustChoose ? chosenRow && <div className="mb-2">{chosenRow}</div> : customerSelect)}
             {/* Sideways the store buttons sit here, on the empty side, so the price list on the left has the whole
                 height. They only work before a sale starts anyway; during a sale its title names the store. */}
-            {quickCount || editCard || cartCard || (
+            {openCard || quickCount || editCard || cartCard || (
               <>
                 {!mustChoose && storeBar}
                 <div className="card"><div className="card-body text-center text-muted py-4"><i className="bi bi-hand-index fs-1 d-block mb-2" aria-hidden="true"></i>{asking ? "First choose the store and who is buying (on the left)." : "Tap a product to start a sale."}</div></div>
@@ -933,15 +1041,15 @@ export default function BentaPanel() {
         <div className="fit-col">
           {/* While the price card is open (or a count is asked), the steps and the store buttons step aside, so
               the pad, the reason and Save fit without scrolling. Both are back as soon as it is closed. */}
-          {!(editing || checking || orderBig) && stepsRow}
-          {!(editing || checking || orderBig) && cart.length === 0 && !mustChoose && storeBar}
+          {!(editing || checking || opening || orderBig) && stepsRow}
+          {!(editing || checking || opening || orderBig) && cart.length === 0 && !mustChoose && storeBar}
           {heldCard}
           {errAlert}
-          {step === "pick" && !newItem && !editing && !checking && <>{!orderBig && dayBar}{!orderBig && pickArea}{cartCard}</>}
-          {step === "pick" && !newItem && (editing || checking) && <div className="fit-scroll">{quickCount || editCard}</div>}
+          {step === "pick" && !newItem && !editing && !checking && !opening && <>{!orderBig && dayBar}{!orderBig && pickArea}{cartCard}</>}
+          {step === "pick" && !newItem && (editing || checking || opening) && <div className="fit-scroll">{openCard || quickCount || editCard}</div>}
           {step === "pick" && newItem && <div className="fit-scroll"><NewItemForm locationId={locationId} onCancel={() => setNewItem(false)} onDone={async () => { setNewItem(false); await loadCatalog(locationId); }} /></div>}
 
-          {step === "check" && (editing || checking) ? <div className="fit-scroll">{quickCount || editCard}</div> : !editing && !checking && checkCard}
+          {step === "check" && (editing || checking || opening) ? <div className="fit-scroll">{openCard || quickCount || editCard}</div> : !editing && !checking && !opening && checkCard}
           {step === "pay" && (
             <div className="fit-scroll">
           <div className="sale-card fit-pay mx-auto w-100" style={{ maxWidth: padSide ? 920 : 560 }}>
