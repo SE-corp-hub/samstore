@@ -987,7 +987,17 @@ export class AdminController {
       const result = await this.warehouses.update(storeId, place.id, details);
       if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
     }
+    const before = await prisma.warehouse.findUnique({ where: { id: place.id }, select: { dayOpenClose: true, requireOpenShift: true, hidePricePreOrder: true } });
     if (Object.keys(switches).length) await prisma.warehouse.update({ where: { id: place.id }, data: switches });
+    // A record of who changed a store's settings (turning Open day / Z-read off included).
+    const changed = Object.fromEntries(Object.entries(switches).filter(([k, v]) => before?.[k as keyof typeof before] !== v));
+    if (Object.keys(changed).length || Object.keys(details).length) {
+      await prisma.auditLog.create({ data: {
+        storeId, actorType: "USER", actorId: user.sub, action: "store.settings", entityType: "Warehouse", entityId: place.id,
+        before: Object.keys(changed).length ? Object.fromEntries(Object.keys(changed).map((k) => [k, before?.[k as keyof typeof before] ?? null])) : undefined,
+        after: { ...changed, ...(Object.keys(details).length ? { details: Object.keys(details) } : {}) },
+      } });
+    }
     await cacheBust(cacheKey("settings", storeId));
     return { storeId, locationId: place.id, ok: true };
   }
@@ -1831,8 +1841,23 @@ export class AdminController {
     requireUser(user);
     const { storeId, role } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
     // The owner adds anyone; a manager or a store head adds counter (STAFF) logins for their own stores.
-    const why = teamRefusal(await loadActor(storeId, user.sub, role), null, { role: body?.role, homeLocationId: typeof body?.homeLocationId === "string" ? body.homeLocationId : null });
+    const actor = await loadActor(storeId, user.sub, role);
+    const change = { role: body?.role, homeLocationId: typeof body?.homeLocationId === "string" ? body.homeLocationId : null };
+    const why = teamRefusal(actor, null, change);
     if (why) throw new HttpException({ type: "forbidden", message: why }, HttpStatus.FORBIDDEN);
+    // Adding a number or email that already has a login CHANGES that person's role and store. Nobody may
+    // do that to an owner; a manager or a store head only to a counter login they already look after,
+    // and never to someone from outside this business (that stays with the owner).
+    const existing = await this.team.existingFor(storeId, body?.email, body?.phone);
+    if (existing) {
+      const m = existing.membership;
+      if (m?.role === "OWNER") throw new HttpException({ type: "conflict", message: "That mobile number or email belongs to the owner. Use another one." }, HttpStatus.CONFLICT);
+      if (existing.userId === user.sub) throw new HttpException({ type: "conflict", message: "That mobile number or email is your own login. Use another one." }, HttpStatus.CONFLICT);
+      if (!["OWNER", "STORE_OWNER", "PLATFORM_ADMIN"].includes(actor.role)) {
+        const whyExisting = m ? teamRefusal(actor, m, change) : "That mobile number or email already has a login. Ask the owner to add this person.";
+        if (whyExisting) throw new HttpException({ type: "forbidden", message: m ? `That mobile number or email belongs to someone already in the team. ${whyExisting}.` : whyExisting }, HttpStatus.FORBIDDEN);
+      }
+    }
     const result = await this.team.invite(
       storeId,
       typeof body?.email === "string" ? body.email : "",

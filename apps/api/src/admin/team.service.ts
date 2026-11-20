@@ -65,6 +65,22 @@ export class TeamService {
    * - Else create the user (role + a temporary password) so they can log in.
    * New accounts are flagged to change their password on first login.
    */
+  /**
+   * Who already has this mobile number or email, and their place in this store (null: nobody, or
+   * not in this store). Inviting an existing person changes their role and store, so the caller
+   * checks this first (2026-11-20: a store head must not turn the owner into staff by typing the
+   * owner's number).
+   */
+  async existingFor(storeId: string, email: string | null | undefined, phone: string | null | undefined): Promise<{ userId: string; membership: { role: string; homeLocationId: string | null; isLocationHead: boolean } | null } | null> {
+    const cleanEmail = email?.trim().toLowerCase() || "";
+    const cleanPhone = phone ? toE164(phone) : null;
+    let user = cleanPhone ? await prisma.user.findUnique({ where: { phone: cleanPhone }, select: { id: true } }) : null;
+    if (!user && cleanEmail) user = await prisma.user.findUnique({ where: { email: cleanEmail }, select: { id: true } });
+    if (!user) return null;
+    const membership = await prisma.userStore.findUnique({ where: { userId_storeId: { userId: user.id, storeId } }, select: { role: true, homeLocationId: true, isLocationHead: true } });
+    return { userId: user.id, membership };
+  }
+
   async invite(
     storeId: string,
     email: string,
