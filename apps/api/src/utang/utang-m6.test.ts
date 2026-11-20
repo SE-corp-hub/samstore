@@ -70,8 +70,8 @@ async function fixture(opts: { limit?: number; phone?: string | null; unlimited?
   const store = await prisma.store.create({ data: { slug, name: `Bigasan M6 ${seq}` } });
   storeIds.push(store.id);
   await prisma.storeSettings.create({ data: { storeId: store.id, requireOpenShift: false } });
-  const s1 = await prisma.warehouse.create({ data: { storeId: store.id, name: "Store 1", code: "S1", type: "STORE", isDefault: true } });
-  const s2 = await prisma.warehouse.create({ data: { storeId: store.id, name: "Store 2", code: "S2", type: "STORE" } });
+  const s1 = await prisma.warehouse.create({ data: { storeId: store.id, name: "Store 1", code: "S1", type: "STORE", sellPerKilo: true, isDefault: true } });
+  const s2 = await prisma.warehouse.create({ data: { storeId: store.id, name: "Store 2", code: "S2", type: "STORE", sellPerKilo: true } });
   const sin25 = await prisma.product.create({ data: { storeId: store.id, sku: `${run}-${seq}-S25`, name: "Sinandomeng 25 kg", priceMinor: 130_000, costMinor: 110_000, stockBaseUnit: "g", stockBaseQuantity: 25_000, stockConversionFamily: "Bigas" } });
   await prisma.stockLevel.create({ data: { storeId: store.id, productId: sin25.id, warehouseId: s1.id, quantityOnHand: 10 } });
   await prisma.stockLevel.create({ data: { storeId: store.id, productId: sin25.id, warehouseId: s2.id, quantityOnHand: 10 } });

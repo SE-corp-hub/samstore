@@ -67,8 +67,8 @@ async function fixture() {
   const store = await prisma.store.create({ data: { slug, name: `M8 ${seq}` } });
   storeIds.push(store.id);
   await prisma.storeSettings.create({ data: { storeId: store.id, requireOpenShift: false } });
-  const s1 = await prisma.warehouse.create({ data: { storeId: store.id, name: "Store 1", code: "S1", type: "STORE", isDefault: true } });
-  const s2 = await prisma.warehouse.create({ data: { storeId: store.id, name: "Store 2", code: "S2", type: "STORE" } });
+  const s1 = await prisma.warehouse.create({ data: { storeId: store.id, name: "Store 1", code: "S1", type: "STORE", isDefault: true, sellPerKilo: true } });
+  const s2 = await prisma.warehouse.create({ data: { storeId: store.id, name: "Store 2", code: "S2", type: "STORE", sellPerKilo: true } });
   const mkP = (sku: string, name: string, grams: number, price: number, cost: number) =>
     prisma.product.create({ data: { storeId: store.id, sku: `${run}-${seq}-${sku}`, name, priceMinor: price, costMinor: cost, stockBaseUnit: "g", stockBaseQuantity: grams, stockConversionFamily: "Bigas", soldByWeight: grams === 1 } });
   const sin25 = await mkP("S25", "Sinandomeng 25 kg", 25_000, 130_000, 110_000);

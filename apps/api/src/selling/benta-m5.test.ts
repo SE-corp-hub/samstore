@@ -78,8 +78,9 @@ async function fixture() {
   const store = await prisma.store.create({ data: { slug, name: `M5 ${run}` } });
   storeIds.push(store.id);
   await prisma.storeSettings.create({ data: { storeId: store.id, requireOpenShift: false } });
-  const s1 = await prisma.warehouse.create({ data: { storeId: store.id, name: "Store 1", code: "S1", type: "STORE", isDefault: true } });
-  const s2 = await prisma.warehouse.create({ data: { storeId: store.id, name: "Store 2", code: "S2", type: "STORE" } });
+  // Both stores sell per kilo too ("Sell per kilo here" on); the sacks-only case has its own test.
+  const s1 = await prisma.warehouse.create({ data: { storeId: store.id, name: "Store 1", code: "S1", type: "STORE", isDefault: true, sellPerKilo: true } });
+  const s2 = await prisma.warehouse.create({ data: { storeId: store.id, name: "Store 2", code: "S2", type: "STORE", sellPerKilo: true } });
   const wh = await prisma.warehouse.create({ data: { storeId: store.id, name: "Warehouse", code: "WH", type: "WAREHOUSE" } });
   const rice = (sku: string, name: string, grams: number, price: number, cost: number) =>
     prisma.product.create({ data: { storeId: store.id, sku: `${run}-${seq}-${sku}`, name, priceMinor: price, costMinor: cost, stockBaseUnit: "g", stockBaseQuantity: grams, stockConversionFamily: "Bigas", soldByWeight: grams === 1 } });
@@ -611,4 +612,37 @@ test("Counter list: picks the location, its prices and a consignment store's cos
   assert.equal(off.ok, false, "a switched-off location sells nothing");
   const after = await svc.catalog(fx.storeId, fx.owner, undefined);
   assert.equal(after.ok && after.value.locations.some((l) => l.id === fx.wh), false, "and is not offered");
+});
+
+test("Sell per kilo here OFF: the store sells by the sack only — no kilo rice on its list, a kilo sale is refused, an offline one still goes through", async () => {
+  const fx = await fixture();
+  await prisma.warehouse.update({ where: { id: fx.s1 }, data: { sellPerKilo: false } });
+  const list = await svc.catalog(fx.storeId, fx.staff1, fx.s1);
+  assert.equal(list.ok, true, msg(list));
+  if (!list.ok) return;
+  assert.equal(list.value.products.some((p) => p.id === fx.loose.id), false, "no kilo rice at Store 1");
+  assert.equal(list.value.products.some((p) => p.id === fx.sin25.id), true, "sacks still there");
+  assert.equal(list.value.location.sellPerKilo, false);
+  const s2 = await svc.catalog(fx.storeId, fx.staff2, fx.s2);
+  assert.equal(s2.ok && s2.value.products.some((p) => p.id === fx.loose.id), true, "Store 2 (on) still sells per kilo");
+
+  const sale = await svc.sell(fx.storeId, fx.staff1, { idempotencyKey: key(), locationId: fx.s1, lines: [{ productId: fx.loose.id, kilos: "2" }], payment: { method: "cash", tenderedMinor: 20_000 } });
+  assert.equal(sale.ok, false, "refused at a sacks-only store");
+  assert.match(msg(sale), /sells by the sack only/);
+  assert.equal(await onHand(fx, fx.loose.id, fx.s1), 50_000, "no kilos left the shelf");
+
+  const offline = await svc.sell(fx.storeId, fx.staff1, { idempotencyKey: key(), locationId: fx.s1, soldAt: new Date(Date.now() - 60 * 60_000).toISOString(), lines: [{ productId: fx.loose.id, kilos: "2" }], payment: { method: "cash", tenderedMinor: 20_000 } });
+  assert.equal(offline.ok, true, `a sale made offline before the switch went off is kept: ${msg(offline)}`);
+  assert.equal(await onHand(fx, fx.loose.id, fx.s1), 48_000);
+});
+
+test("A kilo item stands right after its sack on the price list", async () => {
+  const fx = await fixture();
+  await prisma.product.update({ where: { id: fx.loose.id }, data: { kiloOfId: fx.sin25.id } });
+  const list = await svc.catalog(fx.storeId, fx.staff1, fx.s1);
+  assert.equal(list.ok, true, msg(list));
+  if (!list.ok) return;
+  const ids = list.value.products.map((p) => p.id);
+  assert.equal(ids.indexOf(fx.loose.id), ids.indexOf(fx.sin25.id) + 1);
+  assert.equal(list.value.products.find((p) => p.id === fx.loose.id)?.kiloOfId, fx.sin25.id);
 });
