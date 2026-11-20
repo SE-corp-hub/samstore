@@ -6,18 +6,23 @@
 
 import { useEffect, useState } from "react";
 import {
-  MAX_TRIES, UNLOCK_MINUTES, WAIT_SECONDS, pinMatches, readTries, unlockForAWhile, writeTries, type FeatureLock,
+  MAX_TRIES, UNLOCK_MINUTES, WAIT_SECONDS, pinMatches, readTries, unlockForAWhile, writeTries, type FeatureLock, type StoreLock,
 } from "../../lib/feature-lock";
+import { isStoreHead } from "../../lib/admin";
 
 interface Props {
   lock: FeatureLock;
+  /** "owner": the owner locked it (only the owner's lock PIN opens it). "store": this store's own lock. */
+  kind?: "owner" | "store";
+  /** This store's own lock (its PIN opens the store's locked screens). */
+  storeLock?: StoreLock | null;
   screenName: string;
   /** Who is signed in, so the words fit: the owner types their own lock PIN, staff ask the owner. */
   ownerSignedIn: boolean;
   onBack: () => void;
 }
 
-export default function LockScreen({ lock, screenName, ownerSignedIn, onBack }: Props) {
+export default function LockScreen({ lock, kind = "owner", storeLock, screenName, ownerSignedIn, onBack }: Props) {
   const [pin, setPin] = useState("");
   const [checking, setChecking] = useState(false);
   const [wrong, setWrong] = useState<string | null>(null);
@@ -33,11 +38,13 @@ export default function LockScreen({ lock, screenName, ownerSignedIn, onBack }: 
 
   const check = async (value: string) => {
     setChecking(true);
-    const ok = await pinMatches(lock, value);
+    // The owner's lock PIN opens everything; a store PIN opens only that store's own locked screens.
+    const ownerOk = lock.on && !!lock.hash && (await pinMatches(lock, value));
+    const storeOk = !ownerOk && kind === "store" && !!storeLock && (await pinMatches(storeLock, value));
     setChecking(false);
-    if (ok) {
+    if (ownerOk || storeOk) {
       writeTries({ n: 0, waitUntil: 0 });
-      unlockForAWhile();
+      unlockForAWhile(ownerOk ? "all" : "store");
       return;
     }
     const n = tries.n + 1;
@@ -66,7 +73,9 @@ export default function LockScreen({ lock, screenName, ownerSignedIn, onBack }: 
         <div className="lock-icon" aria-hidden="true"><i className="bi bi-lock-fill"></i></div>
         <h1 id="lock-title" className="h4 mb-1">{screenName} is locked</h1>
         <p className="mb-3 lock-help">
-          {ownerSignedIn ? "Type your lock PIN to open it." : "Ask the owner to type the lock PIN."}
+          {kind === "store"
+            ? (isStoreHead() ? "Type this store's lock PIN to open it." : "Ask the store head (or the owner) to type this store's lock PIN.")
+            : ownerSignedIn ? "Type your lock PIN to open it." : "Ask the owner to type the lock PIN."}
           {" "}It stays open for {UNLOCK_MINUTES} minutes.
         </p>
         <div className="lock-dots" aria-label={`${pin.length} of 4 digits typed`} role="status">
