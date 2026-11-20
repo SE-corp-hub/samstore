@@ -316,7 +316,10 @@ export const TABS_BY_ROLE: Record<string, string[]> = {
   // Platform operators manage tenants/access and monitor the platform; daily POS/catalog tabs belong to store roles.
   PLATFORM_ADMIN: ["overview", "stores", "useraccess", "maintenance", "analytics", "reports", "settings"],
   MANAGER: OWNER_TABS.filter((t) => t !== "storelink" && t !== "export"), // export carries costs + every customer: owner only
-  STAFF: ["overview", "pos", "preorders", "orders", "utang", "products", "inventory", "cash", "expenses", "customers", "reports", "countersettings", "moves", "returns", "resack", "drafts", "kargadors", "pasok", "utangrice", "bilangin", "storereport", "ulat", "zreads"],
+  // 2026-11-20 (owner's ask "hide reports on staff"): no report screens for staff — no Reports, Today,
+  // Closing & stock, Store report, Money or Z-reads. Staff close the day on Count ("Close the store")
+  // or with Close day on POS, so they do not need the Closing screen.
+  STAFF: ["pos", "preorders", "orders", "utang", "products", "inventory", "cash", "expenses", "customers", "countersettings", "moves", "returns", "resack", "drafts", "kargadors", "pasok", "utangrice", "bilangin"],
   SALES_AGENT: ["agent", "overview", "orders", "customers", "reports"],
   DELIVERY: [],
 };

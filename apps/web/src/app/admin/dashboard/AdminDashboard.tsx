@@ -288,7 +288,8 @@ export default function AdminDashboard() {
     setRole(r);
     // The screen named in the address wins (a reload, or Back from another page); else the role's start screen.
     const asked = new URLSearchParams(window.location.search).get("tab") ?? "";
-    if (asked && (asked === "home" || asked === "utang" || navItemFor(asked))) { userNavigated.current = true; setTab(asked, true); }
+    // A screen this login may not open (e.g. a report link kept from before) falls back to its start screen.
+    if (asked && (asked === "home" || asked === "utang" || (navItemFor(asked) && allowedTabs(r).includes(asked)))) { userNavigated.current = true; setTab(asked, true); }
     else setTab(defaultTabFor(r), true);
     setAuthed(true);
     setActiveStore(getAdminStoreId());
