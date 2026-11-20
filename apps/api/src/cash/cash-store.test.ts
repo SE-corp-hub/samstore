@@ -90,9 +90,9 @@ test("one day at a store: expected cash matches the drawer to the peso, and the 
   const voided = await sale(fx, { locationId: fx.bt, totalMinor: 65_000 }); //   + 650.00, then voided
   await prisma.payment.create({ data: { orderId: voided, storeId: fx.storeId, method: "cash", amountMinor: 0, type: "void" } }); // − 650.00 (the void row carries no place and no amount)
   const exp = new ExpensesService();
-  must(await exp.create(fx.storeId, fx.btStaff, { category: "transport", amountMinor: 35_000, paidFromDrawer: true })); // − 350.00 from the drawer
+  must(await exp.create(fx.storeId, fx.btStaff, { category: "transport", amountMinor: 35_000, note: "tricycle", paidFromDrawer: true })); // − 350.00 from the drawer
   must(await exp.create(fx.storeId, fx.btStaff, { category: "supplies", amountMinor: 99_000 })); //                          not from the drawer
-  const wrong = must(await exp.create(fx.storeId, fx.btStaff, { category: "other", amountMinor: 77_700, paidFromDrawer: true }));
+  const wrong = must(await exp.create(fx.storeId, fx.owner, { category: "other", amountMinor: 77_700, locationId: fx.bt, paidFromDrawer: true }));
   must(await exp.cancel(fx.storeId, fx.owner, wrong.id, "Typed wrong")); //                                                   cancelled: counts nowhere
   const handed = must(await cashSvc.handOver(fx.storeId, fx.btStaff, { amountMinor: 200_000, note: "to the owner at noon" })); // − 2,000.00 handed over
   // The main store's cash is its own.

@@ -58,3 +58,47 @@ test("a step saved before makers were recorded is still sent", async () => {
   assert.equal(queuedSteps().length, 1);
   assert.deepEqual(await flushQueue(), { sent: 1, failed: 0 });
 });
+
+test("a sale the server refuses stays on the tablet with everything in it, and can be sent again", async () => {
+  const { failedSteps, retryFailed, removeFailed, clearFailed } = await import("./offlineQueue");
+  signIn("lorna", "Lorna");
+  nav.onLine = false;
+  globalThis.fetch = (async () => { throw new Error("no signal"); }) as typeof fetch;
+  await sendStep("/admin/benta/sell", { lines: [{ productId: "p1", quantity: 2 }] }, "Sale ₱2,700");
+  const id = queuedSteps()[0]!.id;
+
+  // The signal returns; the server says no (the books show too little stock).
+  nav.onLine = true;
+  const keys: string[] = [];
+  let refuse = true;
+  globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+    keys.push((init?.headers as Record<string, string>)["Idempotency-Key"] ?? "");
+    return refuse
+      ? new Response(JSON.stringify({ message: "Only 1 of Dinorado 25 kg here" }), { status: 409, headers: { "x-request-id": "r1" } })
+      : new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "x-request-id": "r1" } });
+  }) as typeof fetch;
+  assert.deepEqual(await flushQueue(), { sent: 0, failed: 1 });
+  assert.equal(queuedSteps().length, 0);
+  const kept = failedSteps();
+  assert.equal(kept.length, 1);
+  assert.deepEqual([kept[0]!.id, kept[0]!.label, kept[0]!.message, kept[0]!.path, kept[0]!.by, kept[0]!.byName], [id, "Sale ₱2,700", "Only 1 of Dinorado 25 kg here", "/admin/benta/sell", "lorna", "Lorna"]);
+  assert.deepEqual(kept[0]!.body, { lines: [{ productId: "p1", quantity: 2 }] }, "the whole sale is kept, not only its label");
+
+  // "Clear the list" never throws a kept sale away.
+  clearFailed();
+  assert.equal(failedSteps().length, 1);
+
+  // The owner adds the stock; "Send again" sends the same sale with the same key (the server saves it once).
+  refuse = false;
+  assert.equal(retryFailed(id), true);
+  await new Promise((r) => setTimeout(r, 20));
+  await flushQueue();
+  assert.equal(failedSteps().length, 0);
+  assert.equal(queuedSteps().length, 0);
+  assert.deepEqual(keys, [id, id]);
+
+  // Removing is one sale at a time.
+  mem.set("rice-offline-failed-v1", JSON.stringify([{ id: "a", label: "A", message: "no", at: 1, path: "/x", body: {} }, { id: "b", label: "B", message: "no", at: 2, path: "/x", body: {} }]));
+  removeFailed("a");
+  assert.deepEqual(failedSteps().map((f) => f.id), ["b"]);
+});

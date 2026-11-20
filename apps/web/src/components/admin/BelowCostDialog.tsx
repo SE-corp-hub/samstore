@@ -36,6 +36,8 @@ export interface BelowCostAsk {
   canChangePrice?: boolean | string;
   /** The "go ahead" button: "Sell anyway", "Save anyway"… */
   proceed: string;
+  /** Staff changed the price to under the lowest price: there is no "go ahead", only the owner can sell lower. */
+  noProceed?: boolean;
   /** Which number was just typed: a new cost (stock in) words the title the other way round. */
   trigger?: "price" | "cost";
 }
@@ -74,7 +76,7 @@ function Dialog({ ask, onDone }: { ask: BelowCostAsk; onDone: (v: BelowCostChoic
 
   const newPrice = pesoToMinor(price);
   const newCost = pesoToMinor(cost);
-  const title = ask.trigger === "cost" ? "Cost is higher than the selling price" : "Selling below cost";
+  const title = ask.noProceed ? "Price is too low" : ask.trigger === "cost" ? "Cost is higher than the selling price" : "Selling below cost";
 
   return (
     <>
@@ -94,7 +96,7 @@ function Dialog({ ask, onDone }: { ask: BelowCostAsk; onDone: (v: BelowCostChoic
                     <p className="alert alert-danger py-2 mb-3">You lose <strong>{peso(lossEach(ask.priceMinor, ask.costMinor))}</strong> on each {unit}.</p>
                   </>
                 ) : (
-                  <p className="alert alert-danger py-2 mb-3">This price is less than what the store paid for it. Check with the owner before you sell at this price.</p>
+                  <p className="alert alert-danger py-2 mb-3">{ask.noProceed ? "This price is lower than the lowest price for this rice. Only the owner can sell lower." : "This price is less than what the store paid for it. Check with the owner before you sell at this price."}</p>
                 )}
               </div>
 
@@ -112,7 +114,7 @@ function Dialog({ ask, onDone }: { ask: BelowCostAsk; onDone: (v: BelowCostChoic
                       {typeof ask.canChangeCost === "string" && <small id="bc-cost-why" className="text-muted text-center">{ask.canChangeCost}</small>}
                     </>
                   )}
-                  <button type="button" className="btn btn-lg btn-outline-danger" onClick={() => onDone({ kind: "proceed" })}>{ask.proceed}</button>
+                  {!ask.noProceed && <button type="button" className="btn btn-lg btn-outline-danger" onClick={() => onDone({ kind: "proceed" })}>{ask.proceed}</button>}
                   <button type="button" className="btn btn-lg btn-outline-secondary" onClick={() => onDone(null)}>Go back</button>
                 </div>
               )}

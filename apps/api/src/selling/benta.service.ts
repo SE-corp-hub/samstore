@@ -34,6 +34,7 @@ import { applyReceipt, loadOpenOrder } from "../purchase-orders/receive.js";
 import { coverShortage, deductWithBuffer } from "../domain/buffer.js";
 import { formatOrderNumber } from "../domain/order-number.js";
 import { resolveLinePrice, PriceOverrideError } from "../domain/price-override.js";
+import { lowestPriceRefusal } from "./lowest-price.js";
 import { taxColumnsFor } from "../domain/tax-store.js";
 import { cashTimeFor, dayGate } from "../day/day-gate.js";
 import { checkPaperSlip, isLoose, mergeQuantity, offlineSoldAt, planManualItem, priceAt, priceLine, saleKey, SellingError, shortMessage, type ManualItemAsk, type PricedLine } from "../domain/selling.js";
@@ -143,7 +144,7 @@ async function soldLast30Days(storeId: string): Promise<Record<string, number>> 
 }
 
 const productSelect = {
-  id: true, name: true, sku: true, priceMinor: true, costMinor: true, isActive: true, reviewStatus: true,
+  id: true, name: true, sku: true, priceMinor: true, costMinor: true, floorPriceMinor: true, isActive: true, reviewStatus: true,
   stockBaseUnit: true, stockBaseQuantity: true, stockConversionFamily: true, soldByWeight: true, trackStock: true, photoKey: true, categoryId: true, kiloOfId: true,
 } as const;
 type P = Prisma.ProductGetPayload<{ select: typeof productSelect }>;
@@ -270,6 +271,8 @@ export class BentaService {
           priceMinor: priceAt(p.priceMinor, priceBy.get(p.id)), mainPriceMinor: p.priceMinor, forReview: p.reviewStatus === "FOR_REVIEW", kiloOfId: p.kiloOfId,
           stock: stockBy.get(p.id) ?? {}, tracked: p.trackStock !== false && (stockBy.has(p.id) || !!p.kiloOfId), sold30d: sold[p.id] ?? 0,
           floorMinor: effectiveCost(costMode, shelfCost.get(p.id), p.costMinor ?? 0),
+          /** The lowest price staff may change a line to: the owner's lowest price, else the cost above. */
+          lowestMinor: typeof p.floorPriceMinor === "number" ? p.floorPriceMinor : effectiveCost(costMode, shelfCost.get(p.id), p.costMinor ?? 0),
           /** This shelf counts its own cost: changing the product cost would not move it. */
           ownShelfCost: shelfCost.has(p.id),
         }))
@@ -377,6 +380,9 @@ export class BentaService {
           sourceLocationId: l.sourceLocationId && l.sourceLocationId !== loc.id ? l.sourceLocationId : null,
         });
       }
+      // Staff may change a price only down to the lowest price (the owner's, else the cost). The owner and a manager: any price.
+      const tooLow = await lowestPriceRefusal(prisma, { storeId, role: actor.role, locationId: loc.id, lines: priced.map((l) => ({ productId: l.product.id, name: l.product.name, unitPriceMinor: l.unitPriceMinor, overridden: l.overridden })) });
+      if (tooLow) throw new SellingError(tooLow);
       const subtotal = priced.reduce((s, l) => s + l.lineTotalMinor, 0);
       if (subtotal <= 0) throw new SellingError("The sale has no amount");
 

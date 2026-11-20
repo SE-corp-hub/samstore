@@ -8,9 +8,44 @@
 //   - "Paid from the drawer" marks cash taken out of that store's cash drawer (the cash count of
 //     step 4 reads it).
 
+//
+// System review 2026-11-20, finding 6: a login that is not the owner or a manager
+//   - writes TODAY's expenses only (no back-dating into a day that is closed),
+//   - says what a drawer expense was for,
+//   - may take up to STAFF_DRAWER_DAY_LIMIT_MINOR a day out of one store's drawer. Above that the
+//     expense waits for the owner's OK (Approvals) and lowers the expected cash only when approved.
+
 import { prisma } from "../persistence/prisma-repositories.js";
+import { randomId } from "../persistence/repositories.js";
 import type { ApiError } from "@sam-store/contracts";
 import { ALL_LOCATION_ROLES } from "../domain/people.js";
+import { dayRange, manilaDate } from "../domain/reports.js";
+import { registerApprovalHandler, requestApproval } from "../people/people.service.js";
+
+/** What staff may take out of one store's drawer in a day without the owner's OK: ₱500. */
+export const STAFF_DRAWER_DAY_LIMIT_MINOR = 50_000;
+
+const pesos = (minor: number) => `₱${(minor / 100).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+/** Pure rule: does this staff drawer expense need the owner's OK? `alreadyMinor` = staff drawer expenses there today. */
+export function needsOwnerOk(alreadyMinor: number, amountMinor: number, limitMinor = STAFF_DRAWER_DAY_LIMIT_MINOR): boolean {
+  return alreadyMinor + amountMinor > limitMinor;
+}
+
+// The owner said yes: now the expense is written (dated when the money left the drawer) and counts.
+registerApprovalHandler("EXPENSE", async (tx, a) => {
+  if (a.status !== "APPROVED") return;
+  if (await tx.expense.findFirst({ where: { id: a.documentId }, select: { id: true } })) return;
+  const d = ((await tx.approvalRequest.findUnique({ where: { id: a.id }, select: { detail: true } }))?.detail ?? {}) as Record<string, unknown>;
+  if (typeof d.amountMinor !== "number" || typeof d.category !== "string" || typeof d.locationId !== "string") return;
+  await tx.expense.create({
+    data: {
+      id: a.documentId, storeId: a.storeId, locationId: d.locationId, category: d.category, amountMinor: d.amountMinor,
+      note: typeof d.note === "string" ? d.note : null, spentAt: typeof d.spentAt === "string" ? new Date(d.spentAt) : new Date(),
+      paidFromDrawer: true, createdBy: typeof d.createdBy === "string" ? d.createdBy : null,
+    },
+  });
+});
 
 export type ExpenseResult<T> = { ok: true; value: T } | { ok: false; error: ApiError };
 
@@ -36,12 +71,14 @@ const invalid = (msg: string): { ok: false; error: ApiError } => ({ ok: false, e
 const refused = (msg: string): { ok: false; error: ApiError } => ({ ok: false, error: { type: "forbidden", message: msg } });
 
 export class ExpensesService {
-  async create(storeId: string, actor: ExpenseActor, input: ExpenseInput): Promise<ExpenseResult<{ id: string; locationId: string | null }>> {
+  async create(storeId: string, actor: ExpenseActor, input: ExpenseInput): Promise<ExpenseResult<{ id: string; locationId: string | null; /** Not written yet: it becomes expense `id` when the owner approves. */ waitingForOwner?: boolean; approvalId?: string }>> {
     if (!EXPENSE_CATEGORIES.includes(input.category as (typeof EXPENSE_CATEGORIES)[number])) return invalid(`category must be one of: ${EXPENSE_CATEGORIES.join(", ")}`);
     if (!Number.isInteger(input.amountMinor) || input.amountMinor <= 0) return invalid("amountMinor must be a positive integer");
     const spentAt = input.spentAt ? new Date(input.spentAt) : new Date();
     if (Number.isNaN(spentAt.getTime())) return invalid("The date is not a date");
     if (spentAt.getTime() > Date.now() + 86_400_000) return invalid("The date cannot be in the future");
+    const staff = !seesAll(actor);
+    if (staff && manilaDate(spentAt) !== manilaDate(new Date())) return invalid("You can add today's expenses only. Ask the owner to add an older one.");
 
     // Which store? A login tied to a store: that store, always. The owner: the one chosen, or the whole business.
     let locationId: string | null;
@@ -62,14 +99,34 @@ export class ExpensesService {
       if (!place) return invalid("Choose a store from the list");
     }
 
+    const fromDrawer = !!locationId && input.paidFromDrawer === true;
+    const note = input.note?.trim().slice(0, 200) || null;
+    if (staff && fromDrawer && locationId) {
+      if (!note || note.length < 3) return invalid("Write what the money from the drawer was for.");
+      // What staff already took out of this drawer today (the owner's own expenses do not use up the limit).
+      const bosses = (await prisma.userStore.findMany({ where: { storeId, role: { in: ["OWNER", "MANAGER"] } }, select: { userId: true } })).map((u) => u.userId);
+      const { from, to } = dayRange(manilaDate(new Date()));
+      const already = (await prisma.expense.aggregate({ where: { storeId, locationId, paidFromDrawer: true, ...COUNTED, spentAt: { gte: from, lt: to }, OR: [{ createdBy: null }, { createdBy: { notIn: bosses } }] }, _sum: { amountMinor: true } }))._sum.amountMinor ?? 0;
+      if (needsOwnerOk(already, input.amountMinor)) {
+        const place = await prisma.warehouse.findFirst({ where: { storeId, id: locationId }, select: { name: true } });
+        const id = randomId();
+        const approval = await prisma.$transaction((tx) => requestApproval(tx, {
+          storeId, kind: "EXPENSE", documentType: "EXPENSE", documentId: id, locationId, requestedById: actor.userId,
+          summary: `Expense from the drawer: ${pesos(input.amountMinor)} for ${input.category} at ${place?.name ?? "the store"} (${note}). Staff already took ${pesos(already)} today; the limit without your OK is ${pesos(STAFF_DRAWER_DAY_LIMIT_MINOR)} a day.`,
+          detail: { category: input.category, amountMinor: input.amountMinor, note, spentAt: spentAt.toISOString(), locationId, createdBy: actor.userId },
+        }));
+        return { ok: true, value: { id, locationId, waitingForOwner: true, approvalId: approval.id } };
+      }
+    }
+
     const e = await prisma.expense.create({
       data: {
         storeId, locationId,
         category: input.category,
         amountMinor: input.amountMinor,
-        note: input.note?.trim().slice(0, 200) || null,
+        note,
         spentAt,
-        paidFromDrawer: !!locationId && input.paidFromDrawer === true,
+        paidFromDrawer: fromDrawer,
         createdBy: actor.userId,
       },
     });

@@ -204,6 +204,7 @@ test("a Facebook order for Bahay Tindahan, delivered for cash: that store's sale
   assert.equal(await owes(fx, fx.bt), 0);
   const refund = (await order(made.orderId)).payments.find((p) => p.type === "refund");
   assert.deepEqual([refund?.amountMinor, refund?.locationId], [-275_000, fx.bt]);
+  assert.deepEqual(await shelf(fx, fx.bt), [20, 0], "the rice is back on Bahay Tindahan's shelf");
   assert.equal((await reports(fx)).day(fx.bt).sales.count, 0);
 });
 
