@@ -12,6 +12,53 @@ import VariantEditor from "./VariantEditor";
 import PhotoPicker, { type PhotoChange } from "./PhotoPicker";
 import ProductPhoto from "./ProductPhoto";
 import { kg, peso } from "../../lib/number-format";
+import { toast } from "../../lib/toast";
+
+/** A sack big enough to also sell per kilo (10 kg or more; the 5 kg packs stay packs). */
+const canSellPerKilo = (p: AdminProduct) => !p.soldByWeight && p.stockBaseUnit === "g" && (p.stockBaseQuantity ?? 0) >= 10_000;
+
+/**
+ * "Also sell per kilo" on a sack rice (2026-11-20). Saved at once (not with Save): On makes the
+ * kilo item ("Sinandomeng · per kilo"), with a starting price of sack ÷ kilos, rounded up, + ₱2.
+ * Its price is then changed on its own line in Products like any price. Only stores with
+ * Settings → This store → "Sell per kilo here" on show it on POS and Pre-order.
+ */
+function AlsoPerKilo({ sack, onChanged }: { sack: AdminProduct; onChanged: () => void }) {
+  const [item, setItem] = useState(sack.kiloItem ?? null);
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+  const on = !!item?.isActive;
+  const flip = async (next: boolean) => {
+    setBusy(true); setProblem(null);
+    try {
+      const res = await fetch(`${API_URL}/admin/products/${encodeURIComponent(sack.id)}/kilo-item`, {
+        method: "POST", headers: { "Content-Type": "application/json", ...adminHeaders() }, body: JSON.stringify({ on: next }),
+      });
+      const d = await res.json().catch(() => null);
+      if (!res.ok) { setProblem(d?.errors?.join(", ") ?? d?.message ?? "Did not save. Try again."); return; }
+      setItem(d?.kiloItem ?? null);
+      toast(next ? `${d?.kiloItem?.name ?? "Kilo rice"} added` : "Kilo rice hidden", "success");
+      onChanged();
+    } catch {
+      setProblem("No internet. Nothing was saved. Try again when the tablet is online.");
+    } finally { setBusy(false); }
+  };
+  return (
+    <div className="border rounded p-2 mb-2" style={{ background: "var(--bs-tertiary-bg, #f7f5f2)" }}>
+      <div className="form-check form-switch mb-1">
+        <input className="form-check-input" type="checkbox" role="switch" id="alsoPerKilo" checked={on} disabled={busy} onChange={(e) => void flip(e.target.checked)} />
+        <label className="form-check-label fw-semibold" htmlFor="alsoPerKilo">Also sell per kilo</label>
+      </div>
+      <div className="small text-muted">
+        {on && item
+          ? <>Sold as its own item: <strong>{item.name}</strong> at {peso(item.priceMinor)} a kilo. To change the kilo price, edit that item in Products.</>
+          : "On: adds a kilo item for this rice, priced at the sack price ÷ kilos, rounded up, + ₱2. It shows only at stores with Sell per kilo here on (Settings → This store)."}
+      </div>
+      {busy && <div className="small mt-1" role="status">Saving…</div>}
+      {problem && <div className="alert alert-danger py-1 px-2 mt-1 mb-0 small" role="alert">{problem}</div>}
+    </div>
+  );
+}
 
 export interface AdminProduct {
   id: string;
@@ -33,6 +80,10 @@ export interface AdminProduct {
   tags: string[];
   /** The product's picture (see lib/product-photo.ts), or null. */
   photoKey?: string | null;
+  /** A kilo item: the sack rice it is opened from. */
+  kiloOfId?: string | null;
+  /** A sack rice: its kilo item ("Also sell per kilo"), or null. */
+  kiloItem?: { id: string; name: string; isActive: boolean; priceMinor: number } | null;
   related: { id: string; name: string; priceMinor: number; isActive: boolean }[];
   upsell: { id: string; name: string; priceMinor: number; isActive: boolean }[];
   category: { id: string; name: string; slug: string } | null;
@@ -440,7 +491,8 @@ export default function ProductsPanel() {
                       {p.unit && <span className="badge text-bg-light border ms-1">{p.unit}</span>}
                       {p.stockBaseUnit && p.stockBaseQuantity && !p.soldByWeight && <span className="badge text-bg-light border ms-1">{formatStockSize(p.stockBaseQuantity, p.stockBaseUnit)}</span>}
                       {p.stockConversionFamily && <span className="badge text-bg-info ms-1">{p.stockConversionFamily}</span>}
-                      {p.soldByWeight && <span className="badge text-bg-secondary ms-1" title="Sold by weight">per-kilo</span>}
+                      {p.soldByWeight && <span className="badge text-bg-secondary ms-1" title="Sold by weight">per kilo</span>}
+                      {p.kiloItem?.isActive && <span className="badge text-bg-success ms-1" title={`Also sold per kilo: ${p.kiloItem.name}`}>+ per kilo</span>}
                       {p.trackStock === false && <span className="badge text-bg-warning ms-1" title="Sells at any time — stock is not counted">Not tracked</span>}
                       {isBelowCost(p.priceMinor, p.costMinor) && <span className="badge text-bg-danger ms-1">Below cost</span>}
                       <div className="small text-muted fw-normal d-lg-none">{p.sku}</div>
@@ -548,11 +600,11 @@ export default function ProductsPanel() {
                     </div>
                     <div className="form-check form-switch mb-2">
                       <input className="form-check-input" type="checkbox" id="soldByWeight" checked={form.soldByWeight} onChange={(e) => setForm({ ...form, soldByWeight: e.target.checked })} />
-                      <label className="form-check-label small" htmlFor="soldByWeight">Sold per weight (kilo) <span className="text-muted">— decimal quantity on a future module; pricing stays per-unit for now</span></label>
+                      <label className="form-check-label small" htmlFor="soldByWeight">Sold per kilo <span className="text-muted">— loose rice; its price is per kilo</span></label>
                     </div>
                     <div className="row">
                       <div className="col-6 mb-2">
-                        <label className="form-label small" htmlFor="productSellingPrice">Selling price (₱) per unit *</label>
+                        <label className="form-label small" htmlFor="productSellingPrice">Selling price (₱) {form.soldByWeight ? "per kilo" : "per unit"} *</label>
                         <PesoInput id="productSellingPrice" required value={form.priceMinor} onChange={(v) => setForm({ ...form, priceMinor: v })} placeholder="0.00" />
                       </div>
                       {hasCost && (
@@ -563,6 +615,7 @@ export default function ProductsPanel() {
                         </div>
                       )}
                     </div>
+                    {modal.editing && canSellPerKilo(modal.editing) && <AlsoPerKilo sack={modal.editing} onChanged={() => void load()} />}
                     {modal.editing && <PriceHistoryList productId={modal.editing.id} />}
                     <div className="row">
                       <div className="col-6 mb-2">

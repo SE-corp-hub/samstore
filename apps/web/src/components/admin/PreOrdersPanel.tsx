@@ -57,6 +57,8 @@ interface PosProduct {
   availableQuantity: number; category: { name: string } | null;
   /** false = removed from Products (kept only for old orders): not offered for a new pre-order. */
   isActive?: boolean;
+  /** Kilo rice (sold per kilo): a pre-order counts whole items, so it is not offered here yet. */
+  soldByWeight?: boolean;
 }
 interface PosCustomer { id: string; name: string | null; email: string | null; phone: string | null; }
 interface CartLine { product: PosProduct; quantity: number; variantId?: string | null; /** What is typed in the price box, kept while typing. */ priceText?: string; /** Manual price (centavos each) when it differs from the list price. */ price?: number; reason?: string }
@@ -232,7 +234,8 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
   const [moveError, setMoveError] = useState<string | null>(null);
   /** The products at this store's price, with this store's count. */
   const buildProducts = useMemo(
-    () => rawProducts.filter((p) => p.isActive !== false).map((p) => ({ ...p, group: p.category?.name ?? null, priceMinor: atStore.price.get(p.id) ?? p.priceMinor, availableQuantity: atStore.stock.get(p.id) ?? p.availableQuantity })),
+    // Kilo rice is sold at the counter (POS) only for now: a pre-order counts whole sacks and packs.
+    () => rawProducts.filter((p) => p.isActive !== false && !p.soldByWeight).map((p) => ({ ...p, group: p.category?.name ?? null, priceMinor: atStore.price.get(p.id) ?? p.priceMinor, availableQuantity: atStore.stock.get(p.id) ?? p.availableQuantity })),
     [rawProducts, atStore],
   );
   // Unit cost per product (from the counter list, saved for offline) and whether this login may see it.

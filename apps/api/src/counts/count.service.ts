@@ -138,7 +138,7 @@ export class CountService {
 
   private async location(storeId: string, actor: Actor, locationId: string | undefined) {
     const id = locationId || actor.homeLocationId;
-    const loc = id ? await prisma.warehouse.findFirst({ where: { id, storeId, isActive: true }, select: { id: true, name: true } }) : null;
+    const loc = id ? await prisma.warehouse.findFirst({ where: { id, storeId, isActive: true }, select: { id: true, name: true, sellPerKilo: true } }) : null;
     if (!loc) throw new StepError(invalid("Choose a location"));
     const refusal = locationRefusal(actor, loc.id);
     if (refusal) throw new StepError(forbidden(refusal));
@@ -167,8 +167,13 @@ export class CountService {
   }
 
   /** Items that can be counted at a location: every active, tracked item (even with no stock row yet), plus inactive ones that still have rice on the shelf. */
-  private countable(storeId: string, locationId: string): Prisma.ProductWhereInput {
-    return { storeId, trackStock: true, OR: [{ isActive: true }, { stockLevels: { some: { warehouseId: locationId, quantityOnHand: { gt: 0 } } } }] };
+  private countable(storeId: string, loc: { id: string; sellPerKilo?: boolean }): Prisma.ProductWhereInput {
+    const hasStockHere = { stockLevels: { some: { warehouseId: loc.id, quantityOnHand: { gt: 0 } } } };
+    return {
+      storeId, trackStock: true, OR: [{ isActive: true }, hasStockHere],
+      // A store selling by the sack only counts kilo rice only when some is really on its shelf.
+      ...(loc.sellPerKilo ? {} : { AND: [{ OR: [{ soldByWeight: false }, hasStockHere] }] }),
+    };
   }
 
   /**
@@ -179,7 +184,7 @@ export class CountService {
     return this.run(async () => {
       const loc = await this.location(storeId, actor, input.locationId);
       const products = await prisma.product.findMany({
-        where: this.countable(storeId, loc.id),
+        where: this.countable(storeId, loc),
         select: { id: true, name: true, sku: true, barcode: true, variety: true, stockBaseUnit: true, stockBaseQuantity: true },
         orderBy: { name: "asc" },
       });
@@ -208,7 +213,7 @@ export class CountService {
       const variety = (input.variety ?? "").trim().toLowerCase();
       const staleDays = input.staleDays === undefined ? 0 : input.staleDays;
       if (staleDays !== 0 && (!Number.isInteger(staleDays) || staleDays < 1 || staleDays > 3650)) throw new CountError("Choose how many days (1 or more)");
-      const scope = this.countable(storeId, loc.id);
+      const scope = this.countable(storeId, loc);
       let products = await prisma.product.findMany({ where: chosen.length ? { AND: [scope, { id: { in: chosen } }] } : scope, select: { id: true, name: true, variety: true } });
       if (chosen.length && products.length !== new Set(chosen).size) throw new CountError("Unknown product");
       if (!chosen.length && variety) products = products.filter((p) => varietyOf(p) === variety);
@@ -713,7 +718,7 @@ export class CountService {
       const loc = await this.location(storeId, actor, input.locationId);
       const now = Date.now();
       const [products, last, sales, levels] = await Promise.all([
-        prisma.product.findMany({ where: this.countable(storeId, loc.id), select: { id: true, name: true } }),
+        prisma.product.findMany({ where: this.countable(storeId, loc), select: { id: true, name: true } }),
         this.lastCounted(storeId, loc.id),
         prisma.stockMovement.groupBy({ by: ["productId"], where: { storeId, warehouseId: loc.id, type: "CONSUME", createdAt: { gte: new Date(now - 30 * 86_400_000) } }, _count: { _all: true } }),
         prisma.stockLevel.findMany({ where: { storeId, warehouseId: loc.id }, select: { productId: true, quantityOnHand: true } }),

@@ -12,32 +12,35 @@ import { adminHeaders } from "../../lib/admin";
 import { toast } from "../../lib/toast";
 import { cachedGet, saveCopy, savedCopy, useOffline } from "../../lib/offlineCache";
 import { PesoInput } from "../NumberBoxes";
+import { kg } from "../../lib/number-format";
 
 const PATH = "/admin/store-settings";
 
 interface Place {
   id: string; name: string; code: string | null; type: string; sells: boolean;
   dayOpenClose: boolean; requireOpenShift: boolean; hidePricePreOrder: boolean;
+  /** Sells rice per kilo as well as per sack (off = sacks only). Older servers leave it out. */
+  sellPerKilo?: boolean; kiloGramsLeft?: number;
   address: string | null; facebookPageUrl: string | null; receiptName: string | null; receiptHeader: string | null;
   receiptFooter: string | null; receiptContact: string | null; dailySalesTargetMinor: number | null;
 }
 interface Answer { places: Place[] }
 
 interface Form {
-  dayOpenClose: boolean; requireOpenShift: boolean; hidePricePreOrder: boolean; target: string;
+  dayOpenClose: boolean; requireOpenShift: boolean; hidePricePreOrder: boolean; sellPerKilo: boolean; target: string;
   receiptName: string; address: string; receiptContact: string; receiptHeader: string; receiptFooter: string; facebookPageUrl: string;
 }
 
 const pesos = (minor: number | null | undefined) => (minor ? String(minor / 100) : "");
 const toMinor = (v: string) => { const n = Number(v.replace(/,/g, "")); return Number.isFinite(n) && n > 0 ? Math.round(n * 100) : 0; };
 const toForm = (p: Place): Form => ({
-  dayOpenClose: p.dayOpenClose, requireOpenShift: p.requireOpenShift, hidePricePreOrder: p.hidePricePreOrder, target: pesos(p.dailySalesTargetMinor),
+  dayOpenClose: p.dayOpenClose, requireOpenShift: p.requireOpenShift, hidePricePreOrder: p.hidePricePreOrder, sellPerKilo: !!p.sellPerKilo, target: pesos(p.dailySalesTargetMinor),
   receiptName: p.receiptName ?? "", address: p.address ?? "", receiptContact: p.receiptContact ?? "",
   receiptHeader: p.receiptHeader ?? "", receiptFooter: p.receiptFooter ?? "", facebookPageUrl: p.facebookPageUrl ?? "",
 });
 const orNull = (v: string) => v.trim() || null;
 const payload = (f: Form, sells: boolean) => ({
-  ...(sells ? { dayOpenClose: f.dayOpenClose, requireOpenShift: f.requireOpenShift, hidePricePreOrder: f.hidePricePreOrder, dailySalesTargetMinor: toMinor(f.target) } : {}),
+  ...(sells ? { dayOpenClose: f.dayOpenClose, requireOpenShift: f.requireOpenShift, hidePricePreOrder: f.hidePricePreOrder, sellPerKilo: f.sellPerKilo, dailySalesTargetMinor: toMinor(f.target) } : {}),
   receiptName: orNull(f.receiptName), address: orNull(f.address), receiptContact: orNull(f.receiptContact),
   receiptHeader: orNull(f.receiptHeader), receiptFooter: orNull(f.receiptFooter), facebookPageUrl: orNull(f.facebookPageUrl),
 });
@@ -113,6 +116,8 @@ export default function ThisStoreSettings({ standalone = false, onSaved }: { sta
       if (fresh) { setAnswer(fresh); saveCopy(PATH, fresh); }
       // POS, Pre-order and the reports read the switches from these saved answers: get them again.
       void cachedGet("/admin/settings"); void cachedGet("/admin/rice/day");
+      // The price list of this store (kilo rice shows or hides with "Sell per kilo here").
+      void cachedGet(`/admin/benta/catalog?locationId=${encodeURIComponent(place.id)}`);
       toast(`${place.name} saved`, "success");
       onSaved?.();
     } catch {
@@ -132,6 +137,7 @@ export default function ThisStoreSettings({ standalone = false, onSaved }: { sta
                 disabled={busy} onClick={() => setPlaceId(p.id)}>
                 {p.name}
                 {p.sells && <span className={`badge ms-2 ${p.dayOpenClose ? "text-bg-success" : "text-bg-light"}`}>{p.dayOpenClose ? "Z-read on" : "Z-read off"}</span>}
+                {p.sells && p.sellPerKilo && <span className="badge ms-1 text-bg-success">Per kilo</span>}
               </button>
             ))}
           </div>
@@ -155,6 +161,16 @@ export default function ThisStoreSettings({ standalone = false, onSaved }: { sta
               {!form.dayOpenClose && (
                 <SwitchRow id="ts-shift" label="Open the cash drawer before taking cash" checked={form.requireOpenShift} onChange={(v) => set({ requireOpenShift: v })}
                   help="On: each day starts by counting the drawer. Off: staff can sell any time." />
+              )}
+              <SwitchRow id="ts-kilo" label="Sell per kilo here" checked={form.sellPerKilo} onChange={(v) => set({ sellPerKilo: v })}
+                help={form.sellPerKilo
+                  ? `On: ${place.name} sells rice by the sack AND by the kilo. Kilo rice shows on POS and Pre-order. Choose which rice in Products: Also sell per kilo.`
+                  : `Off: ${place.name} sells by the sack only. Kilo rice does not show on POS or Pre-order here.`} />
+              {place.sellPerKilo && !form.sellPerKilo && (place.kiloGramsLeft ?? 0) > 0 && (
+                <div className="alert alert-warning py-2" role="alert">
+                  <i className="bi bi-exclamation-triangle-fill me-1" aria-hidden="true"></i>
+                  {kg(place.kiloGramsLeft ?? 0)} of kilo rice is still at {place.name}. It stays in stock and shows in the count, but it cannot be sold here until you turn this back on.
+                </div>
               )}
               <SwitchRow id="ts-hideprice" label="Hide item prices on pre-orders" checked={form.hidePricePreOrder} onChange={(v) => set({ hidePricePreOrder: v })}
                 help="The Pre-order screen shows only the total, not the price of each item." />

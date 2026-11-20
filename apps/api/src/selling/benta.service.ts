@@ -145,7 +145,7 @@ async function soldLast30Days(storeId: string): Promise<Record<string, number>> 
 
 const productSelect = {
   id: true, name: true, sku: true, priceMinor: true, costMinor: true, floorPriceMinor: true, isActive: true, reviewStatus: true,
-  stockBaseUnit: true, stockBaseQuantity: true, stockConversionFamily: true, soldByWeight: true, trackStock: true, photoKey: true, categoryId: true,
+  stockBaseUnit: true, stockBaseQuantity: true, stockConversionFamily: true, soldByWeight: true, trackStock: true, photoKey: true, categoryId: true, kiloOfId: true,
 } as const;
 type P = Prisma.ProductGetPayload<{ select: typeof productSelect }>;
 
@@ -228,7 +228,7 @@ export class BentaService {
     return this.run(async () => {
       const wanted = locationId || actor.homeLocationId || null;
       const [warehouses, products, prices, levels, sold, costMode, promo, categories] = await Promise.all([
-        prisma.warehouse.findMany({ where: { storeId }, select: { id: true, name: true, code: true, type: true, isActive: true, isDefault: true, consignment: true }, orderBy: [{ isDefault: "desc" }, { name: "asc" }] }),
+        prisma.warehouse.findMany({ where: { storeId }, select: { id: true, name: true, code: true, type: true, isActive: true, isDefault: true, consignment: true, sellPerKilo: true }, orderBy: [{ isDefault: "desc" }, { name: "asc" }] }),
         prisma.product.findMany({ where: { storeId, isActive: true, reviewStatus: { not: "MERGED" } }, select: productSelect, orderBy: { name: "asc" } }),
         // The asked-for location's prices; with none asked, every location's (the default is picked below).
         prisma.locationPrice.findMany({ where: { storeId, ...(wanted ? { warehouseId: wanted } : {}) }, select: { productId: true, warehouseId: true, priceMinor: true } }),
@@ -263,10 +263,12 @@ export class BentaService {
         m[l.warehouseId!] = (m[l.warehouseId!] ?? 0) + Math.max(0, l.quantityOnHand - l.quantityReserved);
         stockBy.set(l.productId, m);
       }
+      // "Sell per kilo here" off (the default): this store sells by the sack only, so no kilo rice on its list.
       const items = products
+        .filter((p) => found.sellPerKilo || !isLoose(p))
         .map((p) => ({
           id: p.id, name: p.name, sku: p.sku, photoKey: p.photoKey, categoryId: p.categoryId, group: p.categoryId ? groupName.get(p.categoryId) ?? null : null, loose: isLoose(p), gramsPerUnit: p.stockBaseUnit === "g" ? p.stockBaseQuantity : null,
-          priceMinor: priceAt(p.priceMinor, priceBy.get(p.id)), mainPriceMinor: p.priceMinor, forReview: p.reviewStatus === "FOR_REVIEW",
+          priceMinor: priceAt(p.priceMinor, priceBy.get(p.id)), mainPriceMinor: p.priceMinor, forReview: p.reviewStatus === "FOR_REVIEW", kiloOfId: p.kiloOfId,
           stock: stockBy.get(p.id) ?? {}, tracked: p.trackStock !== false && stockBy.has(p.id), sold30d: sold[p.id] ?? 0,
           floorMinor: effectiveCost(costMode, shelfCost.get(p.id), p.costMinor ?? 0),
           /** The lowest price staff may change a line to: the owner's lowest price, else the cost above. */
@@ -275,12 +277,17 @@ export class BentaService {
           ownShelfCost: shelfCost.has(p.id),
         }))
         .sort((a, b) => b.sold30d - a.sold30d || a.name.localeCompare(b.name));
+      // A kilo item stands right after its sack on the list ("Sinandomeng 25kg", then "Sinandomeng · per kilo").
+      const listed = new Set(items.map((i) => i.id));
+      const kiloOf = new Map<string, typeof items>();
+      for (const i of items) if (i.kiloOfId && listed.has(i.kiloOfId)) kiloOf.set(i.kiloOfId, [...(kiloOf.get(i.kiloOfId) ?? []), i]);
+      const ordered = items.flatMap((i) => (i.kiloOfId && listed.has(i.kiloOfId) ? [] : [i, ...(kiloOf.get(i.id) ?? [])]));
       const locations = warehouses.filter((w) => w.isActive).map((w) => ({ id: w.id, name: w.name, code: w.code, type: w.type }));
       // The quota promo travels with the price list, so the tablet applies it with no internet too.
       const quotaPromo = promo ? { quotaPromoEnabled: promo.quotaPromoEnabled, quotaPromoMinSacks: promo.quotaPromoMinSacks, quotaPromoOffMinor: promo.quotaPromoOffMinor, quotaPromoCategoryIds: promo.quotaPromoCategoryIds } : null;
       // Where this store may take rice from, itself first (null = no rule yet, any place).
       const takeFrom = await shelvesFor(prisma, storeId, loc.id);
-      return { location: loc, locations, takeFrom, products: items, seesCost: seesCost(actor.role), quotaPromo };
+      return { location: { ...loc, sellPerKilo: found.sellPerKilo }, locations, takeFrom, products: ordered, seesCost: seesCost(actor.role), quotaPromo };
     });
   }
 
@@ -407,6 +414,11 @@ export class BentaService {
       const madeEarlier = paper?.occurredAt ?? offlineSoldAt(input.soldAt, new Date());
       const gate = await dayGate(prisma, storeId, loc.id, { offline: !!madeEarlier || !!fromCount, storeName: loc.name });
       if (gate.refusal) throw new StepError(conflict(gate.refusal));
+      // "Sell per kilo here" off: this store sells by the sack only (a sale that waited offline still goes through).
+      if (!madeEarlier && !fromCount && priced.some((l) => isLoose(l.product))) {
+        const here = await prisma.warehouse.findFirst({ where: { id: loc.id, storeId }, select: { sellPerKilo: true } });
+        if (!here?.sellPerKilo) throw new SellingError(`${loc.name} sells by the sack only. To sell per kilo here, turn on "Sell per kilo here" in Settings → This store.`);
+      }
       const registerSessionId = method === "utang" ? null : gate.on ? gate.sessionId : await this.drawerFor(storeId, loc.id, !!fromCount);
 
       const store = await prisma.store.findUnique({ where: { id: storeId }, include: { settings: true } });

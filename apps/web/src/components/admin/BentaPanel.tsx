@@ -51,7 +51,7 @@ import { noteUse } from "../../lib/product-find";
 
 interface Loc { id: string; name: string; code: string | null; type: string }
 interface Item {
-  id: string; name: string; photoKey?: string | null; loose: boolean; gramsPerUnit: number | null; priceMinor: number; forReview: boolean;
+  id: string; name: string; photoKey?: string | null; loose: boolean; gramsPerUnit: number | null; /** A kilo item: its sack rice. */ kiloOfId?: string | null; priceMinor: number; forReview: boolean;
   /** Products → group; the quota promo is for some groups only. */
   categoryId?: string | null;
   /** Products → group's name (Premium, Imported, 5kg …): the group buttons on the product list. */

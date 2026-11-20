@@ -769,6 +769,20 @@ export class AdminController {
     return result.value;
   }
 
+  /** POST /admin/products/:id/kilo-item — body { on }: "Also sell per kilo" on a sack rice (makes / hides its kilo item). */
+  @Post("products/:id/kilo-item")
+  async setKiloItem(@Req() req: Request & { user?: AuthPrincipal }, @Param("id") id: string, @Body() body: { on?: unknown }, @Headers("x-store-id") headerStoreId?: string) {
+    const user = req.user;
+    requireUser(user);
+    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
+    if (typeof body?.on !== "boolean") throw new HttpException({ type: "validation", errors: ["on must be true or false"] }, HttpStatus.BAD_REQUEST);
+    const result = await this.productsAdmin.setKiloItem(storeId, id, body.on);
+    if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
+    await cacheBust(cacheKey("products", storeId));
+    await cacheBust(cacheKey("inventory", storeId));
+    return result.value;
+  }
+
   // ─────────────────────────────── Variants + add-ons (P2c admin) ───────────────────────────────
 
   /** POST /admin/products/:id/variants — create a variant on a product. */
@@ -938,13 +952,21 @@ export class AdminController {
         select: {
           id: true, name: true, code: true, type: true, address: true, facebookPageUrl: true,
           receiptName: true, receiptHeader: true, receiptFooter: true, receiptContact: true, dailySalesTargetMinor: true,
-          dayOpenClose: true, requireOpenShift: true, hidePricePreOrder: true,
+          dayOpenClose: true, requireOpenShift: true, hidePricePreOrder: true, sellPerKilo: true,
         },
       }),
     ]);
+    // Kilo rice still on each shelf: the screen warns before "Sell per kilo here" is turned off.
+    const kiloLeft = await prisma.stockLevel.groupBy({
+      by: ["warehouseId"],
+      where: { storeId, warehouseId: { in: rows.map((r) => r.id) }, quantityOnHand: { gt: 0 }, product: { stockBaseUnit: "g", stockBaseQuantity: 1 } },
+      _sum: { quantityOnHand: true },
+    });
+    const gramsLeft = new Map(kiloLeft.map((k) => [k.warehouseId, k._sum.quantityOnHand ?? 0]));
     const places = rows.filter((r) => canManageLocation(actor, r.id)).map((r) => ({
       id: r.id, name: r.name, code: r.code, type: r.type, sells: r.type !== "WAREHOUSE",
       ...mergeSwitches(business, r),
+      sellPerKilo: r.type !== "WAREHOUSE" && r.sellPerKilo, kiloGramsLeft: gramsLeft.get(r.id) ?? 0,
       address: r.address, facebookPageUrl: r.facebookPageUrl, receiptName: r.receiptName, receiptHeader: r.receiptHeader,
       receiptFooter: r.receiptFooter, receiptContact: r.receiptContact, dailySalesTargetMinor: r.dailySalesTargetMinor,
     }));
@@ -964,7 +986,7 @@ export class AdminController {
     requireUser(user);
     const { storeId, role } = await resolveTenant(user, headerStoreId, TENANT_ROLES.VIEW);
     const actor = await loadActor(storeId, user.sub, role);
-    const place = await prisma.warehouse.findFirst({ where: { id: locationId, storeId }, select: { id: true } });
+    const place = await prisma.warehouse.findFirst({ where: { id: locationId, storeId }, select: { id: true, type: true } });
     if (!place) throw new HttpException({ type: "not_found", message: "That store was not found" }, HttpStatus.NOT_FOUND);
     if (!canManageLocation(actor, place.id)) throw new HttpException({ type: "forbidden", message: "You can change only your own store's settings" }, HttpStatus.FORBIDDEN);
     const errors: string[] = [];
@@ -972,6 +994,11 @@ export class AdminController {
     for (const k of SWITCH_KEYS) {
       if (body?.[k] === undefined) continue;
       if (typeof body[k] !== "boolean") errors.push(`${k} must be true or false`); else switches[k] = body[k] as boolean;
+    }
+    if (body?.sellPerKilo !== undefined) {
+      if (typeof body.sellPerKilo !== "boolean") errors.push("sellPerKilo must be true or false");
+      else if (place.type === "WAREHOUSE" && body.sellPerKilo) errors.push("The warehouse does not sell, so it cannot sell per kilo");
+      else switches.sellPerKilo = body.sellPerKilo;
     }
     const text = (k: string) => (body?.[k] === null || typeof body?.[k] === "string" ? { [k]: body[k] as string | null } : {});
     const target = body?.dailySalesTargetMinor;

@@ -70,8 +70,8 @@ async function fixture() {
   const store = await prisma.store.create({ data: { slug, name: `WI ${seq}` } });
   storeIds.push(store.id);
   await prisma.storeSettings.create({ data: { storeId: store.id, requireOpenShift: true } });
-  const s1 = await prisma.warehouse.create({ data: { storeId: store.id, name: "Store 1", code: "S1", type: "STORE", isDefault: true } });
-  const s2 = await prisma.warehouse.create({ data: { storeId: store.id, name: "Store 2", code: "S2", type: "STORE", consignment: true } });
+  const s1 = await prisma.warehouse.create({ data: { storeId: store.id, name: "Store 1", code: "S1", type: "STORE", sellPerKilo: true, isDefault: true } });
+  const s2 = await prisma.warehouse.create({ data: { storeId: store.id, name: "Store 2", code: "S2", type: "STORE", sellPerKilo: true, consignment: true } });
   const jasmine = await prisma.product.create({ data: { storeId: store.id, sku: `${run}-${seq}-J25`, name: "Jasmine 25 kg", priceMinor: 135_000, costMinor: 115_000, stockBaseUnit: "g", stockBaseQuantity: 25_000, stockConversionFamily: "Bigas" } });
   const loose = await prisma.product.create({ data: { storeId: store.id, sku: `${run}-${seq}-JK`, name: "Jasmine (per kilo)", priceMinor: 5_600, costMinor: 4_600, stockBaseUnit: "g", stockBaseQuantity: 1, stockConversionFamily: "Bigas", soldByWeight: true } });
   await prisma.locationPrice.create({ data: { storeId: store.id, warehouseId: s2.id, productId: jasmine.id, priceMinor: 135_000 } });

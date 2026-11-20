@@ -78,7 +78,7 @@ test("one whole day at Bogs and Lucy, Bahay Tindahan and Lipa", async () => {
   const storeId = store.id;
   storeIds.push(storeId);
   await prisma.storeSettings.create({ data: { storeId, requireOpenShift: false, orderNumberPrefix: "SAM" } });
-  const place = (name: string, code: string, extra: object = {}) => prisma.warehouse.create({ data: { storeId, name, code, type: "STORE", ...extra } });
+  const place = (name: string, code: string, extra: object = {}) => prisma.warehouse.create({ data: { storeId, name, code, type: "STORE", sellPerKilo: true, ...extra } });
   const main = await place("Bogs and Lucy", "S1", { isDefault: true });
   const bt = await place("Bahay Tindahan", "S2", { consignment: true });
   const lipa = await place("Lipa", "S3", { consignment: true });

@@ -401,6 +401,8 @@ model Product {
   // The product's picture on POS / Pre-order / Products (ProductPhoto.id). A new picture gets a new key,
   // so its address never changes content and the tablet may keep it for good (works offline).
   photoKey              String?
+  // 2026-11-20 sell per kilo: a kilo item ("Sinandomeng · per kilo") points at the sack rice it is opened from.
+  kiloOfId              String?
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
 
@@ -426,6 +428,7 @@ model Product {
   stockLevelId   String?
 
   @@unique([storeId, sku])
+  @@index([storeId, kiloOfId])
   @@unique([storeId, barcode]) // M5: scannable barcode unique per store
   @@unique([storeId, id]) // M3: composite target for tenant-consistent children
 }
@@ -850,6 +853,8 @@ model Warehouse {
   dayOpenClose          Boolean?
   requireOpenShift      Boolean?
   hidePricePreOrder     Boolean?
+  // 2026-11-20 "Sell per kilo here": this store sells rice per kilo (loose) as well as per sack. Off = sacks only.
+  sellPerKilo           Boolean   @default(false)
   expenses          Expense[]
   cashHandovers     CashHandover[]
   paymentsFor       Payment[] @relation("PaymentForLocation")

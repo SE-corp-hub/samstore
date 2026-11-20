@@ -323,7 +323,7 @@ export default function SettingsPanel({ role = "" }: { role?: string }) {
     switch (g) {
       case "business": return data?.name ?? "";
       case "printer": { const p = getPrinterSettings(); return `${p.widthMm} mm · ${p.autoPrint ? "prints after each sale" : "print by hand"}${p.bluetooth ? " · Bluetooth" : ""}`; }
-      case "store": return "Each store's Open day and Z-read, drawer, receipt details";
+      case "store": return "Each store's Open day and Z-read, drawer, per kilo, receipt details";
       case "counter": return saved.promoOn ? `On · ${saved.promoMin} sacks or more, ${peso(toMinor(saved.promoOff))} less each` : "Off";
       case "credit": return toMinor(saved.creditLimit) > 0 ? `New customers ${peso(toMinor(saved.creditLimit))} · ${saved.creditTermDays} days to pay` : `No default limit · ${saved.creditTermDays} days to pay`;
       case "receipt": return `${saved.vatEnabled ? `VAT ${saved.vatRate}%${saved.pricesIncludeVat ? " included" : " added"}` : "No VAT"}${saved.tin ? " · TIN set" : ""}${saved.seniorPwd ? " · Senior/PWD 20%" : ""}`;
