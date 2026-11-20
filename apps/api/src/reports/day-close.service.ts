@@ -35,7 +35,7 @@ const notFound = (m: string) => ({ ok: false as const, error: { type: "not_found
 const OWNERS = ["OWNER", "MANAGER", "STORE_OWNER", "PLATFORM_ADMIN"];
 const MAX_MINOR = 100_000_000_00; // ₱100M: a typo guard
 /** Bills and coins, in centavos, for the bill-by-bill count. */
-export const DENOMINATIONS = [100_000, 50_000, 20_000, 10_000, 5_000, 2_000, 1_000, 500, 100] as const;
+export const DENOMINATIONS = [100_000, 50_000, 20_000, 10_000, 5_000, 2_000, 1_000, 500, 100, 25] as const;
 export const VARIANCE_REASONS = ["Wrong change given", "Expense not written down", "Walk-in sale not rung up", "Cash handed over not written down", "Counting mistake", "Don't know"] as const;
 
 /** The figures of a Z-read (and an X-read). Frozen in RegisterSession.zTotals at the close. */

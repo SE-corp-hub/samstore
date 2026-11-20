@@ -38,7 +38,7 @@ export interface DayFigures {
 export const DENOMINATIONS: { minor: number; label: string; coin: boolean }[] = [
   { minor: 100_000, label: "₱1,000", coin: false }, { minor: 50_000, label: "₱500", coin: false }, { minor: 20_000, label: "₱200", coin: false },
   { minor: 10_000, label: "₱100", coin: false }, { minor: 5_000, label: "₱50", coin: false }, { minor: 2_000, label: "₱20", coin: false },
-  { minor: 1_000, label: "₱10", coin: true }, { minor: 500, label: "₱5", coin: true }, { minor: 100, label: "₱1", coin: true },
+  { minor: 1_000, label: "₱10", coin: true }, { minor: 500, label: "₱5", coin: true }, { minor: 100, label: "₱1", coin: true }, { minor: 25, label: "25¢", coin: true },
 ];
 
 export const VARIANCE_REASONS = ["Wrong change given", "Expense not written down", "Walk-in sale not rung up", "Cash handed over not written down", "Counting mistake", "Don't know"] as const;

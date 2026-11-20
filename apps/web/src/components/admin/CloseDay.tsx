@@ -1,15 +1,15 @@
 "use client";
 
-// Close day (Z-read): one screen, five steps, no skipping ahead.
-//   1 Check    everything on this tablet is sent; sales on hold; cash taken out today is written down
-//   2 Cash     count the drawer bill by bill (or type the total)
-//   3 GCash    type today's total from the GCash app
-//   4 Balance  should be / counted / result for cash and GCash; a reason when it does not match;
-//              the change fund kept for tomorrow
-//   5 Sign     signature, Close day → the Z-read, Print
-// The counts are typed BEFORE the "should be" amounts show, so nobody counts toward a number.
+// Close day (Z-read): three steps, no skipping ahead.
+//   1 Check   everything on this tablet is sent; sales on hold; cash taken out today is written down
+//   2 Count   ONE screen like a cashier's X-reading (the owner asked for it, 2026-11-20): a row of big
+//             number keys on top, bills and coins with how many + the amount, and beside them the day's
+//             sales, the cash that should be in the drawer and the difference, live as you count.
+//             GCash from the app and the change fund for tomorrow are typed on the same screen.
+//             Print count = the bills and coins on paper. Post = go and sign.
+//   3 Sign    signature, Close day → the Z-read, Print
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { API_URL } from "../../config";
 import { adminHeaders } from "../../lib/admin";
 import { flushQueue, heldSteps, QUEUE_EVENT, queuedSteps } from "../../lib/offlineQueue";
@@ -18,12 +18,11 @@ import { peso } from "../../lib/number-format";
 import { printSlip } from "../../lib/slip-print";
 import { toast } from "../../lib/toast";
 import { DENOMINATIONS, dayText, timeText, VARIANCE_REASONS, zLabel, zSlip, type DayFigures } from "../../lib/day";
-import NumPad from "./NumPad";
 import SignaturePad from "./SignaturePad";
 import Steps from "./Steps";
-import { PesoInput } from "../NumberBoxes";
 
-const STEPS = ["Check", "Cash", "GCash", "Balance", "Sign"];
+const STEPS = ["Check", "Count", "Sign"];
+const FIRST: Field = `d${DENOMINATIONS[0]?.minor ?? 100_000}`;
 const toMinor = (s: string) => Math.round(Number(s.replace(/,/g, "") || "0") * 100);
 const errText = (d: { message?: string; errors?: string[] } | null, fallback: string) => d?.errors?.join(", ") || d?.message || fallback;
 const diffWords = (m: number) => (m === 0 ? "Correct" : m < 0 ? `Short ${peso(-m)}` : `Over ${peso(m)}`);
@@ -89,6 +88,9 @@ export default function CloseDay({ locationId, storeName, placeName, heldCount, 
   const [keep, setKeep] = useState("");
   const [sig, setSig] = useState<string | null>(null);
   const [done, setDone] = useState<DayFigures | null>(null);
+  // The box the number keys type into, and whether the next digit replaces what is there.
+  const [active, setActive] = useState<Field>(FIRST);
+  const [fresh, setFresh] = useState(true);
   const offline = useOffline();
 
   const load = useCallback(async () => {
@@ -118,10 +120,91 @@ export default function CloseDay({ locationId, storeName, placeName, heldCount, 
   const matches = cashDiff === 0 && gcashDiff === 0;
   const keepMinor = toMinor(keep);
 
-  const setCount = (minor: number, n: number) => setCounts((c) => ({ ...c, [minor]: Math.max(0, Math.min(9999, n)) }));
+  // ── The number keys ──
+  const order: Field[] = useMemo(() => [...(byTotal ? ["total" as Field] : DENOMINATIONS.map((d) => `d${d.minor}` as Field)), "gcash", "keep"], [byTotal]);
+  const pick = (f: Field) => { setActive(f); setFresh(true); };
+  const money: Record<"total" | "gcash" | "keep", [string, (v: string) => void]> = { total: [cashTotal, setCashTotal], gcash: [gcash, setGcash], keep: [keep, setKeep] };
+  const press = (k: string) => {
+    if (k === "next") { const i = order.indexOf(active); pick(order[(i + 1) % order.length] ?? FIRST); return; }
+    if (active.startsWith("d")) {
+      const minor = Number(active.slice(1));
+      const n = counts[minor] ?? 0;
+      let v = n;
+      if (k === "C") v = 0;
+      else if (k === "⌫") v = Math.floor(n / 10);
+      else if (/^\d$/.test(k)) v = (fresh ? 0 : n) * 10 + Number(k);
+      else return;
+      if (v > 9999) return;
+      setCounts((c) => ({ ...c, [minor]: v }));
+      setFresh(false);
+      return;
+    }
+    const [val, set] = money[active as "total" | "gcash" | "keep"];
+    const base = fresh ? "" : val;
+    if (k === "C") set("");
+    else if (k === "⌫") set(fresh ? "" : val.slice(0, -1));
+    else if (k === ".") { if (!base.includes(".")) set((base || "0") + "."); }
+    else if (/^\d$/.test(k)) {
+      const dot = base.indexOf(".");
+      if (dot >= 0 && base.length - dot > 2) return;   // centavos: two digits
+      if (base.replace(".", "").length >= 8) return;
+      set(base === "0" ? k : base + k);
+    } else return;
+    setFresh(false);
+  };
+  const pressRef = useRef(press);
+  pressRef.current = press;
+  useEffect(() => {
+    if (step !== 1 || done) return;
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA")) return;   // the note box types normally
+      if (/^\d$/.test(e.key) || e.key === ".") pressRef.current(e.key);
+      else if (e.key === "Backspace") pressRef.current("⌫");
+      else if (e.key === "Enter") { e.preventDefault(); pressRef.current("next"); }
+      else return;
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [step, done]);
 
   const sendNow = async () => { setBusy(true); await flushQueue(); setBusy(false); setWaiting(queuedSteps().length); };
-  const toBalance = async () => { setBusy(true); const f = await load(); setBusy(false); if (f) setStep(3); };
+
+  /** Post: read the day again (a late sale changes "should be"), then go and sign. */
+  const post = async () => {
+    if (!fig) return;
+    setBusy(true);
+    const before = fig;
+    const f = await load();
+    setBusy(false);
+    if (!f) return;
+    if (f.cash.shouldBeMinor !== before.cash.shouldBeMinor || f.gcash.shouldBeMinor !== before.gcash.shouldBeMinor) {
+      setError("A payment came in while you were counting. The amounts changed — check them, then press Post again.");
+      return;
+    }
+    setStep(2);
+  };
+
+  const printCount = () => {
+    if (!fig) return;
+    const rows = byTotal
+      ? [{ name: "Cash counted (total typed)", qty: peso(countedMinor) }]
+      : DENOMINATIONS.filter((d) => (counts[d.minor] ?? 0) > 0).map((d) => ({ name: `${d.label} x ${counts[d.minor]}`, qty: peso(d.minor * (counts[d.minor] ?? 0)) }));
+    printSlip({
+      storeName, locationId, title: "CASH COUNT (not closed yet)", when: new Date().toLocaleString("en-PH", { timeZone: "Asia/Manila" }),
+      lines: [{ label: "Store", value: placeName }, { label: "Day", value: dayText(businessDate) }],
+      rows: [
+        ...rows,
+        { name: "CASH COUNTED", qty: peso(countedMinor) },
+        { name: "Cash should be", qty: peso(fig.cash.shouldBeMinor) },
+        { name: "Cash", qty: diffWords(cashDiff) },
+        { name: "GCash in the app", qty: peso(gcashMinor) },
+        { name: "GCash should be", qty: peso(fig.gcash.shouldBeMinor) },
+        { name: "GCash", qty: diffWords(gcashDiff) },
+      ],
+      footer: "Count only. The day is still open.",
+    });
+  };
 
   const close = async () => {
     setBusy(true); setError(null);
@@ -138,8 +221,8 @@ export default function CloseDay({ locationId, storeName, placeName, heldCount, 
     if (!res) { setError("Needs internet to close the day"); return; }
     if (!res.ok || !d) {
       setError(errText(d, "Could not close the day"));
-      // The amounts changed meanwhile (a late sale): show the balance again.
-      if (res.status === 422 && /match|add up/i.test(errText(d, ""))) { await load(); setStep(3); }
+      // The amounts changed meanwhile (a late sale): show the count screen again.
+      if (res.status === 422 && /match|add up/i.test(errText(d, ""))) { await load(); setStep(1); }
       return;
     }
     setDone(d);
@@ -147,15 +230,37 @@ export default function CloseDay({ locationId, storeName, placeName, heldCount, 
   };
 
   const canLeaveCheck = waiting === 0 && !offline && !!fig && cashOutOk === true;
+  const canPost = !!fig && !busy && !offline && (matches || !!reason) && keepMinor <= countedMinor;
+
+  /** A box the number keys type into. */
+  const box = (f: Field, shown: string, label: string, extra = "") => (
+    <button type="button" className={`zc-box${active === f ? " is-active" : ""}${extra}`} aria-pressed={active === f} aria-label={`${label}: ${shown || "0"}. Tap, then use the number keys.`} onClick={() => pick(f)}>
+      {shown || <span className="zc-zero">0</span>}
+    </button>
+  );
+  const sumRow = (label: string, value: string, cls = "") => (
+    <div className={`zc-sum-row ${cls}`}><span>{label}</span><span className="zc-amt">{value}</span></div>
+  );
+  const denomRow = (d: (typeof DENOMINATIONS)[number]) => {
+    const n = counts[d.minor] ?? 0;
+    return (
+      <div key={d.minor} className="zc-denom">
+        <span className={`zc-money zc-m${d.minor}`}>{d.label}</span>
+        {box(`d${d.minor}`, n ? String(n) : "", `How many ${d.label}${d.coin ? " coins" : " bills"}`)}
+        <span className="zc-line">{n ? peso(d.minor * n) : <span className="zc-zero">{peso(0)}</span>}</span>
+      </div>
+    );
+  };
+  const KEYS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0", ".", "⌫", "C"];
+  const dotOk = !active.startsWith("d");
 
   return (
     <div className="close-day position-fixed top-0 start-0 w-100 h-100 bg-body overflow-auto rice-ui" role="dialog" aria-modal="true" aria-labelledby="cd-title" style={{ zIndex: 1075 }}>
-      <div className="close-day-body py-3 px-3 mx-auto">
+      <div className={`close-day-body py-3 px-3 mx-auto${step === 1 && !done ? " is-count" : ""}`}>
         <div className="d-flex align-items-center gap-2 mb-2">
-          <h1 id="cd-title" className="h4 mb-0 me-auto"><i className="bi bi-lock me-2" aria-hidden="true"></i>Close day · {placeName}</h1>
+          <h1 id="cd-title" className="h4 mb-0 me-auto"><i className="bi bi-lock me-2" aria-hidden="true"></i>Close day · {placeName} <span className="fw-normal text-muted fs-6 text-nowrap">{dayText(businessDate)}</span></h1>
           {!done && <button type="button" className="btn btn-outline-secondary btn-lg" onClick={onCancel}>Back to POS</button>}
         </div>
-        <p className="text-muted mb-2">{dayText(businessDate)}</p>
         {!done && <Steps items={STEPS} current={step} />}
         {error && <div className="alert alert-danger py-2" role="alert">{error}</div>}
 
@@ -194,91 +299,113 @@ export default function CloseDay({ locationId, storeName, placeName, heldCount, 
               <button type="button" className={`btn btn-lg ${cashOutOk === false ? "btn-dark" : "btn-outline-dark"}`} aria-pressed={cashOutOk === false} onClick={() => setCashOutOk(false)}>Yes</button>
             </div>
             {cashOutOk === false && <div className="alert alert-warning py-2">Write it down first: Menu → Expenses (paid from the drawer), or Money → Cash → Hand over. Then come back and close.</div>}
-            <button type="button" className="btn btn-success btn-lg w-100 mt-2" disabled={!canLeaveCheck} onClick={() => setStep(1)}>Next: count the cash</button>
+            <button type="button" className="btn btn-success btn-lg w-100 mt-2" disabled={!canLeaveCheck} onClick={() => setStep(1)}>Next: count the money</button>
           </div></div>
-        ) : step === 1 ? (
-          <div className="card"><div className="card-body">
-            <h2 className="h5">2. Count the cash in the drawer</h2>
-            <p className="mb-2">Count everything in the drawer, the change fund too.</p>
-            <div className="d-flex gap-2 mb-3" role="group" aria-label="How to count">
-              <button type="button" className={`btn ${!byTotal ? "btn-dark" : "btn-outline-dark"}`} aria-pressed={!byTotal} onClick={() => setByTotal(false)}>Bill by bill</button>
-              <button type="button" className={`btn ${byTotal ? "btn-dark" : "btn-outline-dark"}`} aria-pressed={byTotal} onClick={() => setByTotal(true)}>Type the total</button>
+        ) : step === 1 && fig ? (
+          <div className="zc">
+            <div className="zc-keys" role="group" aria-label="Number keys">
+              {KEYS.map((k) => (
+                <button key={k} type="button" className={`zc-key${k === "C" ? " zc-key-c" : ""}`} disabled={k === "." && !dotOk}
+                  aria-label={k === "⌫" ? "Erase one digit" : k === "C" ? "Clear this box" : k === "." ? "Point" : k} onClick={() => press(k)}>{k}</button>
+              ))}
+              <button type="button" className="zc-key zc-key-next" aria-label="Next box" onClick={() => press("next")}>Next <i className="bi bi-arrow-down-short" aria-hidden="true"></i></button>
             </div>
-            {byTotal ? (
-              <div className="mx-auto" style={{ maxWidth: 360 }}><NumPad value={cashTotal} onChange={setCashTotal} decimals={2} label="Cash counted" unit="₱" /></div>
-            ) : (
-              <div className="denoms">
-                {DENOMINATIONS.map((d) => {
-                  const n = counts[d.minor] ?? 0;
-                  return (
-                    <div key={d.minor} className="denom-row">
-                      <span className="denom-label">{d.label}{d.coin ? <span className="text-muted small"> coin</span> : null}</span>
-                      <span className="d-flex align-items-center gap-1">
-                        <button type="button" className="btn btn-outline-dark qty-btn" aria-label={`One less ${d.label}`} disabled={n === 0} onClick={() => setCount(d.minor, n - 1)}>−</button>
-                        <input className="form-control text-center denom-n" inputMode="numeric" aria-label={`How many ${d.label}`} value={n || ""} placeholder="0"
-                          onChange={(e) => setCount(d.minor, Number(e.target.value.replace(/\D/g, "") || "0"))} onFocus={(e) => e.target.select()} />
-                        <button type="button" className="btn btn-outline-dark qty-btn" aria-label={`One more ${d.label}`} onClick={() => setCount(d.minor, n + 1)}>+</button>
-                      </span>
-                      <span className="denom-sum">{n ? peso(d.minor * n) : ""}</span>
-                    </div>
-                  );
-                })}
+
+            <div className="d-flex flex-wrap align-items-center gap-2 my-2">
+              <span className="me-auto">Tap a box, then press the numbers. Count everything in the drawer, the change fund too.</span>
+              <div className="btn-group" role="group" aria-label="How to count">
+                <button type="button" className={`btn ${!byTotal ? "btn-dark" : "btn-outline-dark"}`} aria-pressed={!byTotal} onClick={() => { setByTotal(false); pick(FIRST); }}>Bill by bill</button>
+                <button type="button" className={`btn ${byTotal ? "btn-dark" : "btn-outline-dark"}`} aria-pressed={byTotal} onClick={() => { setByTotal(true); pick("total"); }}>Type the total</button>
               </div>
-            )}
-            <div className="d-flex justify-content-between align-items-baseline mt-3 fs-4"><span>Cash counted</span><strong className="sale-total">{peso(countedMinor)}</strong></div>
-            <div className="d-flex gap-2 mt-3">
-              <button type="button" className="btn btn-outline-secondary btn-lg" onClick={() => setStep(0)}>Back</button>
-              <button type="button" className="btn btn-success btn-lg flex-grow-1" onClick={() => setStep(2)}>Next: GCash</button>
             </div>
-          </div></div>
-        ) : step === 2 ? (
-          <div className="card"><div className="card-body">
-            <h2 className="h5">3. GCash received today</h2>
-            <p className="mb-2">Open the GCash app and type today&apos;s total received (0 if none).</p>
-            <div className="mx-auto" style={{ maxWidth: 360 }}><NumPad value={gcash} onChange={setGcash} decimals={2} label="GCash received today" unit="₱" /></div>
-            <div className="d-flex gap-2 mt-3">
-              <button type="button" className="btn btn-outline-secondary btn-lg" onClick={() => setStep(1)}>Back</button>
-              <button type="button" className="btn btn-success btn-lg flex-grow-1" disabled={busy || offline} onClick={() => void toBalance()}>{busy ? "Please wait…" : "Next: check the balance"}</button>
+
+            <div className={`zc-grid${byTotal ? " by-total" : ""}`}>
+              {byTotal ? (
+                <section className="zc-col zc-bills" aria-label="Cash counted">
+                  <h2 className="zc-h">Cash in the drawer</h2>
+                  <div className="zc-denom zc-denom-total"><span className="zc-money zc-mtotal">Total</span>{box("total", cashTotal ? `₱${cashTotal}` : "", "Cash counted, total")}</div>
+                    <div className="zc-gcash">
+                      <h3 className="zc-h">GCash</h3>
+                      {sumRow("GCash should be", peso(fig.gcash.shouldBeMinor))}
+                      <div className="zc-sum-row zc-sum-box"><span>In the GCash app today</span>{box("gcash", gcash ? `₱${gcash}` : "", "GCash in the app today")}</div>
+                      <div className={`zc-variance ${diffClass(gcashDiff)}`} aria-live="polite"><span>GCash</span><strong>{diffWords(gcashDiff)}</strong></div>
+                    </div>
+                </section>
+              ) : (
+                <>
+                  <section className="zc-col zc-bills" aria-label="Bills">
+                    <h2 className="zc-h">Bills</h2>
+                    {DENOMINATIONS.filter((d) => !d.coin).map(denomRow)}
+                  </section>
+                  <section className="zc-col zc-coins" aria-label="Coins">
+                    <h2 className="zc-h">Coins</h2>
+                    {DENOMINATIONS.filter((d) => d.coin).map(denomRow)}
+                    <div className="zc-count-total"><span>Cash count</span><strong>{peso(countedMinor)}</strong></div>
+                    <div className="zc-gcash">
+                      <h3 className="zc-h">GCash</h3>
+                      {sumRow("GCash should be", peso(fig.gcash.shouldBeMinor))}
+                      <div className="zc-sum-row zc-sum-box"><span>In the GCash app today</span>{box("gcash", gcash ? `₱${gcash}` : "", "GCash in the app today")}</div>
+                      <div className={`zc-variance ${diffClass(gcashDiff)}`} aria-live="polite"><span>GCash</span><strong>{diffWords(gcashDiff)}</strong></div>
+                    </div>
+                  </section>
+                </>
+              )}
+
+              <section className="zc-col zc-sum" aria-label="Today's figures">
+                <h2 className="zc-h">Today · {fig.sales.count} {fig.sales.count === 1 ? "sale" : "sales"}</h2>
+                {sumRow("Net sales", peso(fig.sales.netMinor), "fw-bold")}
+                {fig.sales.takenBackCount > 0 && sumRow(`Taken back (${fig.sales.takenBackCount})`, `−${peso(fig.sales.takenBackMinor)}`)}
+                {sumRow("Credit (utang)", peso(fig.sales.creditMinor))}
+                {sumRow("GCash sales", peso(fig.sales.gcashMinor))}
+                {fig.sales.otherMinor !== 0 && sumRow("Maya / bank", peso(fig.sales.otherMinor))}
+                {sumRow("Cash sales", peso(fig.sales.cashMinor), "fw-bold")}
+                {fig.creditCollectedMinor > 0 && sumRow("Credit collected", peso(fig.creditCollectedMinor))}
+
+                <h3 className="zc-h zc-h-sub">Cash drawer</h3>
+                {sumRow("Change fund (opening)", peso(fig.cash.floatMinor))}
+                {sumRow("Cash in", peso(fig.cash.inMinor))}
+                {fig.cash.givenBackMinor > 0 && sumRow("Given back", `−${peso(fig.cash.givenBackMinor)}`)}
+                {fig.cash.paidOutMinor > 0 && sumRow("Expenses", `−${peso(fig.cash.paidOutMinor)}`)}
+                {fig.cash.handedOverMinor > 0 && sumRow("To the owner", `−${peso(fig.cash.handedOverMinor)}`)}
+                {sumRow("Cash should be", peso(fig.cash.shouldBeMinor), "fw-bold zc-rule")}
+                {sumRow("Cash counted", peso(countedMinor), "fw-bold")}
+                <div className={`zc-variance ${diffClass(cashDiff)}`} aria-live="polite"><span>Cash</span><strong>{diffWords(cashDiff)}</strong></div>
+
+              </section>
             </div>
-          </div></div>
-        ) : step === 3 && fig ? (
-          <div className="card"><div className="card-body">
-            <h2 className="h5">4. Does it balance?</h2>
-            <table className="table align-middle day-balance mb-2">
-              <thead><tr><th></th><th className="text-end">Should be</th><th className="text-end">Counted</th><th className="text-end">Result</th></tr></thead>
-              <tbody>
-                <tr><th scope="row">Cash</th><td className="text-end">{peso(fig.cash.shouldBeMinor)}</td><td className="text-end">{peso(countedMinor)}</td><td className={`text-end fw-bold ${diffClass(cashDiff)}`}>{diffWords(cashDiff)}</td></tr>
-                <tr><th scope="row">GCash</th><td className="text-end">{peso(fig.gcash.shouldBeMinor)}</td><td className="text-end">{peso(gcashMinor)}</td><td className={`text-end fw-bold ${diffClass(gcashDiff)}`}>{diffWords(gcashDiff)}</td></tr>
-              </tbody>
-            </table>
-            <p className="small text-muted">Cash should be = change fund {peso(fig.cash.floatMinor)} + cash in {peso(fig.cash.inMinor)}{fig.cash.givenBackMinor ? ` − given back ${peso(fig.cash.givenBackMinor)}` : ""}{fig.cash.paidOutMinor ? ` − expenses ${peso(fig.cash.paidOutMinor)}` : ""}{fig.cash.handedOverMinor ? ` − to the owner ${peso(fig.cash.handedOverMinor)}` : ""}.</p>
+
             {!matches && (
-              <>
+              <div className="zc-why mt-3">
                 <p className="fw-semibold mb-2">It does not match. Count again, or choose why:</p>
                 <div className="d-flex flex-wrap gap-2 mb-2" role="group" aria-label="Why it does not match">
                   {VARIANCE_REASONS.map((r) => <button key={r} type="button" className={`btn ${reason === r ? "btn-dark" : "btn-outline-dark"}`} aria-pressed={reason === r} onClick={() => setReason(r)}>{r}</button>)}
                 </div>
-                <input className="form-control form-control-lg mb-2" aria-label="Note (optional)" placeholder="Note (optional)" value={note} maxLength={200} onChange={(e) => setNote(e.target.value)} />
-                <div className="mb-3"><button type="button" className="btn btn-outline-primary" onClick={() => setStep(1)}>Count again</button></div>
-              </>
+                <input className="form-control form-control-lg" aria-label="Note (optional)" placeholder="Note (optional)" value={note} maxLength={200} onChange={(e) => setNote(e.target.value)} />
+              </div>
             )}
-            <label className="form-label fw-semibold" htmlFor="cd-keep">Change fund left in the drawer for tomorrow</label>
-            <PesoInput id="cd-keep" className="form-control form-control-lg mb-1" value={keep} onChange={setKeep} />
-            {keepMinor > countedMinor && <div className="text-danger small mb-1">Cannot be more than the cash counted.</div>}
-            <p className="small text-muted">The rest ({peso(Math.max(0, countedMinor - keepMinor))}) goes to the owner. Write the hand-over on Money → Cash.</p>
-            <div className="d-flex gap-2 mt-3">
-              <button type="button" className="btn btn-outline-secondary btn-lg" onClick={() => setStep(2)}>Back</button>
-              <button type="button" className="btn btn-success btn-lg flex-grow-1" disabled={(!matches && !reason) || keepMinor > countedMinor} onClick={() => setStep(4)}>Next: sign</button>
+
+            <div className="zc-keep mt-3">
+              <span className="fw-semibold">Change fund to leave for tomorrow</span>
+              {box("keep", keep ? `₱${keep}` : "", "Change fund to leave for tomorrow")}
+              <span className="text-muted">The rest, {peso(Math.max(0, countedMinor - keepMinor))}, goes to the owner.</span>
+              {keepMinor > countedMinor && <span className="text-danger fw-semibold w-100">Cannot be more than the cash counted.</span>}
             </div>
-          </div></div>
-        ) : step === 4 ? (
+
+            <div className="zc-actions">
+              <button type="button" className="btn btn-outline-secondary btn-lg" onClick={() => setStep(0)}>Back</button>
+              <button type="button" className="btn btn-outline-primary btn-lg" onClick={printCount}><i className="bi bi-printer me-1" aria-hidden="true"></i>Print count</button>
+              <button type="button" className="btn btn-success btn-lg zc-post" disabled={!canPost} onClick={() => void post()}>{busy ? "Please wait…" : "Post"}</button>
+            </div>
+            {!matches && !reason && <p className="text-muted text-end mb-0 mt-1">Choose why it does not match to Post.</p>}
+          </div>
+        ) : step === 2 ? (
           <div className="card"><div className="card-body">
-            <h2 className="h5">5. Sign and close</h2>
+            <h2 className="h5">3. Sign and close</h2>
             <p className="mb-2">Cash counted <strong>{peso(countedMinor)}</strong> ({diffWords(cashDiff)}) · GCash <strong>{peso(gcashMinor)}</strong> ({diffWords(gcashDiff)}){!matches && reason ? ` · ${reason}` : ""}</p>
             <p className="mb-2">After closing, {placeName} cannot sell again today. Only the owner can reopen the day.</p>
             <SignaturePad onSignature={setSig} />
             <div className="d-flex gap-2 mt-3">
-              <button type="button" className="btn btn-outline-secondary btn-lg" disabled={busy} onClick={() => setStep(3)}>Back</button>
+              <button type="button" className="btn btn-outline-secondary btn-lg" disabled={busy} onClick={() => setStep(1)}>Back</button>
               <button type="button" className="btn btn-success btn-lg flex-grow-1" disabled={busy || !sig || offline} onClick={() => void close()}>{busy ? "Please wait…" : "Close day"}</button>
             </div>
           </div></div>
@@ -287,3 +414,5 @@ export default function CloseDay({ locationId, storeName, placeName, heldCount, 
     </div>
   );
 }
+
+type Field = `d${number}` | "total" | "gcash" | "keep";
