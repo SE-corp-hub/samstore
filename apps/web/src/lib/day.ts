@@ -3,7 +3,7 @@
 
 import { useEffect, useState } from "react";
 import { cachedGet, savedCopy } from "./offlineCache";
-import { peso } from "./number-format";
+import { kg, peso } from "./number-format";
 import type { Slip } from "./slip-print";
 
 export interface DayStatus {
@@ -26,6 +26,8 @@ export interface DayFigures {
   sales: { count: number; grossMinor: number; takenBackCount: number; takenBackMinor: number; netMinor: number; cashMinor: number; gcashMinor: number; creditMinor: number; otherMinor: number; encodedLater: number };
   receipts: { first: string | null; last: string | null };
   creditCollectedMinor: number;
+  /** Rice sold per kilo this day (already inside the sales). Missing on Z-reads made before sell per kilo. */
+  perKilo?: { grams: number; totalMinor: number; lines: number };
   cash: { floatMinor: number; inMinor: number; givenBackMinor: number; paidOutMinor: number; handedOverMinor: number; shouldBeMinor: number; countedMinor: number | null; differenceMinor: number | null; ownerKeptMinor?: number };
   /** Sales the owner rang at this store this day, and the cash the owner kept (missing on older Z-reads). */
   ownerSales?: { orderNumber: string; at: string; totalMinor: number; method: string; ownerKeptMinor: number; by: string }[];
@@ -113,6 +115,7 @@ export function zSlip(z: DayFigures, storeName: string, kind: "Z" | "X"): Slip {
     { name: "  Credit", qty: peso(z.sales.creditMinor) },
     ...(z.sales.otherMinor ? [{ name: "  Other", qty: peso(z.sales.otherMinor) }] : []),
     { name: "Credit collected", qty: peso(z.creditCollectedMinor) },
+    ...(z.perKilo && z.perKilo.grams > 0 ? [{ name: `Per kilo sold (${kg(z.perKilo.grams)})`, qty: peso(z.perKilo.totalMinor) }] : []),
     { name: "— CASH DRAWER —", qty: "" },
     { name: "Change fund", qty: peso(z.cash.floatMinor) },
     { name: "Cash in", qty: peso(z.cash.inMinor) },

@@ -35,6 +35,8 @@ type CompareRow = {
   owesMinor: number;
   /** Step 5: this store's expenses in the dates (cancelled ones left out), and its profit after them. */
   expensesMinor: number; netProfitMinor: number;
+  /** Sell per kilo: the kilo rice inside the sales (grams, sales, and for the owner its profit). */
+  perKilo?: { grams: number; salesMinor: number; profitMinor?: number };
 };
 
 export class StoreReportService {
@@ -145,7 +147,11 @@ export class StoreReportService {
     }
     // Profit share (owner): + at the consignment store for rice the main store took from it, − at the main store.
     const share = owner ? (await profitShareByLocation(prisma, storeId, range)).get(locationId) ?? 0 : 0;
+    // Sell per kilo (2026-11-20): the kilo rice inside these sales, on its own line.
+    const kilos = [...items.values()].filter((v) => v.loose);
+    const perKilo = { grams: kilos.reduce((a, v) => a + v.quantity, 0), salesMinor: kilos.reduce((a, v) => a + v.salesMinor, 0), ...(owner ? { profitMinor: kilos.reduce((a, v) => a + v.salesMinor - v.costMinor, 0) } : {}) };
     return {
+      perKilo,
       sales: { count: t.count, totalMinor: t.totalMinor, cashMinor: t.cashMinor, gcashMinor: t.gcashMinor, creditMinor: t.creditMinor, otherMinor: t.otherMinor, takenBack: t.takenBack, ...(owner ? { costMinor: t.costMinor, profitShareMinor: share, grossProfitMinor: t.totalMinor - t.costMinor + share } : {}) },
       cashInMinor: payments.filter((p) => p.method === "cash").reduce((s, p) => s + p.amountMinor, 0),
       creditGivenMinor: credits.reduce((s, c) => s + c.amountMinor, 0),
@@ -222,7 +228,7 @@ export class StoreReportService {
         const s = await this.salesOf(storeId, l.id, r.start, r.end, true);
         const stock = await this.stockRows(storeId, l.id, true);
         stores.push({
-          location: { id: l.id, name: l.name, type: l.type }, sales: s.sales, cashInMinor: s.cashInMinor, creditGivenMinor: s.creditGivenMinor, creditCollectedMinor: s.creditCollectedMinor,
+          location: { id: l.id, name: l.name, type: l.type }, sales: s.sales, perKilo: s.perKilo, cashInMinor: s.cashInMinor, creditGivenMinor: s.creditGivenMinor, creditCollectedMinor: s.creditCollectedMinor,
           stock: { items: stock.length, low: stock.filter((x) => x.flag === "LOW").length, empty: stock.filter((x) => x.flag === "ZERO").length, valueMinor: stock.reduce((a, x) => a + x.valueMinor, 0) },
           owesMinor: owes.get(l.id) ?? 0,
           expensesMinor: spentAt.get(l.id) ?? 0, netProfitMinor: (s.sales.grossProfitMinor ?? 0) - (spentAt.get(l.id) ?? 0),

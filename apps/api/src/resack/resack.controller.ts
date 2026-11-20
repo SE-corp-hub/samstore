@@ -82,6 +82,13 @@ export class ResackController {
     }));
   }
 
+  /** POST /admin/resacks/open-for-kilos — POS "Open a sack": { locationId, kiloProductId, sacks? } — 1 (or `sacks`) of its rice → kilos. */
+  @Post("resacks/open-for-kilos")
+  async openForKilos(@Req() req: Req_, @Body() body: Record<string, unknown>, @Headers("x-store-id") h?: string) {
+    const { storeId, actor } = await this.ctx(req, h);
+    return unwrap(await this.resacks.openSackForKilos(storeId, actor, { locationId: str(body?.locationId), kiloProductId: str(body?.kiloProductId), sacks: body?.sacks }));
+  }
+
   /** POST /admin/resacks/start — Simulan: { locationId, inputProductId, inputQty, kargadorId?, note?, signatures } */
   @Post("resacks/start")
   async start(@Req() req: Req_, @Body() body: Record<string, unknown>, @Headers("x-store-id") h?: string) {

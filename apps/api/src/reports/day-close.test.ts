@@ -243,3 +243,20 @@ test("each store has its own Open day switch (This store in Settings)", async ()
   assert.equal(noDrawer.ok, false);
   assert.match(why(noDrawer), /drawer/);
 });
+
+test("Sell per kilo: the X-read / Z-read shows the kilos sold today and their pesos", async () => {
+  const counter = new BentaService();
+  const day = new DayCloseService();
+  const fx = await fixture(true);
+  await prisma.warehouse.update({ where: { id: fx.main }, data: { sellPerKilo: true } });
+  const kilo = await prisma.product.create({ data: { storeId: fx.storeId, sku: `${run}-kg-${seq}`, name: "Sinandomeng · per kilo", priceMinor: 5_600, costMinor: 4_600, stockBaseUnit: "g", stockBaseQuantity: 1, soldByWeight: true, stockConversionFamily: "Bigas", kiloOfId: fx.rice } });
+  await prisma.stockLevel.create({ data: { storeId: fx.storeId, productId: kilo.id, warehouseId: fx.main, quantityOnHand: 25_000 } });
+  must(await day.open(fx.storeId, fx.staff, { openingFloatMinor: 0 }));
+  must(await counter.sell(fx.storeId, fx.staff, { idempotencyKey: key(), lines: [{ productId: kilo.id, kilos: "2.5" }, { productId: fx.rice, quantity: 1 }], payment: { method: "cash" } }));
+  must(await counter.sell(fx.storeId, fx.staff, { idempotencyKey: key(), lines: [{ productId: kilo.id, amountMinor: 10_000 }], payment: { method: "cash" } }));
+  const x = must(await day.xread(fx.storeId, fx.staff, {}));
+  assert.equal(x.perKilo?.lines, 2);
+  assert.equal(x.perKilo?.totalMinor, 14_000 + 10_000, "2.5 kg × ₱56 + ₱100 worth");
+  assert.equal(x.perKilo?.grams, 2_500 + Math.floor((10_000 * 1000) / 5_600));
+  assert.equal(x.sales.netMinor, 130_000 + 24_000, "already inside the sales");
+});

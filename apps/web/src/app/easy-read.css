@@ -310,6 +310,8 @@ html[data-text-size] .btn:focus-visible { box-shadow: none; }
 /* − and + : square, big digits, a wide number between them. */
 .qty-btn { min-width: 3rem; min-height: 3rem; padding: 0; font-size: 1.5rem; font-weight: 700; line-height: 1; }
 .qty-num { min-width: 3.5rem; text-align: center; font-size: 1.25rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+/* Kilo rice: the kilos on a sale line are a button (tap to type 2.5 kg or ₱100 worth). */
+.qty-num.qty-kilos { color: inherit; text-decoration: underline dotted; text-underline-offset: 4px; padding: 0 .25rem; min-height: 44px; }
 
 /* The one number the person reads out ("Customer pays", change to give back). */
 .big-amount { font-size: 2.25rem; font-weight: 800; line-height: 1.1; font-variant-numeric: tabular-nums; }

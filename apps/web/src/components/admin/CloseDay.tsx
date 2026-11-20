@@ -14,7 +14,7 @@ import { API_URL } from "../../config";
 import { adminHeaders } from "../../lib/admin";
 import { flushQueue, heldSteps, QUEUE_EVENT, queuedSteps } from "../../lib/offlineQueue";
 import { useOffline } from "../../lib/offlineCache";
-import { peso } from "../../lib/number-format";
+import { kg, peso } from "../../lib/number-format";
 import { printSlip } from "../../lib/slip-print";
 import { toast } from "../../lib/toast";
 import { DENOMINATIONS, dayText, handedOnly, ownerKept, payWord, timeText, VARIANCE_REASONS, zLabel, zSlip, type DayFigures } from "../../lib/day";
@@ -64,6 +64,7 @@ export function ZView({ z, kind }: { z: DayFigures; kind: "X" | "Z" }) {
       {row("Credit", peso(z.sales.creditMinor))}
       {z.sales.otherMinor !== 0 && row("Maya / bank", peso(z.sales.otherMinor))}
       {row("Credit collected", peso(z.creditCollectedMinor))}
+      {z.perKilo && z.perKilo.grams > 0 && row(`Per kilo sold (${kg(z.perKilo.grams)})`, peso(z.perKilo.totalMinor))}
       {z.receipts.first && row("Receipts", z.receipts.first === z.receipts.last ? z.receipts.first : `${z.receipts.first} to ${z.receipts.last}`)}
       <h3 className="h6 mt-3">Cash drawer</h3>
       {row("Change fund", peso(z.cash.floatMinor))}

@@ -52,6 +52,8 @@ export interface DayFigures {
   cash: { floatMinor: number; inMinor: number; givenBackMinor: number; paidOutMinor: number; handedOverMinor: number; shouldBeMinor: number; countedMinor: number | null; differenceMinor: number | null;
     /** Of the handed over: cash of the owner's own sales that the owner kept (never in the drawer). Missing on Z-reads made before 2026-11-20. */
     ownerKeptMinor?: number };
+  /** Rice sold per kilo at this store this day (sell per kilo, 2026-11-20). Missing on older Z-reads. */
+  perKilo?: { grams: number; totalMinor: number; lines: number };
   /** Sales the owner rang at this store this day, and whose cash the owner kept. */
   ownerSales?: { orderNumber: string; at: string; totalMinor: number; method: string; ownerKeptMinor: number; by: string }[];
   gcash: { inMinor: number; givenBackMinor: number; shouldBeMinor: number; countedMinor: number | null; differenceMinor: number | null };
@@ -194,6 +196,11 @@ export class DayCloseService {
       select: { id: true, orderNumber: true, occurredAt: true, totalMinor: true, paymentMethod: true, statusHistory: { select: { actorId: true }, orderBy: { createdAt: "asc" }, take: 1 } },
       orderBy: { occurredAt: "asc" },
     });
+    // Kilo rice sold today (lines sold by the kilo or by pesos worth); already inside the sales above.
+    const kiloSum = dayOrders.length ? await prisma.orderItem.aggregate({
+      where: { storeId, orderId: { in: dayOrders.map((o) => o.id) }, soldBy: { in: ["KILO", "PESO"] } },
+      _sum: { quantity: true, lineTotalMinor: true }, _count: { _all: true },
+    }) : null;
     const ringers = [...new Set(dayOrders.map((o) => o.statusHistory[0]?.actorId).filter((x): x is string => !!x))];
     const bosses = new Set(ringers.length ? (await prisma.userStore.findMany({ where: { storeId, userId: { in: ringers }, role: "OWNER" }, select: { userId: true } })).map((u) => u.userId) : []);
     const keptBy = new Map<string, number>();
@@ -212,6 +219,7 @@ export class DayCloseService {
       },
       receipts: { first: firstSale?.orderNumber ?? null, last: lastSale?.orderNumber ?? null },
       creditCollectedMinor: t.utang.collectedMinor,
+      perKilo: { grams: kiloSum?._sum.quantity ?? 0, totalMinor: kiloSum?._sum.lineTotalMinor ?? 0, lines: kiloSum?._count._all ?? 0 },
       cash: {
         floatMinor: float, inMinor: t.cash.inMinor, givenBackMinor: t.cash.givenBackMinor, paidOutMinor: t.cash.paidOutMinor, handedOverMinor: t.cash.handedOverMinor,
         shouldBeMinor: float + t.cash.expectedMinor, countedMinor: null, differenceMinor: null,

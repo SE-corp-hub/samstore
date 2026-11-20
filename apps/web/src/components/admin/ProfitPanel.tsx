@@ -16,10 +16,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { API_URL } from "../../config";
 import { adminHeaders } from "../../lib/admin";
-import { peso } from "../../lib/number-format";
+import { kg, peso } from "../../lib/number-format";
 
 interface Totals { count: number; totalMinor: number; costMinor?: number; grossProfitMinor?: number; profitShareMinor?: number }
-interface StoreRow { location: { id: string; name: string; type: string }; sales: Totals; expensesMinor?: number; netProfitMinor?: number }
+interface StoreRow { location: { id: string; name: string; type: string }; sales: Totals; expensesMinor?: number; netProfitMinor?: number; /** Kilo rice inside the sales (sell per kilo). */ perKilo?: { grams: number; salesMinor: number; profitMinor?: number } }
 interface CompareData {
   from: string; to: string; stores: StoreRow[];
   business?: { expensesMinor: number };
@@ -162,6 +162,11 @@ export default function ProfitPanel({ onNavigate }: { onNavigate?: (tab: string)
                       {share < 0 && <Line label="Less: profit share paid" value={share} minus hint="for rice taken from another store" />}
                       <Line label="Less: expenses" value={s.expensesMinor ?? 0} minus />
                     </div>
+                    {s.perKilo && s.perKilo.grams > 0 && (
+                      <p className="small text-body-secondary mt-2 mb-0">
+                        Of these, per kilo: {kg(s.perKilo.grams)} sold for {peso(s.perKilo.salesMinor)}{s.perKilo.profitMinor !== undefined && <>, profit {peso(s.perKilo.profitMinor)}</>}.
+                      </p>
+                    )}
                   </section>
                 </div>
               );
