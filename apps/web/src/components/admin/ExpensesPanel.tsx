@@ -107,8 +107,10 @@ export default function ExpensesPanel() {
         body: JSON.stringify({ category, amountMinor, note: note.trim() || undefined, locationId: own ?? (paidBy === BUSINESS ? null : paidBy), paidFromDrawer: paidBy !== BUSINESS && drawer }),
       });
       if (res.ok) {
+        const saved = await res.json().catch(() => null);
         setAmount(""); setNote(""); setDrawer(false);
-        toast(`Expense saved for ${own ? ownName : paidByName}`);
+        // Staff over the day's drawer limit: it is written only when the owner says yes (Approvals).
+        toast(saved?.waitingForOwner ? "Sent to the owner for OK. It counts when the owner approves it." : `Expense saved for ${own ? ownName : paidByName}`);
         await load();
       } else {
         const d = await res.json().catch(() => null);
