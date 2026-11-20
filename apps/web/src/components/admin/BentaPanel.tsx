@@ -176,6 +176,8 @@ export default function BentaPanel() {
   const keptBelow = useRef(new Set<string>()); // below-cost prices someone chose to sell at anyway
   // Owner: "Start a sale" asks the store and who is buying first; both start empty for every sale.
   const [mustChoose, setMustChoose] = useState(() => choosesEachSale(savedCopy<{ role?: string }>("/admin/me/rice")?.role));
+  // Only the owner may keep a sale's cash ("Who keeps the cash?"), not a manager.
+  const [ownerLogin, setOwnerLogin] = useState(() => savedCopy<{ role?: string }>("/admin/me/rice")?.role === "OWNER");
   const [storePicked, setStorePicked] = useState(() => !!savedCart()?.cart.length);
   const [walkIn, setWalkIn] = useState(() => (savedCart()?.cart.length ? (savedCart()?.who ?? WALK_IN) === WALK_IN : false));
   const [startOpen, setStartOpen] = useState(() => !savedCart()?.cart.length);
@@ -280,7 +282,7 @@ export default function BentaPanel() {
       void savedThenFresh<{ customers?: Customer[] }>("/admin/customers", (cs) => setCustomers((cs?.customers ?? []) as Customer[]));
       const me = await cachedGet<{ homeLocationId?: string | null; role?: string }>("/admin/me/rice");
       setHomeLocationId(me?.homeLocationId ?? null);
-      if (me) setMustChoose(choosesEachSale(me.role) && !me.homeLocationId);
+      if (me) { setMustChoose(choosesEachSale(me.role) && !me.homeLocationId); setOwnerLogin(me.role === "OWNER"); }
       const want = where(me?.homeLocationId);
       const shown = await catalog;
       // A sale kept on this tablet for a customer: their special prices back on the buttons.
@@ -382,7 +384,7 @@ export default function BentaPanel() {
 
   const allPay = morePay || pay === "maya" || pay === "bank" || pay === "split";
   const takesCash = pay === "cash" || (pay === "split" && parts.some((x) => x.method === "cash" && toMinor(x.amount || "0") > 0));
-  const asksCashTo = mustChoose && takesCash;
+  const asksCashTo = ownerLogin && takesCash;
   const canSubmit = total > 0 && !!pay && !busy
     && (!asksCashTo || !!cashTo)
     && (pay !== "cash" || (!!tendered && toMinor(tendered) >= total))

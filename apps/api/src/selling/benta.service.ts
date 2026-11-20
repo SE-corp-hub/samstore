@@ -49,7 +49,6 @@ import {
 import { txOptions } from "../persistence/tx-options.js";
 import { shelvesFor } from "../domain/sources.js";
 import { findOrMakeQuickCustomer } from "../pos/quick-customer.js";
-import { ALL_LOCATION_ROLES } from "../domain/people.js";
 import { manilaDate } from "../domain/reports.js";
 
 export type BentaResult<T> = { ok: true; value: T } | { ok: false; error: ApiError };
@@ -82,7 +81,7 @@ export type PayMethod = "cash" | "gcash" | "maya" | "bank" | "split" | "utang";
 
 export interface BentaInput {
   idempotencyKey?: unknown;
-  /** The owner rang the sale and keeps its cash (not this store's drawer). Ignored for other logins. */
+  /** The owner rang the sale and keeps its cash (not this store's drawer). Owner login only; ignored for others (managers too). */
   cashToOwner?: unknown;
   locationId?: string;
   lines?: BentaLineInput[];
@@ -502,7 +501,7 @@ export class BentaService {
             await writeTenders(tx, { storeId, orderId, actorId: actor.userId, plan: plan!, note: paper ? `Benta (papel #${paper.slipNo})` : fromCount ? `Walk-ins (count ${fromCount.countDoc})` : "Benta", registerSessionId, receivedAt: cashAt });
             // The owner keeps the cash of their own sale: written as handed to the owner on the same day,
             // so this store's drawer (and its Close day) does not expect it.
-            const ownerCash = input.cashToOwner === true && (ALL_LOCATION_ROLES as readonly string[]).includes(actor.role) && !fromCount
+            const ownerCash = input.cashToOwner === true && actor.role === "OWNER" && !fromCount
               ? tendersIn.filter((t) => t.methodCode === "cash").reduce((sum, t) => sum + t.amountMinor, 0) : 0;
             if (ownerCash > 0) {
               await tx.cashHandover.create({ data: { storeId, locationId: loc.id, businessDate: manilaDate(cashAt), amountMinor: ownerCash, note: `Owner's sale ${orderNumber}`, handedById: actor.userId, receivedById: actor.userId, orderId } });

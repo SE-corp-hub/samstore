@@ -51,7 +51,7 @@ export interface DayFigures {
   cash: { floatMinor: number; inMinor: number; givenBackMinor: number; paidOutMinor: number; handedOverMinor: number; shouldBeMinor: number; countedMinor: number | null; differenceMinor: number | null;
     /** Of the handed over: cash of the owner's own sales that the owner kept (never in the drawer). Missing on Z-reads made before 2026-11-20. */
     ownerKeptMinor?: number };
-  /** Sales the owner (or a manager) rang at this store this day, and whose cash the owner kept. */
+  /** Sales the owner rang at this store this day, and whose cash the owner kept. */
   ownerSales?: { orderNumber: string; at: string; totalMinor: number; method: string; ownerKeptMinor: number; by: string }[];
   gcash: { inMinor: number; givenBackMinor: number; shouldBeMinor: number; countedMinor: number | null; differenceMinor: number | null };
   cashOut: { what: string; amountMinor: number; at: string }[];
@@ -182,14 +182,14 @@ export class DayCloseService {
       prisma.expense.findMany({ where: { storeId, locationId: loc.id, paidFromDrawer: true, voidedAt: null, spentAt: range }, select: { category: true, note: true, amountMinor: true, spentAt: true }, orderBy: { spentAt: "asc" } }),
       prisma.cashHandover.findMany({ where: { storeId, locationId: loc.id, businessDate: date, voidedAt: null }, select: { amountMinor: true, note: true, createdAt: true, orderId: true }, orderBy: { createdAt: "asc" } }),
     ]);
-    // The owner's own sales here today: rung by an owner/manager login, or the owner kept the cash.
+    // The owner's own sales here today: rung by the owner's login, or the owner kept the cash.
     const dayOrders = await prisma.order.findMany({
       where: { storeId, sellingLocationId: loc.id, occurredAt: range, status: { not: "CANCELLED" } },
       select: { id: true, orderNumber: true, occurredAt: true, totalMinor: true, paymentMethod: true, statusHistory: { select: { actorId: true }, orderBy: { createdAt: "asc" }, take: 1 } },
       orderBy: { occurredAt: "asc" },
     });
     const ringers = [...new Set(dayOrders.map((o) => o.statusHistory[0]?.actorId).filter((x): x is string => !!x))];
-    const bosses = new Set(ringers.length ? (await prisma.userStore.findMany({ where: { storeId, userId: { in: ringers }, role: { in: ["OWNER", "MANAGER"] } }, select: { userId: true } })).map((u) => u.userId) : []);
+    const bosses = new Set(ringers.length ? (await prisma.userStore.findMany({ where: { storeId, userId: { in: ringers }, role: "OWNER" }, select: { userId: true } })).map((u) => u.userId) : []);
     const keptBy = new Map<string, number>();
     for (const h of handovers) if (h.orderId) keptBy.set(h.orderId, (keptBy.get(h.orderId) ?? 0) + h.amountMinor);
     const ownerOrders = dayOrders.filter((o) => keptBy.has(o.id) || bosses.has(o.statusHistory[0]?.actorId ?? ""));
