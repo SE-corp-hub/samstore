@@ -20,6 +20,7 @@ import { aging, dayRange, manilaDate, monthRange, pct, ReportError, stockFlag } 
 import { varietyOf } from "../domain/resack.js";
 import { bookLines, bookTotals, mainLocationId, ordersOfStore, paymentsOfStore, salesBook } from "./sales-book.js";
 import { cashOfDay } from "../cash/cash-book.js";
+import { dayModeOn } from "../day/day-gate.js";
 import { costValue, isLooseP } from "../domain/counting.js";
 import { checkChain, periodTotals, type ChainCheck, type LedgerRow } from "../domain/stock-book.js";
 import { buildSummary, type KiloTotals, type SummaryRow } from "../domain/movement-summary.js";
@@ -154,7 +155,7 @@ export class RiceReportsService {
   // ─────────────────────────── Daily ───────────────────────────
 
   /** The day's numbers for one location, straight from that day's documents. */
-  private async dayTotals(storeId: string, locationId: string, date: string) {
+  async dayTotals(storeId: string, locationId: string, date: string) {
     const { from, to } = dayRange(date);
     const range = { gte: from, lt: to };
     // At most 4 queries at a time: the database pooler gives this app few connections,
@@ -327,6 +328,8 @@ export class RiceReportsService {
       if (date > manilaDate(new Date())) throw new StepError(invalid("That day has not come yet"));
       const counted = input.cashCountedMinor;
       if (typeof counted !== "number" || !Number.isInteger(counted) || counted < 0) throw new StepError(invalid("Enter the cash you counted"));
+      // Open day on: the day closes with Close day (Z-read) on POS, so the change fund and GCash are counted too.
+      if (await dayModeOn(prisma, storeId)) throw new StepError(conflict("Close the day with Close day (Z-read) on POS."));
       const totals = await this.dayTotals(storeId, loc.id, date);
       const handOffs = await this.openHandOffs(storeId, loc.id);
       try {

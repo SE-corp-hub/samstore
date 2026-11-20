@@ -5,6 +5,8 @@
 //                     with optional line replacement (resume-edit), void restores stock.
 // Totals are always server-computed; stock mutations are atomic.
 
+import { dayGate } from "../day/day-gate.js";
+import { offlineSoldAt } from "../domain/selling.js";
 import { orderPrefixAt } from "../domain/store-identity.js";
 import { orderWall } from "../auth/wall.js";
 import { coverShortage } from "../domain/buffer.js";
@@ -772,6 +774,10 @@ export class PosService {
       const fallback = await this.preorderStore(storeId, actor, undefined);
       locId = fallback.ok ? fallback.value?.id ?? null : null;
     }
+    // Open day (switch on): handing over a pre-order is a sale, so its store's day must be open
+    // (one completed offline earlier is never refused: the money was really taken).
+    const gate = locId ? await dayGate(prisma, storeId, locId, { offline: !!offlineSoldAt(input.soldAt, new Date()) }) : null;
+    if (gate?.refusal) return { ok: false, error: { type: "conflict", message: gate.refusal } };
     const becomeSale = async (tx: Prisma.TransactionClient, at: Date) => {
       if (locId) await settleSaleAtStore(tx, { storeId, orderId: id, orderNumber: order.orderNumber, locationId: locId, actorId, at });
       else await tx.order.update({ where: { id }, data: { occurredAt: at } });
@@ -785,7 +791,7 @@ export class PosService {
     let creditEntryId = "";
     if (method === "cash") {
       // Paid in cash at finalize: the money goes in the drawer (needs an open shift only when the store requires one).
-      const session = await this.drawerAt(storeId, locId);
+      const session: PosResult<string | null> = gate?.on ? { ok: true, value: gate.sessionId } : await this.drawerAt(storeId, locId);
       if (!session.ok) return session;
       const prepared = await this.prepareCounterTenders(storeId, id, { paymentMethod: "cash", tenderedMinor: input.tenderedMinor }, finalTotal, order.storeCustomerId);
       if (!prepared.ok) return prepared;

@@ -11,6 +11,7 @@
 // Prices are the preferred store's, frozen when the agent orders. Tenant-scoped; staff
 // act only at their own location.
 
+import { dayGate } from "../day/day-gate.js";
 import { orderPrefixAt } from "../domain/store-identity.js";
 import type { ApiError } from "@sam-store/contracts";
 import { Prisma } from "@prisma/client";
@@ -339,7 +340,10 @@ export class AgentOrderService {
       });
       if (!prepared.ok) throw new StepError(prepared);
       const plan = prepared.value;
-      const registerSessionId = method === "utang" ? null : await this.registers.sessionAt(storeId, sellingLocationId);
+      // Open day (switch on): a handed-over order is a sale of this store, so its day must be open.
+      const gate = sellingLocationId ? await dayGate(prisma, storeId, sellingLocationId) : null;
+      if (gate?.refusal) throw new StepError(conflict(gate.refusal));
+      const registerSessionId = method === "utang" ? null : gate?.on ? gate.sessionId : await this.registers.sessionAt(storeId, sellingLocationId);
       const sent = { smsQueued: false };
       await prisma.$transaction(async (tx) => {
         const c = await tx.order.updateMany({ where: { id, storeId, status: "CONFIRMED" }, data: { status: "COMPLETED", paymentMethod: code, paymentStatus: method === "utang" ? "PENDING" : "COLLECTED", totalMinor: due, registerSessionId } });

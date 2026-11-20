@@ -19,6 +19,7 @@ export interface StoreSettingsInput {
   creditLimitMinor?: number; // P11: default utang limit
   creditTermDays?: number; // V1: default dueAt offset
   requireOpenShift?: boolean; // false = cash can be taken without opening a drawer shift
+  dayOpenClose?: boolean; // Open day + Close day (Z-read) on POS; each store sells only while its day is open
   receiptHeader?: string | null; // P11
   receiptFooter?: string | null; // P11
   showVatLabel?: boolean; // P11
@@ -81,6 +82,7 @@ export class StoreSettingsService {
         creditLimitMinor: store.settings?.creditLimitMinor ?? 0,
         creditTermDays: store.settings?.creditTermDays ?? 30,
         requireOpenShift: store.settings?.requireOpenShift ?? false,
+        dayOpenClose: store.settings?.dayOpenClose ?? false,
         receiptHeader: store.settings?.receiptHeader ?? null,
         receiptFooter: store.settings?.receiptFooter ?? null,
         showVatLabel: store.settings?.showVatLabel ?? true,
@@ -118,6 +120,9 @@ export class StoreSettingsService {
         return { ok: false, error: { type: "validation", errors: [`${key} must be a non-negative integer`] } };
       }
     }
+    if (input.dayOpenClose !== undefined && typeof input.dayOpenClose !== "boolean") {
+      return { ok: false, error: { type: "validation", errors: ["Open and close the day: on or off"] } };
+    }
     if (input.orderCutoff !== undefined && input.orderCutoff !== null && !/^\d{2}:\d{2}$/.test(input.orderCutoff)) {
       return { ok: false, error: { type: "validation", errors: ["orderCutoff must be HH:MM (24h)"] } };
     }
@@ -151,6 +156,7 @@ export class StoreSettingsService {
         ...(input.creditLimitMinor !== undefined ? { creditLimitMinor: input.creditLimitMinor } : {}),
         ...(input.creditTermDays !== undefined ? { creditTermDays: input.creditTermDays } : {}),
         ...(input.requireOpenShift !== undefined ? { requireOpenShift: input.requireOpenShift } : {}),
+        ...(input.dayOpenClose !== undefined ? { dayOpenClose: input.dayOpenClose } : {}),
         ...(input.receiptHeader !== undefined ? { receiptHeader: input.receiptHeader } : {}),
         ...(input.receiptFooter !== undefined ? { receiptFooter: input.receiptFooter } : {}),
         ...(input.showVatLabel !== undefined ? { showVatLabel: input.showVatLabel } : {}),
@@ -188,6 +194,7 @@ export class StoreSettingsService {
         creditLimitMinor: input.creditLimitMinor ?? 0,
         creditTermDays: input.creditTermDays ?? 30,
         requireOpenShift: input.requireOpenShift ?? false,
+        dayOpenClose: input.dayOpenClose ?? false,
         receiptHeader: input.receiptHeader ?? null,
         receiptFooter: input.receiptFooter ?? null,
         showVatLabel: input.showVatLabel ?? true,

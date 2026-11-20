@@ -191,6 +191,8 @@ export interface WriteInput {
   locationId?: string | null;
   /** Utang terms for CREDIT tenders (POS passes the sale's start/due dates). */
   creditTerms?: { startAt?: string; dueAt?: string };
+  /** When the money was taken (a sale that waited offline keeps its own time). Empty = now. */
+  receivedAt?: Date;
 }
 
 /**
@@ -217,6 +219,7 @@ export async function writeTenders(tx: Prisma.TransactionClient, input: WriteInp
         createdBy: input.actorId,
         registerSessionId: input.registerSessionId ?? null,
         locationId: input.locationId ?? null,
+        ...(input.receivedAt ? { receivedAt: input.receivedAt } : {}),
       },
     });
     if (p.kind === "CREDIT") {

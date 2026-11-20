@@ -294,6 +294,7 @@ model StoreSettings {
   vatShowOnReceipt          Boolean        @default(true) // store owner may HIDE the VAT lines (decision #1b)
   tin                       String? // BIR taxpayer identification number, printed on the slip
   requireOpenShift          Boolean        @default(true) // N1: counter cash sales require an open register shift
+  dayOpenClose              Boolean        @default(false) // Open day + Close day (Z-read) on POS: each store opens and closes its own day; no sale without an open day
   // P3b: statutory 20% discount for Senior Citizens & PWDs (RA 9994 / RA 10754)
   seniorPwdDiscountEnabled  Boolean        @default(false)
   dailySalesTargetMinor     Int            @default(0) // Overview: daily sales target (0 = off)
@@ -1216,6 +1217,19 @@ model RegisterSession {
   expectedMinor     Int? // computed at close (opening float + cash in − cash out + cash sales − cash refunds)
   varianceMinor     Int? // countedMinor − expectedMinor (negative = short)
   notes             String?
+  // Open day / Z-read (StoreSettings.dayOpenClose). One store's day: its drawer, its date, its Z number.
+  locationId          String? // the store this day is for (same as register.locationId)
+  businessDate        String? // YYYY-MM-DD (Manila) the day belongs to
+  zNumber             Int? // Z-0001… per store, given at the close
+  gcashExpectedMinor  Int?
+  gcashCountedMinor   Int?
+  cashCounts          Json? // bills and coins counted: { "100000": 3, "50000": 2, … } (minor units → how many)
+  varianceReason      String? // why the cash or GCash did not match
+  keepFloatMinor      Int? // change fund left in the drawer for tomorrow
+  zTotals             Json? // the Z-read figures, frozen at the close
+  reopenedAt          DateTime?
+  reopenedById        String?
+  reopenReason        String?
   movements         CashMovement[]
   payments          Payment[] // N1: every tender recorded against this shift
   orders            Order[] // N1: counter sales opened during this shift
@@ -1223,6 +1237,7 @@ model RegisterSession {
   @@unique([storeId, id]) // M3: composite target for tenant-consistent children
   @@index([storeId, status])
   @@index([storeId, openedAt])
+  @@index([storeId, locationId, businessDate])
 }
 
 model CashMovement {
