@@ -27,12 +27,13 @@ import StaffHome from "../../../components/admin/StaffHome";
 import TextSizePicker from "../../../components/admin/TextSizePicker";
 import LockScreen from "../../../components/admin/LockScreen";
 import StoreLockSettings from "../../../components/admin/StoreLockSettings";
+import ThisStoreSettings from "../../../components/admin/ThisStoreSettings";
 import OrderAlerts from "../../../components/admin/OrderAlerts";
 import { OPEN_ORDER_EVENT, OPEN_ORDER_KEY } from "../../../lib/order-pulse";
 import { anyLockFor, isScreenClosed, isScreenLocked, lockAgain, storeLockOf, whoLocks, useFeatureLock } from "../../../lib/feature-lock";
 
 /** Rice Ops M10: the store screens get the large, high-contrast look (globals.css .rice-ui). */
-const RICE_TABS = new Set(["zreads", "pos", "preorders", "orders", "utang", "utangrice", "agentorders", "agent", "approvals", "moves", "returns", "resack", "pasok", "purchaseorders", "bilangin", "storereport", "profit", "payable", "ulat", "drafts", "kargadors", "settings", "expenses", "cash", "storeprices", "storelock", "storelink",
+const RICE_TABS = new Set(["zreads", "pos", "preorders", "orders", "utang", "utangrice", "agentorders", "agent", "approvals", "moves", "returns", "resack", "pasok", "purchaseorders", "bilangin", "storereport", "profit", "payable", "ulat", "drafts", "kargadors", "settings", "expenses", "cash", "storeprices", "storelock", "mystore", "storelink",
   // 2026-11-12, step 4 of the app review: the last old-look screens get the same large, easy-read look.
   "products", "inventory", "warehouses", "customers", "overview", "reports"]);
 // The landing panel stays eager (it is the first paint); every other panel loads when
@@ -449,6 +450,7 @@ export default function AdminDashboard() {
       case "cash": return <CashPanel />;
       case "storeprices": return <StorePricesPanel />;
       case "storelock": return <StoreLockSettings role={role} />;
+      case "mystore": return <ThisStoreSettings standalone />;
       case "purchases": return <PurchasesPanel />;
       case "storelink": return <StoreLinkPanel />;
       case "reports": return <ReportsPanel />;

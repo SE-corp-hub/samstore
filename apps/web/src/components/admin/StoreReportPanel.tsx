@@ -62,11 +62,11 @@ async function getJson<T>(path: string): Promise<{ ok: boolean; data: (T & { mes
 
 export default function StoreReportPanel({ role, onNavigate }: { role?: string; onNavigate?: (tab: string) => void }) {
   const owner = role === "OWNER" || role === "STORE_OWNER" || role === "MANAGER";
-  const dayOn = useDayOn();
   const [tab, setTab] = useState<Tab>("stock");
   const [places, setPlaces] = useState<Place[]>([]);
   const [home, setHome] = useState<string | null>(null);
   const [locationId, setLocationId] = useState("");
+  const dayOn = useDayOn(locationId || home);
   const [from, setFrom] = useState(today());
   const [to, setTo] = useState(today());
   const [sortBy, setSortBy] = useState<"sales" | "qty" | "profit" | "slow">("sales");

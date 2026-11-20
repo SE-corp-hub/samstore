@@ -62,7 +62,7 @@ export default function ZReadsPanel({ role }: { role?: string }) {
   return (
     <div className="container-fluid py-3" style={{ maxWidth: 900 }}>
       <h1 className="h4 mb-2">Z-reads</h1>
-      {dayOn === false && <div className="alert alert-info py-2">Open day and Close day are turned off. {owner ? "Turn them on in Settings, Selling at the counter." : "The owner turns them on in Settings."}</div>}
+      {dayOn === false && <div className="alert alert-info py-2">Open day and Close day are turned off. {owner ? "Turn them on for each store in Settings, This store." : "The owner or the store head turns them on in Settings, This store."}</div>}
       <div className="d-flex flex-wrap gap-2 align-items-end mb-3">
         <div><label className="form-label small mb-1" htmlFor="zr-from">From</label><input id="zr-from" type="date" className="form-control" value={from} max={to} onChange={(e) => setFrom(e.target.value)} /></div>
         <div><label className="form-label small mb-1" htmlFor="zr-to">To</label><input id="zr-to" type="date" className="form-control" value={to} min={from} max={daysAgo(0)} onChange={(e) => setTo(e.target.value)} /></div>

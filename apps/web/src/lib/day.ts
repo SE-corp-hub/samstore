@@ -8,6 +8,8 @@ import type { Slip } from "./slip-print";
 
 export interface DayStatus {
   on: boolean;
+  /** The stores whose own Open day switch is on (an older server does not send it). */
+  onAt?: { id: string; name: string }[];
   location: { id: string; name: string } | null;
   today: string;
   open: { id: string; businessDate: string; openedAt: string; openedBy: string; floatMinor: number; stale: boolean } | null;
@@ -138,8 +140,22 @@ export function zSlip(z: DayFigures, storeName: string, kind: "Z" | "X"): Slip {
 }
 
 /** Is Open day + Close day turned on (Settings)? null while not known yet. */
-export function useDayOn(): boolean | null {
-  const [on, setOn] = useState<boolean | null>(() => savedCopy<DayStatus>("/admin/rice/day")?.on ?? null);
-  useEffect(() => { void cachedGet<DayStatus>("/admin/rice/day").then((d) => { if (d) setOn(d.on); }); }, []);
-  return on;
+/** Is Open day on at this store? Each store has its own switch. `store`: a location id or name; none = at any store. */
+export function dayOnAt(d: DayStatus | null | undefined, store?: string | null): boolean | null {
+  if (!d) return null;
+  if (!store || !d.onAt) return d.on;
+  return d.onAt.some((p) => p.id === store || p.name === store);
+}
+
+/** Open day on? For one store (id or name), or with none given, at any store. */
+export function useDayOn(store?: string | null): boolean | null {
+  const status = useDayStatus();
+  return dayOnAt(status, store);
+}
+
+/** The business-wide day answer (which stores have Open day on); saved copy first, so it works offline. */
+export function useDayStatus(): DayStatus | null {
+  const [d, setD] = useState<DayStatus | null>(() => savedCopy<DayStatus>("/admin/rice/day"));
+  useEffect(() => { void cachedGet<DayStatus>("/admin/rice/day").then((x) => { if (x) setD(x); }); }, []);
+  return d;
 }

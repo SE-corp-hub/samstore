@@ -39,7 +39,8 @@ import { StoreAdminService } from "./store-admin.service.js";
 import { AnalyticsService } from "./analytics.service.js";
 import { TeamService } from "./team.service.js";
 import { WarehouseService } from "./warehouse.service.js";
-import { isHeadOf, loadActor, locationRefusal } from "../people/people.service.js";
+import { canManageLocation, isHeadOf, loadActor, locationRefusal } from "../people/people.service.js";
+import { mergeSwitches, switchesAt, SWITCH_KEYS } from "../day/store-switches.js";
 import { signaturesFrom } from "../people/signature-input.js";
 import { LoyaltyService } from "../loyalty/loyalty.service.js";
 import { CartRecoveryService } from "../cart/recovery.service.js";
@@ -886,9 +887,11 @@ export class AdminController {
   async getCounterSettings(@Req() req: Request & { user?: AuthPrincipal }, @Headers("x-store-id") headerStoreId?: string) {
     const user = req.user;
     requireUser(user);
-    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
-    const row = await prisma.storeSettings.findUnique({ where: { storeId }, select: { requireOpenShift: true } });
-    return { storeId, requireOpenShift: row?.requireOpenShift ?? false };
+    const { storeId, role } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
+    // 2026-11-20: the drawer rule is each store's own. A login tied to one store reads its store's.
+    const actor = await loadActor(storeId, user.sub, role);
+    const sw = await switchesAt(prisma, storeId, actor.homeLocationId);
+    return { storeId, locationId: actor.homeLocationId, requireOpenShift: sw.requireOpenShift };
   }
 
   /** PATCH /admin/counter-settings — change a counter switch. Only the listed keys are accepted. */
@@ -900,15 +903,93 @@ export class AdminController {
   ) {
     const user = req.user;
     requireUser(user);
-    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
+    const { storeId, role } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
     if (typeof body?.requireOpenShift !== "boolean") throw new HttpException({ type: "validation", errors: ["requireOpenShift must be true or false"] }, HttpStatus.BAD_REQUEST);
-    await prisma.storeSettings.upsert({
-      where: { storeId },
-      update: { requireOpenShift: body.requireOpenShift },
-      create: { storeId, requireOpenShift: body.requireOpenShift },
-    });
+    // A login tied to one store changes only its own store's rule; a login with no store, the business's.
+    const actor = await loadActor(storeId, user.sub, role);
+    if (actor.homeLocationId) {
+      await prisma.warehouse.updateMany({ where: { id: actor.homeLocationId, storeId }, data: { requireOpenShift: body.requireOpenShift } });
+    } else {
+      await prisma.storeSettings.upsert({
+        where: { storeId },
+        update: { requireOpenShift: body.requireOpenShift },
+        create: { storeId, requireOpenShift: body.requireOpenShift },
+      });
+    }
     await cacheBust(cacheKey("settings", storeId));
-    return { storeId, requireOpenShift: body.requireOpenShift };
+    return { storeId, locationId: actor.homeLocationId, requireOpenShift: body.requireOpenShift };
+  }
+
+  /**
+   * GET /admin/store-settings — "This store" in Settings: each store's own switches and details,
+   * only for the stores this login may change (owner and manager: all; a store head: their own).
+   */
+  @Get("store-settings")
+  async getStoreOwnSettings(@Req() req: Request & { user?: AuthPrincipal }, @Headers("x-store-id") headerStoreId?: string) {
+    const user = req.user;
+    requireUser(user);
+    const { storeId, role } = await resolveTenant(user, headerStoreId, TENANT_ROLES.VIEW);
+    const actor = await loadActor(storeId, user.sub, role);
+    const [business, rows] = await Promise.all([
+      prisma.storeSettings.findUnique({ where: { storeId }, select: { dayOpenClose: true, requireOpenShift: true, hidePricePreOrder: true } }),
+      prisma.warehouse.findMany({
+        where: { storeId, isActive: true },
+        orderBy: [{ code: "asc" }, { name: "asc" }],
+        select: {
+          id: true, name: true, code: true, type: true, address: true, facebookPageUrl: true,
+          receiptName: true, receiptHeader: true, receiptFooter: true, receiptContact: true, dailySalesTargetMinor: true,
+          dayOpenClose: true, requireOpenShift: true, hidePricePreOrder: true,
+        },
+      }),
+    ]);
+    const places = rows.filter((r) => canManageLocation(actor, r.id)).map((r) => ({
+      id: r.id, name: r.name, code: r.code, type: r.type, sells: r.type !== "WAREHOUSE",
+      ...mergeSwitches(business, r),
+      address: r.address, facebookPageUrl: r.facebookPageUrl, receiptName: r.receiptName, receiptHeader: r.receiptHeader,
+      receiptFooter: r.receiptFooter, receiptContact: r.receiptContact, dailySalesTargetMinor: r.dailySalesTargetMinor,
+    }));
+    if (!places.length) throw new HttpException({ type: "forbidden", message: "Only the owner, a manager or the head of a store can change a store's settings" }, HttpStatus.FORBIDDEN);
+    return { storeId, places };
+  }
+
+  /** PATCH /admin/store-settings/:locationId — save one store's own switches and details. */
+  @Patch("store-settings/:locationId")
+  async updateStoreOwnSettings(
+    @Req() req: Request & { user?: AuthPrincipal },
+    @Param("locationId") locationId: string,
+    @Body() body: Record<string, unknown>,
+    @Headers("x-store-id") headerStoreId?: string,
+  ) {
+    const user = req.user;
+    requireUser(user);
+    const { storeId, role } = await resolveTenant(user, headerStoreId, TENANT_ROLES.VIEW);
+    const actor = await loadActor(storeId, user.sub, role);
+    const place = await prisma.warehouse.findFirst({ where: { id: locationId, storeId }, select: { id: true } });
+    if (!place) throw new HttpException({ type: "not_found", message: "That store was not found" }, HttpStatus.NOT_FOUND);
+    if (!canManageLocation(actor, place.id)) throw new HttpException({ type: "forbidden", message: "You can change only your own store's settings" }, HttpStatus.FORBIDDEN);
+    const errors: string[] = [];
+    const switches: Record<string, boolean> = {};
+    for (const k of SWITCH_KEYS) {
+      if (body?.[k] === undefined) continue;
+      if (typeof body[k] !== "boolean") errors.push(`${k} must be true or false`); else switches[k] = body[k] as boolean;
+    }
+    const text = (k: string) => (body?.[k] === null || typeof body?.[k] === "string" ? { [k]: body[k] as string | null } : {});
+    const target = body?.dailySalesTargetMinor;
+    if (target !== undefined && target !== null && !(typeof target === "number" && Number.isInteger(target) && target >= 0)) errors.push("Daily sales target must be 0 or more");
+    if (errors.length) throw new HttpException({ type: "validation", errors }, HttpStatus.BAD_REQUEST);
+    // The details go through the same checks as Menu → Locations.
+    const details = {
+      ...text("address"), ...text("receiptName"), ...text("receiptHeader"), ...text("receiptFooter"), ...text("receiptContact"),
+      ...(body?.facebookPageUrl === null || typeof body?.facebookPageUrl === "string" ? { facebookPageUrl: body.facebookPageUrl as string | null } : {}),
+      ...(target === null || typeof target === "number" ? { dailySalesTargetMinor: target as number | null } : {}),
+    };
+    if (Object.keys(details).length) {
+      const result = await this.warehouses.update(storeId, place.id, details);
+      if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
+    }
+    if (Object.keys(switches).length) await prisma.warehouse.update({ where: { id: place.id }, data: switches });
+    await cacheBust(cacheKey("settings", storeId));
+    return { storeId, locationId: place.id, ok: true };
   }
 
   /** GET /admin/settings — store + settings + public link. */
