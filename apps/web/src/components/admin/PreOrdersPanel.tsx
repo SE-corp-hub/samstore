@@ -478,6 +478,7 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
         startAt: finalizeStart ? new Date(finalizeStart).toISOString() : undefined,
         dueAt: finalizeDue ? new Date(finalizeDue).toISOString() : undefined,
         idempotencyKey: newSaleKey(),
+        soldAt: new Date().toISOString(), // one that waits offline keeps its real time (a closed day never refuses it)
       }, `Complete pre-order ${target.customerName}`, view);
       if (sent.status === "queued") {
         // No internet: completed on this tablet, it moves to Done and uploads later (see the upload bar).

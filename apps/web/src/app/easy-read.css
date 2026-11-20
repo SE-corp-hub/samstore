@@ -830,3 +830,33 @@ html[data-text-size] .start-cust.chosen, .start-cust.chosen { border: 3px solid 
 .order-check .check-edit .line-edit, .order-check .check-edit .line-remove { min-height: 3rem; min-width: 3rem; white-space: nowrap; }
 .order-check .check-edit .line-remove { margin-left: auto; }
 .order-check .check-price { flex: 1 0 100%; padding-left: 2.4rem; }
+/* §17 Open day + Close day (Z-read) on POS (2026-11-20). Open = one slim row above the price list (green chip);
+   not open / closed / an old day still open = a card in the price list's place. Colours keep their meaning:
+   green = correct / go, red = short, amber = over or careful. */
+.day-bar { min-height: 3rem; }
+.day-bar .btn { min-height: 2.75rem; white-space: nowrap; }
+.day-chip { display: inline-flex; align-items: center; padding: 0.35rem 0.75rem; border-radius: 999px; font-weight: 600; border: 1px solid; }
+.day-chip-open { background: #e6f2ea; border-color: #1F6F3F; color: #14532d; }
+.day-bar-compact .day-chip-detail { display: none; }
+@media (min-width: 700px) { .day-bar-compact .day-chip-detail { display: inline; } }
+.day-card .btn-lg { min-height: 3.25rem; }
+.day-ok { color: #1F6F3F; }
+.day-short { color: #A3201B; }
+.day-over { color: #6F4800; }
+.close-day .denoms { display: grid; gap: 0.5rem; }
+.close-day .denom-row { display: grid; grid-template-columns: minmax(5.5rem, 1fr) auto minmax(6.5rem, 1fr); align-items: center; gap: 0.75rem; padding: 0.25rem 0; border-bottom: 1px solid #e6e1d9; }
+.close-day .denom-label { font-size: 1.25rem; font-weight: 700; }
+.close-day .denom-n { width: 4.5rem; min-height: 3rem; font-size: 1.25rem; }
+.close-day .qty-btn { min-width: 3rem; min-height: 3rem; font-size: 1.4rem; line-height: 1; }
+.close-day .denom-sum { text-align: right; font-variant-numeric: tabular-nums; }
+.close-day .day-balance td, .close-day .day-balance th { font-size: 1.1rem; }
+.zview { font-variant-numeric: tabular-nums; }
+@media (prefers-reduced-motion: reduce) { .close-day * { transition: none !important; } }
+.rice-ui .settings-switch .form-check-label { white-space: normal; } /* Settings switches: the help text wraps (the nowrap above is for the short pre-order switches) */
+.close-day { background: var(--bs-body-bg, #faf7f2); }
+.close-day-body { max-width: 760px; }
+/* Sideways (or a PC): the bills in two columns, so the count fits on the screen. */
+@media (min-width: 992px) {
+  .close-day-body { max-width: 980px; }
+  .close-day .denoms { grid-template-columns: 1fr 1fr; column-gap: 2rem; }
+}

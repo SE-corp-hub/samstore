@@ -7,6 +7,7 @@
 //   End of day     the day's summary for one store, ready to print; closing is in Reports, Closing & stock
 // Staff see their own store and no cost or profit.
 
+import { useDayOn } from "../../lib/day";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { API_URL } from "../../config";
 import { adminHeaders } from "../../lib/admin";
@@ -61,6 +62,7 @@ async function getJson<T>(path: string): Promise<{ ok: boolean; data: (T & { mes
 
 export default function StoreReportPanel({ role, onNavigate }: { role?: string; onNavigate?: (tab: string) => void }) {
   const owner = role === "OWNER" || role === "STORE_OWNER" || role === "MANAGER";
+  const dayOn = useDayOn();
   const [tab, setTab] = useState<Tab>("stock");
   const [places, setPlaces] = useState<Place[]>([]);
   const [home, setHome] = useState<string | null>(null);
@@ -420,7 +422,7 @@ export default function StoreReportPanel({ role, onNavigate }: { role?: string; 
           </div>
           <div className="d-flex gap-2">
             <button type="button" className="btn btn-outline-dark" onClick={printDay}>Print</button>
-            {!day.locked && onNavigate && <button type="button" className="btn btn-success" onClick={() => onNavigate("ulat")}>Close the day…</button>}
+            {!day.locked && onNavigate && <button type="button" className="btn btn-success" onClick={() => onNavigate(dayOn ? "pos" : "ulat")}>{dayOn ? "Close the day on POS…" : "Close the day…"}</button>}
           </div>
         </>
       )}

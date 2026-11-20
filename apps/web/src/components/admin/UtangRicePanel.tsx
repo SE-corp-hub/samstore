@@ -534,7 +534,7 @@ function PayForm({ customer, locationId, wide, onCancel, onDone }: { customer: C
     setBusy(true); setError(null);
     const signatures = [{ signerKind: "STAFF", imagePng: staffSig }, ...(custSig ? [{ signerKind: "CUSTOMER", signerName: customer.name, imagePng: custSig }] : [])];
     const ref = method === "gcash" ? reference.trim() : "";
-    const sent = await sendStep("/admin/utang/payments", { customerId: customer.id, amountMinor: amt, method, reference: ref || undefined, locationId: locationId ?? undefined, signatures }, `Payment from ${customer.name}`);
+    const sent = await sendStep("/admin/utang/payments", { customerId: customer.id, amountMinor: amt, method, reference: ref || undefined, locationId: locationId ?? undefined, signatures, madeAt: new Date().toISOString() }, `Payment from ${customer.name}`);
     setBusy(false);
     if (sent.status === "queued") { await onDone({ paidMinor: amt, balanceMinor: owed - amt, method, reference: ref, queued: true }); return; }
     const data = sent.data as ApiBody | null;

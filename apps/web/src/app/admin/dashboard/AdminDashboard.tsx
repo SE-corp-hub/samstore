@@ -31,7 +31,7 @@ import { OPEN_ORDER_EVENT, OPEN_ORDER_KEY } from "../../../lib/order-pulse";
 import { isScreenLocked, lockAgain, lockListFor, useFeatureLock } from "../../../lib/feature-lock";
 
 /** Rice Ops M10: the store screens get the large, high-contrast look (globals.css .rice-ui). */
-const RICE_TABS = new Set(["pos", "preorders", "orders", "utang", "utangrice", "agentorders", "agent", "approvals", "moves", "returns", "resack", "pasok", "purchaseorders", "bilangin", "storereport", "profit", "payable", "ulat", "drafts", "kargadors", "settings", "expenses", "cash", "storeprices", "storelink",
+const RICE_TABS = new Set(["zreads", "pos", "preorders", "orders", "utang", "utangrice", "agentorders", "agent", "approvals", "moves", "returns", "resack", "pasok", "purchaseorders", "bilangin", "storereport", "profit", "payable", "ulat", "drafts", "kargadors", "settings", "expenses", "cash", "storeprices", "storelink",
   // 2026-11-12, step 4 of the app review: the last old-look screens get the same large, easy-read look.
   "products", "inventory", "warehouses", "customers", "overview", "reports"]);
 // The landing panel stays eager (it is the first paint); every other panel loads when
@@ -91,6 +91,7 @@ const ProfitPanel = panel(() => import("../../../components/admin/ProfitPanel"))
 const PayablePanel = panel(() => import("../../../components/admin/PayablePanel"));
 const PurchaseOrdersPanel = panel(() => import("../../../components/admin/PurchaseOrdersPanel"));
 const UlatPanel = panel(() => import("../../../components/admin/UlatPanel"));
+const ZReadsPanel = panel(() => import("../../../components/admin/ZReadsPanel"));
 
 /**
  * Bottom bar for counter staff: the six jobs they do all day, one tap each, plus
@@ -473,6 +474,7 @@ export default function AdminDashboard() {
       case "payable": return <PayablePanel />;
       case "purchaseorders": return <PurchaseOrdersPanel />;
       case "ulat": return <UlatPanel role={role} onNavigate={setTab} />;
+      case "zreads": return <ZReadsPanel role={role} />;
       case "stores": return <StoresPanel />;
       default: return <OrdersPanel />;
     }

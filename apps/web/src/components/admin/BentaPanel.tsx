@@ -43,6 +43,7 @@ import { useLinesCap } from "../../lib/use-lines-cap";
 import { useFitHeight } from "../../lib/use-fit-height";
 import { quickCash } from "../../lib/quick-cash";
 import Steps from "./Steps";
+import DayBar, { type DayState } from "./DayBar";
 import OrderCheck, { type CheckLine } from "./OrderCheck";
 import ProductFinder from "./ProductFinder";
 import PickTile from "./PickTile";
@@ -175,6 +176,8 @@ export default function BentaPanel() {
   const [storePicked, setStorePicked] = useState(() => !!savedCart()?.cart.length);
   const [walkIn, setWalkIn] = useState(() => (savedCart()?.cart.length ? (savedCart()?.who ?? WALK_IN) === WALK_IN : false));
   const [startOpen, setStartOpen] = useState(() => !savedCart()?.cart.length);
+  // Open day + Close day (Z-read): while the store's day is not open, the price list steps aside.
+  const [dayState, setDayState] = useState<DayState>("off");
 
   const catalogAsk = useRef(0); // only the latest location asked for may fill the screen
   /** The price list of a location: the copy saved on this tablet at once, then the server's. Returns the location shown. */
@@ -879,6 +882,11 @@ export default function BentaPanel() {
       lockedNote="To switch store, hold or clear this sale first." onPick={(id) => { reset(); void loadCatalog(id); }} />
   );
   const errAlert = error && <div className="alert alert-danger py-2" role="alert">{error}</div>;
+  const dayBlocked = dayState === "blocked" && !asking;
+  const dayBar = !asking && step === "pick" && !newItem && !editing && !checking && (
+    <DayBar locationId={locationId} storeName={storeName} heldCount={holds.length} onState={setDayState} compact={!wide} />
+  );
+  const pickArea = startCard || (dayBlocked ? null : finder);
   // Sideways, the steps sit above the sale; they step aside while the number pad needs the whole column.
   const stepsRow = !(sideBySide && (editing || checking)) && (
     <div className="d-flex flex-wrap align-items-center gap-2 mb-2">
@@ -895,7 +903,8 @@ export default function BentaPanel() {
           <div className="fit-col fit-main">
             {heldCard}
             {errAlert}
-            {startCard || finder}
+            {dayBar}
+            {pickArea}
           </div>
           <div className="fit-col fit-side">
             {stepsRow}
@@ -918,7 +927,7 @@ export default function BentaPanel() {
           {!(editing || checking || orderBig) && cart.length === 0 && !mustChoose && storeBar}
           {heldCard}
           {errAlert}
-          {step === "pick" && !newItem && !editing && !checking && <>{!orderBig && (startCard || finder)}{cartCard}</>}
+          {step === "pick" && !newItem && !editing && !checking && <>{!orderBig && dayBar}{!orderBig && pickArea}{cartCard}</>}
           {step === "pick" && !newItem && (editing || checking) && <div className="fit-scroll">{quickCount || editCard}</div>}
           {step === "pick" && newItem && <div className="fit-scroll"><NewItemForm locationId={locationId} onCancel={() => setNewItem(false)} onDone={async () => { setNewItem(false); await loadCatalog(locationId); }} /></div>}
 

@@ -5,6 +5,7 @@
 // Stock Live listens to the server's change stream and refreshes within seconds of any
 // signed step (every 30 s as a backup). Every table exports to Excel (CSV).
 
+import { useDayOn } from "../../lib/day";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { API_URL } from "../../config";
 import { adminHeaders, isOwnerRole } from "../../lib/admin";
@@ -381,6 +382,7 @@ function Daily({ owner, onNavigate }: { owner: boolean; onNavigate?: (tab: strin
   const [date, setDate] = useState(today());
   const [data, setData] = useState<{ sections: DaySection[]; total: Record<string, number> } | null>(null);
   const [closing, setClosing] = useState<DaySection | null>(null);
+  const dayOn = useDayOn(); // Open day + Close day on: the day closes with Close day (Z-read) on POS
   const [error, setError] = useState<string | null>(null);
   const load = useCallback(async () => {
     const r = await getJson(`/admin/rice/daily?date=${date}`);
@@ -411,7 +413,9 @@ function Daily({ owner, onNavigate }: { owner: boolean; onNavigate?: (tab: strin
               <div className="d-flex justify-content-between align-items-center">
                 <h2 className="h5 mb-0">{s.location.name}</h2>
                 {s.locked ? <span className="badge text-bg-secondary">Closed {s.closedAt ? new Date(s.closedAt).toLocaleTimeString("en-PH") : ""}</span>
-                  : date === today() ? <button type="button" className="btn btn-success" onClick={() => setClosing(s)}>Close the day</button> : null}
+                  : date === today() ? (dayOn
+                    ? (onNavigate ? <button type="button" className="btn btn-outline-dark" onClick={() => onNavigate("pos")}>Close it on POS</button> : <span className="small">Close it on POS</span>)
+                    : <button type="button" className="btn btn-success" onClick={() => setClosing(s)}>Close the day</button>) : null}
               </div>
               <div className="fs-4 mt-1">Sales {peso(s.sales.totalMinor)} <span className="fs-6 text-muted">({s.sales.count})</span></div>
               <div className="small">Cash {peso(s.sales.cashMinor)} · GCash {peso(s.sales.gcashMinor)} · Credit {peso(s.sales.utangMinor)}{s.sales.encodedLater ? ` · ${s.sales.encodedLater} from paper slips` : ""}</div>

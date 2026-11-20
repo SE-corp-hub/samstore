@@ -46,6 +46,7 @@ interface StoreSettings {
     creditLimitMinor: number;
     creditTermDays: number;
     requireOpenShift?: boolean;
+    dayOpenClose?: boolean;
     receiptHeader: string | null;
     receiptFooter: string | null;
     showVatLabel: boolean;
@@ -70,7 +71,7 @@ interface StoreSettings {
 
 /** Everything on the screen that is saved to the server, as the boxes hold it. */
 interface Form {
-  dailyTarget: string; hidePrePrice: boolean; requireOpenShift: boolean;
+  dailyTarget: string; hidePrePrice: boolean; requireOpenShift: boolean; dayOpenClose: boolean;
   promoOn: boolean; promoMin: string; promoOff: string; promoCats: string[];
   creditLimit: string; creditTermDays: string;
   vatEnabled: boolean; vatRate: string; pricesIncludeVat: boolean; vatShowOnReceipt: boolean; showVat: boolean; tin: string; seniorPwd: boolean;
@@ -86,7 +87,7 @@ const toInt = (s: string, fallback: number) => { const n = parseInt(s.replace(/,
 
 function formFrom(s: StoreSettings["settings"]): Form {
   return {
-    dailyTarget: pesos(s.dailySalesTargetMinor), hidePrePrice: s.hidePricePreOrder ?? false, requireOpenShift: s.requireOpenShift === true,
+    dailyTarget: pesos(s.dailySalesTargetMinor), hidePrePrice: s.hidePricePreOrder ?? false, requireOpenShift: s.requireOpenShift === true, dayOpenClose: s.dayOpenClose === true,
     promoOn: s.quotaPromoEnabled === true, promoMin: String(s.quotaPromoMinSacks ?? 10), promoOff: pesos(s.quotaPromoOffMinor ?? 2000), promoCats: [...(s.quotaPromoCategoryIds ?? [])].sort(),
     creditLimit: pesos(s.creditLimitMinor), creditTermDays: String(s.creditTermDays ?? 30),
     vatEnabled: s.vatEnabled ?? true, vatRate: String((s.vatRateBp ?? 1200) / 100), pricesIncludeVat: s.pricesIncludeVat ?? true,
@@ -107,7 +108,7 @@ type Group = "business" | "printer" | ServerGroup | "lock" | "account";
 /** What each group sends when saved. Also used to tell whether a group has unsaved changes. */
 const PAYLOAD: Record<ServerGroup, (f: Form) => Record<string, unknown>> = {
   counter: (f) => ({
-    dailySalesTargetMinor: toMinor(f.dailyTarget), hidePricePreOrder: f.hidePrePrice, requireOpenShift: f.requireOpenShift,
+    dailySalesTargetMinor: toMinor(f.dailyTarget), hidePricePreOrder: f.hidePrePrice, requireOpenShift: f.requireOpenShift, dayOpenClose: f.dayOpenClose,
     quotaPromoEnabled: f.promoOn, quotaPromoMinSacks: toInt(f.promoMin, 10), quotaPromoOffMinor: toMinor(f.promoOff), quotaPromoCategoryIds: f.promoCats,
   }),
   credit: (f) => ({ creditLimitMinor: toMinor(f.creditLimit), creditTermDays: toInt(f.creditTermDays, 30) }),
@@ -319,7 +320,7 @@ export default function SettingsPanel({ role = "" }: { role?: string }) {
     switch (g) {
       case "business": return data?.name ?? "";
       case "printer": { const p = getPrinterSettings(); return `${p.widthMm} mm · ${p.autoPrint ? "prints after each sale" : "print by hand"}${p.bluetooth ? " · Bluetooth" : ""}`; }
-      case "counter": return `${toMinor(saved.dailyTarget) > 0 ? `Target ${peso(toMinor(saved.dailyTarget))}` : "No daily target"} · ${saved.requireOpenShift ? "open the drawer first" : "sell any time"}`;
+      case "counter": return `${toMinor(saved.dailyTarget) > 0 ? `Target ${peso(toMinor(saved.dailyTarget))}` : "No daily target"} · ${saved.dayOpenClose ? "Open day and Z-read on POS" : saved.requireOpenShift ? "open the drawer first" : "sell any time"}`;
       case "credit": return toMinor(saved.creditLimit) > 0 ? `New customers ${peso(toMinor(saved.creditLimit))} · ${saved.creditTermDays} days to pay` : `No default limit · ${saved.creditTermDays} days to pay`;
       case "receipt": return `${saved.vatEnabled ? `VAT ${saved.vatRate}%${saved.pricesIncludeVat ? " included" : " added"}` : "No VAT"}${saved.tin ? " · TIN set" : ""}${saved.seniorPwd ? " · Senior/PWD 20%" : ""}`;
       case "shop": return saved.paused ? "Closed for now" : `${saved.allowGuest ? "Open to guests" : "Open"} · ${[saved.deliveryEnabled && "delivery", saved.pickupEnabled && "pickup"].filter(Boolean).join(" and ") || "no delivery or pickup"}`;
@@ -386,8 +387,12 @@ export default function SettingsPanel({ role = "" }: { role?: string }) {
       case "counter":
         return (
           <>
-            <SwitchRow id="st-shift" label="Open the cash drawer before taking cash" checked={form.requireOpenShift} onChange={(v) => set({ requireOpenShift: v })}
-              help="On: each day starts by counting the drawer. Off: staff can sell any time." />
+            <SwitchRow id="st-day" label="Open and close the day on POS" checked={form.dayOpenClose} onChange={(v) => set({ dayOpenClose: v })}
+              help="On: each store taps Open day (change fund) before selling, and Close day at night: count the cash and GCash, the app checks it against the sales and prints the Z-read. No sale of any kind while a store's day is not open. Off: POS works as before." />
+            {!form.dayOpenClose && (
+              <SwitchRow id="st-shift" label="Open the cash drawer before taking cash" checked={form.requireOpenShift} onChange={(v) => set({ requireOpenShift: v })}
+                help="On: each day starts by counting the drawer. Off: staff can sell any time." />
+            )}
             <SwitchRow id="st-hideprice" label="Hide item prices on pre-orders" checked={form.hidePrePrice} onChange={(v) => set({ hidePrePrice: v })}
               help="The Pre-order screen shows only the total, not the price of each item." />
             <SwitchRow id="st-promo" label="Quota promo" checked={form.promoOn} onChange={(v) => set({ promoOn: v })}
