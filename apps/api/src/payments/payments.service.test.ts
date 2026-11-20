@@ -46,6 +46,8 @@ after(async () => {
   if (createdIds.length) {
     // FK-safe cleanup: delete in dependency order.
     await prisma.stockMovement.deleteMany({ where: { storeId: { in: createdIds } } });
+    await prisma.creditEntry.deleteMany({ where: { storeId: { in: createdIds } } });
+    await prisma.cashHandover.deleteMany({ where: { storeId: { in: createdIds } } });
     const orders = await prisma.order.findMany({ where: { storeId: { in: createdIds } }, select: { id: true } });
     const oid = orders.map((o) => o.id);
     if (oid.length) {
@@ -66,6 +68,9 @@ after(async () => {
     await prisma.cashMovement.deleteMany({ where: { storeId: { in: createdIds } } });
     await prisma.registerSession.deleteMany({ where: { storeId: { in: createdIds } } });
     await prisma.register.deleteMany({ where: { storeId: { in: createdIds } } });
+    await prisma.storeCustomer.deleteMany({ where: { storeId: { in: createdIds } } });
+    await prisma.customer.deleteMany({ where: { id: { in: createdIds } } });
+    await prisma.warehouse.deleteMany({ where: { storeId: { in: createdIds } } });
     await prisma.store.deleteMany({ where: { id: { in: createdIds } } });
   }
   await prisma.$disconnect();
@@ -113,17 +118,17 @@ test("N1: a cash refund while a shift is open is attributed to that shift and re
   const taken = await svc.recordPayment({ orderId: order.id, storeId: store.id, method: "cash", amountMinor: 10000, createdBy: "cashier-1" });
   assert.equal(taken.ok, true, JSON.stringify(taken));
 
-  const refunded = await svc.refundOrder(order.id, store.id, "cashier-1", 4000, "damaged");
+  const refunded = await svc.refundOrder(order.id, store.id, "cashier-1", undefined, "damaged");
   assert.equal(refunded.ok, true, JSON.stringify(refunded));
 
   const refundRow = await prisma.payment.findFirst({ where: { orderId: order.id, type: "refund" }, select: { amountMinor: true, registerSessionId: true } });
-  assert.equal(refundRow?.amountMinor, -4000);
+  assert.equal(refundRow?.amountMinor, -10000);
   assert.equal(refundRow?.registerSessionId, opened.ok ? opened.value.sessionId : null, "the refund is bound to the open shift");
 
   const summary = await registers.currentSession(store.id);
   assert.equal(summary?.live.cashSalesMinor, 10000);
-  assert.equal(summary?.live.cashRefundsMinor, 4000);
-  assert.equal(summary?.live.expectedMinor, 6000, "cash in the drawer = sale − refund");
+  assert.equal(summary?.live.cashRefundsMinor, 10000);
+  assert.equal(summary?.live.expectedMinor, 0, "cash in the drawer = sale − refund");
 });
 
 test("N1: an off-counter cash payment records cleanly with no shift attribution", async () => {
@@ -156,20 +161,80 @@ test("M7: a second VOID is rejected — stock is never restored twice", async ()
   assert.equal(after2, after1, "stock NOT restored a second time");
 });
 
-test("M7: a partial refund within the captured amount is allowed and audited", async () => {
+test("a refund takes back the WHOLE sale: a part amount is refused, the money goes back the way it was paid, the rice goes back on the shelf", async () => {
   const store = await makeStore();
-  const order = await makeOrder(store.id, "DELIVERED", "COLLECTED");
-  await prisma.payment.create({ data: { orderId: order.id, storeId: store.id, method: "cash", amountMinor: 10000, type: "payment" } });
+  const product = await makeProduct(store.id);
+  const order = await makeOrder(store.id, "COMPLETED", "COLLECTED", [{ productId: product.id, quantity: 2 }]);
+  await prisma.payment.createMany({ data: [
+    { orderId: order.id, storeId: store.id, method: "cash", amountMinor: 6000, type: "payment" },
+    { orderId: order.id, storeId: store.id, method: "gcash", amountMinor: 4000, type: "payment" },
+  ] });
+  // The sale took 2 off the shelf (the stock book says so).
+  const level = (await prisma.stockLevel.findFirst({ where: { storeId: store.id, productId: product.id } }))!;
+  await prisma.stockLevel.update({ where: { id: level.id }, data: { quantityOnHand: { decrement: 2 } } });
+  await prisma.stockMovement.create({ data: { storeId: store.id, productId: product.id, warehouseId: level.warehouseId, delta: -2, type: "CONSUME", orderId: order.id } });
+  const before = (await prisma.stockLevel.findUniqueOrThrow({ where: { id: level.id } })).quantityOnHand;
 
   const part = await svc.refundOrder(order.id, store.id, "actor", 4000, "partial");
-  assert.equal(part.ok, true, "partial refund within captured amount succeeds");
-  const refunds = await prisma.payment.findMany({ where: { orderId: order.id, type: "refund" } });
-  assert.equal(refunds.length, 1);
-  assert.equal(refunds[0]!.amountMinor, -4000);
+  assert.equal(part.ok, false, "a part of the sale cannot be refunded here");
+  if (!part.ok) assert.equal(part.error.type, "conflict");
+  assert.equal((await prisma.order.findUniqueOrThrow({ where: { id: order.id } })).status, "COMPLETED", "the sale is untouched");
+  assert.equal(await prisma.payment.count({ where: { orderId: order.id, type: "refund" } }), 0);
+
+  const whole = await svc.refundOrder(order.id, store.id, "actor", undefined, "customer brought it back");
+  assert.equal(whole.ok, true, JSON.stringify(whole));
+  const refunds = await prisma.payment.findMany({ where: { orderId: order.id, type: "refund" }, orderBy: { method: "asc" } });
+  assert.deepEqual(refunds.map((r) => [r.method, r.amountMinor]), [["cash", -6000], ["gcash", -4000]], "cash back as cash, GCash back as GCash");
+  assert.equal((await prisma.stockLevel.findUniqueOrThrow({ where: { id: level.id } })).quantityOnHand, before + 2, "the rice is back on the shelf");
+  const back = await prisma.stockMovement.findFirst({ where: { storeId: store.id, orderId: order.id, type: "VOID_RESTORE" } });
+  assert.equal(back?.delta, 2);
+
   // A second refund is rejected by the order-status guard (already CANCELLED) — one refund per order.
-  const again = await svc.refundOrder(order.id, store.id, "actor", 4000, "partial-2");
+  const again = await svc.refundOrder(order.id, store.id, "actor", undefined, "again");
   assert.equal(again.ok, false);
   if (!again.ok) assert.equal(again.error.type, "conflict");
+  assert.equal((await prisma.stockLevel.findUniqueOrThrow({ where: { id: level.id } })).quantityOnHand, before + 2, "stock is not put back twice");
+});
+
+test("a refund never puts back rice the sale did not take (no stock from nowhere)", async () => {
+  const store = await makeStore();
+  const product = await makeProduct(store.id);
+  const order = await makeOrder(store.id, "COMPLETED", "COLLECTED", [{ productId: product.id, quantity: 2 }]);
+  await prisma.payment.create({ data: { orderId: order.id, storeId: store.id, method: "cash", amountMinor: 10000, type: "payment" } });
+  const level = (await prisma.stockLevel.findFirst({ where: { storeId: store.id, productId: product.id } }))!;
+  const r = await svc.refundOrder(order.id, store.id, "actor");
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal((await prisma.stockLevel.findUniqueOrThrow({ where: { id: level.id } })).quantityOnHand, level.quantityOnHand);
+});
+
+test("cancelling a credit sale takes it off what the customer owes; cash the owner kept is not taken from the drawer", async () => {
+  const store = await makeStore();
+  const customer = await prisma.customer.create({ data: { phone: `+63917${String(Date.now()).slice(-7)}`, name: "Aling Nena" } });
+  createdIds.push(customer.id);
+  const sc = await prisma.storeCustomer.create({ data: { storeId: store.id, customerId: customer.id, creditApproved: true, creditBalanceMinor: 25000 } });
+  const loc = (await prisma.warehouse.findFirst({ where: { storeId: store.id } })) ?? (await prisma.warehouse.create({ data: { storeId: store.id, name: "Main", code: "S1", type: "STORE", isDefault: true } }));
+
+  // A credit sale of 100.00 (the customer owed 150.00 before it).
+  const credit = await makeOrder(store.id, "COMPLETED", "PENDING");
+  await prisma.order.update({ where: { id: credit.id }, data: { paymentMethod: "credit", storeCustomerId: sc.id, sellingLocationId: loc.id } });
+  await prisma.payment.create({ data: { orderId: credit.id, storeId: store.id, method: "credit", amountMinor: 10000, type: "payment" } });
+  await prisma.creditEntry.create({ data: { storeId: store.id, storeCustomerId: sc.id, orderId: credit.id, type: "purchase", amountMinor: 10000 } });
+  const v = await svc.voidOrder(credit.id, store.id, "owner-1", "wrong customer");
+  assert.equal(v.ok, true, JSON.stringify(v));
+  assert.equal((await prisma.storeCustomer.findUniqueOrThrow({ where: { id: sc.id } })).creditBalanceMinor, 15000, "the debt of the cancelled sale is gone");
+  const adj = await prisma.creditEntry.findFirst({ where: { orderId: credit.id, type: "adjustment" } });
+  assert.equal(adj?.amountMinor, -10000);
+  assert.equal(await prisma.payment.count({ where: { orderId: credit.id, type: "refund" } }), 0, "nothing was paid, so no cash goes back");
+
+  // The owner's own cash sale, cash kept by the owner; then refunded.
+  const kept = await makeOrder(store.id, "COMPLETED", "COLLECTED");
+  await prisma.order.update({ where: { id: kept.id }, data: { sellingLocationId: loc.id } });
+  await prisma.payment.create({ data: { orderId: kept.id, storeId: store.id, method: "cash", amountMinor: 10000, type: "payment", locationId: loc.id } });
+  await prisma.cashHandover.create({ data: { storeId: store.id, locationId: loc.id, businessDate: "2026-11-20", amountMinor: 10000, handedById: "owner-1", receivedById: "owner-1", orderId: kept.id } });
+  const r = await svc.refundOrder(kept.id, store.id, "owner-1");
+  assert.equal(r.ok, true, JSON.stringify(r));
+  const rows = await prisma.cashHandover.findMany({ where: { orderId: kept.id }, orderBy: { createdAt: "asc" } });
+  assert.deepEqual(rows.map((h) => h.amountMinor), [10000, -10000], "the owner gives it back, not the drawer");
 });
 
 test("M7: over-capture refund is rejected with a conflict", async () => {

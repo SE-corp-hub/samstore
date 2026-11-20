@@ -35,6 +35,7 @@ import { LoyaltyService } from "../loyalty/loyalty.service.js";
 import { ensureMethods, prepareTenders, writeTenders } from "../payments/tenders.js";
 import type { ApiError, PosSellRequest, PosSellResponse, PosHoldRequest, PosHoldItemsRequest, PosHoldCompleteRequest, PosSellItem, PosTender, PreOrderCreateRequest, PreOrderFinalizeRequest, PreOrderFinalizeResponse } from "@sam-store/contracts";
 import { txOptions } from "../persistence/tx-options.js";
+import { lowestPriceRefusal } from "../selling/lowest-price.js";
 
 export type PosResult<T> = { ok: true; value: T } | { ok: false; error: ApiError };
 
@@ -80,7 +81,7 @@ export class PosService {
 
   /** Load fresh products for a store (active) + validate availability. P2b: variant lines
  *  resolve their own price + stock (variant must belong to the product and be active). */
-  private async loadProducts(storeId: string, items: PosSellItem[], opts: { allowRemote?: boolean; allowShort?: boolean; /** The store that sells (a pre-order's store): its own price and its own shelf. Empty = the main store, main price. */ locationId?: string | null } = {}): Promise<PosResult<{ products: any[]; lines: LoadedLine[]; totals: any }>> {
+  private async loadProducts(storeId: string, items: PosSellItem[], opts: { allowRemote?: boolean; allowShort?: boolean; /** The store that sells (a pre-order's store): its own price and its own shelf. Empty = the main store, main price. */ locationId?: string | null; /** Who is pricing, and the prices already on the order: staff may change a price only down to the lowest price (selling/lowest-price.ts). */ pricedBy?: { role: string | undefined; kept?: Map<string, number> } } = {}): Promise<PosResult<{ products: any[]; lines: LoadedLine[]; totals: any }>> {
     const ids = items.map((i) => i.productId);
     // Rice Ops M3: a line may be served from another location — immediate sales only.
     const remoteIds = [...new Set(items.map((i) => i.sourceLocationId).filter((x): x is string => typeof x === "string" && x.length > 0))];
@@ -184,6 +185,14 @@ export class PosService {
         sku: v?.sku ?? p.sku,
         sourceLocationId: !v && it.sourceLocationId && it.sourceLocationId !== defaultLocation?.id ? it.sourceLocationId : null,
       });
+    }
+
+    if (opts.pricedBy) {
+      const tooLow = await lowestPriceRefusal(prisma, {
+        storeId, role: opts.pricedBy.role, locationId: opts.locationId ?? defaultLocation?.id ?? null, kept: opts.pricedBy.kept,
+        lines: lines.filter((l) => !l.variantId).map((l) => ({ productId: l.productId, name: l.name, unitPriceMinor: l.unitPriceMinor, overridden: l.priceOverridden })),
+      });
+      if (tooLow) return { ok: false, error: { type: "validation", errors: [tooLow] } };
     }
 
     let totals;
@@ -667,7 +676,7 @@ export class PosService {
     const store_ = await this.preorderStore(storeId, actor, input.locationId);
     if (!store_.ok) return store_;
     const loc = store_.value;
-    const loaded = await this.loadProducts(storeId, input.items, { allowShort: true, locationId: loc?.id ?? null });
+    const loaded = await this.loadProducts(storeId, input.items, { allowShort: true, locationId: loc?.id ?? null, pricedBy: { role: actor.role } });
     if (!loaded.ok) return loaded;
     const { storeCustomerId: custId, displayName } = await this.resolveCustomer(storeId, input);
     if (!custId) {
@@ -875,10 +884,13 @@ export class PosService {
       const refusal = await this.preorderRefusal(storeId, actor, hold.sellingLocationId);
       if (refusal) return { ok: false, error: { type: "forbidden", message: refusal } };
     }
-    const loaded = await this.loadProducts(storeId, input.items, { allowShort: hold.source === "PRE_ORDER", locationId: preLoc });
+    const before = await prisma.orderItem.findMany({ where: { orderId: holdId } });
+    // A price someone changed earlier (the owner's discount) may stay when staff change the order.
+    const kept = new Map(before.filter((i) => i.priceOverridden && i.productId && !i.variantId).map((i) => [i.productId!, i.unitPriceMinor]));
+    const loaded = await this.loadProducts(storeId, input.items, { allowShort: hold.source === "PRE_ORDER", locationId: preLoc, pricedBy: { role: actor.role, kept } });
     if (!loaded.ok) return loaded;
     // Only the stock identity of the previous lines matters here (restore delta).
-    const oldLines = (await prisma.orderItem.findMany({ where: { orderId: holdId } })).map((i) => ({
+    const oldLines = before.map((i) => ({
       productId: i.productId ?? "", variantId: i.variantId ?? null, quantity: i.quantity,
     }));
     const { lines, totals } = loaded.value;

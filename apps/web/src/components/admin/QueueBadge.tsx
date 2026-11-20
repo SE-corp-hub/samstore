@@ -9,7 +9,8 @@
 //     so nothing silently disappears. Waiting records still upload by themselves too.
 
 import { useEffect, useState } from "react";
-import { clearFailed, failedSteps, flushQueue, heldSteps, QUEUE_EVENT, queuedSteps, startQueue, type FailedStep, type QueuedStep } from "../../lib/offlineQueue";
+import { clearFailed, failedSteps, flushQueue, heldSteps, QUEUE_EVENT, queuedSteps, removeFailed, retryFailed, startQueue, type FailedStep, type QueuedStep } from "../../lib/offlineQueue";
+import { askConfirm } from "../../lib/ask";
 import { useLang } from "../../lib/lang";
 import { connectionState, isOffline, OFFLINE_EVENT } from "../../lib/offlineCache";
 
@@ -104,8 +105,18 @@ export function SyncBar() {
       {failed.length > 0 && (
         <div className="alert alert-danger py-2 mb-2" role="alert">
           <div className="fw-semibold">{t("queue.failed")} ({failed.length})</div>
-          {failed.map((f) => <div key={f.id} className="small">✕ {f.label}: {f.message}</div>)}
-          <button type="button" className="btn btn-link btn-sm px-0" onClick={() => clearFailed()}>{t("queue.clear")}</button>
+          <div className="mb-1">{t("queue.failedHow")}</div>
+          {failed.map((f) => (
+            <div key={f.id} className="d-flex flex-wrap align-items-center gap-2 border-top py-2">
+              <div className="flex-grow-1">
+                <div className="fw-semibold">{f.label}{f.byName ? ` · ${f.byName}` : ""} · {new Date(f.createdAt ?? f.at).toLocaleString("en-PH", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</div>
+                <div>{f.message}</div>
+              </div>
+              {f.path && <button type="button" className="btn btn-lg btn-dark" onClick={() => retryFailed(f.id)}><i className="bi bi-arrow-repeat me-1" aria-hidden="true"></i>{t("queue.retry")}</button>}
+              {f.path && <button type="button" className="btn btn-lg btn-outline-danger" onClick={async () => { if (await askConfirm(t("queue.removeAsk", { what: f.label }), { ok: t("queue.remove"), danger: true })) removeFailed(f.id); }}>{t("queue.remove")}</button>}
+            </div>
+          ))}
+          {failed.some((f) => !f.path) && <button type="button" className="btn btn-link btn-sm px-0" onClick={() => clearFailed()}>{t("queue.clear")}</button>}
         </div>
       )}
     </div>

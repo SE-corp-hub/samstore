@@ -28,7 +28,14 @@ export interface QueuedStep {
   by?: string;
   byName?: string;
 }
-export interface FailedStep { id: string; label: string; message: string; at: number }
+/**
+ * A step the server refused. It keeps everything it had (system review 2026-11-20, finding 27): a
+ * refused sale was already paid and the rice is gone, so it stays on the tablet until someone sends
+ * it again (after the reason is fixed) or removes it by hand. Rows saved before this have no `path`.
+ */
+export interface FailedStep { id: string; label: string; message: string; at: number; path?: string; body?: unknown; view?: unknown; by?: string; byName?: string; createdAt?: number }
+/** How many refused steps the tablet keeps (the oldest go first; far more than a day of refusals). */
+export const MAX_FAILED = 200;
 export type StepResult = { status: "sent"; ok: boolean; data: (Record<string, unknown> & { message?: string; errors?: string[] }) | null } | { status: "queued" };
 
 function read<T>(key: string): T[] {
@@ -58,7 +65,26 @@ export const queuedSteps = () => { const me = getAdminUserId(); return allSteps(
 /** Steps another login made on this tablet: they wait until that login signs in here again. */
 export const heldSteps = () => { const me = getAdminUserId(); return allSteps().filter((s) => !isMine(s, me)); };
 export const failedSteps = () => read<FailedStep>(FAILED);
-export const clearFailed = () => write<FailedStep>(FAILED, []);
+/** Clear the list, but never a refused step that can still be sent again: those are removed one by one. */
+export const clearFailed = () => write<FailedStep>(FAILED, failedSteps().filter((f) => !!f.path));
+/** Remove one refused step for good (the person typed it again, or it was a mistake). */
+export const removeFailed = (id: string) => write<FailedStep>(FAILED, failedSteps().filter((f) => f.id !== id));
+/**
+ * Send a refused step again: it goes back in line with the SAME key and its maker, so it is sent
+ * under the login that made it and the server can never save it twice. False = nothing to send.
+ */
+export function retryFailed(id: string): boolean {
+  const f = failedSteps().find((x) => x.id === id);
+  if (!f?.path) return false;
+  const items = allSteps();
+  if (!items.some((s) => s.id === id)) {
+    items.push({ id: f.id, path: f.path, body: f.body, label: f.label, createdAt: f.createdAt ?? f.at, attempts: 0, ...(f.view === undefined ? {} : { view: f.view }), ...(f.by ? { by: f.by, ...(f.byName ? { byName: f.byName } : {}) } : {}) });
+    if (!write(QUEUE, items)) return false;
+  }
+  removeFailed(id);
+  void flushQueue();
+  return true;
+}
 export const QUEUE_EVENT = EVENT;
 
 /** How long a step waits for the server before it is kept on the tablet instead (a sleeping server, weak signal). */
@@ -134,7 +160,10 @@ export async function flushQueue(): Promise<{ sent: number; failed: number }> {
       if (r.ok) sent++;
       else {
         failed++;
-        write(FAILED, [...failedSteps(), { id: next.id, label: next.label, message: r.data?.errors?.join(", ") ?? r.data?.message ?? `HTTP ${r.status}`, at: Date.now() }].slice(-20));
+        write(FAILED, [...failedSteps().filter((f) => f.id !== next.id), {
+          id: next.id, label: next.label, message: r.data?.errors?.join(", ") ?? r.data?.message ?? `HTTP ${r.status}`, at: Date.now(),
+          path: next.path, body: next.body, createdAt: next.createdAt, ...(next.view === undefined ? {} : { view: next.view }), ...(next.by ? { by: next.by, ...(next.byName ? { byName: next.byName } : {}) } : {}),
+        }].slice(-MAX_FAILED));
       }
     }
   } finally {

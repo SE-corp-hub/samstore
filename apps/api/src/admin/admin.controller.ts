@@ -1478,7 +1478,7 @@ export class AdminController {
       await cacheBust(cacheKey("orders", storeId));
       return { id, status: "ON_HOLD", totalMinor: edited.value.totalMinor, storeId };
     }
-    const result = await this.ordersAdmin.replaceOrderItems(storeId, id, body?.items ?? [], user.sub);
+    const result = await this.ordersAdmin.replaceOrderItems(storeId, id, body?.items ?? [], user.sub, role);
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
     return { ...result.value, storeId };
   }

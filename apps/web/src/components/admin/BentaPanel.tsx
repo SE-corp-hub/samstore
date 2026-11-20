@@ -59,6 +59,8 @@ interface Item {
   stock: Record<string, number>; tracked: boolean;
   /** Unit cost here (per piece, or per kilo): selling under it loses money. Staff get it only to compare. */
   floorMinor?: number; ownShelfCost?: boolean;
+  /** The lowest price staff may change a line to (the owner's lowest price, else the cost). */
+  lowestMinor?: number;
 }
 // Shape of GET /admin/customers (flat: name/phone on the row).
 interface Customer { id: string; name: string | null; phone: string | null; creditApproved: boolean; creditLimitMinor: number; creditUnlimited?: boolean; creditStatus?: string; creditAvailableMinor?: number | null; creditBalanceMinor: number }
@@ -580,10 +582,13 @@ export default function BentaPanel() {
     if (!it) return true;
     const unit = l.price ?? it.priceMinor;
     let floor = it.floorMinor ?? 0;
+    // Staff who changed the price may go down to the lowest price only; the server refuses lower (selling/lowest-price.ts).
+    const low = !seesCost && l.price !== undefined && l.price !== it.priceMinor ? it.lowestMinor ?? floor : 0;
+    const tooLow = low > 0 && unit < low;
     for (;;) {
-      if (!isBelowCost(unit, floor) || keptBelow.current.has(okKey(it.id, unit, floor))) return true;
+      if (!tooLow && (!isBelowCost(unit, floor) || keptBelow.current.has(okKey(it.id, unit, floor)))) return true;
       const pick = await askBelowCost({
-        name: it.name, priceMinor: unit, costMinor: floor, unit: it.loose ? "kilo" : it.gramsPerUnit ? "sack" : "piece", showCost: seesCost, proceed: "Sell anyway",
+        name: it.name, priceMinor: unit, costMinor: tooLow ? low : floor, noProceed: tooLow, unit: it.loose ? "kilo" : it.gramsPerUnit ? "sack" : "piece", showCost: seesCost, proceed: "Sell anyway",
         canChangeCost: !seesCost ? false : offline ? NEEDS_NET : it.ownShelfCost ? "This location has its own cost. Change it in Inventory." : true,
       });
       if (!pick) return false;

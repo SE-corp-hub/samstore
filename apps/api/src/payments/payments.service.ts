@@ -5,7 +5,9 @@
 // - Void (same-day, unfulfilled POS sale): reverses the sale, restores stock, order → CANCELLED.
 // - Refund: negative Payment + order → CANCELLED with reason (audited).
 
+import type { Prisma } from "@prisma/client";
 import { orderWall } from "../auth/wall.js";
+import { manilaDate } from "../domain/reports.js";
 import { reverseSaleCharges } from "../payable/charges.js";
 import { prisma } from "../persistence/prisma-repositories.js";
 import { randomId } from "../persistence/repositories.js";
@@ -346,6 +348,58 @@ export class PaymentsService {
     };
   }
 
+  /**
+   * What a sale that is taken back (void or refund) gives back besides its payments:
+   *   - credit: what this sale put on the customer's debt comes off again; anything the customer
+   *     already paid of it is cash given back (returned amount);
+   *   - cash the owner kept: the drawer never held it, so the cash given back is not taken from the drawer.
+   */
+  private async undoCreditAndOwnerCash(
+    tx: Prisma.TransactionClient,
+    order: { id: string; storeId: string; orderNumber: string; storeCustomerId: string | null; sellingLocationId: string | null },
+    actorId: string, why: string, registerSessionId: string | null,
+  ): Promise<void> {
+    const { id: orderId, storeId } = order;
+    if (order.storeCustomerId) {
+      // Everything this sale wrote on the customer's credit: the sale itself, less returns already taken off.
+      const owed = (await tx.creditEntry.aggregate({ where: { storeId, storeCustomerId: order.storeCustomerId, orderId }, _sum: { amountMinor: true } }))._sum.amountMinor ?? 0;
+      if (owed > 0) {
+        const sc = await tx.storeCustomer.findUniqueOrThrow({ where: { id: order.storeCustomerId }, select: { creditBalanceMinor: true } });
+        const reduce = Math.min(owed, Math.max(0, sc.creditBalanceMinor));
+        if (reduce > 0) {
+          await tx.storeCustomer.update({ where: { id: order.storeCustomerId }, data: { creditBalanceMinor: { decrement: reduce } } });
+          await tx.creditEntry.create({ data: { storeId, storeCustomerId: order.storeCustomerId, orderId, type: "adjustment", amountMinor: -reduce, note: `${why} (${order.orderNumber})`.slice(0, 200), createdBy: actorId } });
+        }
+        // The customer already paid some of this sale's credit: that money goes back as cash.
+        if (owed > reduce) {
+          await tx.payment.create({ data: { orderId, storeId, method: "cash", amountMinor: -(owed - reduce), note: `REFUND: credit already paid (${order.orderNumber})`.slice(0, 200), type: "refund", createdBy: actorId, registerSessionId, locationId: order.sellingLocationId } });
+        }
+      }
+    }
+    // The owner kept this sale's cash, so the owner gives it back: today's drawer is not short by it.
+    const kept = (await tx.cashHandover.aggregate({ where: { storeId, orderId, voidedAt: null }, _sum: { amountMinor: true } }))._sum.amountMinor ?? 0;
+    const first = kept > 0 ? await tx.cashHandover.findFirst({ where: { storeId, orderId, voidedAt: null }, orderBy: { createdAt: "asc" }, select: { locationId: true, handedById: true } }) : null;
+    if (first) {
+      await tx.cashHandover.create({ data: { storeId, locationId: first.locationId, businessDate: manilaDate(new Date()), amountMinor: -kept, note: `Owner's sale ${order.orderNumber} taken back`, handedById: actorId, receivedById: first.handedById, orderId } });
+    }
+  }
+
+  /** Put back on the shelf what this order really took off it (never more than the stock book shows). */
+  private async restoreTaken(tx: Prisma.TransactionClient, storeId: string, orderId: string, items: { productId: string | null; quantity: number }[], type: string, actorId: string): Promise<void> {
+    const moved = await tx.stockMovement.groupBy({ by: ["productId"], where: { storeId, orderId, type: { notIn: ["RESERVE", "RELEASE_RESERVATION"] } }, _sum: { delta: true } });
+    const taken = new Map(moved.map((m) => [m.productId, -(m._sum.delta ?? 0)]));
+    const lines: { productId: string; quantity: number }[] = [];
+    for (const it of items) {
+      if (!it.productId) continue;
+      const left = taken.get(it.productId) ?? 0;
+      const quantity = Math.min(it.quantity, left);
+      if (quantity <= 0) continue;
+      taken.set(it.productId, left - quantity);
+      lines.push({ productId: it.productId, quantity });
+    }
+    await restoreStock(tx, storeId, lines, { type, orderId, createdBy: actorId });
+  }
+
   /** Void an unfulfilled POS sale (same-day): restores stock, order → CANCELLED. */
   async voidOrder(orderId: string, storeId: string, actorId: string, reason?: string): Promise<PaymentResult<{ id: string; status: string }>> {
     const order = await prisma.order.findFirst({
@@ -367,9 +421,12 @@ export class PaymentsService {
       }
       await tx.order.update({ where: { id: orderId }, data: { status: "CANCELLED", paymentStatus: "CANCELLED_REFUND" } });
       await reverseSaleCharges(tx, storeId, orderId, actorId, reason?.trim() || "sale voided");
+      const registerSessionId = await this.registers.attachOpenSession(storeId);
       await tx.payment.create({
-        data: { orderId, storeId, method: "cash", amountMinor: 0, note: `VOID: ${reason?.trim() ?? "same-day void"}`.slice(0, 200), type: "void", createdBy: actorId, registerSessionId: await this.registers.attachOpenSession(storeId) },
+        data: { orderId, storeId, method: "cash", amountMinor: 0, note: `VOID: ${reason?.trim() ?? "same-day void"}`.slice(0, 200), type: "void", createdBy: actorId, registerSessionId },
       });
+      // A credit sale that is cancelled is no longer owed (the cash book already gives back a voided sale's cash).
+      await this.undoCreditAndOwnerCash(tx, order, actorId, "Sale cancelled", registerSessionId);
       await tx.orderStatusHistory.create({
         data: { orderId, storeId, fromStatus: order.status, toStatus: "CANCELLED", reason: reason?.trim() ?? null, actorType: "pos_void", actorId },
       });
@@ -382,41 +439,57 @@ export class PaymentsService {
     return { ok: true, value: { id: orderId, status: "CANCELLED" } };
   }
 
-  /** Refund a collected sale: negative Payment + order → CANCELLED (audited). */
+  /**
+   * Refund a collected sale. A refund takes back the WHOLE sale: every payment goes back the way it
+   * was paid (cash as cash, GCash as GCash, credit off the customer's debt), the rice goes back on
+   * the shelf it left, and the order is CANCELLED. Rice returned in part goes through Returns.
+   */
   async refundOrder(orderId: string, storeId: string, actorId: string, amountMinor?: number, reason?: string): Promise<PaymentResult<{ id: string; status: string }>> {
-    const order = await prisma.order.findFirst({ where: { id: orderId, storeId } });
+    const order = await prisma.order.findFirst({ where: { id: orderId, storeId }, include: { items: { select: { productId: true, quantity: true } } } });
     if (!order) return { ok: false, error: { type: "not_found", message: "Order not found" } };
     if (order.paymentStatus !== "COLLECTED" && order.paymentStatus !== "REVIEWED") {
       return { ok: false, error: { type: "conflict", message: "Only collected or reviewed payments can be refunded" } };
     }
     if (order.status === "CANCELLED") return { ok: false, error: { type: "conflict", message: "Order is already cancelled (refunded)" } };
-    const refundAmount = amountMinor ?? order.totalMinor;
-    if (!Number.isInteger(refundAmount) || refundAmount <= 0) {
+    if (amountMinor !== undefined && (!Number.isInteger(amountMinor) || amountMinor <= 0)) {
       return { ok: false, error: { type: "validation", errors: ["refund amount must be a positive integer"] } };
     }
-    // M7: cap the refund at the REMAINING captured amount (partial refunds allowed;
-    // repeated/over refunds rejected — stock/payment can never go negative).
-    const payments = await prisma.payment.findMany({ where: { orderId }, select: { amountMinor: true, type: true } });
-    const captured = payments.filter((p) => p.type === "payment" && p.amountMinor > 0).reduce((s, p) => s + p.amountMinor, 0);
-    const refunded = payments.filter((p) => p.type === "refund" && p.amountMinor < 0).reduce((s, p) => s + -p.amountMinor, 0);
-    const remaining = captured - refunded;
-    if (refundAmount > remaining) {
+    // What is still held of this sale, by the way it was paid. Credit is not money in hand: it is undone on the customer's debt.
+    const payments = await prisma.payment.findMany({ where: { orderId, method: { not: "credit" } }, select: { amountMinor: true, type: true, method: true } });
+    const held = new Map<string, number>();
+    for (const p of payments) {
+      if (p.type === "payment" && p.amountMinor > 0) held.set(p.method, (held.get(p.method) ?? 0) + p.amountMinor);
+      else if (p.type === "refund") held.set(p.method, (held.get(p.method) ?? 0) - Math.abs(p.amountMinor));
+    }
+    const remaining = [...held.values()].reduce((s, v) => s + Math.max(0, v), 0);
+    if (amountMinor !== undefined && amountMinor > remaining) {
       return { ok: false, error: { type: "conflict", message: `Refund exceeds the remaining captured amount (₱${(remaining / 100).toFixed(2)} available)` } };
+    }
+    if (amountMinor !== undefined && amountMinor < remaining) {
+      return { ok: false, error: { type: "conflict", message: `A refund takes back the whole sale (₱${(remaining / 100).toFixed(2)}). For rice returned in part, use Returns.` } };
     }
 
     await prisma.$transaction(async (tx) => {
       // N1: the cash leaves the drawer NOW — attribute the refund to the open shift
       // so the X/Z report's expected cash accounts for it (null when off-counter).
       const registerSessionId = await this.registers.attachOpenSession(storeId);
-      await tx.payment.create({
-        data: { orderId, storeId, method: "cash", amountMinor: -refundAmount, note: `REFUND: ${reason?.trim() ?? "customer refund"}`.slice(0, 200), type: "refund", createdBy: actorId, registerSessionId, locationId: order.sellingLocationId },
-      });
+      for (const [method, amount] of held) {
+        if (amount <= 0) continue;
+        await tx.payment.create({
+          data: { orderId, storeId, method, amountMinor: -amount, note: `REFUND: ${reason?.trim() ?? "customer refund"}`.slice(0, 200), type: "refund", createdBy: actorId, registerSessionId, locationId: order.sellingLocationId },
+        });
+      }
       await tx.order.update({ where: { id: orderId }, data: { status: "CANCELLED", paymentStatus: "REFUNDED" } });
       // The sale is taken back, so is what its store owed the main store for it (and any profit share it booked).
       await reverseSaleCharges(tx, storeId, orderId, actorId, reason?.trim() || "sale refunded");
-      // An online order that is refunded before dispatch gives its reservation
-      // back. Already-delivered orders were consumed, so this is a no-op there.
-      await settleOrderReservations(tx, { id: orderId, storeId }, "RELEASED");
+      await this.undoCreditAndOwnerCash(tx, order, actorId, "Sale refunded", registerSessionId);
+      // The rice comes back. An online order refunded before it went out still only HOLDS its rice:
+      // the hold is given back. Rice that already left the shelf (a counter sale, or an order that
+      // was handed over) is put back on the shelf it left.
+      const settlement = await settleOrderReservations(tx, { id: orderId, storeId }, "RELEASED");
+      if (settlement.outcome === "no-reservation" || (settlement.outcome === "already-settled" && order.stockDisposition === "CONSUMED")) {
+        await this.restoreTaken(tx, storeId, orderId, order.items, "VOID_RESTORE", actorId);
+      }
       await tx.orderStatusHistory.create({
         data: { orderId, storeId, fromStatus: order.status, toStatus: "CANCELLED", reason: reason?.trim() ?? null, actorType: "pos_refund", actorId },
       });
