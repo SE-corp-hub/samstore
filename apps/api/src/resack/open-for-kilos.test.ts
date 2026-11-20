@@ -52,4 +52,16 @@ test("Open a sack on POS: 1 sack out, 25 kg of kilo rice in, kilo cost = sack co
   assert.equal(other.ok, false, "staff open sacks only at their own store");
   const notKilo = await svc.openSackForKilos(store.id, owner, { locationId: s1.id, kiloProductId: sack.id });
   assert.equal(notKilo.ok, false, "only a kilo rice can be filled");
+
+  // Filling the display rack: 2 sacks at once → 50 kg more, 2 sacks fewer; 0 or 51 are refused.
+  const two = await svc.openSackForKilos(store.id, owner, { locationId: s1.id, kiloProductId: kilo.id, sacks: 2 });
+  assert.equal(two.ok, true, JSON.stringify(two));
+  if (!two.ok) return;
+  assert.deepEqual([two.value.sacks, two.value.gramsIn, two.value.kiloGramsLeft], [2, 50_000, 75_000]);
+  assert.equal(await level(sack.id), 1, "two more sacks left the shelf");
+  assert.equal((await prisma.product.findUniqueOrThrow({ where: { id: kilo.id } })).costMinor, 5_200, "still ₱1,300 ÷ 25 per kilo");
+  for (const bad of [0, 51, 1.5, "2"]) {
+    const r2 = await svc.openSackForKilos(store.id, owner, { locationId: s1.id, kiloProductId: kilo.id, sacks: bad });
+    assert.equal(r2.ok, false, `sacks ${String(bad)} refused`);
+  }
 });

@@ -215,23 +215,25 @@ export class ResackService {
    * the closing count). Kept as a finished resack (openSack) so it is on the Resack list and reports.
    * A step sent again (offline queue) is answered once by the Idempotency-Key.
    */
-  async openSackForKilos(storeId: string, actor: Actor, input: { locationId?: string; kiloProductId?: string }) {
+  async openSackForKilos(storeId: string, actor: Actor, input: { locationId?: string; kiloProductId?: string; sacks?: unknown }) {
     return this.run(async () => {
       const loc = await this.location(storeId, actor, input.locationId);
+      const n = input.sacks === undefined || input.sacks === null ? 1 : input.sacks;
+      if (typeof n !== "number" || !Number.isInteger(n) || n < 1 || n > 50) throw new ResackError("Open 1 to 50 sacks at a time");
       const kilo = input.kiloProductId ? await prisma.product.findFirst({ where: { id: input.kiloProductId, storeId }, select: { ...productSelect, kiloOfId: true } }) : null;
       if (!kilo || !kilo.isActive || !isKiloItem(kilo)) throw new ResackError("Choose the kilo rice to fill");
       if (!kilo.kiloOfId) throw new ResackError(`${kilo.name} has no sack linked. Open its sack on the Resack screen.`);
       const sack = (await this.products(storeId, [kilo.kiloOfId])).get(kilo.kiloOfId);
       if (!sack || !sack.isActive) throw new ResackError(`The sack rice of ${kilo.name} is not for sale any more`);
-      const grams = gramsOf(sack, 1);
-      const value = valueOf(sack, 1);
+      const grams = gramsOf(sack, n);
+      const value = valueOf(sack, n);
       let out = { id: "", docNumber: "" };
       await prisma.$transaction(async (tx) => {
         const docNumber = await nextDocNumber(tx, storeId, "RSK");
         const now = new Date();
         const job = await tx.resackJob.create({
           data: {
-            storeId, docNumber, locationId: loc.id, inputProductId: sack.id, inputQty: 1, inputGrams: grams, inputValueMinor: value,
+            storeId, docNumber, locationId: loc.id, inputProductId: sack.id, inputQty: n, inputGrams: grams, inputValueMinor: value,
             outputGrams: grams, lossGrams: 0, lossBp: 0, lossValueMinor: 0, openSack: true, status: "FINISHED",
             note: "Opened on POS for kilo selling", startedById: actor.userId, finishedById: actor.userId, finishedAt: now,
           },
@@ -239,20 +241,20 @@ export class ResackService {
         });
         const level = await tx.stockLevel.findFirst({ where: { storeId, productId: sack.id, warehouseId: loc.id }, select: { id: true } });
         if (!level && !(await bufferIdOf(tx, storeId))) throw new StepError(conflict(`No ${sack.name} is recorded at ${loc.name}`));
-        await coverShortage(tx, storeId, { productId: sack.id, warehouseId: loc.id, needed: 1, actorId: actor.userId, documentType: "RESACK", documentId: job.id, reason: `open a sack ${docNumber}` });
-        await releaseForTrip(tx, this.leg(storeId, sack.id, loc.id, actor, job.id, docNumber), 0, 1, "RESACK_OUT");
+        await coverShortage(tx, storeId, { productId: sack.id, warehouseId: loc.id, needed: n, actorId: actor.userId, documentType: "RESACK", documentId: job.id, reason: `open ${n === 1 ? "a sack" : `${n} sacks`} ${docNumber}` });
+        await releaseForTrip(tx, this.leg(storeId, sack.id, loc.id, actor, job.id, docNumber), 0, n, "RESACK_OUT");
         await tx.resackOutput.create({ data: { storeId, jobId: job.id, productId: kilo.id, quantity: grams, grams, valueMinor: value } });
         await addForTrip(tx, this.leg(storeId, kilo.id, loc.id, actor, job.id, docNumber), grams, "RESACK_IN");
         // The kilo rice costs what its sack cost, per kilo (profit and the store payable per kilo sold).
-        const perKilo = kiloCostFrom(sack.costMinor, grams);
+        const perKilo = kiloCostFrom(sack.costMinor, grams / n);
         if (perKilo > 0 && perKilo !== kilo.costMinor) await tx.product.update({ where: { id: kilo.id }, data: { costMinor: perKilo } });
         await tx.auditLog.create({
-          data: { storeId, actorType: "USER", actorId: actor.userId, action: "resack.open_sack_pos", entityType: "ResackJob", entityId: job.id, after: { sack: sack.name, kilo: kilo.name, grams, locationId: loc.id } },
+          data: { storeId, actorType: "USER", actorId: actor.userId, action: "resack.open_sack_pos", entityType: "ResackJob", entityId: job.id, after: { sack: sack.name, sacks: n, kilo: kilo.name, grams, locationId: loc.id } },
         });
         out = job;
       }, txOptions());
       const level = await prisma.stockLevel.findFirst({ where: { storeId, productId: kilo.id, warehouseId: loc.id }, select: { quantityOnHand: true, quantityReserved: true } });
-      return { ...out, sackName: sack.name, kiloName: kilo.name, gramsIn: grams, kiloGramsLeft: Math.max(0, (level?.quantityOnHand ?? 0) - (level?.quantityReserved ?? 0)) };
+      return { ...out, sackName: sack.name, kiloName: kilo.name, sacks: n, gramsIn: grams, kiloGramsLeft: Math.max(0, (level?.quantityOnHand ?? 0) - (level?.quantityReserved ?? 0)) };
     });
   }
 

@@ -155,8 +155,11 @@ export default function BentaPanel() {
   const [staffSig, setStaffSig] = useState<string | null>(null);
   const [last, setLast] = useState<{ status: "COMPLETED" | "WAITING_OWNER" | "DECLINED"; /** Saved on this tablet, not sent yet. */ offline?: boolean; /** Printed on the receipt; empty = walk-in. */ customerName?: string | null; smsStatus: string | null; orderNumber: string; totalMinor: number; changeMinor: number; lines: { name: string; soldBy: string | null; quantity: number; grams: number | null; lineTotalMinor: number }[]; releases: { docNumber: string }[]; zeroCheck: { productId: string; name: string }[]; belowCost?: string[] } | null>(null);
   const [checking, setChecking] = useState<{ productId: string; name: string } | null>(null);
-  // "Open a sack" (sell per kilo): the kilo rice whose sack to open; `addAfter` = a tap on it asked for one more kilo.
-  const [opening, setOpening] = useState<{ kiloId: string; addAfter: boolean } | null>(null);
+  // "Open a sack" (sell per kilo): the kilo rice whose sack to open (null = choose it first, from the "Open sacks" button);
+  // `addAfter` = a tap on it asked for one more kilo. `openCount` = how many sacks (filling the display rack).
+  const [opening, setOpeningRaw] = useState<{ kiloId: string | null; addAfter: boolean } | null>(null);
+  const [openCount, setOpenCount] = useState(1);
+  const setOpening = (o: { kiloId: string | null; addAfter: boolean } | null) => { setOpeningRaw(o); setOpenCount(1); };
   const [openBusy, setOpenBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -756,37 +759,67 @@ export default function BentaPanel() {
     <QuickCount productId={checking.productId} name={checking.name} loose={!!byId.get(checking.productId)?.loose} locationId={locationId}
       onCancel={() => setChecking(null)} onDone={async () => { setChecking(null); await loadCatalog(locationId); }} />
   );
-  /** Open one sack of a kilo rice's own rice at this store: 1 sack off the shelf, its kilos (25 kg) on. Works offline (sent later). */
-  const openSack = async (kilo: Item, addAfter: boolean) => {
+  /** Open sacks of a kilo rice's own rice at this store: n sacks off the shelf, their kilos (25 kg each) on. Works offline (sent later). */
+  const openSack = async (kilo: Item, addAfter: boolean, n: number) => {
     const sack = sackOf(kilo);
     if (!sack || !sack.gramsPerUnit) return;
-    const grams = sack.gramsPerUnit;
+    const grams = sack.gramsPerUnit * n;
+    const sacksWord = n === 1 ? "1 sack" : `${n} sacks`;
     setOpenBusy(true); setError(null);
     try {
-      const r = await sendStep("/admin/resacks/open-for-kilos", { locationId, kiloProductId: kilo.id }, `Open a sack: ${sack.name}`);
+      const r = await sendStep("/admin/resacks/open-for-kilos", { locationId, kiloProductId: kilo.id, sacks: n }, `Open ${sacksWord}: ${sack.name}`);
       if (r.status === "sent" && !r.ok) { setError(errText(r.data as ApiBody | null, "Could not open the sack. Try again.")); return; }
       setItems((prev) => prev.map((x) => (x.id === kilo.id ? { ...x, tracked: true, stock: { ...x.stock, [locationId]: (x.stock[locationId] ?? 0) + grams } }
-        : x.id === sack.id ? { ...x, stock: { ...x.stock, [locationId]: (x.stock[locationId] ?? 0) - 1 } } : x)));
-      toast(`1 sack opened: ${kg(grams)} more ${kilo.name}${r.status === "queued" ? " (sent when the internet is back)" : ""}`, "success");
+        : x.id === sack.id ? { ...x, stock: { ...x.stock, [locationId]: (x.stock[locationId] ?? 0) - n } } : x)));
+      toast(`${sacksWord} opened: ${kg(grams)} more ${kilo.name}${r.status === "queued" ? " (sent when the internet is back)" : ""}`, "success");
       setOpening(null);
       if (addAfter) await addOne(kilo, true);
     } finally { setOpenBusy(false); }
   };
+  /** Kilo rice that can be filled from a sack here (for the "Open sacks" button). */
+  const kiloItems = items.filter((i) => i.loose && sackOf(i));
   const openCard = opening && (() => {
+    // From the "Open sacks" button: first choose which kilo rice to fill.
+    if (!opening.kiloId) {
+      return (
+        <div className="sale-card fit-card mx-auto w-100" style={{ maxWidth: 520 }}>
+          <div className="card-body">
+            <h2 className="h4 text-center mb-2">Open sacks for kilo selling</h2>
+            <p className="text-center mb-3">Which rice goes on the display rack?</p>
+            <div className="d-grid gap-2 mb-3">
+              {kiloItems.map((k) => (
+                <button key={k.id} type="button" className="btn btn-outline-success btn-lg text-start d-flex justify-content-between align-items-center" onClick={() => setOpening({ kiloId: k.id, addAfter: false })}>
+                  <span>{sackOf(k)?.name ?? k.name}</span><span className="small text-muted">{kg(Math.max(0, kilosLeft(k)))} left</span>
+                </button>
+              ))}
+            </div>
+            <button type="button" className="btn btn-outline-dark btn-lg w-100" onClick={() => setOpening(null)}>Back</button>
+          </div>
+        </div>
+      );
+    }
     const kilo = byId.get(opening.kiloId);
     const sack = sackOf(kilo);
     if (!kilo || !sack) return null;
     const left = Math.max(0, kilosLeft(kilo));
     const sacksHere = sack.stock[locationId] ?? 0;
+    const n = openCount;
+    const sacksWord = n === 1 ? "1 sack" : `${n} sacks`;
     return (
       <div className="sale-card fit-card mx-auto w-100" style={{ maxWidth: 520 }}>
         <div className="card-body">
-          <h2 className="h4 text-center mb-2">Open a sack?</h2>
-          <p className="text-center mb-2">{left > 0 ? <>Only <strong>{kg(left)}</strong></> : <strong>No kilos</strong>} of {kilo.name} left at {here?.name ?? "this store"}.</p>
-          <p className="text-center mb-3">Open 1 sack of <strong>{sack.name}</strong> for {kg(sack.gramsPerUnit ?? 0)} more. {sacksHere > 0 ? `${sacksHere} ${sacksHere === 1 ? "sack" : "sacks"} here now.` : "The count shows no sack here, but you can still open one."}</p>
+          <h2 className="h4 text-center mb-2">Open sacks?</h2>
+          <p className="text-center mb-2">{left > 0 ? <><strong>{kg(left)}</strong></> : <strong>No kilos</strong>} of {kilo.name} left at {here?.name ?? "this store"}.</p>
+          <p className="text-center mb-2">How many sacks of <strong>{sack.name}</strong>? {sacksHere > 0 ? `${sacksHere} ${sacksHere === 1 ? "sack" : "sacks"} here now.` : "The count shows no sack here, but you can still open."}</p>
+          <div className="qty d-flex justify-content-center align-items-center gap-2 mb-2" role="group" aria-label="How many sacks to open">
+            <button type="button" className="btn btn-outline-dark qty-btn" aria-label="One sack less" disabled={openBusy || n <= 1} onClick={() => setOpenCount(Math.max(1, n - 1))}>−</button>
+            <span className="qty-num fs-3 px-3" aria-live="polite">{n}</span>
+            <button type="button" className="btn btn-outline-dark qty-btn" aria-label="One sack more" disabled={openBusy || n >= 50} onClick={() => setOpenCount(Math.min(50, n + 1))}>+</button>
+          </div>
+          <p className="text-center mb-3">= <strong>{kg((sack.gramsPerUnit ?? 0) * n)}</strong> more kilo rice</p>
           <div className="d-grid gap-2">
-            <button type="button" className="btn btn-success btn-lg py-3 fw-bold" disabled={openBusy} onClick={() => void openSack(kilo, opening.addAfter)}>
-              <i className="bi bi-box-arrow-up me-2" aria-hidden="true"></i>{openBusy ? "Opening…" : "Yes, open a sack"}
+            <button type="button" className="btn btn-success btn-lg py-3 fw-bold" disabled={openBusy} onClick={() => void openSack(kilo, opening.addAfter, n)}>
+              <i className="bi bi-box-arrow-up me-2" aria-hidden="true"></i>{openBusy ? "Opening…" : `Yes, open ${sacksWord}`}
             </button>
             <div className="d-flex gap-2">
               <button type="button" className="btn btn-outline-dark btn-lg flex-fill" disabled={openBusy} onClick={() => setOpening(null)}>Back</button>
@@ -1015,6 +1048,11 @@ export default function BentaPanel() {
     <div className="d-flex flex-wrap align-items-center gap-2 mb-2">
       <Steps className="mb-0 me-auto" items={STEPS} current={step === "pay" ? 2 : step === "check" ? 1 : 0} />
       {heldBtn}
+      {step === "pick" && !newItem && !editing && !checking && !opening && kiloItems.length > 0 && (
+        <button type="button" className="btn btn-outline-success open-sacks-btn" onClick={() => setOpening({ kiloId: null, addAfter: false })}>
+          <i className="bi bi-box-arrow-up me-1" aria-hidden="true"></i>Open sacks
+        </button>
+      )}
       {!sideBySide && step === "pick" && !newItem && !editing && !checking && !opening && (mustChoose ? chosenRow : customerSelect)}
     </div>
   );
