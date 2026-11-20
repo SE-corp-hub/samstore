@@ -86,7 +86,7 @@ export class ResackController {
   @Post("resacks/open-for-kilos")
   async openForKilos(@Req() req: Req_, @Body() body: Record<string, unknown>, @Headers("x-store-id") h?: string) {
     const { storeId, actor } = await this.ctx(req, h);
-    return unwrap(await this.resacks.openSackForKilos(storeId, actor, { locationId: str(body?.locationId), kiloProductId: str(body?.kiloProductId), sacks: body?.sacks }));
+    return unwrap(await this.resacks.openSackForKilos(storeId, actor, { locationId: str(body?.locationId), kiloProductId: str(body?.kiloProductId), sackProductId: str(body?.sackProductId), sacks: body?.sacks }));
   }
 
   /** POST /admin/resacks/start — Simulan: { locationId, inputProductId, inputQty, kargadorId?, note?, signatures } */

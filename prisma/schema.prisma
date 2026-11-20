@@ -445,6 +445,19 @@ model ProductImage {
 
 // The product's own picture, kept small (the tablet shrinks it before upload). Separate from Product so
 // product lists never read the bytes; served at GET /public/product-photo/:id (the id is random).
+/// Sell per kilo — a display rack: one kilo item (sold by weight, one price) that can be filled from several sacks
+/// (e.g. "Rack ₱50" ← Samrice Sinandomeng 25kg, Mikami yellow 25kg). Its own sack (Product.kiloOfId) counts too.
+model RackSack {
+  id            String   @id @default(cuid())
+  storeId       String
+  kiloProductId String
+  sackProductId String
+  createdAt     DateTime @default(now())
+
+  @@unique([storeId, kiloProductId, sackProductId])
+  @@index([storeId, sackProductId])
+}
+
 model ProductPhoto {
   id        String   @id
   storeId   String

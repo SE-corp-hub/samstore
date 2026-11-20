@@ -771,15 +771,27 @@ export class AdminController {
 
   /** POST /admin/products/:id/kilo-item — body { on }: "Also sell per kilo" on a sack rice (makes / hides its kilo item). */
   @Post("products/:id/kilo-item")
-  async setKiloItem(@Req() req: Request & { user?: AuthPrincipal }, @Param("id") id: string, @Body() body: { on?: unknown }, @Headers("x-store-id") headerStoreId?: string) {
+  async setKiloItem(@Req() req: Request & { user?: AuthPrincipal }, @Param("id") id: string, @Body() body: { on?: unknown; force?: unknown }, @Headers("x-store-id") headerStoreId?: string) {
     const user = req.user;
     requireUser(user);
     const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
     if (typeof body?.on !== "boolean") throw new HttpException({ type: "validation", errors: ["on must be true or false"] }, HttpStatus.BAD_REQUEST);
-    const result = await this.productsAdmin.setKiloItem(storeId, id, body.on);
+    const result = await this.productsAdmin.setKiloItem(storeId, id, body.on, body.force === true);
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
     await cacheBust(cacheKey("products", storeId));
     await cacheBust(cacheKey("inventory", storeId));
+    return result.value;
+  }
+
+  /** PUT /admin/products/:id/rack-sacks — body { sackIds }: the sacks that can fill this kilo rice (a display rack). */
+  @Put("products/:id/rack-sacks")
+  async setRackSacks(@Req() req: Request & { user?: AuthPrincipal }, @Param("id") id: string, @Body() body: { sackIds?: unknown }, @Headers("x-store-id") headerStoreId?: string) {
+    const user = req.user;
+    requireUser(user);
+    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
+    const result = await this.productsAdmin.setRackSacks(storeId, id, body?.sackIds);
+    if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
+    await cacheBust(cacheKey("products", storeId));
     return result.value;
   }
 

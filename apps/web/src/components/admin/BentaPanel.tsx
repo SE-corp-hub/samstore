@@ -11,7 +11,7 @@
 //   New item: a rice that isn't in the system yet, with what is on hand now.
 // One idempotency key per sale, kept until it succeeds: a double-tap is one sale.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { API_URL } from "../../config";
 import { adminHeaders, getAdminStoreId } from "../../lib/admin";
 import { toast } from "../../lib/toast";
@@ -51,7 +51,7 @@ import { noteUse } from "../../lib/product-find";
 
 interface Loc { id: string; name: string; code: string | null; type: string }
 interface Item {
-  id: string; name: string; photoKey?: string | null; loose: boolean; gramsPerUnit: number | null; /** A kilo item: its sack rice. */ kiloOfId?: string | null; priceMinor: number; forReview: boolean;
+  id: string; name: string; photoKey?: string | null; loose: boolean; gramsPerUnit: number | null; /** A kilo item: its sack rice. */ kiloOfId?: string | null; /** A kilo item (display rack): every sack that can fill it. */ sackIds?: string[]; priceMinor: number; forReview: boolean;
   /** Products → group; the quota promo is for some groups only. */
   categoryId?: string | null;
   /** Products → group's name (Premium, Imported, 5kg …): the group buttons on the product list. */
@@ -157,9 +157,10 @@ export default function BentaPanel() {
   const [checking, setChecking] = useState<{ productId: string; name: string } | null>(null);
   // "Open a sack" (sell per kilo): the kilo rice whose sack to open (null = choose it first, from the "Open sacks" button);
   // `addAfter` = a tap on it asked for one more kilo. `openCount` = how many sacks (filling the display rack).
-  const [opening, setOpeningRaw] = useState<{ kiloId: string | null; addAfter: boolean } | null>(null);
+  // A display rack can take several rice: `sackId` = the rice chosen to go in (null = ask, when there is a choice).
+  const [opening, setOpeningRaw] = useState<{ kiloId: string | null; sackId?: string | null; addAfter: boolean } | null>(null);
   const [openCount, setOpenCount] = useState(1);
-  const setOpening = (o: { kiloId: string | null; addAfter: boolean } | null) => { setOpeningRaw(o); setOpenCount(1); };
+  const setOpening = (o: { kiloId: string | null; sackId?: string | null; addAfter: boolean } | null) => { setOpeningRaw(o); setOpenCount(1); };
   const [openBusy, setOpenBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -629,7 +630,13 @@ export default function BentaPanel() {
     return -1;
   };
   /** A kilo rice's own sack (on this list), when it has one. */
-  const sackOf = (it: Item | undefined) => (it?.kiloOfId ? byId.get(it.kiloOfId) : undefined);
+  /** The sacks (on this list) that can fill a kilo rice: its own sack, then the display rack's. */
+  const sacksOf = (it: Item | undefined): Item[] => {
+    if (!it?.loose) return [];
+    const ids = it.sackIds ?? (it.kiloOfId ? [it.kiloOfId] : []);
+    return ids.map((id) => byId.get(id)).filter((x): x is Item => !!x && !!x.gramsPerUnit);
+  };
+  const canOpen = (it: Item | undefined) => sacksOf(it).length > 0;
   /** Kilos of a kilo rice still on this store's shelf after this sale (grams). */
   const kilosLeft = (it: Item) => (it.stock[locationId] ?? 0) - inSale(it.id);
   /**
@@ -639,7 +646,7 @@ export default function BentaPanel() {
   const addOne = async (it: Item, force = false) => {
     noteUse("pos", it.id);
     setError(null);
-    if (!force && it.loose && sackOf(it) && kilosLeft(it) < 1000) { setOpening({ kiloId: it.id, addAfter: true }); return; }
+    if (!force && it.loose && canOpen(it) && kilosLeft(it) < 1000) { setOpening({ kiloId: it.id, addAfter: true }); return; }
     const at = tapLineIdx(it);
     if (at >= 0) { bump(at, 1, 1); return; }
     const line: CartLine = { productId: it.id, mode: it.loose ? "KILO" : "PIECE", value: "1", sourceLocationId: null };
@@ -707,7 +714,7 @@ export default function BentaPanel() {
                 <span className="name">
                   {name}
                   {l.mode === "PESO" && <span className="text-muted"> (₱{l.value})</span>}
-                  {it?.loose && sackOf(it) && kilosLeft(it) < 0 && (
+                  {it?.loose && canOpen(it) && kilosLeft(it) < 0 && (
                     <button type="button" className="btn btn-sm btn-outline-success ms-1 open-sack-btn" onClick={() => setOpening({ kiloId: it.id, addAfter: false })}>
                       <i className="bi bi-box-arrow-up me-1" aria-hidden="true"></i>Open a sack
                     </button>
@@ -759,76 +766,107 @@ export default function BentaPanel() {
     <QuickCount productId={checking.productId} name={checking.name} loose={!!byId.get(checking.productId)?.loose} locationId={locationId}
       onCancel={() => setChecking(null)} onDone={async () => { setChecking(null); await loadCatalog(locationId); }} />
   );
-  /** Open sacks of a kilo rice's own rice at this store: n sacks off the shelf, their kilos (25 kg each) on. Works offline (sent later). */
-  const openSack = async (kilo: Item, addAfter: boolean, n: number) => {
-    const sack = sackOf(kilo);
-    if (!sack || !sack.gramsPerUnit) return;
+  /**
+   * Open sacks into a kilo rice (its display rack) at this store: n sacks of the chosen rice off the shelf,
+   * their kilos (25 kg each) on the rack. Works offline (sent later); a sack the count does not show still opens.
+   */
+  const openSack = async (kilo: Item, sack: Item, addAfter: boolean, n: number) => {
+    if (!sack.gramsPerUnit) return;
     const grams = sack.gramsPerUnit * n;
     const sacksWord = n === 1 ? "1 sack" : `${n} sacks`;
     setOpenBusy(true); setError(null);
     try {
-      const r = await sendStep("/admin/resacks/open-for-kilos", { locationId, kiloProductId: kilo.id, sacks: n }, `Open ${sacksWord}: ${sack.name}`);
+      const r = await sendStep("/admin/resacks/open-for-kilos", { locationId, kiloProductId: kilo.id, sackProductId: sack.id, sacks: n }, `Open ${sacksWord}: ${sack.name} → ${kilo.name}`);
       if (r.status === "sent" && !r.ok) { setError(errText(r.data as ApiBody | null, "Could not open the sack. Try again.")); return; }
       setItems((prev) => prev.map((x) => (x.id === kilo.id ? { ...x, tracked: true, stock: { ...x.stock, [locationId]: (x.stock[locationId] ?? 0) + grams } }
         : x.id === sack.id ? { ...x, stock: { ...x.stock, [locationId]: (x.stock[locationId] ?? 0) - n } } : x)));
-      toast(`${sacksWord} opened: ${kg(grams)} more ${kilo.name}${r.status === "queued" ? " (sent when the internet is back)" : ""}`, "success");
+      toast(`${sacksWord} of ${sack.name} opened: ${kg(grams)} more ${kilo.name}${r.status === "queued" ? " (sent when the internet is back)" : ""}`, "success");
       setOpening(null);
       if (addAfter) await addOne(kilo, true);
     } finally { setOpenBusy(false); }
   };
-  /** Kilo rice that can be filled from a sack here (for the "Open sacks" button). */
-  const kiloItems = items.filter((i) => i.loose && sackOf(i));
+  /** Kilo rice (racks) that can be filled from a sack here (for the "Open sacks" button). */
+  const kiloItems = items.filter((i) => canOpen(i));
   const openCard = opening && (() => {
-    // From the "Open sacks" button: first choose which kilo rice to fill.
-    if (!opening.kiloId) {
-      return (
-        <div className="sale-card fit-card mx-auto w-100" style={{ maxWidth: 520 }}>
-          <div className="card-body">
-            <h2 className="h4 text-center mb-2">Open sacks for kilo selling</h2>
-            <p className="text-center mb-3">Which rice goes on the display rack?</p>
-            <div className="d-grid gap-2 mb-3">
-              {kiloItems.map((k) => (
-                <button key={k.id} type="button" className="btn btn-outline-success btn-lg text-start d-flex justify-content-between align-items-center" onClick={() => setOpening({ kiloId: k.id, addAfter: false })}>
-                  <span>{sackOf(k)?.name ?? k.name}</span><span className="small text-muted">{kg(Math.max(0, kilosLeft(k)))} left</span>
-                </button>
-              ))}
-            </div>
-            <button type="button" className="btn btn-outline-dark btn-lg w-100" onClick={() => setOpening(null)}>Back</button>
-          </div>
-        </div>
-      );
-    }
-    const kilo = byId.get(opening.kiloId);
-    const sack = sackOf(kilo);
-    if (!kilo || !sack) return null;
-    const left = Math.max(0, kilosLeft(kilo));
-    const sacksHere = sack.stock[locationId] ?? 0;
-    const n = openCount;
-    const sacksWord = n === 1 ? "1 sack" : `${n} sacks`;
-    return (
+    const shell = (body: ReactNode) => (
       <div className="sale-card fit-card mx-auto w-100" style={{ maxWidth: 520 }}>
-        <div className="card-body">
-          <h2 className="h4 text-center mb-2">Open sacks?</h2>
-          <p className="text-center mb-2">{left > 0 ? <><strong>{kg(left)}</strong></> : <strong>No kilos</strong>} of {kilo.name} left at {here?.name ?? "this store"}.</p>
-          <p className="text-center mb-2">How many sacks of <strong>{sack.name}</strong>? {sacksHere > 0 ? `${sacksHere} ${sacksHere === 1 ? "sack" : "sacks"} here now.` : "The count shows no sack here, but you can still open."}</p>
-          <div className="qty d-flex justify-content-center align-items-center gap-2 mb-2" role="group" aria-label="How many sacks to open">
-            <button type="button" className="btn btn-outline-dark qty-btn" aria-label="One sack less" disabled={openBusy || n <= 1} onClick={() => setOpenCount(Math.max(1, n - 1))}>−</button>
-            <span className="qty-num fs-3 px-3" aria-live="polite">{n}</span>
-            <button type="button" className="btn btn-outline-dark qty-btn" aria-label="One sack more" disabled={openBusy || n >= 50} onClick={() => setOpenCount(Math.min(50, n + 1))}>+</button>
-          </div>
-          <p className="text-center mb-3">= <strong>{kg((sack.gramsPerUnit ?? 0) * n)}</strong> more kilo rice</p>
-          <div className="d-grid gap-2">
-            <button type="button" className="btn btn-success btn-lg py-3 fw-bold" disabled={openBusy} onClick={() => void openSack(kilo, opening.addAfter, n)}>
-              <i className="bi bi-box-arrow-up me-2" aria-hidden="true"></i>{openBusy ? "Opening…" : `Yes, open ${sacksWord}`}
-            </button>
-            <div className="d-flex gap-2">
-              <button type="button" className="btn btn-outline-dark btn-lg flex-fill" disabled={openBusy} onClick={() => setOpening(null)}>Back</button>
-              {opening.addAfter && <button type="button" className="btn btn-outline-dark btn-lg flex-fill" disabled={openBusy} onClick={() => { setOpening(null); void addOne(kilo, true); }}>Sell anyway</button>}
-            </div>
-          </div>
-        </div>
+        <div className="card-body">{body}</div>
       </div>
     );
+    const backBtn = (to: (() => void) | null) => (
+      <button type="button" className="btn btn-outline-dark btn-lg w-100" disabled={openBusy} onClick={() => (to ? to() : setOpening(null))}>Back</button>
+    );
+    // From the "Open sacks" button: first choose which rack (kilo rice) to fill.
+    if (!opening.kiloId) {
+      return shell(<>
+        <h2 className="h4 text-center mb-2">Open sacks for kilo selling</h2>
+        <p className="text-center mb-3">Which display rack?</p>
+        <div className="d-grid gap-2 mb-3">
+          {kiloItems.map((k) => (
+            <button key={k.id} type="button" className="btn btn-outline-success btn-lg text-start d-flex justify-content-between align-items-center gap-2" onClick={() => setOpening({ kiloId: k.id, addAfter: false })}>
+              <span>{k.name} <span className="fw-normal">· {peso(k.priceMinor)}/kg</span></span><span className="small text-nowrap">{kg(Math.max(0, kilosLeft(k)))} left</span>
+            </button>
+          ))}
+        </div>
+        {backBtn(null)}
+      </>);
+    }
+    const kilo = byId.get(opening.kiloId);
+    const sacks = sacksOf(kilo);
+    if (!kilo || sacks.length === 0) return null;
+    const left = Math.max(0, kilosLeft(kilo));
+    const leftLine = <p className="text-center mb-2">{left > 0 ? <strong>{kg(left)}</strong> : <strong>No kilos</strong>} of {kilo.name} left at {here?.name ?? "this store"}.</p>;
+    const sack = opening.sackId ? sacks.find((x) => x.id === opening.sackId) : sacks.length === 1 ? sacks[0] : undefined;
+    // A rack that takes several rice: which rice goes in now?
+    if (!sack) {
+      return shell(<>
+        <h2 className="h4 text-center mb-2">Which rice goes in?</h2>
+        {leftLine}
+        <div className="d-grid gap-2 mb-3">
+          {sacks.map((sk) => {
+            const here_ = sk.stock[locationId] ?? 0;
+            return (
+              <button key={sk.id} type="button" className="btn btn-outline-success btn-lg text-start d-flex justify-content-between align-items-center gap-2" onClick={() => setOpening({ ...opening, sackId: sk.id })}>
+                <span>{sk.name}</span>{here_ > 0 ? <span className="small text-nowrap">{here_} here</span> : <span className="badge text-bg-warning text-nowrap">None here</span>}
+              </button>
+            );
+          })}
+        </div>
+        <div className="d-flex gap-2">
+          {backBtn(opening.addAfter ? null : () => setOpening({ kiloId: null, addAfter: false }))}
+          {opening.addAfter && <button type="button" className="btn btn-outline-dark btn-lg w-100" onClick={() => { setOpening(null); void addOne(kilo, true); }}>Sell anyway</button>}
+        </div>
+      </>);
+    }
+    const sacksHere = Math.max(0, sack.stock[locationId] ?? 0);
+    const n = openCount;
+    const sacksWord = n === 1 ? "1 sack" : `${n} sacks`;
+    const over = n - sacksHere;
+    return shell(<>
+      <h2 className="h4 text-center mb-2">Open sacks?</h2>
+      {leftLine}
+      <p className="text-center mb-2">How many sacks of <strong>{sack.name}</strong>? {sacksHere > 0 ? `${sacksHere} ${sacksHere === 1 ? "sack" : "sacks"} here now.` : "The count shows none here."}</p>
+      <div className="qty d-flex justify-content-center align-items-center gap-2 mb-2" role="group" aria-label="How many sacks to open">
+        <button type="button" className="btn btn-outline-dark qty-btn" aria-label="One sack less" disabled={openBusy || n <= 1} onClick={() => setOpenCount(Math.max(1, n - 1))}>−</button>
+        <span className="qty-num fs-3 px-3" aria-live="polite">{n}</span>
+        <button type="button" className="btn btn-outline-dark qty-btn" aria-label="One sack more" disabled={openBusy || n >= 50} onClick={() => setOpenCount(Math.min(50, n + 1))}>+</button>
+      </div>
+      <p className="text-center mb-2">= <strong>{kg((sack.gramsPerUnit ?? 0) * n)}</strong> more on the rack</p>
+      {over > 0 && (
+        <div className="alert alert-warning py-2 text-center" role="status">
+          {sacksHere > 0 ? `Only ${sacksHere} here in the app.` : "The app shows no sack here."} You can still open {over === 1 ? "it" : "them"}; the stock count fixes the number.
+        </div>
+      )}
+      <div className="d-grid gap-2">
+        <button type="button" className="btn btn-success btn-lg py-3 fw-bold" disabled={openBusy} onClick={() => void openSack(kilo, sack, opening.addAfter, n)}>
+          <i className="bi bi-box-arrow-up me-2" aria-hidden="true"></i>{openBusy ? "Opening…" : `Yes, open ${sacksWord}`}
+        </button>
+        <div className="d-flex gap-2">
+          {backBtn(sacks.length > 1 ? () => { setOpeningRaw({ ...opening, sackId: null }); setOpenCount(1); } : opening.addAfter ? null : () => setOpening({ kiloId: null, addAfter: false }))}
+          {opening.addAfter && <button type="button" className="btn btn-outline-dark btn-lg w-100" disabled={openBusy} onClick={() => { setOpening(null); void addOne(kilo, true); }}>Sell anyway</button>}
+        </div>
+      </div>
+    </>);
   })();
   // Kilo rice: how much on one line, typed on the big pad: kilos (2.5) or pesos worth (₱100).
   const kilosCard = editing && editWhat === "kilos" && (() => {

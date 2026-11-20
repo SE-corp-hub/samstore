@@ -7,7 +7,7 @@ import { priceChanges } from "../domain/price-history.js";
 import { validateProductInput, slugify, type ProductInput } from "../domain/product-validation.js";
 import { newPhotoKey, parsePhoto, isPhotoKey } from "../domain/product-photo.js";
 import type { ApiError } from "@sam-store/contracts";
-import { kiloCostFrom, kiloName, kiloPriceFrom, kiloRefusal } from "../domain/kilo.js";
+import { isKiloItem, kiloCostFrom, kiloName, kiloPriceFrom, kiloRefusal } from "../domain/kilo.js";
 import { varietyOf } from "../domain/resack.js";
 
 export type AdminResult<T> = { ok: true; value: T } | { ok: false; error: ApiError };
@@ -57,6 +57,10 @@ export class ProductAdminService {
     });
     const kiloBySack = new Map<string, { id: string; name: string; isActive: boolean; priceMinor: number }>();
     for (const k of kiloItems) if (k.kiloOfId && !kiloBySack.has(k.kiloOfId)) kiloBySack.set(k.kiloOfId, { id: k.id, name: k.name, isActive: k.isActive, priceMinor: k.priceMinor });
+    // Display racks: the other sacks that can fill each kilo item.
+    const rackRows = await prisma.rackSack.findMany({ where: { storeId, kiloProductId: { in: products.filter((p) => p.soldByWeight).map((p) => p.id) } }, orderBy: { createdAt: "asc" }, select: { kiloProductId: true, sackProductId: true } });
+    const rackOf = new Map<string, string[]>();
+    for (const r of rackRows) rackOf.set(r.kiloProductId, [...(rackOf.get(r.kiloProductId) ?? []), r.sackProductId]);
     return products.map((p) => {
       const tracked = isTracked(p);
       const onHand = tracked ? p.stockLevels.reduce((s, l) => s + l.quantityOnHand, 0) : UNLIMITED_STOCK;
@@ -85,6 +89,7 @@ export class ProductAdminService {
       photoKey: p.photoKey,
       kiloOfId: p.kiloOfId,
       kiloItem: kiloBySack.get(p.id) ?? null,
+      rackSackIds: rackOf.get(p.id) ?? [],
       related: link("related"),
       upsell: link("upsell"),
       category: p.category,
@@ -381,7 +386,7 @@ export class ProductAdminService {
    * sack price (÷ kilos, rounded up, + ₱2). Off: hide the kilo item; kilos left stay in stock.
    * Only stores with "Sell per kilo here" on show it on POS / Pre-order.
    */
-  async setKiloItem(storeId: string, sackId: string, on: boolean): Promise<AdminResult<{ sackId: string; kiloItem: { id: string; name: string; isActive: boolean; priceMinor: number } | null }>> {
+  async setKiloItem(storeId: string, sackId: string, on: boolean, force = false): Promise<AdminResult<{ sackId: string; kiloItem: { id: string; name: string; isActive: boolean; priceMinor: number } | null }>> {
     const sack = await prisma.product.findFirst({
       where: { id: sackId, storeId },
       select: { id: true, sku: true, name: true, variety: true, soldByWeight: true, stockBaseUnit: true, stockBaseQuantity: true, stockConversionFamily: true, priceMinor: true, costMinor: true, categoryId: true, photoKey: true, isActive: true, kiloOfId: true },
@@ -389,6 +394,12 @@ export class ProductAdminService {
     if (!sack) return { ok: false, error: { type: "not_found", message: "Product not found" } };
     const existing = await prisma.product.findFirst({ where: { storeId, kiloOfId: sack.id }, orderBy: { createdAt: "asc" }, select: { id: true, name: true, isActive: true, priceMinor: true } });
     if (!on) {
+      // Kilos still on the rack would be stuck (hidden from POS and count): say so first.
+      if (existing?.isActive && !force) {
+        const left = await prisma.stockLevel.aggregate({ where: { storeId, productId: existing.id }, _sum: { quantityOnHand: true } });
+        const grams = left._sum.quantityOnHand ?? 0;
+        if (grams > 0) return { ok: false, error: { type: "conflict", message: `${existing.name} still has ${Math.round(grams / 100) / 10} kg. Sell or count them first, or hide it anyway.` } };
+      }
       if (existing?.isActive) await prisma.product.update({ where: { id: existing.id }, data: { isActive: false } });
       return { ok: true, value: { sackId: sack.id, kiloItem: existing ? { ...existing, isActive: false } : null } };
     }
@@ -421,6 +432,32 @@ export class ProductAdminService {
       return p;
     });
     return { ok: true, value: { sackId: sack.id, kiloItem: item } };
+  }
+
+  /**
+   * Display rack: which sacks can fill this kilo item (besides its own sack). Replaces the list.
+   * Any loose rice can be a rack, also one made by hand earlier (this links it to its sacks).
+   */
+  async setRackSacks(storeId: string, kiloId: string, sackIds: unknown): Promise<AdminResult<{ id: string; rackSackIds: string[] }>> {
+    if (!Array.isArray(sackIds) || sackIds.some((x) => typeof x !== "string")) return { ok: false, error: { type: "validation", errors: ["Choose the sacks"] } };
+    const kilo = await prisma.product.findFirst({ where: { id: kiloId, storeId }, select: { id: true, name: true, soldByWeight: true, stockBaseUnit: true, stockBaseQuantity: true, kiloOfId: true } });
+    if (!kilo) return { ok: false, error: { type: "not_found", message: "Product not found" } };
+    if (!isKiloItem(kilo)) return { ok: false, error: { type: "validation", errors: [`${kilo.name} is not sold per kilo`] } };
+    const ids = [...new Set(sackIds as string[])].filter((id) => id !== kilo.kiloOfId);
+    const sacks = await prisma.product.findMany({ where: { storeId, id: { in: ids } }, select: { id: true, name: true, soldByWeight: true, stockBaseUnit: true, stockBaseQuantity: true } });
+    if (sacks.length !== ids.length) return { ok: false, error: { type: "validation", errors: ["One of the sacks was not found"] } };
+    for (const sk of sacks) {
+      const why = kiloRefusal(sk);
+      if (why) return { ok: false, error: { type: "validation", errors: [why] } };
+    }
+    await prisma.$transaction([
+      prisma.rackSack.deleteMany({ where: { storeId, kiloProductId: kilo.id, sackProductId: { notIn: ids } } }),
+      ...ids.map((sackProductId) => prisma.rackSack.upsert({
+        where: { storeId_kiloProductId_sackProductId: { storeId, kiloProductId: kilo.id, sackProductId } },
+        create: { storeId, kiloProductId: kilo.id, sackProductId }, update: {},
+      })),
+    ]);
+    return { ok: true, value: { id: kilo.id, rackSackIds: ids } };
   }
 
   /**

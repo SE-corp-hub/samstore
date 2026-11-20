@@ -14,10 +14,10 @@ import type { ApiError } from "@sam-store/contracts";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../persistence/prisma-repositories.js";
 import { bufferIdOf, coverShortage } from "../domain/buffer.js";
-import { addForTrip, InsufficientStockError, releaseForTrip, type TripLeg } from "../domain/movements.js";
+import { addForTrip, deductStock, InsufficientStockError, releaseForTrip, type TripLeg } from "../domain/movements.js";
 import { gramsOf, planResack, ResackError, valueOf, type ResackPlan } from "../domain/resack.js";
 import { formatKilos } from "../domain/weight.js";
-import { isKiloItem, kiloCostFrom } from "../domain/kilo.js";
+import { isKiloItem, kiloCostFrom, rackCostAfter } from "../domain/kilo.js";
 import { chargeResackLoss } from "../payable/charges.js";
 import {
   captureSignatures, locationRefusal, nextDocNumber, requestApproval, requireSignatures, signatureErrorResult,
@@ -215,16 +215,22 @@ export class ResackService {
    * the closing count). Kept as a finished resack (openSack) so it is on the Resack list and reports.
    * A step sent again (offline queue) is answered once by the Idempotency-Key.
    */
-  async openSackForKilos(storeId: string, actor: Actor, input: { locationId?: string; kiloProductId?: string; sacks?: unknown }) {
+  async openSackForKilos(storeId: string, actor: Actor, input: { locationId?: string; kiloProductId?: string; sackProductId?: string; sacks?: unknown }) {
     return this.run(async () => {
       const loc = await this.location(storeId, actor, input.locationId);
       const n = input.sacks === undefined || input.sacks === null ? 1 : input.sacks;
       if (typeof n !== "number" || !Number.isInteger(n) || n < 1 || n > 50) throw new ResackError("Open 1 to 50 sacks at a time");
       const kilo = input.kiloProductId ? await prisma.product.findFirst({ where: { id: input.kiloProductId, storeId }, select: { ...productSelect, kiloOfId: true } }) : null;
       if (!kilo || !kilo.isActive || !isKiloItem(kilo)) throw new ResackError("Choose the kilo rice to fill");
-      if (!kilo.kiloOfId) throw new ResackError(`${kilo.name} has no sack linked. Open its sack on the Resack screen.`);
-      const sack = (await this.products(storeId, [kilo.kiloOfId])).get(kilo.kiloOfId);
-      if (!sack || !sack.isActive) throw new ResackError(`The sack rice of ${kilo.name} is not for sale any more`);
+      // The sacks that can fill it: its own sack, then the display rack's (RackSack).
+      const rack = await prisma.rackSack.findMany({ where: { storeId, kiloProductId: kilo.id }, orderBy: { createdAt: "asc" }, select: { sackProductId: true } });
+      const sources = [...new Set([...(kilo.kiloOfId ? [kilo.kiloOfId] : []), ...rack.map((r) => r.sackProductId)])];
+      if (sources.length === 0) throw new ResackError(`${kilo.name} has no sack linked. In Products, choose the sacks that go in it.`);
+      const sackId = input.sackProductId || (sources.length === 1 ? sources[0]! : "");
+      if (!sackId) throw new ResackError(`Choose which rice goes in ${kilo.name}`);
+      if (!sources.includes(sackId)) throw new ResackError(`That rice does not go in ${kilo.name}. In Products, tick it on ${kilo.name} first.`);
+      const sack = (await this.products(storeId, [sackId])).get(sackId);
+      if (!sack || !sack.isActive) throw new ResackError(`That sack rice is not for sale any more`);
       const grams = gramsOf(sack, n);
       const value = valueOf(sack, n);
       let out = { id: "", docNumber: "" };
@@ -239,14 +245,16 @@ export class ResackService {
           },
           select: { id: true, docNumber: true },
         });
-        const level = await tx.stockLevel.findFirst({ where: { storeId, productId: sack.id, warehouseId: loc.id }, select: { id: true } });
-        if (!level && !(await bufferIdOf(tx, storeId))) throw new StepError(conflict(`No ${sack.name} is recorded at ${loc.name}`));
+        // Like a sale: the sacks the count does not show come off the Buffer (Not counted yet) when there is one,
+        // else the store goes below zero. The rice is in the staff's hands, so the next count fixes the number.
         await coverShortage(tx, storeId, { productId: sack.id, warehouseId: loc.id, needed: n, actorId: actor.userId, documentType: "RESACK", documentId: job.id, reason: `open ${n === 1 ? "a sack" : `${n} sacks`} ${docNumber}` });
-        await releaseForTrip(tx, this.leg(storeId, sack.id, loc.id, actor, job.id, docNumber), 0, n, "RESACK_OUT");
+        await deductStock(tx, storeId, [{ productId: sack.id, quantity: n }], { type: "RESACK_OUT", createdBy: actor.userId, warehouseId: loc.id, documentType: "RESACK", documentId: job.id, allowBelowZero: true });
+        const onRack = await tx.stockLevel.findFirst({ where: { storeId, productId: kilo.id, warehouseId: loc.id }, select: { quantityOnHand: true } });
         await tx.resackOutput.create({ data: { storeId, jobId: job.id, productId: kilo.id, quantity: grams, grams, valueMinor: value } });
         await addForTrip(tx, this.leg(storeId, kilo.id, loc.id, actor, job.id, docNumber), grams, "RESACK_IN");
-        // The kilo rice costs what its sack cost, per kilo (profit and the store payable per kilo sold).
-        const perKilo = kiloCostFrom(sack.costMinor, grams / n);
+        // The kilo rice costs what its sacks cost, per kilo (profit and the store payable per kilo sold). A rack
+        // holding two rice at one price: the average by weight of what was on it and what came in.
+        const perKilo = rackCostAfter(onRack?.quantityOnHand ?? 0, kilo.costMinor, grams, kiloCostFrom(sack.costMinor, grams / n));
         if (perKilo > 0 && perKilo !== kilo.costMinor) await tx.product.update({ where: { id: kilo.id }, data: { costMinor: perKilo } });
         await tx.auditLog.create({
           data: { storeId, actorType: "USER", actorId: actor.userId, action: "resack.open_sack_pos", entityType: "ResackJob", entityId: job.id, after: { sack: sack.name, sacks: n, kilo: kilo.name, grams, locationId: loc.id } },

@@ -1,6 +1,6 @@
-import { describe, it } from "node:test";
+import { describe, it, test } from "node:test";
 import assert from "node:assert/strict";
-import { isKiloItem, kiloCostFrom, kiloName, kiloPriceFrom, kiloRefusal } from "./kilo.js";
+import { isKiloItem, kiloCostFrom, kiloName, kiloPriceFrom, kiloRefusal, rackCostAfter } from "./kilo.js";
 
 const sack = { name: "Samrice Sinandomeng 25kg", stockBaseUnit: "g", stockBaseQuantity: 25_000 };
 
@@ -28,4 +28,12 @@ describe("sell per kilo", () => {
     assert.match(kiloRefusal({ name: "X", stockBaseUnit: "g", stockBaseQuantity: 1 }) ?? "", /already/);
     assert.equal(isKiloItem({ stockBaseUnit: "g", stockBaseQuantity: 1 }), true);
   });
+});
+
+test("rack cost = average by weight of what is on the rack and what comes in", () => {
+  assert.equal(rackCostAfter(0, 0, 25_000, 5_200), 5_200, "empty rack: the new sack's cost");
+  assert.equal(rackCostAfter(-500, 5_000, 25_000, 4_800), 4_800, "below zero counts as none");
+  assert.equal(rackCostAfter(25_000, 5_200, 25_000, 4_800), 5_000, "half and half");
+  assert.equal(rackCostAfter(25_000, 5_200, 50_000, 4_600), 4_800, "one part to two");
+  assert.equal(rackCostAfter(10_000, 5_000, 0, 9_999), 5_000, "nothing added: unchanged");
 });

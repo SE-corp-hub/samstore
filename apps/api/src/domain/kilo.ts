@@ -55,3 +55,14 @@ export function kiloCostFrom(sackCostMinor: number, sackGrams: number): number {
   if (!(sackCostMinor > 0) || !(sackGrams > 0)) return 0;
   return Math.round((sackCostMinor * 1000) / sackGrams);
 }
+
+/**
+ * A rack's cost per kilo after more rice goes in: the average of what is on the rack and what comes in,
+ * by weight (a rack can hold Sinandomeng and Mikami at one price). Rice below zero on the rack counts as none.
+ */
+export function rackCostAfter(onRackGrams: number, onRackCostMinor: number, addGrams: number, addCostMinor: number): number {
+  const have = Math.max(0, onRackGrams);
+  if (!(addGrams > 0)) return onRackCostMinor;
+  if (!(have > 0) || !(onRackCostMinor > 0)) return addCostMinor;
+  return Math.round((have * onRackCostMinor + addGrams * addCostMinor) / (have + addGrams));
+}
