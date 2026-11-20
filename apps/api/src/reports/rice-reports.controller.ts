@@ -136,6 +136,20 @@ export class RiceReportsController {
     return unwrap(await this.cash.cancel(storeId, actor, str(body?.id) ?? "", str(body?.reason)));
   }
 
+  /** POST /admin/rice/cash/in { locationId?, amountMinor, note, at? } — "Cash in" on POS: money put into the drawer that is not a sale. */
+  @Post("cash/in")
+  async cashIn(@Req() req: Req_, @Body() body: Record<string, unknown>, @Headers("x-store-id") h?: string) {
+    const { storeId, actor } = await this.ctx(req, h);
+    return unwrap(await this.cash.cashIn(storeId, actor, { locationId: str(body?.locationId), amountMinor: body?.amountMinor, note: str(body?.note), at: str(body?.at) }));
+  }
+
+  /** POST /admin/rice/cash/in/cancel { id, reason } — owner only; it stays on the list, crossed out. */
+  @Post("cash/in/cancel")
+  async cashInCancel(@Req() req: Req_, @Body() body: Record<string, unknown>, @Headers("x-store-id") h?: string) {
+    const { storeId, actor } = await this.ctx(req, h);
+    return unwrap(await this.cash.cancelCashIn(storeId, actor, str(body?.id) ?? "", str(body?.reason)));
+  }
+
   /** GET /admin/rice/stock-live — every rice product × location, in transit, in resack, totals. */
   @Get("stock-live")
   async stockLive(@Req() req: Req_, @Headers("x-store-id") h?: string) {

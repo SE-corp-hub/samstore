@@ -44,6 +44,7 @@ import { useFitHeight } from "../../lib/use-fit-height";
 import { quickCash } from "../../lib/quick-cash";
 import Steps from "./Steps";
 import DayBar, { type DayState } from "./DayBar";
+import DrawerMoney, { DrawerMoneyButtons, type DrawerKind } from "./DrawerMoney";
 import OrderCheck, { type CheckLine } from "./OrderCheck";
 import ProductFinder from "./ProductFinder";
 import PickTile from "./PickTile";
@@ -195,6 +196,8 @@ export default function BentaPanel() {
   const [startOpen, setStartOpen] = useState(() => !savedCart()?.cart.length);
   // Open day + Close day (Z-read): while the store's day is not open, the price list steps aside.
   const [dayState, setDayState] = useState<DayState>("off");
+  // "Cash in" / "Expense": drawer money that is not a sale (on the Z-read).
+  const [drawer, setDrawer] = useState<DrawerKind | null>(null);
 
   const catalogAsk = useRef(0); // only the latest location asked for may fill the screen
   /** The price list of a location: the copy saved on this tablet at once, then the server's. Returns the location shown. */
@@ -1091,12 +1094,15 @@ export default function BentaPanel() {
           <i className="bi bi-box-arrow-up me-1" aria-hidden="true"></i>Open sacks
         </button>
       )}
+      {step === "pick" && !newItem && !editing && !checking && !opening && !!locationId && (!mustChoose || storeKnown) && !dayBlocked && <DrawerMoneyButtons onOpen={setDrawer} />}
       {!sideBySide && step === "pick" && !newItem && !editing && !checking && !opening && (mustChoose ? chosenRow : customerSelect)}
     </div>
   );
+  const drawerModal = drawer && <DrawerMoney kind={drawer} locationId={locationId} placeName={here?.name ?? storeName} onClose={() => setDrawer(null)} />;
   return (
     <div ref={fitRef} className="sell-screen tone-sell sell-fit">
       <h1 className="visually-hidden">POS</h1>
+      {drawerModal}
       {sideBySide ? (
         <div className="fit-row">
           <div className="fit-col fit-main">

@@ -68,7 +68,8 @@ export function ZView({ z, kind }: { z: DayFigures; kind: "X" | "Z" }) {
       {z.receipts.first && row("Receipts", z.receipts.first === z.receipts.last ? z.receipts.first : `${z.receipts.first} to ${z.receipts.last}`)}
       <h3 className="h6 mt-3">Cash drawer</h3>
       {row("Change fund", peso(z.cash.floatMinor))}
-      {row("Cash in", peso(z.cash.inMinor))}
+      {row("Cash from customers", peso(z.cash.inMinor))}
+      {(z.cash.addedMinor ?? 0) > 0 && row("Cash in (money added)", peso(z.cash.addedMinor ?? 0))}
       {z.cash.givenBackMinor > 0 && row("Given back", `−${peso(z.cash.givenBackMinor)}`)}
       {z.cash.paidOutMinor > 0 && row("Expenses from the drawer", `−${peso(z.cash.paidOutMinor)}`)}
       {ownerKept(z) > 0 && row("Owner kept (own sales)", `−${peso(ownerKept(z))}`)}
@@ -313,12 +314,18 @@ export default function CloseDay({ locationId, storeName, placeName, heldCount, 
             {!fig ? <p className="text-muted">Loading…</p> : fig.cashOut.length === 0 ? <p className="mb-2">Nothing written down yet.</p> : (
               <ul className="list-group mb-2">{fig.cashOut.map((c, i) => <li key={i} className="list-group-item d-flex justify-content-between gap-2"><span>{c.what} <span className="text-muted small">{timeText(c.at)}</span></span><strong>{peso(c.amountMinor)}</strong></li>)}</ul>
             )}
+            {!!fig?.cashAdded?.length && (
+              <>
+                <h3 className="h6 mt-3">Cash put into the drawer today (Cash in)</h3>
+                <ul className="list-group mb-2">{fig.cashAdded.map((c, i) => <li key={i} className="list-group-item d-flex justify-content-between gap-2"><span>{c.what} <span className="text-muted small">{timeText(c.at)}</span></span><strong>{peso(c.amountMinor)}</strong></li>)}</ul>
+              </>
+            )}
             <p className="fw-semibold mb-2">Did anyone take cash out that is NOT on this list (an expense, cash for the owner)?</p>
             <div className="d-flex flex-wrap gap-2 mb-2" role="group" aria-label="Cash taken out">
               <button type="button" className={`btn btn-lg ${cashOutOk === true ? "btn-dark" : "btn-outline-dark"}`} aria-pressed={cashOutOk === true} onClick={() => setCashOutOk(true)}>No, all written down</button>
               <button type="button" className={`btn btn-lg ${cashOutOk === false ? "btn-dark" : "btn-outline-dark"}`} aria-pressed={cashOutOk === false} onClick={() => setCashOutOk(false)}>Yes</button>
             </div>
-            {cashOutOk === false && <div className="alert alert-warning py-2">Write it down first: Menu → Expenses (paid from the drawer), or Money → Cash → Hand over. Then come back and close.</div>}
+            {cashOutOk === false && <div className="alert alert-warning py-2">Write it down first: tap Back, then Expense or Cash in on POS (or Money → Cash → Hand over). Then come back and close.</div>}
             <button type="button" className="btn btn-success btn-lg w-100 mt-2" disabled={!canLeaveCheck} onClick={() => setStep(1)}>Next: count the money</button>
           </div></div>
         ) : step === 1 && fig ? (
@@ -383,7 +390,8 @@ export default function CloseDay({ locationId, storeName, placeName, heldCount, 
 
                 <h3 className="zc-h zc-h-sub">Cash drawer</h3>
                 {sumRow("Change fund (opening)", peso(fig.cash.floatMinor))}
-                {sumRow("Cash in", peso(fig.cash.inMinor))}
+                {sumRow("Cash from customers", peso(fig.cash.inMinor))}
+                {(fig.cash.addedMinor ?? 0) > 0 && sumRow("Cash in (added)", peso(fig.cash.addedMinor ?? 0))}
                 {fig.cash.givenBackMinor > 0 && sumRow("Given back", `−${peso(fig.cash.givenBackMinor)}`)}
                 {fig.cash.paidOutMinor > 0 && sumRow("Expenses", `−${peso(fig.cash.paidOutMinor)}`)}
                 {ownerKept(fig) > 0 && sumRow("Owner kept (own sales)", `−${peso(ownerKept(fig))}`)}

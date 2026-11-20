@@ -28,11 +28,12 @@ export interface DayFigures {
   creditCollectedMinor: number;
   /** Rice sold per kilo this day (already inside the sales). Missing on Z-reads made before sell per kilo. */
   perKilo?: { grams: number; totalMinor: number; lines: number };
-  cash: { floatMinor: number; inMinor: number; givenBackMinor: number; paidOutMinor: number; handedOverMinor: number; shouldBeMinor: number; countedMinor: number | null; differenceMinor: number | null; ownerKeptMinor?: number };
+  cash: { floatMinor: number; inMinor: number; givenBackMinor: number; paidOutMinor: number; handedOverMinor: number; shouldBeMinor: number; countedMinor: number | null; differenceMinor: number | null; ownerKeptMinor?: number; addedMinor?: number };
   /** Sales the owner rang at this store this day, and the cash the owner kept (missing on older Z-reads). */
   ownerSales?: { orderNumber: string; at: string; totalMinor: number; method: string; ownerKeptMinor: number; by: string }[];
   gcash: { inMinor: number; givenBackMinor: number; shouldBeMinor: number; countedMinor: number | null; differenceMinor: number | null };
   cashOut: { what: string; amountMinor: number; at: string }[];
+  cashAdded?: { what: string; amountMinor: number; at: string }[];
   cashCounts: Record<string, number> | null;
   keepFloatMinor: number | null;
   varianceReason: string | null;
@@ -118,7 +119,8 @@ export function zSlip(z: DayFigures, storeName: string, kind: "Z" | "X"): Slip {
     ...(z.perKilo && z.perKilo.grams > 0 ? [{ name: `Per kilo sold (${kg(z.perKilo.grams)})`, qty: peso(z.perKilo.totalMinor) }] : []),
     { name: "— CASH DRAWER —", qty: "" },
     { name: "Change fund", qty: peso(z.cash.floatMinor) },
-    { name: "Cash in", qty: peso(z.cash.inMinor) },
+    { name: "Cash from customers", qty: peso(z.cash.inMinor) },
+    ...(z.cash.addedMinor ? [{ name: "Cash in (added)", qty: peso(z.cash.addedMinor) }] : []),
     ...(z.cash.givenBackMinor ? [{ name: "Given back", qty: `-${peso(z.cash.givenBackMinor)}` }] : []),
     ...(z.cash.paidOutMinor ? [{ name: "Expenses", qty: `-${peso(z.cash.paidOutMinor)}` }] : []),
     ...(ownerKept(z) ? [{ name: "Owner kept (own sales)", qty: `-${peso(ownerKept(z))}` }] : []),

@@ -11,7 +11,7 @@ import { prisma } from "../persistence/prisma-repositories.js";
 
 /** Activity: removed for the store. */
 export const CLEAR_TABLES = [
-  "ApprovalRequest", "Cart", "CartItem", "CashHandover", "CashMovement", "CourierRemittance",
+  "ApprovalRequest", "Cart", "CartItem", "CashHandover", "CashIn", "CashMovement", "CourierRemittance",
   "CreditEntry", "DailyClose", "DeliveryBooking", "DeliveryEvent", "Expense", "FlowDraft",
   "JournalEntry", "JournalEntryLine", "LoyaltyEntry", "Order", "OrderClaimToken", "OrderItem",
   "OrderStatusHistory", "OutboxEvent", "Payment", "PaymentStatusHistory", "Purchase", "PurchaseItem",

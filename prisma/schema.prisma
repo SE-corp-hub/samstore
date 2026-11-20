@@ -246,6 +246,7 @@ model Store {
   creditEntries          CreditEntry[]
   expenses               Expense[]
   cashHandovers CashHandover[]
+  cashIns       CashIn[]
   purchases              Purchase[]
   suppliers              Supplier[] // M6: vendor master per store
   rolePermissions        RolePermission[] // M7: roles × permissions deny matrix
@@ -870,6 +871,7 @@ model Warehouse {
   sellPerKilo           Boolean   @default(false)
   expenses          Expense[]
   cashHandovers     CashHandover[]
+  cashIns           CashIn[]
   paymentsFor       Payment[] @relation("PaymentForLocation")
   createdAt DateTime     @default(now())
   updatedAt DateTime     @updatedAt
@@ -1323,6 +1325,26 @@ model CashHandover {
 
   @@index([storeId, locationId, businessDate])
   @@index([orderId])
+}
+
+// Cash in: money put INTO a store's drawer that is not a sale (more change, the owner adds money).
+// Raises that store's expected cash on its day (cash/cash-book.ts), so the Z-read balances.
+model CashIn {
+  id          String    @id @default(cuid())
+  storeId     String
+  store       Store     @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  locationId  String
+  location    Warehouse @relation(fields: [locationId], references: [id], onDelete: Restrict)
+  amountMinor Int
+  note        String?
+  receivedAt  DateTime  @default(now()) // when the money went into the drawer
+  createdBy   String
+  voidedAt    DateTime? // a wrong one is cancelled, never deleted
+  voidedById  String?
+  voidReason  String?
+  createdAt   DateTime  @default(now())
+
+  @@index([storeId, locationId, receivedAt])
 }
 
 // ─────────────────────────────── Purchases / replenishment ───────────────────────────────

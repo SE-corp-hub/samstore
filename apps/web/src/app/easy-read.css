@@ -931,3 +931,15 @@ html[data-text-size] .start-cust.chosen, .start-cust.chosen { border: 3px solid 
 @media (max-width: 575.98px) { .zc-actions { grid-template-columns: 1fr 1fr; } .zc-post { grid-column: 1 / -1; } }
 .zc-gcash { margin-top: 1rem; padding-top: 0.75rem; border-top: 2px solid #e0d9ce; }
 .zc-gcash .zc-sum-box .zc-box { max-width: 9rem; }
+
+/* §19 "Cash in" and "Expense" on POS (drawer money that is not a sale; on the Z-read). */
+.rice-ui .drawer-btn { min-height: 2.75rem; font-weight: 700; white-space: nowrap; background: #fff; }
+.rice-ui .btn-outline-danger.drawer-btn { color: #a11a1a; border-color: #a11a1a; }
+.rice-ui .btn-outline-danger.drawer-btn:hover, .rice-ui .btn-outline-danger.drawer-btn:active { color: #fff; background: #a11a1a; }
+.drawer-grid { display: grid; gap: 1rem; grid-template-columns: 1fr; }
+.drawer-pad { max-width: 22rem; width: 100%; margin: 0 auto; }
+.drawer-chips { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.5rem; }
+.drawer-chips .btn { min-height: 3rem; font-weight: 600; white-space: normal; }
+@media (min-width: 700px) {
+  .drawer-grid { grid-template-columns: minmax(0, 22rem) minmax(0, 1fr); align-items: start; }
+}
