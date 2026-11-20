@@ -16,6 +16,7 @@ import { askConfirm } from "../../lib/ask";
 import { cachedGet, savedCopy, useOffline } from "../../lib/offlineCache";
 import { LOCK_PATH, type FeatureLock } from "../../lib/feature-lock";
 import PinLockSettings, { lockSummary } from "./PinLockSettings";
+import StoreLockSettings from "./StoreLockSettings";
 import { getPrinterSettings } from "../../lib/printer-settings";
 import { peso } from "../../lib/number-format";
 import { useMediaQuery, WIDE } from "../../lib/use-media-query";
@@ -615,7 +616,15 @@ export default function SettingsPanel({ role = "" }: { role?: string }) {
           </>
         );
       case "lock":
-        return <PinLockSettings canChange={isOwnerRole(role) || role === "PLATFORM_ADMIN"} onSaved={() => setPrinterTick((t) => t + 1)} />;
+        return (
+          <>
+            {/* The owner's lock (whole business); a manager sees only the stores' own locks below. */}
+            {(isOwnerRole(role) || role === "PLATFORM_ADMIN") && <PinLockSettings canChange onSaved={() => setPrinterTick((t) => t + 1)} />}
+            <h3 className="h5 mt-4 mb-1">Each store&apos;s own PIN lock</h3>
+            <p className="text-muted mb-3">A store head or a manager can set these too. If a store head forgets the store PIN, the owner sets a new one here.</p>
+            <StoreLockSettings role={role} />
+          </>
+        );
       case "account":
         return <AccountSection />;
     }

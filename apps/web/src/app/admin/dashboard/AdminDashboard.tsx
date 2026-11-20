@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   getAdminToken, getAdminStoreId, setAdminStoreId, getAdminRole, clearAdminSession,
-  NAV_GROUPS, MENU_HIDDEN, REPORT_SECTIONS, isReportSection, allowedTabs, setHomeLocation, adminHeaders, defaultTabFor, isOwnerRole, handleUnauthorized, STORES_CHANGED_EVENT, navItemFor, navGroupFor, toneFor,
+  NAV_GROUPS, MENU_HIDDEN, REPORT_SECTIONS, isReportSection, allowedTabs, setHomeLocation, adminHeaders, defaultTabFor, isOwnerRole, handleUnauthorized, STORES_CHANGED_EVENT, navItemFor, navGroupFor, toneFor, getHomeLocation, isStoreLogin,
 } from "../../../lib/admin";
 import dynamic from "next/dynamic";
 import { API_URL } from "../../../config";
@@ -26,12 +26,13 @@ import QueueBadge, { SyncBar } from "../../../components/admin/QueueBadge";
 import StaffHome from "../../../components/admin/StaffHome";
 import TextSizePicker from "../../../components/admin/TextSizePicker";
 import LockScreen from "../../../components/admin/LockScreen";
+import StoreLockSettings from "../../../components/admin/StoreLockSettings";
 import OrderAlerts from "../../../components/admin/OrderAlerts";
 import { OPEN_ORDER_EVENT, OPEN_ORDER_KEY } from "../../../lib/order-pulse";
-import { isScreenLocked, lockAgain, lockListFor, useFeatureLock } from "../../../lib/feature-lock";
+import { anyLockFor, isScreenClosed, isScreenLocked, lockAgain, storeLockOf, whoLocks, useFeatureLock } from "../../../lib/feature-lock";
 
 /** Rice Ops M10: the store screens get the large, high-contrast look (globals.css .rice-ui). */
-const RICE_TABS = new Set(["zreads", "pos", "preorders", "orders", "utang", "utangrice", "agentorders", "agent", "approvals", "moves", "returns", "resack", "pasok", "purchaseorders", "bilangin", "storereport", "profit", "payable", "ulat", "drafts", "kargadors", "settings", "expenses", "cash", "storeprices", "storelink",
+const RICE_TABS = new Set(["zreads", "pos", "preorders", "orders", "utang", "utangrice", "agentorders", "agent", "approvals", "moves", "returns", "resack", "pasok", "purchaseorders", "bilangin", "storereport", "profit", "payable", "ulat", "drafts", "kargadors", "settings", "expenses", "cash", "storeprices", "storelock", "storelink",
   // 2026-11-12, step 4 of the app review: the last old-look screens get the same large, easy-read look.
   "products", "inventory", "warehouses", "customers", "overview", "reports"]);
 // The landing panel stays eager (it is the first paint); every other panel loads when
@@ -422,16 +423,20 @@ export default function AdminDashboard() {
     .map((g) => ({ ...g, items: g.items.filter((i) => allowed.includes(i.id) && !MENU_HIDDEN.has(i.id)) }))
     .filter((g) => g.items.length > 0);
 
-  const pinLocked = (id: string) => isScreenLocked(pinLock.lock, role, id);
-  const showPinPad = tab !== "home" && pinLocked(tab) && !pinLock.open;
-  const anyPinLock = !!pinLock.lock?.on && (pinLock.lock[lockListFor(role)]?.length ?? 0) > 0;
+  // A login tied to one store also gets that store's own lock (set by its head, a manager or the owner).
+  const lockHome = isStoreLogin(role) ? getHomeLocation() : null;
+  const pinLocked = (id: string) => isScreenLocked(pinLock.lock, role, id, lockHome);
+  const pinClosed = (id: string) => isScreenClosed(pinLock.lock, role, id, lockHome, pinLock.open);
+  const showPinPad = tab !== "home" && pinClosed(tab);
+  const anyPinLock = anyLockFor(pinLock.lock, role, lockHome);
+  const anyOpen = pinLock.open.all || pinLock.open.store;
   const lockIcon = (id: string) => (pinLocked(id)
-    ? <i className={`bi ${pinLock.open ? "bi-unlock" : "bi-lock-fill"} ms-auto nav-lock`} role="img" aria-label={pinLock.open ? "Locked screen, open now" : "Needs the lock PIN"}></i>
+    ? <i className={`bi ${pinClosed(id) ? "bi-lock-fill" : "bi-unlock"} ms-auto nav-lock`} role="img" aria-label={pinClosed(id) ? "Needs the lock PIN" : "Locked screen, open now"}></i>
     : null);
 
   const renderTab = () => {
     switch (tab) {
-      case "home": return <StaffHome role={role} onNavigate={(id) => { userNavigated.current = true; setTab(id); }} labelFor={navLabel} isLocked={pinLock.open ? undefined : pinLocked} />;
+      case "home": return <StaffHome role={role} onNavigate={(id) => { userNavigated.current = true; setTab(id); }} labelFor={navLabel} isLocked={pinClosed} />;
       case "overview": return <OverviewPanel onNavigate={setTab} storeName={active?.name} />;
       // One POS: the rice-ready counter screen.
       case "pos": return <PosPanel />;
@@ -442,6 +447,7 @@ export default function AdminDashboard() {
       case "expenses": return <ExpensesPanel />;
       case "cash": return <CashPanel />;
       case "storeprices": return <StorePricesPanel />;
+      case "storelock": return <StoreLockSettings role={role} />;
       case "purchases": return <PurchasesPanel />;
       case "storelink": return <StoreLinkPanel />;
       case "reports": return <ReportsPanel />;
@@ -643,7 +649,7 @@ export default function AdminDashboard() {
                   ))}
                 </select>
               )}
-              {anyPinLock && pinLock.open && (
+              {anyPinLock && anyOpen && (
                 <button type="button" className="btn btn-sm btn-outline-dark lock-now" onClick={lockAgain} title="Lock the locked screens again">
                   <i className="bi bi-lock-fill me-1" aria-hidden="true"></i>Lock
                 </button>
@@ -670,6 +676,8 @@ export default function AdminDashboard() {
           {showPinPad && pinLock.lock ? (
             <LockScreen
               lock={pinLock.lock}
+              kind={whoLocks(pinLock.lock, role, tab, lockHome) ?? "owner"}
+              storeLock={storeLockOf(pinLock.lock, lockHome)}
               screenName={(() => { const n = navItemFor(NAV_ID[tab] ?? tab); return n ? navLabel(n.id, n.label) : "This screen"; })()}
               ownerSignedIn={isOwnerRole(role)}
               onBack={() => { userNavigated.current = true; setTab(BAR_ROLES.includes(role) ? "home" : defaultTabFor(role)); }}
@@ -722,7 +730,7 @@ export default function AdminDashboard() {
                 onClick={() => { userNavigated.current = true; setTab(b.id); setMobileNav(false); }}
               >
                 <i className={`bi ${b.icon}`}></i>
-                <span>{b.label}{pinLocked(b.id) && !pinLock.open && <i className="bi bi-lock-fill ms-1 bar-lock" role="img" aria-label="Needs the lock PIN"></i>}</span>
+                <span>{b.label}{pinClosed(b.id) && <i className="bi bi-lock-fill ms-1 bar-lock" role="img" aria-label="Needs the lock PIN"></i>}</span>
               </button>
             ))}
             <button

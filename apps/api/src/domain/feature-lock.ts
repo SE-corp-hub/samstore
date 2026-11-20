@@ -52,3 +52,55 @@ export function readFeatureLock(raw: unknown): FeatureLock | null {
     updatedAt: typeof r.updatedAt === "string" ? r.updatedAt : "",
   };
 }
+
+// ───────── each store's own PIN lock (2026-11-20) ─────────
+// The owner asked that a manager can set the PIN lock per location. Each store (location) can have
+// its own lock PIN and its own list of screens. That list applies to every login whose home store
+// it is (the store head and the counter staff). The owner's lock above still applies on top, and the
+// owner's lock PIN opens a store's locked screens too. Who may set a store's lock: the owner, a
+// manager (any store), and the head of that store (its own store only).
+
+export interface LocationLock {
+  salt: string;
+  hash: string;
+  iterations: number;
+  screens: string[];
+  updatedAt: string;
+}
+
+/** Location ids are cuids (letters and digits); anything else is dropped. */
+const LOCATION_ID = /^[A-Za-z0-9_-]{6,64}$/;
+
+/** The stores' own locks from the stored JSON (`featureLock.locations`); broken entries are dropped. */
+export function readLocationLocks(raw: unknown): Record<string, LocationLock> {
+  const out: Record<string, LocationLock> = {};
+  if (!raw || typeof raw !== "object") return out;
+  const locs = (raw as Record<string, unknown>).locations;
+  if (!locs || typeof locs !== "object") return out;
+  for (const [id, v] of Object.entries(locs as Record<string, unknown>)) {
+    if (!LOCATION_ID.test(id) || !v || typeof v !== "object") continue;
+    const r = v as Record<string, unknown>;
+    if (typeof r.salt !== "string" || typeof r.hash !== "string" || typeof r.iterations !== "number") continue;
+    out[id] = { salt: r.salt, hash: r.hash, iterations: r.iterations, screens: cleanScreenIds(r.screens) ?? [], updatedAt: typeof r.updatedAt === "string" ? r.updatedAt : "" };
+  }
+  return out;
+}
+
+/** The whole stored JSON: the owner's lock (or none) plus the stores' own locks. */
+export function writeFeatureLock(owner: FeatureLock | null, locations: Record<string, LocationLock>): Record<string, unknown> | null {
+  const hasLocs = Object.keys(locations).length > 0;
+  if (!owner && !hasLocs) return null;
+  return { ...(owner ?? {}), ...(hasLocs ? { locations } : {}) };
+}
+
+export interface LockActor { role: string; homeLocationId: string | null; isHead?: boolean }
+
+/** May this login set the PIN lock of this store? Owner and manager: any store. Store head: its own store. */
+export function canSetLocationLock(actor: LockActor, locationId: string): boolean {
+  if (["OWNER", "STORE_OWNER", "PLATFORM_ADMIN", "MANAGER"].includes(actor.role)) return true;
+  return !!actor.isHead && !!actor.homeLocationId && actor.homeLocationId === locationId;
+}
+
+/** Does this login sit behind one store (so it only needs that store's lock)? */
+export const isOneStoreLogin = (actor: LockActor): boolean =>
+  !["OWNER", "STORE_OWNER", "PLATFORM_ADMIN", "MANAGER"].includes(actor.role) && !!actor.homeLocationId;

@@ -241,6 +241,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { id: "team", label: "Team", icon: "bi-people", hint: "Staff accounts, roles and PINs" },
       { id: "settings", label: "Settings", icon: "bi-gear", hint: "Store name, receipts, printer" },
       { id: "countersettings", label: "Counter & printer", icon: "bi-sliders", hint: "Cash drawer and printer here" },
+      { id: "storelock", label: "Store PIN lock", icon: "bi-shield-lock", hint: "Screens that ask for this store's PIN" },
       // Hidden: no role list includes them. Add the id to OWNER_TABS to show one again.
       // Purchases (2026-11-12): it added stock to the main store with no signature, a second way in beside Stock in,
       // so one delivery could be counted twice. Rice arrives through Stock in; what is owed is on Supplier orders.
@@ -389,7 +390,13 @@ export function allowedTabs(role: string): string[] {
   if (!isStoreLogin(role)) return tabs;
   const own = tabs.filter((t) => !WHOLE_BUSINESS_TABS.includes(t));
   // The head of a store also gets the screen for that store's own prices.
-  return role === "STAFF" && isStoreHead() ? [...own, "storeprices"] : own;
+  return role === "STAFF" && isStoreHead() ? [...own, "storeprices", "storelock"] : own;
+}
+
+/** Screens a login tied to one store can open (what a store's own PIN lock can lock). */
+export function storeLoginTabs(): string[] {
+  const all = new Set([...(TABS_BY_ROLE.STAFF ?? []), ...(TABS_BY_ROLE.SALES_AGENT ?? []), "storeprices", "storelock"]);
+  return [...all].filter((t) => !WHOLE_BUSINESS_TABS.includes(t));
 }
 
 /** Fetches orders for the admin dashboard (demo: reads from API; auth via token). */

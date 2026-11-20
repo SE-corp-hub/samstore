@@ -20,7 +20,7 @@ import {
   UseGuards,
 } from "@nestjs/common";
 import { redactCost, seesCost } from "../domain/cost-redact.js";
-import { cleanScreenIds, lockPinMatches, newLockSecret, readFeatureLock } from "../domain/feature-lock.js";
+import { canSetLocationLock, cleanScreenIds, isOneStoreLogin, lockPinMatches, newLockSecret, readFeatureLock, readLocationLocks, writeFeatureLock, type LocationLock } from "../domain/feature-lock.js";
 import { verifyPassword } from "../auth/auth.domain.js";
 import { Prisma } from "@prisma/client";
 import type { ApiError, PosHoldItemsRequest } from "@sam-store/contracts";
@@ -977,10 +977,68 @@ export class AdminController {
   async getFeatureLock(@Req() req: Request & { user?: AuthPrincipal }, @Headers("x-store-id") headerStoreId?: string) {
     const user = req.user;
     requireUser(user);
-    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.VIEW);
+    const { storeId, role } = await resolveTenant(user, headerStoreId, TENANT_ROLES.VIEW);
     const row = await prisma.storeSettings.findUnique({ where: { storeId }, select: { featureLock: true } });
     const lock = readFeatureLock(row?.featureLock);
-    return lock ? { storeId, on: true, ...lock } : { storeId, on: false, owner: [], staff: [] };
+    const base = lock ? { storeId, on: true, ...lock } : { storeId, on: false, owner: [] as string[], staff: [] as string[] };
+    // Each store's own lock: a login tied to one store gets only its store's lock; the stores this
+    // login may set are listed with their names, for Settings → PIN lock.
+    const actor = await loadActor(storeId, user.sub, role);
+    const all = readLocationLocks(row?.featureLock);
+    const oneStore = isOneStoreLogin(actor);
+    const locations: Record<string, LocationLock> = {};
+    for (const [id, l] of Object.entries(all)) if (!oneStore || id === actor.homeLocationId) locations[id] = l;
+    const places = await prisma.warehouse.findMany({ where: { storeId, isActive: true }, select: { id: true, name: true }, orderBy: { name: "asc" } });
+    return { ...base, locations, places: places.filter((p) => canSetLocationLock(actor, p.id)) };
+  }
+
+  /**
+   * PUT /admin/feature-lock/location/:locationId — one store's own PIN lock (2026-11-20): a lock PIN
+   * and the screens that ask for it at that store. The owner and a manager may set any store; the
+   * head of a store only its own. Once that store has a lock, a manager or head needs its current
+   * lock PIN, the owner's lock PIN, or their own password; the owner of the app can reset it with
+   * no old PIN (the owner asked for this, for when a manager forgets the store PIN).
+   */
+  @Put("feature-lock/location/:locationId")
+  async putLocationLock(
+    @Req() req: Request & { user?: AuthPrincipal },
+    @Param("locationId") locationId: string,
+    @Body() body: { current?: unknown; newPin?: unknown; screens?: unknown; off?: unknown },
+    @Headers("x-store-id") headerStoreId?: string,
+  ) {
+    const user = req.user;
+    requireUser(user);
+    const { storeId, role } = await resolveTenant(user, headerStoreId, TENANT_ROLES.VIEW);
+    const actor = await loadActor(storeId, user.sub, role);
+    const place = await prisma.warehouse.findFirst({ where: { id: locationId, storeId }, select: { id: true } });
+    if (!place) throw new HttpException({ type: "not_found", message: "That store was not found" }, HttpStatus.NOT_FOUND);
+    if (!canSetLocationLock(actor, locationId)) throw new HttpException({ type: "forbidden", message: "Only the owner, a manager or the head of this store can change its PIN lock" }, HttpStatus.FORBIDDEN);
+    const row = await prisma.storeSettings.findUnique({ where: { storeId }, select: { featureLock: true } });
+    const ownerLock = readFeatureLock(row?.featureLock);
+    const locations = readLocationLocks(row?.featureLock);
+    const existing = locations[locationId];
+    const current = typeof body?.current === "string" ? body.current : "";
+    // The owner (or platform admin) resets a store's PIN when its head forgot it: no old PIN needed.
+    const ownerSignedIn = ["OWNER", "STORE_OWNER", "PLATFORM_ADMIN"].includes(actor.role);
+    if (existing && !ownerSignedIn && !lockPinMatches(existing, current) && !(ownerLock && lockPinMatches(ownerLock, current))) {
+      const me = await prisma.user.findUnique({ where: { id: user.sub }, select: { passwordHash: true } });
+      const pwOk = !!current && !!me?.passwordHash && (await verifyPassword(current, me.passwordHash));
+      if (!pwOk) throw new HttpException({ type: "unauthorized", message: "The current store PIN (or your password) is not right" }, HttpStatus.FORBIDDEN);
+    }
+    if (body?.off === true) {
+      delete locations[locationId];
+    } else {
+      const newPin = typeof body?.newPin === "string" ? body.newPin : "";
+      if (newPin && !/^\d{4}$/.test(newPin)) throw new HttpException({ type: "validation", errors: ["The store PIN must be 4 digits"] }, HttpStatus.BAD_REQUEST);
+      if (!existing && !newPin) throw new HttpException({ type: "validation", errors: ["Choose a 4-digit store PIN first"] }, HttpStatus.BAD_REQUEST);
+      const secret = newPin ? newLockSecret(newPin) : { salt: existing!.salt, hash: existing!.hash, iterations: existing!.iterations };
+      locations[locationId] = { ...secret, screens: cleanScreenIds(body?.screens) ?? existing?.screens ?? [], updatedAt: new Date().toISOString() };
+    }
+    const json = writeFeatureLock(ownerLock, locations);
+    const value = json ? (json as Prisma.InputJsonValue) : Prisma.DbNull;
+    await prisma.storeSettings.upsert({ where: { storeId }, update: { featureLock: value }, create: { storeId, featureLock: value } });
+    const mine = locations[locationId];
+    return { storeId, locationId, on: !!mine, ...(mine ? { lock: mine } : {}) };
   }
 
   /**
@@ -1007,7 +1065,10 @@ export class AdminController {
       if (!pwOk) throw new HttpException({ type: "unauthorized", message: "The current lock PIN (or your password) is not right" }, HttpStatus.FORBIDDEN);
     }
     if (body?.off === true) {
-      await prisma.storeSettings.upsert({ where: { storeId }, update: { featureLock: Prisma.DbNull }, create: { storeId, featureLock: Prisma.DbNull } });
+      // The stores' own locks stay when the owner turns their lock off.
+      const keep = writeFeatureLock(null, readLocationLocks(row?.featureLock));
+      const value = keep ? (keep as Prisma.InputJsonValue) : Prisma.DbNull;
+      await prisma.storeSettings.upsert({ where: { storeId }, update: { featureLock: value }, create: { storeId, featureLock: value } });
       return { storeId, on: false, owner: [], staff: [] };
     }
     const newPin = typeof body?.newPin === "string" ? body.newPin : "";
@@ -1020,7 +1081,8 @@ export class AdminController {
       staff: cleanScreenIds(body?.staff) ?? existing?.staff ?? [],
       updatedAt: new Date().toISOString(),
     };
-    await prisma.storeSettings.upsert({ where: { storeId }, update: { featureLock: lock }, create: { storeId, featureLock: lock } });
+    const json = writeFeatureLock(lock, readLocationLocks(row?.featureLock)) as Prisma.InputJsonValue;
+    await prisma.storeSettings.upsert({ where: { storeId }, update: { featureLock: json }, create: { storeId, featureLock: json } });
     return { storeId, on: true, ...lock };
   }
 

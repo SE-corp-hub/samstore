@@ -17,9 +17,11 @@ type Who = "owner" | "staff";
 
 /** The one line under "PIN lock" in the Settings list. */
 export function lockSummary(lock: FeatureLock | null): string {
-  if (!lock?.on) return "Off · no screen asks for a PIN";
+  const stores = Object.keys(lock?.locations ?? {}).length;
+  const storePart = stores ? ` · ${stores} store${stores === 1 ? "" : "s"} with own lock` : "";
+  if (!lock?.on) return `Owner lock off${storePart}`;
   const n = (k: Who) => lock[k].length;
-  return `On · owner ${n("owner")} screen${n("owner") === 1 ? "" : "s"}, staff ${n("staff")} screen${n("staff") === 1 ? "" : "s"}`;
+  return `On · owner ${n("owner")} screen${n("owner") === 1 ? "" : "s"}, staff ${n("staff")} screen${n("staff") === 1 ? "" : "s"}${storePart}`;
 }
 
 /** Screens each list can lock: what that kind of sign-in can open at all. */
@@ -70,8 +72,11 @@ export default function PinLockSettings({ canChange, onSaved }: { canChange: boo
       const res = await fetch(`${API_URL}${LOCK_PATH}`, { method: "PUT", headers: { "Content-Type": "application/json", ...adminHeaders() }, body: JSON.stringify(body) });
       const d = await res.json().catch(() => null);
       if (!res.ok) { setProblem(d?.message ?? d?.errors?.join(", ") ?? "Did not save. Try again."); return null; }
-      saveCopy(LOCK_PATH, d);
-      setLock(d); fill(d);
+      // Keep the stores' own locks (and the store list) that this answer does not repeat.
+      const prev = savedCopy<FeatureLock>(LOCK_PATH);
+      const next = { ...d, locations: prev?.locations ?? lock?.locations, places: prev?.places ?? lock?.places };
+      saveCopy(LOCK_PATH, next);
+      setLock(next); fill(next);
       setCurrent(""); setNewPin(""); setAgain("");
       // The owner just proved the PIN: keep the locked screens (this one too) open for a while.
       if (d?.on) unlockForAWhile();
