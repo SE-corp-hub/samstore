@@ -1,9 +1,10 @@
 import {
-  Body, Controller, Delete, Get, Headers, HttpException, HttpStatus, Inject, Param, Post, Query, Req, UseGuards,
+  Body, Controller, Delete, Get, Headers, HttpException, HttpStatus, Inject, Param, Post, Query, Req, UseGuards, UseInterceptors,
 } from "@nestjs/common";
 import type { ApiError } from "@sam-store/contracts";
 import { JwtAuthGuard, type AuthPrincipal } from "../auth/auth.guard.js";
 import { requireUser, resolveTenant, TENANT_ROLES } from "../auth/tenant-context.js";
+import { IdempotencyInterceptor } from "../security/idempotency.interceptor.js";
 import { loadActor } from "../people/people.service.js";
 import { EXPENSES_SERVICE, ExpensesService } from "./expenses.service.js";
 
@@ -20,6 +21,7 @@ function statusFor(error: ApiError): HttpStatus {
 
 @Controller("admin")
 @UseGuards(JwtAuthGuard)
+@UseInterceptors(IdempotencyInterceptor)
 export class ExpensesController {
   constructor(@Inject(EXPENSES_SERVICE) private readonly expensesSvc: ExpensesService) {}
 
@@ -38,7 +40,7 @@ export class ExpensesController {
   }
 
   @Post("expenses")
-  async create(@Req() req: Request & { user?: AuthPrincipal }, @Body() body: { category: string; amountMinor: number; note?: string; spentAt?: string; locationId?: string | null; paidFromDrawer?: boolean }, @Headers("x-store-id") headerStoreId?: string) {
+  async create(@Req() req: Request & { user?: AuthPrincipal }, @Body() body: { category: string; amountMinor: number; note?: string; spentAt?: string; locationId?: string | null; paidFromDrawer?: boolean; fromPos?: boolean }, @Headers("x-store-id") headerStoreId?: string) {
     const { storeId, actor } = await this.ctx(req, headerStoreId);
     const result = await this.expensesSvc.create(storeId, actor, body ?? ({} as never));
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));

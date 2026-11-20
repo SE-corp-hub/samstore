@@ -7,6 +7,7 @@ import { prisma } from "../persistence/prisma-repositories.js";
 import { ALL_LOCATION_ROLES } from "../domain/people.js";
 import { dayRange, manilaDate } from "../domain/reports.js";
 import { locationRefusal, type Actor } from "../people/people.service.js";
+import { cashTimeFor } from "../day/day-gate.js";
 import { cashOfDay } from "./cash-book.js";
 
 type R<T> = { ok: true; value: T } | { ok: false; error: ApiError };
@@ -14,6 +15,8 @@ const invalid = (m: string): { ok: false; error: ApiError } => ({ ok: false, err
 const refused = (m: string): { ok: false; error: ApiError } => ({ ok: false, error: { type: "forbidden", message: m } });
 const isOwner = (a: Actor) => (ALL_LOCATION_ROLES as readonly string[]).includes(a.role);
 const MAX_MINOR = 1_000_000_000;
+/** How old a step that waited on the tablet may be and still keep its own time. */
+export const OFFLINE_DAYS = 3;
 
 export class CashService {
   /** Write down cash handed over to the owner. Staff: their own store, today. The owner: any store, today or an earlier day. */
@@ -46,11 +49,59 @@ export class CashService {
     return { ok: true, value: { id: row.id, locationId: loc.id, date, amountMinor: amount, expectedMinor: cash.expectedMinor } };
   }
 
+  /**
+   * Cash in: money put into a store's drawer that is not a sale (more change, the owner adds money).
+   * It raises that store's expected cash. Any login, at its own store, saying what the money is.
+   * `at`: when it was tapped on the tablet (a step that waited offline keeps its own time, unless
+   * that day is already closed at the store: then it counts now, so a closed Z-read never moves).
+   */
+  async cashIn(storeId: string, actor: Actor, input: { locationId?: string; amountMinor?: unknown; note?: string; at?: string }): Promise<R<{ id: string; locationId: string; amountMinor: number; expectedMinor: number }>> {
+    const locationId = input.locationId || actor.homeLocationId;
+    if (!locationId) return invalid("Choose the store");
+    const refusal = locationRefusal(actor, locationId);
+    if (refusal) return refused(refusal);
+    const loc = await prisma.warehouse.findFirst({ where: { storeId, id: locationId, isActive: true }, select: { id: true, name: true } });
+    if (!loc) return invalid("Choose a store from the list");
+    const amount = input.amountMinor;
+    if (typeof amount !== "number" || !Number.isInteger(amount) || amount <= 0 || amount > MAX_MINOR) return invalid("Type the cash that was put in the drawer");
+    const note = input.note?.trim().slice(0, 200) || null;
+    if (!note || note.length < 3) return invalid("Say what the money is for (for example: more change).");
+    const now = new Date();
+    let at = input.at ? new Date(input.at) : now;
+    if (Number.isNaN(at.getTime())) return invalid("The time is not a time");
+    // Only a step that really waited on the tablet is older than now, and never by more than a few days.
+    if (at.getTime() > now.getTime() || now.getTime() - at.getTime() > OFFLINE_DAYS * 86_400_000) at = now;
+    const receivedAt = await cashTimeFor(prisma, storeId, loc.id, at, now);
+    const row = await prisma.$transaction(async (tx) => {
+      const c = await tx.cashIn.create({ data: { storeId, locationId: loc.id, amountMinor: amount, note, receivedAt, createdBy: actor.userId }, select: { id: true } });
+      await tx.auditLog.create({ data: { storeId, actorType: "USER", actorId: actor.userId, action: "cash.in", entityType: "CashIn", entityId: c.id, after: { locationId: loc.id, amountMinor: amount, note, receivedAt: receivedAt.toISOString() } } });
+      return c;
+    });
+    const cash = await cashOfDay(prisma, storeId, loc.id, manilaDate(receivedAt));
+    return { ok: true, value: { id: row.id, locationId: loc.id, amountMinor: amount, expectedMinor: cash.expectedMinor } };
+  }
+
+  /** Cancel a wrong cash in (owner). It stays on the list, crossed out, and no longer raises the expected cash. */
+  async cancelCashIn(storeId: string, actor: Actor, id: string, reason?: string): Promise<R<{ id: string }>> {
+    if (!isOwner(actor)) return refused("Only the owner can cancel a cash in.");
+    const why = (reason ?? "").trim().slice(0, 200);
+    if (why.length < 3) return invalid("Write why this cash in is cancelled");
+    const row = await prisma.cashIn.findFirst({ where: { storeId, id }, select: { voidedAt: true, amountMinor: true, locationId: true } });
+    if (!row) return { ok: false, error: { type: "not_found", message: "Cash in not found" } };
+    if (row.voidedAt) return { ok: true, value: { id } };
+    await prisma.$transaction(async (tx) => {
+      const done = await tx.cashIn.updateMany({ where: { storeId, id, voidedAt: null }, data: { voidedAt: new Date(), voidedById: actor.userId, voidReason: why } });
+      if (done.count) await tx.auditLog.create({ data: { storeId, actorType: "USER", actorId: actor.userId, action: "cash.in_cancel", entityType: "CashIn", entityId: id, after: { reason: why, amountMinor: row.amountMinor, locationId: row.locationId } } });
+    });
+    return { ok: true, value: { id } };
+  }
+
   /** A store's cash for one day, with its hand-overs. A login tied to a store reads its own store only. */
   async day(storeId: string, actor: Actor, input: { locationId?: string; date?: string }): Promise<R<{
     date: string; location: { id: string; name: string }; canCancel: boolean;
-    cash: { inMinor: number; creditPaidMinor: number; givenBackMinor: number; paidOutMinor: number; handedOverMinor: number; expectedMinor: number };
+    cash: { inMinor: number; creditPaidMinor: number; addedMinor: number; givenBackMinor: number; paidOutMinor: number; handedOverMinor: number; expectedMinor: number };
     handovers: { id: string; amountMinor: number; note: string | null; at: Date; handedBy: string | null; received: boolean; receivedBy: string | null; cancelled: boolean; cancelReason: string | null }[];
+    cashIns: { id: string; amountMinor: number; note: string | null; at: Date; by: string | null; cancelled: boolean; cancelReason: string | null }[];
   }>> {
     const locationId = (isOwner(actor) ? input.locationId : null) || actor.homeLocationId || input.locationId;
     if (!locationId) return invalid("Choose the store");
@@ -60,11 +111,13 @@ export class CashService {
     if (!loc) return invalid("Choose a store from the list");
     const date = input.date || manilaDate(new Date());
     try { dayRange(date); } catch { return invalid("The date is not a date"); }
-    const [{ inByOrder: _skip, heldForOthers: _a, heldByOthers: _b, ...cash }, rows] = await Promise.all([
+    const { from, to } = dayRange(date);
+    const [{ inByOrder: _skip, heldForOthers: _a, heldByOthers: _b, ...cash }, rows, ins] = await Promise.all([
       cashOfDay(prisma, storeId, loc.id, date),
       prisma.cashHandover.findMany({ where: { storeId, locationId: loc.id, businessDate: date }, orderBy: { createdAt: "desc" } }),
+      prisma.cashIn.findMany({ where: { storeId, locationId: loc.id, receivedAt: { gte: from, lt: to } }, orderBy: { receivedAt: "desc" } }),
     ]);
-    const ids = [...new Set(rows.flatMap((r) => [r.handedById, r.receivedById]).filter((x): x is string => !!x))];
+    const ids = [...new Set([...rows.flatMap((r) => [r.handedById, r.receivedById]), ...ins.map((c) => c.createdBy)].filter((x): x is string => !!x))];
     const names = new Map((ids.length ? await prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } }) : []).map((u) => [u.id, u.name]));
     return {
       ok: true,
@@ -75,6 +128,7 @@ export class CashService {
           received: !!r.receivedById, receivedBy: r.receivedById ? names.get(r.receivedById) ?? null : null,
           cancelled: !!r.voidedAt, cancelReason: r.voidReason,
         })),
+        cashIns: ins.map((c) => ({ id: c.id, amountMinor: c.amountMinor, note: c.note, at: c.receivedAt, by: names.get(c.createdBy) ?? null, cancelled: !!c.voidedAt, cancelReason: c.voidReason })),
       },
     };
   }

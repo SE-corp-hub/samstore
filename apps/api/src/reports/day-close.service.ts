@@ -8,8 +8,8 @@
 //              It also writes the day's DailyClose, so every older report sees the day as closed.
 //   Reopen     owner only, with a reason. The Z-read stays (marked reopened); the next close is a new Z.
 //
-// Cash "should be" = change fund + the cash book of the day (cash/cash-book.ts: cash in − given back
-// − expenses from the drawer − handed to the owner). GCash "should be" = GCash taken − GCash given back.
+// Cash "should be" = change fund + the cash book of the day (cash/cash-book.ts: cash in + cash added
+// ("Cash in" on POS) − given back − expenses from the drawer − handed to the owner). GCash "should be" = GCash taken − GCash given back.
 
 import { Prisma } from "@prisma/client";
 import type { ApiError } from "@sam-store/contracts";
@@ -37,7 +37,7 @@ const OWNERS = ["OWNER", "MANAGER", "STORE_OWNER", "PLATFORM_ADMIN"];
 const MAX_MINOR = 100_000_000_00; // ₱100M: a typo guard
 /** Bills and coins, in centavos, for the bill-by-bill count. */
 export const DENOMINATIONS = [100_000, 50_000, 20_000, 10_000, 5_000, 2_000, 1_000, 500, 100, 25] as const;
-export const VARIANCE_REASONS = ["Wrong change given", "Expense not written down", "Walk-in sale not rung up", "Cash handed over not written down", "Counting mistake", "Don't know"] as const;
+export const VARIANCE_REASONS = ["Wrong change given", "Expense not written down", "Cash in not written down", "Walk-in sale not rung up", "Cash handed over not written down", "Counting mistake", "Don't know"] as const;
 
 /** The figures of a Z-read (and an X-read). Frozen in RegisterSession.zTotals at the close. */
 export interface DayFigures {
@@ -51,13 +51,17 @@ export interface DayFigures {
   creditCollectedMinor: number;
   cash: { floatMinor: number; inMinor: number; givenBackMinor: number; paidOutMinor: number; handedOverMinor: number; shouldBeMinor: number; countedMinor: number | null; differenceMinor: number | null;
     /** Of the handed over: cash of the owner's own sales that the owner kept (never in the drawer). Missing on Z-reads made before 2026-11-20. */
-    ownerKeptMinor?: number };
+    ownerKeptMinor?: number;
+    /** Money put into the drawer that is not a sale ("Cash in" on POS). Missing on Z-reads made before it existed. */
+    addedMinor?: number };
   /** Rice sold per kilo at this store this day (sell per kilo, 2026-11-20). Missing on older Z-reads. */
   perKilo?: { grams: number; totalMinor: number; lines: number };
   /** Sales the owner rang at this store this day, and whose cash the owner kept. */
   ownerSales?: { orderNumber: string; at: string; totalMinor: number; method: string; ownerKeptMinor: number; by: string }[];
   gcash: { inMinor: number; givenBackMinor: number; shouldBeMinor: number; countedMinor: number | null; differenceMinor: number | null };
   cashOut: { what: string; amountMinor: number; at: string }[];
+  /** Each "Cash in" of the day. Missing on older Z-reads. */
+  cashAdded?: { what: string; amountMinor: number; at: string }[];
   cashCounts: Record<string, number> | null;
   keepFloatMinor: number | null;
   varianceReason: string | null;
@@ -182,13 +186,14 @@ export class DayCloseService {
     const mainId = await mainLocationId(prisma, storeId);
     const t = await this.reports.dayTotals(storeId, loc.id, date);
     const here = paymentsOfStore(loc.id, mainId);
-    const [gIn, gBack, firstSale, lastSale, expenses, handovers] = await Promise.all([
+    const [gIn, gBack, firstSale, lastSale, expenses, handovers, cashIns] = await Promise.all([
       prisma.payment.aggregate({ where: { storeId, type: "payment", method: "gcash", receivedAt: range, ...here }, _sum: { amountMinor: true } }),
       prisma.payment.findMany({ where: { storeId, type: "refund", method: "gcash", receivedAt: range, ...here }, select: { amountMinor: true } }),
       prisma.order.findFirst({ where: { storeId, sellingLocationId: loc.id, occurredAt: range }, orderBy: { occurredAt: "asc" }, select: { orderNumber: true } }),
       prisma.order.findFirst({ where: { storeId, sellingLocationId: loc.id, occurredAt: range }, orderBy: { occurredAt: "desc" }, select: { orderNumber: true } }),
       prisma.expense.findMany({ where: { storeId, locationId: loc.id, paidFromDrawer: true, voidedAt: null, spentAt: range }, select: { category: true, note: true, amountMinor: true, spentAt: true }, orderBy: { spentAt: "asc" } }),
       prisma.cashHandover.findMany({ where: { storeId, locationId: loc.id, businessDate: date, voidedAt: null }, select: { amountMinor: true, note: true, createdAt: true, orderId: true }, orderBy: { createdAt: "asc" } }),
+      prisma.cashIn.findMany({ where: { storeId, locationId: loc.id, voidedAt: null, receivedAt: range }, select: { amountMinor: true, note: true, receivedAt: true }, orderBy: { receivedAt: "asc" } }),
     ]);
     // The owner's own sales here today: rung by the owner's login, or the owner kept the cash.
     const dayOrders = await prisma.order.findMany({
@@ -224,6 +229,7 @@ export class DayCloseService {
         floatMinor: float, inMinor: t.cash.inMinor, givenBackMinor: t.cash.givenBackMinor, paidOutMinor: t.cash.paidOutMinor, handedOverMinor: t.cash.handedOverMinor,
         shouldBeMinor: float + t.cash.expectedMinor, countedMinor: null, differenceMinor: null,
         ownerKeptMinor: [...keptBy.values()].reduce((a, b) => a + b, 0),
+        addedMinor: t.cash.addedMinor,
       },
       ownerSales: ownerOrders.map((o) => ({
         orderNumber: o.orderNumber, at: (o.occurredAt ?? new Date()).toISOString(), totalMinor: o.totalMinor, method: o.paymentMethod ?? "",
@@ -234,6 +240,7 @@ export class DayCloseService {
         ...expenses.map((e) => ({ what: `Expense: ${e.note?.trim() || e.category}`, amountMinor: e.amountMinor, at: e.spentAt.toISOString() })),
         ...handovers.map((h) => ({ what: h.orderId ? `${h.note ?? "Owner's sale"}: the owner kept the cash` : `Handed to the owner${h.note ? `: ${h.note}` : ""}`, amountMinor: h.amountMinor, at: h.createdAt.toISOString() })),
       ],
+      cashAdded: cashIns.map((c) => ({ what: c.note?.trim() || "Cash in", amountMinor: c.amountMinor, at: c.receivedAt.toISOString() })),
       cashCounts: null, keepFloatMinor: null, varianceReason: null, note: null, reopened: null,
     };
   }

@@ -13,6 +13,8 @@ import { prisma } from "../persistence/prisma-repositories.js";
 import { BentaService } from "../selling/benta.service.js";
 import { RiceReportsService } from "./rice-reports.service.js";
 import { DayCloseService } from "./day-close.service.js";
+import { CashService } from "../cash/cash.service.js";
+import { ExpensesService } from "../expenses/expenses.service.js";
 import { manilaDate } from "../domain/reports.js";
 import type { Actor } from "../people/people.service.js";
 
@@ -40,6 +42,8 @@ after(async () => {
     await prisma.order.deleteMany({ where });
     await prisma.cashMovement.deleteMany({ where });
     await prisma.cashHandover.deleteMany({ where });
+    await prisma.cashIn.deleteMany({ where });
+    await prisma.expense.deleteMany({ where });
     await prisma.registerSession.deleteMany({ where });
     await prisma.register.deleteMany({ where });
     await prisma.storeCounter.deleteMany({ where });
@@ -259,4 +263,21 @@ test("Sell per kilo: the X-read / Z-read shows the kilos sold today and their pe
   assert.equal(x.perKilo?.totalMinor, 14_000 + 10_000, "2.5 kg × ₱56 + ₱100 worth");
   assert.equal(x.perKilo?.grams, 2_500 + Math.floor((10_000 * 1000) / 5_600));
   assert.equal(x.sales.netMinor, 130_000 + 24_000, "already inside the sales");
+});
+
+test("Cash in and Expense on POS balance on the Z-read: change fund + cash sales + cash in − expenses", async () => {
+  const counter = new BentaService();
+  const day = new DayCloseService();
+  const fx = await fixture(true);
+  must(await day.open(fx.storeId, fx.staff, { openingFloatMinor: 100_000 }));
+  must(await counter.sell(fx.storeId, fx.staff, { idempotencyKey: key(), lines: [{ productId: fx.rice, quantity: 1 }], payment: { method: "cash" } } as never)); // + 1,300
+  must(await new CashService().cashIn(fx.storeId, fx.staff, { amountMinor: 50_000, note: "More change (panukli)" })); //                                       + 500
+  must(await new ExpensesService().create(fx.storeId, fx.staff, { category: "supplies", amountMinor: 20_000, note: "plastic bags", paidFromDrawer: true, fromPos: true })); // − 200
+  const x = must(await day.xread(fx.storeId, fx.staff, {}));
+  assert.equal(x.cash.addedMinor, 50_000);
+  assert.equal(x.cash.paidOutMinor, 20_000);
+  assert.equal(x.cash.shouldBeMinor, 100_000 + 130_000 + 50_000 - 20_000);
+  assert.deepEqual(x.cashAdded?.map((c) => [c.what, c.amountMinor]), [["More change (panukli)", 50_000]]);
+  const z = must(await day.close(fx.storeId, fx.staff, { cashCountedMinor: 260_000, gcashCountedMinor: 0, signatures: SIG }));
+  assert.equal(z.cash.differenceMinor, 0, "the drawer balances");
 });

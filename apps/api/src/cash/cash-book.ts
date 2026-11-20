@@ -4,6 +4,7 @@
 // Per-store build, step 4. For one store and one day (Manila):
 //
 //     cash in          cash paid at this store: sales, deliveries paid in cash, credit paid in cash
+//   + added            money put into the drawer that is not a sale ("Cash in" on POS; cancelled ones left out)
 //   − given back       cash refunds, and the cash of a sale that was voided, on the day it was given back
 //   − paid out         expenses paid with cash from this store's drawer (cancelled ones left out)
 //   − handed over      cash this store handed over to the owner (cancelled ones left out)
@@ -23,13 +24,15 @@ export interface CashOfDay {
   inMinor: number;
   /** Of the cash in: credit (utang) paid in cash here. */
   creditPaidMinor: number;
+  /** Money put into the drawer that is not a sale ("Cash in" on POS). */
+  addedMinor: number;
   /** Cash given back to customers (refunds and voided cash sales). */
   givenBackMinor: number;
   /** Expenses paid from this store's drawer. */
   paidOutMinor: number;
   /** Cash handed over to the owner. */
   handedOverMinor: number;
-  /** What should be in the drawer: in − given back − paid out − handed over. */
+  /** What should be in the drawer: in + added − given back − paid out − handed over. */
   expectedMinor: number;
   /** Credit paid here for a sale of another store (the cash is in THIS drawer). */
   heldForOthers: { locationId: string; amountMinor: number }[];
@@ -49,7 +52,7 @@ export async function cashOfDay(db: Db, storeId: string, locationId: string, dat
   const when = { ...(opts.after ? { gt: opts.after } : { gte: from }), lt: opts.upTo && opts.upTo < to ? opts.upTo : to };
   const here = paymentsOfStore(locationId, mainId);
 
-  const [paid, back, voids, expenses, handovers, forOthers, byOthers] = await Promise.all([
+  const [paid, back, voids, expenses, handovers, forOthers, byOthers, added] = await Promise.all([
     db.payment.findMany({ where: { storeId, type: "payment", method: "cash", receivedAt: when, ...here }, select: { amountMinor: true, orderId: true } }),
     db.payment.findMany({ where: { storeId, type: "refund", method: "cash", receivedAt: when, ...here }, select: { amountMinor: true } }),
     // A void writes a ₱0 row; the cash given back is what that sale took in cash.
@@ -58,6 +61,7 @@ export async function cashOfDay(db: Db, storeId: string, locationId: string, dat
     db.cashHandover.aggregate({ where: { storeId, locationId, businessDate: date, voidedAt: null, ...(opts.upTo || opts.after ? { createdAt: { ...(opts.after ? { gt: opts.after } : {}), ...(opts.upTo ? { lt: opts.upTo } : {}) } } : {}) }, _sum: { amountMinor: true } }),
     db.payment.groupBy({ by: ["forLocationId"], where: { storeId, type: "payment", method: "cash", receivedAt: when, locationId, forLocationId: { not: null } }, _sum: { amountMinor: true } }),
     db.payment.groupBy({ by: ["locationId"], where: { storeId, type: "payment", method: "cash", receivedAt: when, forLocationId: locationId }, _sum: { amountMinor: true } }),
+    db.cashIn.aggregate({ where: { storeId, locationId, voidedAt: null, receivedAt: when }, _sum: { amountMinor: true } }),
   ]);
   const voidedIds = [...new Set(voids.map((v) => v.orderId!))];
   const voidedCash = voidedIds.length
@@ -71,10 +75,11 @@ export async function cashOfDay(db: Db, storeId: string, locationId: string, dat
   const givenBackMinor = back.reduce((s, p) => s + Math.abs(p.amountMinor), 0) + voidedCash;
   const paidOutMinor = expenses._sum.amountMinor ?? 0;
   const handedOverMinor = handovers._sum.amountMinor ?? 0;
+  const addedMinor = added._sum.amountMinor ?? 0;
   const held = (rows: { id: string | null; sum: number | null }[]) => rows.filter((r) => r.id && r.id !== locationId && (r.sum ?? 0) !== 0).map((r) => ({ locationId: r.id!, amountMinor: r.sum ?? 0 }));
   return {
-    inMinor, creditPaidMinor: inByOrder.get(null) ?? 0, givenBackMinor, paidOutMinor, handedOverMinor,
-    expectedMinor: inMinor - givenBackMinor - paidOutMinor - handedOverMinor,
+    inMinor, creditPaidMinor: inByOrder.get(null) ?? 0, addedMinor, givenBackMinor, paidOutMinor, handedOverMinor,
+    expectedMinor: inMinor + addedMinor - givenBackMinor - paidOutMinor - handedOverMinor,
     heldForOthers: held(forOthers.map((r) => ({ id: r.forLocationId, sum: r._sum.amountMinor }))),
     heldByOthers: held(byOthers.map((r) => ({ id: r.locationId, sum: r._sum.amountMinor }))),
     inByOrder,

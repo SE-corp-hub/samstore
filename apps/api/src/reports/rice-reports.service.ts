@@ -245,7 +245,7 @@ export class RiceReportsService {
     return {
       count: money.count,
       totalMinor: money.totalMinor,
-      cashMinor: cash.inMinor, cashGivenBackMinor: cash.givenBackMinor, cashPaidOutMinor: cash.paidOutMinor, cashHandedOverMinor: cash.handedOverMinor,
+      cashMinor: cash.inMinor, cashAddedMinor: cash.addedMinor, cashGivenBackMinor: cash.givenBackMinor, cashPaidOutMinor: cash.paidOutMinor, cashHandedOverMinor: cash.handedOverMinor,
       takenBack: money.takenBack,
     };
   }

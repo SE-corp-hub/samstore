@@ -15,7 +15,7 @@ import StoreBar, { type StoreOption } from "./StoreBar";
 interface Handover { id: string; amountMinor: number; note: string | null; at: string; handedBy: string | null; received: boolean; receivedBy: string | null; cancelled: boolean; cancelReason: string | null }
 interface CashDay {
   date: string; location: { id: string; name: string }; canCancel: boolean;
-  cash: { inMinor: number; creditPaidMinor: number; givenBackMinor: number; paidOutMinor: number; handedOverMinor: number; expectedMinor: number };
+  cash: { inMinor: number; creditPaidMinor: number; addedMinor?: number; givenBackMinor: number; paidOutMinor: number; handedOverMinor: number; expectedMinor: number };
   handovers: Handover[];
 }
 const errOf = (d: unknown, fallback: string) => { const e = d as { errors?: string[]; message?: string } | null; return e?.errors?.[0] ?? e?.message ?? fallback; };
@@ -118,6 +118,7 @@ export default function CashPanel() {
             <div className="card-body" style={{ fontVariantNumeric: "tabular-nums" }}>
               <h2 className="h5 mb-2" id="cash-today">Today at {data.location.name}</h2>
               <div className="d-flex justify-content-between gap-3 py-1"><span>Cash taken in{c.creditPaidMinor ? ` (${peso(c.creditPaidMinor)} of it is credit paid)` : ""}</span><span className="text-nowrap">{peso(c.inMinor)}</span></div>
+              {(c.addedMinor ?? 0) > 0 && <div className="d-flex justify-content-between gap-3 py-1"><span>Plus: Cash in (money added to the drawer)</span><span className="text-nowrap">{peso(c.addedMinor ?? 0)}</span></div>}
               {c.givenBackMinor > 0 && minus("cash given back to customers", c.givenBackMinor)}
               {c.paidOutMinor > 0 && minus("expenses paid from the drawer", c.paidOutMinor)}
               {c.handedOverMinor > 0 && minus("cash handed over to the owner", c.handedOverMinor)}

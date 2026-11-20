@@ -20,10 +20,13 @@ import { randomId } from "../persistence/repositories.js";
 import type { ApiError } from "@sam-store/contracts";
 import { ALL_LOCATION_ROLES } from "../domain/people.js";
 import { dayRange, manilaDate } from "../domain/reports.js";
+import { cashTimeFor } from "../day/day-gate.js";
 import { registerApprovalHandler, requestApproval } from "../people/people.service.js";
 
 /** What staff may take out of one store's drawer in a day without the owner's OK: ₱500. */
 export const STAFF_DRAWER_DAY_LIMIT_MINOR = 50_000;
+/** How old a POS expense that waited on the tablet may be and still be taken from staff. */
+export const POS_LATE_DAYS = 3;
 
 const pesos = (minor: number) => `₱${(minor / 100).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -61,6 +64,8 @@ export interface ExpenseInput {
   /** The store it belongs to. `null` = the whole business (owner only). Left out = the login's own store. */
   locationId?: string | null;
   paidFromDrawer?: boolean;
+  /** Written with the Expense button on POS (may have waited on the tablet with no signal). */
+  fromPos?: boolean;
 }
 
 /** An expense that counts: not cancelled. Every report adds this to its filter. */
@@ -74,11 +79,15 @@ export class ExpensesService {
   async create(storeId: string, actor: ExpenseActor, input: ExpenseInput): Promise<ExpenseResult<{ id: string; locationId: string | null; /** Not written yet: it becomes expense `id` when the owner approves. */ waitingForOwner?: boolean; approvalId?: string }>> {
     if (!EXPENSE_CATEGORIES.includes(input.category as (typeof EXPENSE_CATEGORIES)[number])) return invalid(`category must be one of: ${EXPENSE_CATEGORIES.join(", ")}`);
     if (!Number.isInteger(input.amountMinor) || input.amountMinor <= 0) return invalid("amountMinor must be a positive integer");
-    const spentAt = input.spentAt ? new Date(input.spentAt) : new Date();
+    let spentAt = input.spentAt ? new Date(input.spentAt) : new Date();
     if (Number.isNaN(spentAt.getTime())) return invalid("The date is not a date");
     if (spentAt.getTime() > Date.now() + 86_400_000) return invalid("The date cannot be in the future");
     const staff = !seesAll(actor);
-    if (staff && manilaDate(spentAt) !== manilaDate(new Date())) return invalid("You can add today's expenses only. Ask the owner to add an older one.");
+    // "Expense" on POS: a step that waited on the tablet with no signal arrives late with its own
+    // time. It is never refused (the money already left the drawer); it counts on its own day, or
+    // now when that day is already closed at the store, so a closed day never changes.
+    const late = input.fromPos === true && manilaDate(spentAt) !== manilaDate(new Date()) && Date.now() - spentAt.getTime() <= POS_LATE_DAYS * 86_400_000 && spentAt.getTime() < Date.now();
+    if (staff && !late && manilaDate(spentAt) !== manilaDate(new Date())) return invalid("You can add today's expenses only. Ask the owner to add an older one.");
 
     // Which store? A login tied to a store: that store, always. The owner: the one chosen, or the whole business.
     let locationId: string | null;
@@ -99,6 +108,7 @@ export class ExpensesService {
       if (!place) return invalid("Choose a store from the list");
     }
 
+    if (late && locationId) spentAt = await cashTimeFor(prisma, storeId, locationId, spentAt);
     const fromDrawer = !!locationId && input.paidFromDrawer === true;
     const note = input.note?.trim().slice(0, 200) || null;
     if (staff && fromDrawer && locationId) {

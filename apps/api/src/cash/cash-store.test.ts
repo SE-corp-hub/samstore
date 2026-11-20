@@ -29,6 +29,7 @@ after(async () => {
     const where = { storeId: { in: storeIds } };
     await prisma.auditLog.deleteMany({ where });
     await prisma.cashHandover.deleteMany({ where });
+    await prisma.cashIn.deleteMany({ where });
     await prisma.creditEntry.deleteMany({ where });
     await prisma.payment.deleteMany({ where });
     await prisma.expense.deleteMany({ where });
@@ -101,10 +102,10 @@ test("one day at a store: expected cash matches the drawer to the peso, and the 
   must(await exp.create(fx.storeId, fx.owner, { category: "wages", amountMinor: 20_000, locationId: fx.main, paidFromDrawer: true }));
 
   // 2,700 + 1,400 + 500 + 1,300 + 650 = 6,550 in; 1,300 + 650 given back; 350 paid out; 2,000 handed over.
-  const want = { inMinor: 655_000, creditPaidMinor: 50_000, givenBackMinor: 195_000, paidOutMinor: 35_000, handedOverMinor: 200_000, expectedMinor: 225_000 };
+  const want = { inMinor: 655_000, creditPaidMinor: 50_000, addedMinor: 0, givenBackMinor: 195_000, paidOutMinor: 35_000, handedOverMinor: 200_000, expectedMinor: 225_000 };
   assert.equal(handed.expectedMinor, 225_000, "the hand-over answers with what is left in the drawer");
   const book = await cashOfDay(prisma, fx.storeId, fx.bt, today);
-  assert.deepEqual({ inMinor: book.inMinor, creditPaidMinor: book.creditPaidMinor, givenBackMinor: book.givenBackMinor, paidOutMinor: book.paidOutMinor, handedOverMinor: book.handedOverMinor, expectedMinor: book.expectedMinor }, want);
+  assert.deepEqual({ inMinor: book.inMinor, creditPaidMinor: book.creditPaidMinor, addedMinor: book.addedMinor, givenBackMinor: book.givenBackMinor, paidOutMinor: book.paidOutMinor, handedOverMinor: book.handedOverMinor, expectedMinor: book.expectedMinor }, want);
 
   const daily = await new RiceReportsService().daily(fx.storeId, fx.owner, { date: today });
   assert.ok(daily.ok, JSON.stringify(daily));
@@ -182,4 +183,44 @@ test("credit paid at one store for another store's sale is noted on both sides, 
   assert.deepEqual(atBt.heldForOthers, [{ locationId: fx.main, amountMinor: 100_000 }]);
   assert.equal(atMain.expectedMinor, 0);
   assert.deepEqual(atMain.heldByOthers, [{ locationId: fx.bt, amountMinor: 100_000 }]);
+});
+
+test("Cash in on POS: raises the drawer's expected cash; a POS expense that waited offline keeps its day", async () => {
+  const fx = await fixture();
+  const today = manilaDate(new Date());
+  await sale(fx, { locationId: fx.bt, totalMinor: 100_000 }); //                    + 1,000.00
+  // Refused: no amount, no reason, another store's drawer.
+  assert.equal((await cashSvc.cashIn(fx.storeId, fx.btStaff, { amountMinor: 0, note: "more change" })).ok, false);
+  assert.equal((await cashSvc.cashIn(fx.storeId, fx.btStaff, { amountMinor: 5_000, note: "" })).ok, false, "say what the money is");
+  const other = await cashSvc.cashIn(fx.storeId, fx.btStaff, { locationId: fx.main, amountMinor: 5_000, note: "more change" });
+  assert.equal(other.ok, false);
+  if (!other.ok) assert.equal(other.error.type, "forbidden");
+
+  const a = must(await cashSvc.cashIn(fx.storeId, fx.btStaff, { amountMinor: 50_000, note: "More change (panukli)" })); // + 500.00
+  assert.equal(a.expectedMinor, 150_000, "the answer says what the drawer should have now");
+  const wrong = must(await cashSvc.cashIn(fx.storeId, fx.btStaff, { amountMinor: 99_900, note: "typed wrong" }));
+  assert.equal((await cashSvc.cancelCashIn(fx.storeId, fx.btStaff, wrong.id, "mistake")).ok, false, "only the owner cancels");
+  must(await cashSvc.cancelCashIn(fx.storeId, fx.owner, wrong.id, "Typed wrong"));
+  // An expense from POS (drawer money).
+  must(await new ExpensesService().create(fx.storeId, fx.btStaff, { category: "supplies", amountMinor: 20_000, note: "plastic bags", paidFromDrawer: true, fromPos: true })); // − 200.00
+
+  const book = await cashOfDay(prisma, fx.storeId, fx.bt, today);
+  assert.deepEqual([book.inMinor, book.addedMinor, book.paidOutMinor, book.expectedMinor], [100_000, 50_000, 20_000, 130_000]);
+  assert.equal((await cashOfDay(prisma, fx.storeId, fx.main, today)).addedMinor, 0, "another store's drawer never moves");
+  const screen = must(await cashSvc.day(fx.storeId, fx.btStaff, {}));
+  assert.equal(screen.cash.addedMinor, 50_000);
+  assert.deepEqual(screen.cashIns.map((c) => [c.amountMinor, c.cancelled]), [[99_900, true], [50_000, false]]);
+
+  // A cash in and a POS expense tapped yesterday with no signal arrive today: they count on yesterday.
+  const yesterdayAt = new Date(Date.now() - 86_400_000);
+  const yesterday = manilaDate(yesterdayAt);
+  must(await cashSvc.cashIn(fx.storeId, fx.btStaff, { amountMinor: 7_000, note: "More change (panukli)", at: yesterdayAt.toISOString() }));
+  must(await new ExpensesService().create(fx.storeId, fx.btStaff, { category: "transport", amountMinor: 3_000, note: "fare", paidFromDrawer: true, spentAt: yesterdayAt.toISOString(), fromPos: true }));
+  const y = await cashOfDay(prisma, fx.storeId, fx.bt, yesterday);
+  assert.deepEqual([y.addedMinor, y.paidOutMinor], [7_000, 3_000]);
+  // A back-dated expense typed on the Expenses screen by staff is still refused.
+  assert.equal((await new ExpensesService().create(fx.storeId, fx.btStaff, { category: "transport", amountMinor: 3_000, note: "fare", paidFromDrawer: true, spentAt: yesterdayAt.toISOString() })).ok, false);
+  // A time in the future is read as now.
+  must(await cashSvc.cashIn(fx.storeId, fx.btStaff, { amountMinor: 1_000, note: "More change (panukli)", at: new Date(Date.now() + 3_600_000).toISOString() }));
+  assert.equal((await cashOfDay(prisma, fx.storeId, fx.bt, today)).addedMinor, 51_000);
 });
