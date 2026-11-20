@@ -43,6 +43,7 @@ import { useLinesCap } from "../../lib/use-lines-cap";
 import { useFitHeight } from "../../lib/use-fit-height";
 import { quickCash } from "../../lib/quick-cash";
 import Steps from "./Steps";
+import DayBar, { type DayState } from "./DayBar";
 import OrderCheck, { type CheckLine } from "./OrderCheck";
 import ProductFinder from "./ProductFinder";
 import PickTile from "./PickTile";
@@ -136,6 +137,9 @@ export default function BentaPanel() {
   const [showHeld, setShowHeld] = useState(false);
   const [step, setStep] = useState<"pick" | "check" | "pay" | "done">("pick");
   const [pay, setPay] = useState<Pay | null>(null);
+  // The owner selling: who keeps the cash of this sale — this store's drawer, or the owner (then it is
+  // written as handed to the owner at once, so the store's Close day still balances).
+  const [cashTo, setCashTo] = useState<"" | "drawer" | "owner">("");
   const [tendered, setTendered] = useState("");
   const [reference, setReference] = useState("");
   const [parts, setParts] = useState<SplitPart[]>([{ method: "cash", amount: "", reference: "" }, { method: "gcash", amount: "", reference: "" }]);
@@ -172,9 +176,13 @@ export default function BentaPanel() {
   const keptBelow = useRef(new Set<string>()); // below-cost prices someone chose to sell at anyway
   // Owner: "Start a sale" asks the store and who is buying first; both start empty for every sale.
   const [mustChoose, setMustChoose] = useState(() => choosesEachSale(savedCopy<{ role?: string }>("/admin/me/rice")?.role));
+  // Only the owner may keep a sale's cash ("Who keeps the cash?"), not a manager.
+  const [ownerLogin, setOwnerLogin] = useState(() => savedCopy<{ role?: string }>("/admin/me/rice")?.role === "OWNER");
   const [storePicked, setStorePicked] = useState(() => !!savedCart()?.cart.length);
   const [walkIn, setWalkIn] = useState(() => (savedCart()?.cart.length ? (savedCart()?.who ?? WALK_IN) === WALK_IN : false));
   const [startOpen, setStartOpen] = useState(() => !savedCart()?.cart.length);
+  // Open day + Close day (Z-read): while the store's day is not open, the price list steps aside.
+  const [dayState, setDayState] = useState<DayState>("off");
 
   const catalogAsk = useRef(0); // only the latest location asked for may fill the screen
   /** The price list of a location: the copy saved on this tablet at once, then the server's. Returns the location shown. */
@@ -274,7 +282,7 @@ export default function BentaPanel() {
       void savedThenFresh<{ customers?: Customer[] }>("/admin/customers", (cs) => setCustomers((cs?.customers ?? []) as Customer[]));
       const me = await cachedGet<{ homeLocationId?: string | null; role?: string }>("/admin/me/rice");
       setHomeLocationId(me?.homeLocationId ?? null);
-      if (me) setMustChoose(choosesEachSale(me.role) && !me.homeLocationId);
+      if (me) { setMustChoose(choosesEachSale(me.role) && !me.homeLocationId); setOwnerLogin(me.role === "OWNER"); }
       const want = where(me?.homeLocationId);
       const shown = await catalog;
       // A sale kept on this tablet for a customer: their special prices back on the buttons.
@@ -368,14 +376,17 @@ export default function BentaPanel() {
     // A customer added with no internet: once online, the list from the server has them for real.
     if (isNewId(priceCustomer) && !offline) void savedThenFresh<{ customers?: Customer[] }>("/admin/customers", (cs) => { if (cs?.customers) setCustomers(cs.customers as Customer[]); });
     setPriceCustomer(""); setSpecialCount(0);
-    setCart([]); setStep("pick"); setPay(null); setTendered(""); setReference(""); setParts([{ method: "cash", amount: "", reference: "" }, { method: "gcash", amount: "", reference: "" }]); setCustomerId(""); setCustomerSig(null);
+    setCart([]); setStep("pick"); setPay(null); setCashTo(""); setTendered(""); setReference(""); setParts([{ method: "cash", amount: "", reference: "" }, { method: "gcash", amount: "", reference: "" }]); setCustomerId(""); setCustomerSig(null);
     setPaper(false); setMorePay(false); setSlipNo(""); setSlipTime(""); setSlipPhoto(null); setStaffSig(null); setError(null);
     // The next sale starts with nothing chosen again: the owner answers "which store" and "who" each time.
     setStorePicked(false); setWalkIn(false); setStartOpen(true);
   };
 
   const allPay = morePay || pay === "maya" || pay === "bank" || pay === "split";
+  const takesCash = pay === "cash" || (pay === "split" && parts.some((x) => x.method === "cash" && toMinor(x.amount || "0") > 0));
+  const asksCashTo = ownerLogin && takesCash;
   const canSubmit = total > 0 && !!pay && !busy
+    && (!asksCashTo || !!cashTo)
     && (pay !== "cash" || (!!tendered && toMinor(tendered) >= total))
     && (!needsRef(pay) || reference.trim().length >= 4)
     && (pay !== "split" || (parts.reduce((s, x) => s + toMinor(x.amount || "0"), 0) === total && parts.every((x) => toMinor(x.amount || "0") > 0 && (x.method === "cash" || x.reference.trim().length >= 4))))
@@ -409,6 +420,7 @@ export default function BentaPanel() {
         ? { newCustomerName: customers.find((c) => c.id === priceCustomer)?.name ?? priceCustomer.slice(NEW_ID.length), newCustomerPhone: customers.find((c) => c.id === priceCustomer)?.phone ?? undefined }
         : { customerId: pay === "utang" ? customerId : priceCustomer || undefined }),
       paperSlip: paper ? { slipNo: slipNo.trim(), occurredAt: new Date(slipTime).toISOString() } : undefined,
+      ...(asksCashTo && cashTo === "owner" ? { cashToOwner: true } : {}),
       signatures,
       soldAt: new Date().toISOString(), // a sale that waits offline keeps its real time
     };
@@ -879,6 +891,11 @@ export default function BentaPanel() {
       lockedNote="To switch store, hold or clear this sale first." onPick={(id) => { reset(); void loadCatalog(id); }} />
   );
   const errAlert = error && <div className="alert alert-danger py-2" role="alert">{error}</div>;
+  const dayBlocked = dayState === "blocked" && !asking;
+  const dayBar = !asking && step === "pick" && !newItem && !editing && !checking && (
+    <DayBar locationId={locationId} storeName={storeName} heldCount={holds.length} onState={setDayState} compact={!wide} />
+  );
+  const pickArea = startCard || (dayBlocked ? null : finder);
   // Sideways, the steps sit above the sale; they step aside while the number pad needs the whole column.
   const stepsRow = !(sideBySide && (editing || checking)) && (
     <div className="d-flex flex-wrap align-items-center gap-2 mb-2">
@@ -895,7 +912,8 @@ export default function BentaPanel() {
           <div className="fit-col fit-main">
             {heldCard}
             {errAlert}
-            {startCard || finder}
+            {dayBar}
+            {pickArea}
           </div>
           <div className="fit-col fit-side">
             {stepsRow}
@@ -918,7 +936,7 @@ export default function BentaPanel() {
           {!(editing || checking || orderBig) && cart.length === 0 && !mustChoose && storeBar}
           {heldCard}
           {errAlert}
-          {step === "pick" && !newItem && !editing && !checking && <>{!orderBig && (startCard || finder)}{cartCard}</>}
+          {step === "pick" && !newItem && !editing && !checking && <>{!orderBig && dayBar}{!orderBig && pickArea}{cartCard}</>}
           {step === "pick" && !newItem && (editing || checking) && <div className="fit-scroll">{quickCount || editCard}</div>}
           {step === "pick" && newItem && <div className="fit-scroll"><NewItemForm locationId={locationId} onCancel={() => setNewItem(false)} onDone={async () => { setNewItem(false); await loadCatalog(locationId); }} /></div>}
 
@@ -953,6 +971,20 @@ export default function BentaPanel() {
                       {m === total ? "Exact" : peso(m)}
                     </button>
                   ))}
+                </div>
+              )}
+              {asksCashTo && (
+                <div className="cash-to mb-3">
+                  <div className="fw-semibold mb-1" id="bt-cashto">Who keeps the cash?</div>
+                  <div className="d-grid gap-2" style={{ gridTemplateColumns: "1fr 1fr" }} role="group" aria-labelledby="bt-cashto">
+                    <button type="button" className={`btn btn-lg px-2 ${cashTo === "drawer" ? "btn-dark" : "btn-outline-dark"}`} aria-pressed={cashTo === "drawer"} onClick={() => setCashTo("drawer")}>
+                      <i className="bi bi-inbox me-1" aria-hidden="true"></i>{saleStore?.code || saleStore?.name || "Store"} drawer
+                    </button>
+                    <button type="button" className={`btn btn-lg px-2 ${cashTo === "owner" ? "btn-dark" : "btn-outline-dark"}`} aria-pressed={cashTo === "owner"} onClick={() => setCashTo("owner")}>
+                      <i className="bi bi-person-check me-1" aria-hidden="true"></i>I keep it (owner)
+                    </button>
+                  </div>
+                  {cashTo === "owner" && <div className="small mt-1">The store&apos;s Close day will not expect this cash in its drawer. It shows on the Z-read as the owner&apos;s sale.</div>}
                 </div>
               )}
               {needsRef(pay as Pay) && (

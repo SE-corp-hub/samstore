@@ -14,6 +14,7 @@ import { RiceReportsService, watchStock } from "./rice-reports.service.js";
 import { StoreReportService } from "./store-report.service.js";
 import { WeeklySummaryService } from "./weekly-summary.service.js";
 import { CashService } from "../cash/cash.service.js";
+import { DayCloseService } from "./day-close.service.js";
 
 function statusFor(error: ApiError): HttpStatus {
   switch (error.type) {
@@ -42,12 +43,67 @@ export class RiceReportsController {
   private readonly storeReports = new StoreReportService();
   private readonly weekly = new WeeklySummaryService();
   private readonly cash = new CashService();
+  private readonly day = new DayCloseService();
 
   private async ctx(req: Req_, h: string | undefined) {
     const user = req.user;
     requireUser(user);
     const { storeId, role } = await resolveTenant(user, h, TENANT_ROLES.ADMIN);
     return { storeId, actor: await loadActor(storeId, user.sub, role) };
+  }
+
+  // ── Open day + Close day (Z-read) on POS ──
+
+  /** GET /admin/rice/day?locationId= — is the store's day open, closed, or not open yet. */
+  @Get("day")
+  async dayStatus(@Req() req: Req_, @Query("locationId") locationId?: string, @Headers("x-store-id") h?: string) {
+    const { storeId, actor } = await this.ctx(req, h);
+    return unwrap(await this.day.status(storeId, actor, { locationId: str(locationId) }));
+  }
+
+  /** POST /admin/rice/day/open { locationId?, openingFloatMinor, note? } — Open day with the change fund. */
+  @Post("day/open")
+  async dayOpen(@Req() req: Req_, @Body() body: Record<string, unknown>, @Headers("x-store-id") h?: string) {
+    const { storeId, actor } = await this.ctx(req, h);
+    return unwrap(await this.day.open(storeId, actor, { locationId: str(body?.locationId), openingFloatMinor: body?.openingFloatMinor, note: str(body?.note) }));
+  }
+
+  /** GET /admin/rice/day/xread?locationId= — the open day's figures now (nothing closes). */
+  @Get("day/xread")
+  async dayX(@Req() req: Req_, @Query("locationId") locationId?: string, @Headers("x-store-id") h?: string) {
+    const { storeId, actor } = await this.ctx(req, h);
+    return unwrap(await this.day.xread(storeId, actor, { locationId: str(locationId) }));
+  }
+
+  /** POST /admin/rice/day/close { locationId?, cashCounts?, cashCountedMinor, gcashCountedMinor, varianceReason?, note?, keepFloatMinor?, signatures } — Z-read. */
+  @Post("day/close")
+  async dayClose(@Req() req: Req_, @Body() body: Record<string, unknown>, @Headers("x-store-id") h?: string) {
+    const { storeId, actor } = await this.ctx(req, h);
+    return unwrap(await this.day.close(storeId, actor, {
+      locationId: str(body?.locationId), cashCounts: body?.cashCounts, cashCountedMinor: body?.cashCountedMinor, gcashCountedMinor: body?.gcashCountedMinor,
+      varianceReason: str(body?.varianceReason), note: str(body?.note), keepFloatMinor: body?.keepFloatMinor, signatures: signaturesFrom(body?.signatures),
+    }));
+  }
+
+  /** POST /admin/rice/day/reopen { id, reason } — owner only. */
+  @Post("day/reopen")
+  async dayReopen(@Req() req: Req_, @Body() body: Record<string, unknown>, @Headers("x-store-id") h?: string) {
+    const { storeId, actor } = await this.ctx(req, h);
+    return unwrap(await this.day.reopen(storeId, actor, { id: str(body?.id), reason: str(body?.reason) }));
+  }
+
+  /** GET /admin/rice/day/zreads?locationId=&from=&to= — the Z-reads, newest first. */
+  @Get("day/zreads")
+  async dayList(@Req() req: Req_, @Query("locationId") locationId?: string, @Query("from") from?: string, @Query("to") to?: string, @Headers("x-store-id") h?: string) {
+    const { storeId, actor } = await this.ctx(req, h);
+    return unwrap(await this.day.list(storeId, actor, { locationId: str(locationId), from: str(from), to: str(to) }));
+  }
+
+  /** GET /admin/rice/day/zread?id= — one Z-read to see or reprint. */
+  @Get("day/zread")
+  async dayOne(@Req() req: Req_, @Query("id") id?: string, @Headers("x-store-id") h?: string) {
+    const { storeId, actor } = await this.ctx(req, h);
+    return unwrap(await this.day.one(storeId, actor, str(id) ?? ""));
   }
 
   // ── cash at each store (per-store build, step 4) ──

@@ -390,6 +390,8 @@ export interface PreOrderFinalizeRequest {
   dueAt?: string;
   /** Sent by a completion saved offline: a retry of a pre-order already completed returns that result. */
   idempotencyKey?: string;
+  /** When the tablet completed it (one that waited offline is never refused by a closed day). */
+  soldAt?: string;
 }
 
 export interface PreOrderFinalizeResponse {

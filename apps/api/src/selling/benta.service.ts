@@ -34,6 +34,7 @@ import { coverShortage, deductWithBuffer } from "../domain/buffer.js";
 import { formatOrderNumber } from "../domain/order-number.js";
 import { resolveLinePrice, PriceOverrideError } from "../domain/price-override.js";
 import { taxColumnsFor } from "../domain/tax-store.js";
+import { cashTimeFor, dayGate } from "../day/day-gate.js";
 import { checkPaperSlip, isLoose, mergeQuantity, offlineSoldAt, planManualItem, priceAt, priceLine, saleKey, SellingError, shortMessage, type ManualItemAsk, type PricedLine } from "../domain/selling.js";
 import { formatKilos } from "../domain/weight.js";
 import { limitCheck, pesoText, saleText } from "../domain/utang.js";
@@ -48,6 +49,7 @@ import {
 import { txOptions } from "../persistence/tx-options.js";
 import { shelvesFor } from "../domain/sources.js";
 import { findOrMakeQuickCustomer } from "../pos/quick-customer.js";
+import { manilaDate } from "../domain/reports.js";
 
 export type BentaResult<T> = { ok: true; value: T } | { ok: false; error: ApiError };
 type Tx = Prisma.TransactionClient;
@@ -79,6 +81,8 @@ export type PayMethod = "cash" | "gcash" | "maya" | "bank" | "split" | "utang";
 
 export interface BentaInput {
   idempotencyKey?: unknown;
+  /** The owner rang the sale and keeps its cash (not this store's drawer). Owner login only; ignored for others (managers too). */
+  cashToOwner?: unknown;
   locationId?: string;
   lines?: BentaLineInput[];
   payment?: { method?: string; tenderedMinor?: unknown; reference?: string; tenders?: { method?: string; amountMinor?: unknown; tenderedMinor?: unknown; reference?: string }[] };
@@ -392,7 +396,12 @@ export class BentaService {
         customerName = pcust.customer.name ?? "Customer";
       }
       const paper = input.paperSlip ? checkPaperSlip(input.paperSlip, new Date()) : null;
-      const registerSessionId = method === "utang" ? null : await this.drawerFor(storeId, loc.id, !!fromCount);
+      // Open day (switch on): this store sells only while its day is open. A sale that waited offline,
+      // a paper slip and the walk-ins of a count are never refused (the money was really taken).
+      const madeEarlier = paper?.occurredAt ?? offlineSoldAt(input.soldAt, new Date());
+      const gate = await dayGate(prisma, storeId, loc.id, { offline: !!madeEarlier || !!fromCount, storeName: loc.name });
+      if (gate.refusal) throw new StepError(conflict(gate.refusal));
+      const registerSessionId = method === "utang" ? null : gate.on ? gate.sessionId : await this.drawerFor(storeId, loc.id, !!fromCount);
 
       const store = await prisma.store.findUnique({ where: { id: storeId }, include: { settings: true } });
       if (!store) throw new StepError(notFound("Store not found"));
@@ -433,6 +442,9 @@ export class BentaService {
       const orderNumber = formatOrderNumber(store.slug, seq, { prefix: await orderPrefixAt(prisma, storeId, loc.id, store.settings?.orderNumberPrefix) });
       const now = new Date();
       const at = paper?.occurredAt ?? offlineSoldAt(input.soldAt, now) ?? now;
+      // A sale that waited offline: its cash counts on the day it was taken, unless that day is already
+      // closed here (then: now). A paper slip's cash counts the day it is typed in, as before.
+      const cashAt = paper ? now : await cashTimeFor(prisma, storeId, loc.id, at, now);
       const releases: { id: string; docNumber: string }[] = [];
 
       try {
@@ -486,7 +498,14 @@ export class BentaService {
           } else {
             // The count's shortages go back on the shelf first, so this sale takes them once.
             if (fromCount) await shortsBecomeSale(tx, { storeId, countId: fromCount.countId, lineIds: fromCount.lineIds, orderId, orderNumber, actorId: actor.userId });
-            await writeTenders(tx, { storeId, orderId, actorId: actor.userId, plan: plan!, note: paper ? `Benta (papel #${paper.slipNo})` : fromCount ? `Walk-ins (count ${fromCount.countDoc})` : "Benta", registerSessionId });
+            await writeTenders(tx, { storeId, orderId, actorId: actor.userId, plan: plan!, note: paper ? `Benta (papel #${paper.slipNo})` : fromCount ? `Walk-ins (count ${fromCount.countDoc})` : "Benta", registerSessionId, receivedAt: cashAt });
+            // The owner keeps the cash of their own sale: written as handed to the owner on the same day,
+            // so this store's drawer (and its Close day) does not expect it.
+            const ownerCash = input.cashToOwner === true && actor.role === "OWNER" && !fromCount
+              ? tendersIn.filter((t) => t.methodCode === "cash").reduce((sum, t) => sum + t.amountMinor, 0) : 0;
+            if (ownerCash > 0) {
+              await tx.cashHandover.create({ data: { storeId, locationId: loc.id, businessDate: manilaDate(cashAt), amountMinor: ownerCash, note: `Owner's sale ${orderNumber}`, handedById: actor.userId, receivedById: actor.userId, orderId } });
+            }
             const local = priced.filter((l) => !l.sourceLocationId);
             for (const l of local) {
               await deductWithBuffer(tx, storeId, { productId: l.product.id, quantity: l.stockQty }, { orderId, createdBy: actor.userId, warehouseId: loc.id, documentType: "SALE", documentId: orderId });

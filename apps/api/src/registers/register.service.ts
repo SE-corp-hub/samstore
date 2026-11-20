@@ -71,7 +71,7 @@ function round(value: number): number {
 export class RegisterService {
   /** The store's single register (created on first use). */
   async ensureRegister(storeId: string): Promise<{ id: string; name: string }> {
-    const existing = await prisma.register.findFirst({ where: { storeId, status: "ACTIVE" } });
+    const existing = await prisma.register.findFirst({ where: { storeId, status: "ACTIVE", locationId: null } }); // each store's own drawer (Open day) is not this one
     if (existing) return { id: existing.id, name: existing.name };
     const created = await prisma.register.create({ data: { storeId, name: "Main counter" } });
     return { id: created.id, name: created.name };

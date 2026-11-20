@@ -394,7 +394,7 @@ textarea,
   display: flex; align-items: center; justify-content: space-between; gap: 16px;
   min-height: 64px; padding: 10px 14px !important; margin: 0 0 8px; border: 1px solid #dedad3; border-radius: 10px; background: #fff;
 }
-.settings-switch .form-check-label { flex: 1 1 auto; cursor: pointer; }
+.settings-switch .form-check-label { flex: 1 1 auto; min-width: 0; cursor: pointer; } /* min-width 0: long help text wraps instead of pushing the switch off screen */
 .settings-switch .form-check-input { float: none; margin: 0; flex-shrink: 0; width: 3.25rem; height: 1.75rem; cursor: pointer; }
 /* The Save bar of a group stays at the bottom of the screen while the group scrolls. */
 .settings-savebar {

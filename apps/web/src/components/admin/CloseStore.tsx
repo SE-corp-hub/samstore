@@ -22,6 +22,7 @@ import { toast } from "../../lib/toast";
 import CountReport from "./CountReport";
 import CountWalkIn, { type WalkInInfo } from "./CountWalkIn";
 import SignaturePad from "./SignaturePad";
+import { useDayOn } from "../../lib/day";
 
 export const CLOSE_STEPS = ["Count", "Check", "Walk-ins", "Cash", "Done"] as const;
 export type CloseStep = (typeof CLOSE_STEPS)[number];
@@ -224,6 +225,7 @@ function CashStep({ countId, cash, onSaved, onSkip }: { countId: string; cash: C
   const counted = typed.trim() === "" ? null : pesosToMinor(typed);
   const diff = counted === null ? null : counted - cash.expectedMinor;
   const day = new Date(`${cash.day}T00:00:00+08:00`).toLocaleDateString("en-PH", { day: "numeric", month: "short", timeZone: "Asia/Manila" });
+  const dayOn = useDayOn();
 
   const save = async () => {
     if (counted === null || !sig) return;
@@ -241,6 +243,18 @@ function CashStep({ countId, cash, onSaved, onSkip }: { countId: string; cash: C
     }
   };
 
+  // Open day + Close day on: the cash (with the change fund and GCash) is counted at Close day on POS.
+  if (dayOn) {
+    return (
+      <section className="card mb-3" aria-labelledby="cash-title">
+        <div className="card-body">
+          <h3 id="cash-title" className="h5 mb-1">The rice count is done</h3>
+          <p className="mb-3">Now close the day on <strong>POS → Close day</strong>: count the cash and GCash there and print the Z-read. The walk-in sales from this count are already in it.</p>
+          <button type="button" className="btn btn-primary btn-lg" onClick={onSkip}>OK</button>
+        </div>
+      </section>
+    );
+  }
   return (
     <section className="card mb-3" aria-labelledby="cash-title">
       <div className="card-body">

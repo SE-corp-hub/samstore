@@ -9,6 +9,8 @@
 //     balance is reduced (a cash sale gets a refund row to pay out from the drawer).
 //   * Reminders: a monthly balance text and an overdue text, once per period.
 
+import { dayGate } from "../day/day-gate.js";
+import { offlineSoldAt } from "../domain/selling.js";
 import { storeOwedFirst } from "../cash/cash-book.js";
 import { mainLocationId } from "../reports/sales-book.js";
 import type { ApiError } from "@sam-store/contracts";
@@ -200,7 +202,7 @@ export class UtangService {
 
   async collect(
     storeId: string, actor: Actor,
-    input: { customerId?: string; amountMinor?: unknown; method?: string; reference?: string; tenderedMinor?: unknown; locationId?: string; signatures?: SignatureInput[] },
+    input: { customerId?: string; amountMinor?: unknown; method?: string; reference?: string; tenderedMinor?: unknown; locationId?: string; signatures?: SignatureInput[]; madeAt?: unknown },
   ): Promise<UtangResult<{ paymentId: string; amountMinor: number; balanceMinor: number; changeMinor: number; smsId: string; smsStatus: string }>> {
     return this.run(async () => {
       const loc = await this.location(storeId, actor, input.locationId);
@@ -216,7 +218,11 @@ export class UtangService {
       });
       if (!prepared.ok) throw new StepError(prepared);
       const tender = prepared.value.prepared[0]!;
-      const registerSessionId = await this.registers.sessionAt(storeId, loc.id);
+      // Open day (switch on): cash comes into this store's drawer only while its day is open (a payment
+      // that waited offline is never refused).
+      const gate = await dayGate(prisma, storeId, loc.id, { offline: !!offlineSoldAt(input.madeAt, new Date()) });
+      if (gate.refusal) throw new StepError(conflict(gate.refusal));
+      const registerSessionId = gate.on ? gate.sessionId : await this.registers.sessionAt(storeId, loc.id);
       const hasCustomerSig = (input.signatures ?? []).some((s) => s.signerKind === "CUSTOMER");
       // Step 4: credit may be paid at any store. The cash stays in THIS store's drawer; when the oldest
       // unpaid credit sale is another store's, the payment notes which store the money is for.

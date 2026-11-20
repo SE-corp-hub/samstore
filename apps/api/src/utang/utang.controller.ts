@@ -69,7 +69,7 @@ export class UtangController {
     const { storeId, actor } = await this.ctx(req, h);
     return unwrap(await this.utang.collect(storeId, actor, {
       customerId: str(body?.customerId), amountMinor: body?.amountMinor, method: str(body?.method), tenderedMinor: body?.tenderedMinor,
-      reference: str(body?.reference), locationId: str(body?.locationId), signatures: signaturesFrom(body?.signatures),
+      reference: str(body?.reference), locationId: str(body?.locationId), signatures: signaturesFrom(body?.signatures), madeAt: body?.madeAt,
     }));
   }
 
