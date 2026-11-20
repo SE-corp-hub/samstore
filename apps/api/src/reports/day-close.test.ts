@@ -42,7 +42,6 @@ after(async () => {
     await prisma.registerSession.deleteMany({ where });
     await prisma.register.deleteMany({ where });
     await prisma.storeCounter.deleteMany({ where });
-    await prisma.idempotencyRecord.deleteMany({ where }).catch(() => undefined);
     await prisma.stockLevel.deleteMany({ where });
     await prisma.product.deleteMany({ where });
     await prisma.userStore.deleteMany({ where });
