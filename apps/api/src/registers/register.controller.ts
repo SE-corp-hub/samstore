@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Headers, HttpException, HttpStatus, Inject, Param, Post, Query, Req, UseGuards } from "@nestjs/common";
+import { switchesAt } from "../day/store-switches.js";
 import type { ApiError } from "@sam-store/contracts";
 import { JwtAuthGuard, type AuthPrincipal } from "../auth/auth.guard.js";
 import { resolveTenant, TENANT_ROLES } from "../auth/tenant-context.js";
@@ -42,13 +43,14 @@ export class RegisterController {
 
   /** GET /admin/registers/current — the open shift with its live drawer totals. */
   @Get("registers/current")
-  async current(@Req() req: Request & { user?: AuthPrincipal }, @Headers("x-store-id") headerStoreId?: string) {
+  async current(@Req() req: Request & { user?: AuthPrincipal }, @Headers("x-store-id") headerStoreId?: string, @Query("locationId") locationId?: string) {
     const storeId = await this.guardStore(req, headerStoreId, TENANT_ROLES.VIEW);
-    const [session, settings] = await Promise.all([
+    // ?locationId=: that store's own drawer rule ("This store" in Settings); none: the business's.
+    const [session, sw] = await Promise.all([
       this.registers.currentSession(storeId),
-      prisma.storeSettings.findUnique({ where: { storeId }, select: { requireOpenShift: true } }),
+      switchesAt(prisma, storeId, locationId || null),
     ]);
-    return { storeId, session, required: settings?.requireOpenShift ?? false };
+    return { storeId, session, required: sw.requireOpenShift };
   }
 
   /** POST /admin/registers/open — start a shift (opening float). */

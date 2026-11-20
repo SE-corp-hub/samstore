@@ -57,7 +57,7 @@ export default function CounterSettingsPanel() {
             </div>
             <p className="text-muted small mb-0 mt-2">
               On: the drawer must be opened before any cash sale, and cash payments are counted against that shift.
-              Off: staff can sell any time — you can still open a shift when you want to count the drawer.
+              Off: staff can sell any time — you can still open a shift when you want to count the drawer. This changes only your own store.
             </p>
           </div>
         </div>

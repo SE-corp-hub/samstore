@@ -302,10 +302,11 @@ export default function BentaPanel() {
   }, [cart, locationId, priceCustomer]);
 
   const checkDrawer = useCallback(async () => {
-    const r = await cachedGet<{ session?: unknown; required?: boolean }>("/admin/registers/current");
+    // The drawer rule is each store's own ("This store" in Settings).
+    const r = await cachedGet<{ session?: unknown; required?: boolean }>(`/admin/registers/current${locationId ? `?locationId=${encodeURIComponent(locationId)}` : ""}`);
     setDrawerOpen(r ? !!r.session : null);
     setShiftRequired(r?.required !== false);
-  }, []);
+  }, [locationId]);
   useEffect(() => { if (pay === "cash") void checkDrawer(); }, [pay, checkDrawer]);
 
   const receiptSlip = (l: NonNullable<typeof last>) => ({

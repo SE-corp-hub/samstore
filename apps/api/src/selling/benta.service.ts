@@ -17,6 +17,7 @@
 // transaction as the order, its payment and its signatures.
 
 import { orderPrefixAt } from "../domain/store-identity.js";
+import { switchesAt } from "../day/store-switches.js";
 import { costModeOf, effectiveCost, recordCostIn, shelfCostFor } from "../domain/shelf-cost.js";
 import type { ApiError } from "@sam-store/contracts";
 import { createHash } from "node:crypto";
@@ -310,8 +311,7 @@ export class BentaService {
     });
     const exact = sessions.find((s) => s.register.locationId === locationId) ?? sessions[0];
     if (exact) return exact.id;
-    const settings = await prisma.storeSettings.findUnique({ where: { storeId }, select: { requireOpenShift: true } });
-    if (settings?.requireOpenShift && !optional) throw new StepError(conflict("No cash drawer is open here — open the drawer before taking cash"));
+    if (!optional && (await switchesAt(prisma, storeId, locationId)).requireOpenShift) throw new StepError(conflict("No cash drawer is open here — open the drawer before taking cash"));
     return null;
   }
 

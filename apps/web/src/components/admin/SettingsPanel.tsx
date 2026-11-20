@@ -17,6 +17,7 @@ import { cachedGet, savedCopy, useOffline } from "../../lib/offlineCache";
 import { LOCK_PATH, type FeatureLock } from "../../lib/feature-lock";
 import PinLockSettings, { lockSummary } from "./PinLockSettings";
 import StoreLockSettings from "./StoreLockSettings";
+import ThisStoreSettings from "./ThisStoreSettings";
 import { getPrinterSettings } from "../../lib/printer-settings";
 import { peso } from "../../lib/number-format";
 import { useMediaQuery, WIDE } from "../../lib/use-media-query";
@@ -104,12 +105,12 @@ function formFrom(s: StoreSettings["settings"]): Form {
 }
 
 type ServerGroup = "counter" | "credit" | "receipt" | "shop" | "messenger";
-type Group = "business" | "printer" | ServerGroup | "lock" | "account";
+type Group = "business" | "store" | "printer" | ServerGroup | "lock" | "account";
 
 /** What each group sends when saved. Also used to tell whether a group has unsaved changes. */
 const PAYLOAD: Record<ServerGroup, (f: Form) => Record<string, unknown>> = {
   counter: (f) => ({
-    dailySalesTargetMinor: toMinor(f.dailyTarget), hidePricePreOrder: f.hidePrePrice, requireOpenShift: f.requireOpenShift, dayOpenClose: f.dayOpenClose,
+    // 2026-11-20: Open day, the drawer rule, pre-order prices and the target moved to "This store" (each store its own).
     quotaPromoEnabled: f.promoOn, quotaPromoMinSacks: toInt(f.promoMin, 10), quotaPromoOffMinor: toMinor(f.promoOff), quotaPromoCategoryIds: f.promoCats,
   }),
   credit: (f) => ({ creditLimitMinor: toMinor(f.creditLimit), creditTermDays: toInt(f.creditTermDays, 30) }),
@@ -152,8 +153,9 @@ function problems(g: ServerGroup, f: Form): Partial<Record<keyof Form, string>> 
 
 const GROUPS: { id: Group; icon: string; title: string; server: boolean }[] = [
   { id: "business", icon: "bi-shop-window", title: "Business name", server: true },
+  { id: "store", icon: "bi-shop", title: "This store", server: true },
   { id: "printer", icon: "bi-printer", title: "Printer and receipt text", server: false },
-  { id: "counter", icon: "bi-shop", title: "Selling at the counter", server: true },
+  { id: "counter", icon: "bi-cash-coin", title: "Quota promo", server: true },
   { id: "credit", icon: "bi-journal-text", title: "Credit (utang)", server: true },
   { id: "receipt", icon: "bi-percent", title: "VAT and tax", server: true },
   { id: "shop", icon: "bi-globe", title: "Online shop", server: true },
@@ -321,7 +323,8 @@ export default function SettingsPanel({ role = "" }: { role?: string }) {
     switch (g) {
       case "business": return data?.name ?? "";
       case "printer": { const p = getPrinterSettings(); return `${p.widthMm} mm · ${p.autoPrint ? "prints after each sale" : "print by hand"}${p.bluetooth ? " · Bluetooth" : ""}`; }
-      case "counter": return `${toMinor(saved.dailyTarget) > 0 ? `Target ${peso(toMinor(saved.dailyTarget))}` : "No daily target"} · ${saved.dayOpenClose ? "Open day and Z-read on POS" : saved.requireOpenShift ? "open the drawer first" : "sell any time"}`;
+      case "store": return "Each store's Open day and Z-read, drawer, receipt details";
+      case "counter": return saved.promoOn ? `On · ${saved.promoMin} sacks or more, ${peso(toMinor(saved.promoOff))} less each` : "Off";
       case "credit": return toMinor(saved.creditLimit) > 0 ? `New customers ${peso(toMinor(saved.creditLimit))} · ${saved.creditTermDays} days to pay` : `No default limit · ${saved.creditTermDays} days to pay`;
       case "receipt": return `${saved.vatEnabled ? `VAT ${saved.vatRate}%${saved.pricesIncludeVat ? " included" : " added"}` : "No VAT"}${saved.tin ? " · TIN set" : ""}${saved.seniorPwd ? " · Senior/PWD 20%" : ""}`;
       case "shop": return saved.paused ? "Closed for now" : `${saved.allowGuest ? "Open to guests" : "Open"} · ${[saved.deliveryEnabled && "delivery", saved.pickupEnabled && "pickup"].filter(Boolean).join(" and ") || "no delivery or pickup"}`;
@@ -355,7 +358,7 @@ export default function SettingsPanel({ role = "" }: { role?: string }) {
     const isDirty = dirty(g);
     const blocked = form ? Object.keys(problems(g, form)).length > 0 : true;
     return (
-      <div className={`settings-savebar position-sticky bottom-0${wide ? "" : " sticky-above-bar"}`}>
+      <div className="settings-savebar position-sticky bottom-0 sticky-above-bar">
         <span className="me-auto" role="status">
           {saving ? <>Saving…</>
             : isDirty ? <><i className="bi bi-pencil-fill me-1" style={{ color: "#8A5A00" }} aria-hidden="true"></i>Not saved yet</>
@@ -385,17 +388,12 @@ export default function SettingsPanel({ role = "" }: { role?: string }) {
           onSaved={(name) => { setData((d) => (d ? { ...d, name } : d)); window.dispatchEvent(new Event(STORES_CHANGED_EVENT)); }} />;
       case "printer":
         return <div onChange={() => setPrinterTick((n) => n + 1)} onClick={() => setPrinterTick((n) => n + 1)}><PrinterSettingsCard storeName={data?.name} /></div>;
+      case "store":
+        return <ThisStoreSettings />;
       case "counter":
         return (
           <>
-            <SwitchRow id="st-day" label="Open and close the day on POS" checked={form.dayOpenClose} onChange={(v) => set({ dayOpenClose: v })}
-              help="On: each store taps Open day (change fund) before selling, and Close day at night: count the cash and GCash, the app checks it against the sales and prints the Z-read. No sale of any kind while a store's day is not open. Off: POS works as before." />
-            {!form.dayOpenClose && (
-              <SwitchRow id="st-shift" label="Open the cash drawer before taking cash" checked={form.requireOpenShift} onChange={(v) => set({ requireOpenShift: v })}
-                help="On: each day starts by counting the drawer. Off: staff can sell any time." />
-            )}
-            <SwitchRow id="st-hideprice" label="Hide item prices on pre-orders" checked={form.hidePrePrice} onChange={(v) => set({ hidePrePrice: v })}
-              help="The Pre-order screen shows only the total, not the price of each item." />
+            <p className="text-muted mb-3">Open day and Z-read, the cash drawer, pre-order prices and the daily target are now set for each store in <button type="button" className="btn btn-link p-0 align-baseline fw-semibold" onClick={() => void openGroup("store")}>This store</button>.</p>
             <SwitchRow id="st-promo" label="Quota promo" checked={form.promoOn} onChange={(v) => set({ promoOn: v })}
               help="On: when one sale or pre-order has enough sacks of the groups below, each of those sacks is cheaper. It shows as a price change with the reason Quota promo." />
             {form.promoOn && (
@@ -426,9 +424,6 @@ export default function SettingsPanel({ role = "" }: { role?: string }) {
                 </fieldset>
               </div>
             )}
-            <Field id="st-target" label="Daily sales target (₱)" help="Shown on Overview so you can see how the day is going. Leave empty for none.">
-              <PesoInput id="st-target" className="form-control form-control-lg" value={form.dailyTarget} onChange={(v) => set({ dailyTarget: v })} placeholder="No target" style={{ maxWidth: 260 }} />
-            </Field>
           </>
         );
       case "credit":

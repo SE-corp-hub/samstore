@@ -225,7 +225,7 @@ function CashStep({ countId, cash, onSaved, onSkip }: { countId: string; cash: C
   const counted = typed.trim() === "" ? null : pesosToMinor(typed);
   const diff = counted === null ? null : counted - cash.expectedMinor;
   const day = new Date(`${cash.day}T00:00:00+08:00`).toLocaleDateString("en-PH", { day: "numeric", month: "short", timeZone: "Asia/Manila" });
-  const dayOn = useDayOn();
+  const dayOn = useDayOn(cash.location);
 
   const save = async () => {
     if (counted === null || !sig) return;

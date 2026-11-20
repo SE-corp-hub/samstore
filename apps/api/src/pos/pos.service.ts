@@ -6,6 +6,7 @@
 // Totals are always server-computed; stock mutations are atomic.
 
 import { dayGate } from "../day/day-gate.js";
+import { switchesAt } from "../day/store-switches.js";
 import { offlineSoldAt } from "../domain/selling.js";
 import { orderPrefixAt } from "../domain/store-identity.js";
 import { orderWall } from "../auth/wall.js";
@@ -239,8 +240,7 @@ export class PosService {
     }
     const at = await this.registers.sessionAt(storeId, locationId);
     if (at) return { ok: true, value: at };
-    const settings = await prisma.storeSettings.findUnique({ where: { storeId }, select: { requireOpenShift: true } });
-    if (settings?.requireOpenShift) return { ok: false, error: { type: "conflict", message: "No cash drawer is open here — open the drawer before taking cash" } };
+    if ((await switchesAt(prisma, storeId, locationId)).requireOpenShift) return { ok: false, error: { type: "conflict", message: "No cash drawer is open here — open the drawer before taking cash" } };
     return { ok: true, value: null };
   }
 

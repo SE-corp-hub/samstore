@@ -64,6 +64,13 @@ const SEES_ALL_PROFIT = ["OWNER", "MANAGER", "STORE_OWNER", "PLATFORM_ADMIN"];
 /** Head of this very store (step 7). */
 export const isHeadOf = (actor: Actor, locationId: string | null | undefined): boolean => !!actor.isHead && !!locationId && actor.homeLocationId === locationId;
 
+/**
+ * Who may change one store's own settings ("This store", its PIN lock, its team): the owner and
+ * managers for every store, the head of a store for that store only. Same rule as canSetLocationLock.
+ */
+export const canManageLocation = (actor: Actor, locationId: string | null | undefined): boolean =>
+  ["OWNER", "STORE_OWNER", "PLATFORM_ADMIN", "MANAGER"].includes(actor.role) || isHeadOf(actor, locationId);
+
 /** Who may see cost and profit of one store: the owner side, and the head of that store. Nobody else. */
 export const seesProfitAt = (actor: Actor, locationId: string | null | undefined): boolean => SEES_ALL_PROFIT.includes(actor.role) || isHeadOf(actor, locationId);
 

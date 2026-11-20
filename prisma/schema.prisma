@@ -846,6 +846,10 @@ model Warehouse {
   receiptContact        String?
   dailySalesTargetMinor Int?
   orderPrefix           String?
+  // 2026-11-20 "This store" in Settings: the store's own switches. Empty = follow the business (StoreSettings).
+  dayOpenClose          Boolean?
+  requireOpenShift      Boolean?
+  hidePricePreOrder     Boolean?
   expenses          Expense[]
   cashHandovers     CashHandover[]
   paymentsFor       Payment[] @relation("PaymentForLocation")

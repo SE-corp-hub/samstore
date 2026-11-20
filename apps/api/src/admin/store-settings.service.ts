@@ -1,6 +1,7 @@
 // Store settings admin service — tenant-scoped store configuration.
 
 import { randomBytes } from "node:crypto";
+import { switchesOfAll } from "../day/store-switches.js";
 import { prisma } from "../persistence/prisma-repositories.js";
 import type { ApiError } from "@sam-store/contracts";
 
@@ -106,6 +107,9 @@ export class StoreSettingsService {
         orderNumberPrefix: store.settings?.orderNumberPrefix ?? null,
         privacyRetentionDays: store.settings?.privacyRetentionDays ?? 0,
       },
+      // 2026-11-20: each store's own switches ("This store"), by location id. Saved on the tablet with the
+      // rest of this answer, so the Pre-order and POS screens know their store's rules offline.
+      storeSwitches: Object.fromEntries([...(await switchesOfAll(prisma, store.id)).entries()].map(([id, sw]) => [id, { dayOpenClose: sw.dayOpenClose, requireOpenShift: sw.requireOpenShift, hidePricePreOrder: sw.hidePricePreOrder }])),
     };
   }
 

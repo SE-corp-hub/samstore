@@ -1,7 +1,7 @@
 // Open day + Close day (Z-read): the one gate every selling step asks.
 //
-// When the owner turns on Settings → Selling at the counter → "Open and close the day on POS"
-// (StoreSettings.dayOpenClose), a store sells only while ITS day is open:
+// When Settings → This store → "Open and close the day on POS" is on for a store
+// (Warehouse.dayOpenClose, empty = the business's StoreSettings.dayOpenClose), that store sells only while ITS day is open:
 //   - no open day          → refused: "Tap Open day on POS"
 //   - the open day is old   → refused: close yesterday first (its Z-read must hold only its own day)
 //   - closed for today      → refused: only the owner can reopen it
@@ -13,12 +13,18 @@
 
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { manilaDate } from "../domain/reports.js";
+import { switchesAt, switchesOfAll } from "./store-switches.js";
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
-export async function dayModeOn(db: Db, storeId: string): Promise<boolean> {
-  const s = await db.storeSettings.findUnique({ where: { storeId }, select: { dayOpenClose: true } });
-  return s?.dayOpenClose === true;
+/**
+ * Is Open day + Close day on? Each store has its own switch ("This store" in Settings); a store
+ * with no own value follows the business. No location: on when it is on at ANY store.
+ */
+export async function dayModeOn(db: Db, storeId: string, locationId?: string | null): Promise<boolean> {
+  if (locationId) return (await switchesAt(db, storeId, locationId)).dayOpenClose;
+  for (const s of (await switchesOfAll(db, storeId)).values()) if (s.dayOpenClose) return true;
+  return (await switchesAt(db, storeId)).dayOpenClose;
 }
 
 /** The open day of one store (any date), or null. */
@@ -52,7 +58,7 @@ export interface DayGate {
  * `offline`: the step was made on the tablet earlier and is only arriving now.
  */
 export async function dayGate(db: Db, storeId: string, locationId: string, opts: { offline?: boolean; now?: Date; storeName?: string } = {}): Promise<DayGate> {
-  if (!(await dayModeOn(db, storeId))) return { on: false, sessionId: null, refusal: null };
+  if (!(await dayModeOn(db, storeId, locationId))) return { on: false, sessionId: null, refusal: null };
   const now = opts.now ?? new Date();
   const today = manilaDate(now);
   const open = await openDayAt(db, storeId, locationId);

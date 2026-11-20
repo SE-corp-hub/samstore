@@ -246,7 +246,8 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
   const [buildNewName, setBuildNewName] = useState("");
   const [buildNewPhone, setBuildNewPhone] = useState("");
   const [buildBusy, setBuildBusy] = useState(false);
-  const [hidePrice, setHidePrice] = useState(false); // StoreSettings.hidePricePreOrder
+  // Hide item prices: each store's own switch ("This store" in Settings), else the business's.
+  const [hideRule, setHideRule] = useState<{ business: boolean; byStore: Record<string, { hidePricePreOrder?: boolean }> }>({ business: false, byStore: {} });
   const [promo, setPromo] = useState<QuotaPromo>(PROMO_OFF); // quota promo (Settings), from the saved price list
   const [promoInfo, setPromoInfo] = useState<Map<string, { categoryId: string | null; isSack: boolean }>>(new Map());
   const wide = useMediaQuery(WIDE);
@@ -266,6 +267,7 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
   const fitRef = useFitHeight<HTMLDivElement>(fit);
 
   /** ₱— when store hides per-product prices (subtotal/total still shown). */
+  const hidePrice = hideRule.byStore[locationId]?.hidePricePreOrder ?? hideRule.business;
   const maybePrice = (minor: number) => (hidePrice ? "—" : toPesos(minor));
 
   /** `first`: opening the screen shows the list saved on this tablet at once (later refreshes wait for the server, so a just-finished pre-order does not flash back). */
@@ -331,8 +333,8 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
       await Promise.all([
         savedThenFresh<{ products?: PosProduct[] }>("/admin/products", (p) => setRawProducts(p?.products ?? [])),
         savedThenFresh<{ customers?: PosCustomer[] }>("/admin/customers", (c) => setBuildCustomers(c?.customers ?? [])),
-        savedThenFresh<{ settings?: { hidePricePreOrder?: boolean }; name?: string }>("/admin/settings", (s) => {
-          setHidePrice(Boolean(s?.settings?.hidePricePreOrder));
+        savedThenFresh<{ settings?: { hidePricePreOrder?: boolean }; storeSwitches?: Record<string, { hidePricePreOrder?: boolean }>; name?: string }>("/admin/settings", (s) => {
+          setHideRule({ business: Boolean(s?.settings?.hidePricePreOrder), byStore: s?.storeSwitches ?? {} });
           setStoreName(s?.name ?? "");
         }),
         savedThenFresh<Cat>(`/admin/benta/catalog${loc ? `?locationId=${encodeURIComponent(loc)}` : ""}`, showCatalog),

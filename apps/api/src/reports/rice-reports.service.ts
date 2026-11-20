@@ -329,7 +329,7 @@ export class RiceReportsService {
       const counted = input.cashCountedMinor;
       if (typeof counted !== "number" || !Number.isInteger(counted) || counted < 0) throw new StepError(invalid("Enter the cash you counted"));
       // Open day on: the day closes with Close day (Z-read) on POS, so the change fund and GCash are counted too.
-      if (await dayModeOn(prisma, storeId)) throw new StepError(conflict("Close the day with Close day (Z-read) on POS."));
+      if (await dayModeOn(prisma, storeId, loc.id)) throw new StepError(conflict("Close the day with Close day (Z-read) on POS."));
       const totals = await this.dayTotals(storeId, loc.id, date);
       const handOffs = await this.openHandOffs(storeId, loc.id);
       try {

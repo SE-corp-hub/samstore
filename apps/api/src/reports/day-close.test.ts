@@ -209,3 +209,37 @@ test("The owner sells at a store and keeps the cash: the drawer does not expect 
   assert.equal(z.cash.differenceMinor, 0, "balances with the owner's cash out of the drawer");
   assert.equal(z.ownerSales?.length, 2, "frozen on the Z-read");
 });
+
+test("each store has its own Open day switch (This store in Settings)", async () => {
+  const counter = new BentaService();
+  const day = new DayCloseService();
+  // The business switch is off; only Bahay Tindahan turns its own on.
+  const fx = await fixture(false);
+  await prisma.warehouse.update({ where: { id: fx.bt }, data: { dayOpenClose: true } });
+  const sellAt = (locationId: string) => counter.sell(fx.storeId, fx.owner, { idempotencyKey: key(), locationId, lines: [{ productId: fx.rice, quantity: 1 }], payment: { method: "cash" } });
+
+  must(await sellAt(fx.main)); // Bogs and Lucy: off, sells as before
+  const bt = await sellAt(fx.bt);
+  assert.equal(bt.ok, false, "Bahay Tindahan needs Open day");
+  assert.match(why(bt), /not open yet/);
+
+  const all = must(await day.status(fx.storeId, fx.owner, {}));
+  assert.equal(all.on, true, "on at some store");
+  assert.deepEqual(all.onAt.map((p) => p.id), [fx.bt]);
+  assert.equal(must(await day.status(fx.storeId, fx.owner, { locationId: fx.main })).on, false);
+  assert.equal(must(await day.status(fx.storeId, fx.owner, { locationId: fx.bt })).on, true);
+  const openMain = await day.open(fx.storeId, fx.owner, { locationId: fx.main, openingFloatMinor: 0 });
+  assert.equal(openMain.ok, false, "no Open day where the switch is off");
+
+  // The other way round: business on, Bogs and Lucy turns its own off.
+  await prisma.storeSettings.update({ where: { storeId: fx.storeId }, data: { dayOpenClose: true } });
+  await prisma.warehouse.update({ where: { id: fx.main }, data: { dayOpenClose: false } });
+  must(await sellAt(fx.main));
+  assert.equal((await sellAt(fx.bt)).ok, false);
+
+  // The drawer rule is each store's own too.
+  await prisma.warehouse.update({ where: { id: fx.main }, data: { requireOpenShift: true } });
+  const noDrawer = await sellAt(fx.main);
+  assert.equal(noDrawer.ok, false);
+  assert.match(why(noDrawer), /drawer/);
+});

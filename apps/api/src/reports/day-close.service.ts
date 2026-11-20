@@ -17,6 +17,7 @@ import { prisma } from "../persistence/prisma-repositories.js";
 import { dayRange, manilaDate, ReportError } from "../domain/reports.js";
 import { captureSignatures, locationRefusal, requireSignatures, signatureErrorResult, type Actor, type SignatureInput } from "../people/people.service.js";
 import { closedDay, dayModeOn, openDayAt } from "../day/day-gate.js";
+import { switchesOfAll } from "../day/store-switches.js";
 import { mainLocationId, paymentsOfStore } from "./sales-book.js";
 import { RiceReportsService } from "./rice-reports.service.js";
 
@@ -64,6 +65,8 @@ export interface DayFigures {
 
 export interface DayStatus {
   on: boolean;
+  /** The stores whose own Open day switch is on (each store has its own). */
+  onAt: { id: string; name: string }[];
   location: { id: string; name: string } | null;
   today: string;
   open: { id: string; businessDate: string; openedAt: string; openedBy: string; floatMinor: number; stale: boolean } | null;
@@ -111,11 +114,14 @@ export class DayCloseService {
 
   async status(storeId: string, actor: Actor, input: { locationId?: string }): Promise<DayResult<DayStatus>> {
     return this.run(async () => {
-      const on = await dayModeOn(prisma, storeId);
       const today = manilaDate(new Date());
       const id = input.locationId || actor.homeLocationId;
-      if (!id) return { on, location: null, today, open: null, closedToday: null, suggestFloatMinor: null };
+      // Each store has its own switch: `on` is this store's; with no store, on when any store has it on.
+      const all = await switchesOfAll(prisma, storeId);
+      const onAt = [...all.entries()].filter(([, s]) => s.dayOpenClose).map(([lid, s]) => ({ id: lid, name: s.name }));
+      if (!id) return { on: await dayModeOn(prisma, storeId), onAt, location: null, today, open: null, closedToday: null, suggestFloatMinor: null };
       const loc = await this.place(storeId, actor, id);
+      const on = await dayModeOn(prisma, storeId, loc.id);
       const [open, closed, last] = await Promise.all([
         openDayAt(prisma, storeId, loc.id),
         closedDay(prisma, storeId, loc.id, today),
@@ -123,7 +129,7 @@ export class DayCloseService {
       ]);
       const names = await this.names([open?.openedBy]);
       return {
-        on, location: loc, today,
+        on, onAt, location: loc, today,
         open: open ? { id: open.id, businessDate: open.businessDate ?? today, openedAt: open.openedAt.toISOString(), openedBy: names.get(open.openedBy) ?? "Staff", floatMinor: open.openingFloatMinor, stale: (open.businessDate ?? today) !== today } : null,
         closedToday: closed ? { id: closed.id, zNumber: closed.zNumber, closedAt: closed.closedAt?.toISOString() ?? null } : null,
         suggestFloatMinor: last?.keepFloatMinor ?? null,
@@ -135,8 +141,8 @@ export class DayCloseService {
 
   async open(storeId: string, actor: Actor, input: { locationId?: string; openingFloatMinor?: unknown; note?: string }): Promise<DayResult<DayStatus>> {
     const out = await this.run(async () => {
-      if (!(await dayModeOn(prisma, storeId))) throw new StepError(conflict("Open day is turned off. The owner turns it on in Settings, Selling at the counter."));
       const loc = await this.place(storeId, actor, input.locationId);
+      if (!(await dayModeOn(prisma, storeId, loc.id))) throw new StepError(conflict(`Open day is turned off for ${loc.name}. Turn it on in Settings, This store.`));
       const float = input.openingFloatMinor ?? 0;
       if (!isInt(float)) throw new StepError(invalid("Type the change fund in the drawer (0 if none)"));
       const today = manilaDate(new Date());
