@@ -368,3 +368,14 @@ test("Buffer store: a move that is short is covered by the Buffer instead of bei
   const b = await prisma.stockLevel.findFirstOrThrow({ where: { storeId: fx.storeId, productId: fx.productId, warehouseId: buffer.id } });
   assert.equal(b.quantityOnHand, -3, "the Buffer owes 3 until the stock is managed");
 });
+
+test("Move stock refuses kilo rice (kept in grams, it stays at its store): 1 would have moved 1 gram", async () => {
+  const fx = await fixture({ s1: 1, s2: 5 });
+  const kilo = await prisma.product.create({ data: { storeId: fx.storeId, sku: `${run}-KILO`, name: "Dinorado · per kilo", priceMinor: 6_000, costMinor: 5_200, stockBaseUnit: "g", stockBaseQuantity: 1, soldByWeight: true } });
+  await prisma.stockLevel.create({ data: { storeId: fx.storeId, productId: kilo.id, warehouseId: fx.s2, quantityOnHand: 25_000 } });
+  const r = await new TransferFlowService().moveNow(fx.storeId, fx.owner, { fromLocationId: fx.s2, toLocationId: fx.s1, productId: kilo.id, quantity: 1 });
+  assert.equal(r.ok, false);
+  assert.match(!r.ok && r.error.type === "validation" ? r.error.errors[0]! : "", /kilo rice/);
+  const left = await prisma.stockLevel.findFirstOrThrow({ where: { storeId: fx.storeId, productId: kilo.id, warehouseId: fx.s2 } });
+  assert.equal(left.quantityOnHand, 25_000);
+});

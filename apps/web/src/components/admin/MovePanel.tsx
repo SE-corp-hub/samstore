@@ -126,7 +126,9 @@ export default function MovePanel() {
       setHome(me?.homeLocationId ?? null);
       setTo(me?.homeLocationId ?? active[0]?.id ?? "");
       setFrom(active.find((l) => l.id !== (me?.homeLocationId ?? active[0]?.id))?.id ?? "");
-      setProducts(((ps?.products ?? ps?.items ?? []) as ProductOption[]).map((p) => ({ id: p.id, name: p.name })));
+      // Kilo rice stays at its store (kept in grams; "1" would be 1 gram): move whole sacks and open them there.
+      setProducts(((ps?.products ?? ps?.items ?? []) as (ProductOption & { stockBaseUnit?: string | null; stockBaseQuantity?: number | null })[])
+        .filter((p) => !(p.stockBaseUnit === "g" && p.stockBaseQuantity === 1)).map((p) => ({ id: p.id, name: p.name })));
     })().catch(() => setError("Could not load the stores"));
   }, []);
 
