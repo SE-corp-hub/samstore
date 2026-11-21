@@ -28,7 +28,7 @@ export interface DayFigures {
   creditCollectedMinor: number;
   /** Rice sold per kilo this day (already inside the sales). Missing on Z-reads made before sell per kilo. */
   perKilo?: { grams: number; totalMinor: number; lines: number };
-  cash: { floatMinor: number; inMinor: number; givenBackMinor: number; paidOutMinor: number; handedOverMinor: number; shouldBeMinor: number; countedMinor: number | null; differenceMinor: number | null; ownerKeptMinor?: number; addedMinor?: number };
+  cash: { floatMinor: number; inMinor: number; givenBackMinor: number; paidOutMinor: number; handedOverMinor: number; shouldBeMinor: number; countedMinor: number | null; differenceMinor: number | null; ownerKeptMinor?: number; addedMinor?: number; handoverWaitingMinor?: number };
   /** Sales the owner rang at this store this day, and the cash the owner kept (missing on older Z-reads). */
   ownerSales?: { orderNumber: string; at: string; totalMinor: number; method: string; ownerKeptMinor: number; by: string }[];
   gcash: { inMinor: number; givenBackMinor: number; shouldBeMinor: number; countedMinor: number | null; differenceMinor: number | null };
@@ -94,6 +94,8 @@ export async function loadDay(locationId: string, opts: { savedOnly?: boolean } 
 /** Cash of the owner's own sales that the owner kept (it never went in the drawer). */
 export const ownerKept = (z: DayFigures) => z.cash.ownerKeptMinor ?? 0;
 /** Cash handed over to the owner from the drawer (the owner's kept sales left out). */
+/** Handed to the owner but not marked Received yet: still part of "Cash should be". */
+export const handoverWaiting = (z: DayFigures) => Math.max(0, z.cash.handoverWaitingMinor ?? 0);
 export const handedOnly = (z: DayFigures) => Math.max(0, z.cash.handedOverMinor - ownerKept(z));
 export const payWord = (m: string) => ({ cash: "Cash", gcash: "GCash", utang: "Credit", maya: "Maya", bank: "Bank", split: "Split" } as Record<string, string>)[m.toLowerCase()] ?? m;
 
@@ -126,6 +128,7 @@ export function zSlip(z: DayFigures, storeName: string, kind: "Z" | "X"): Slip {
     ...(ownerKept(z) ? [{ name: "Owner kept (own sales)", qty: `-${peso(ownerKept(z))}` }] : []),
     ...(handedOnly(z) ? [{ name: "To the owner", qty: `-${peso(handedOnly(z))}` }] : []),
     { name: "Cash should be", qty: peso(z.cash.shouldBeMinor) },
+    ...(handoverWaiting(z) ? [{ name: "(incl. handed over, not yet Received)", qty: peso(handoverWaiting(z)) }] : []),
     ...(z.cash.countedMinor !== null ? [{ name: "Cash counted", qty: peso(z.cash.countedMinor) }, { name: "Cash", qty: diff(z.cash.differenceMinor) }] : []),
     { name: "— GCASH —", qty: "" },
     { name: "GCash should be", qty: peso(z.gcash.shouldBeMinor) },

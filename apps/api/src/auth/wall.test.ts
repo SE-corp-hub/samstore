@@ -13,7 +13,7 @@ import { prisma } from "../persistence/prisma-repositories.js";
 import { PosService } from "../pos/pos.service.js";
 import { LoyaltyService } from "../loyalty/loyalty.service.js";
 import { AnalyticsService } from "../admin/analytics.service.js";
-import { checkWall, orderInsideWall, orderWall, runWithWall, wallAt, wallFor, WALL_RULES, type Wall } from "./wall.js";
+import { checkWall, isCounterLogin, orderInsideWall, orderWall, runWithWall, wallAt, wallFor, WALL_RULES, type Wall } from "./wall.js";
 
 const run = `WAL${Date.now()}${Math.floor(Math.random() * 1000)}`;
 const storeIds: string[] = [];
@@ -100,6 +100,32 @@ test("the wall: who is behind it, what it refuses, and what the lists show", asy
     assert.equal((await ask(bt, "GET", path, fx.atBt)).ok, true, `${path}: its own order is fine`);
     assert.equal((await ask(null, "GET", path, fx.atLipa)).ok, true, `${path}: the owner opens any order`);
   }
+
+  // The new owner-only rules (vouchers, payment methods, delivery areas, customer approval): walled logins are refused.
+  for (const [method, path] of [["POST", "/admin/vouchers"], ["PATCH", "/admin/vouchers/:id"], ["POST", "/admin/payment-methods"], ["POST", "/admin/delivery-zones"], ["PATCH", "/admin/delivery-zones/:id"], ["DELETE", "/admin/delivery-zones/:id"], ["PATCH", "/admin/customers/:id/approval"]] as const) {
+    const v = await ask(bt, method, path);
+    assert.deepEqual([v.ok, v.ok ? 0 : v.status], [false, 403], `${method} ${path} is for the owner`);
+    assert.equal((await ask(null, method, path)).ok, true, `${method} ${path} stays open to the owner`);
+  }
+  for (const [method, path] of [["GET", "/admin/vouchers"], ["GET", "/admin/payment-methods"], ["GET", "/admin/delivery-zones"]] as const) {
+    assert.equal((await ask(bt, method, path)).ok, true, `${method} ${path}: reading stays open to a store login`);
+  }
+
+  // Finding 20: a staff login with NO home store is a counter login: no wall on the order lists,
+  // but every owner-only rule refuses it, the same as a walled login.
+  assert.equal(await isCounterLogin(fx.storeId, fx.floater, "STAFF"), true);
+  assert.equal(await isCounterLogin(fx.storeId, fx.btStaff, "STAFF"), true);
+  assert.equal(await isCounterLogin(fx.storeId, fx.owner, "OWNER"), false);
+  assert.equal(await isCounterLogin(fx.storeId, fx.manager, "MANAGER"), false);
+  const floater = (method: string, path: string, id?: string) => checkWall(null, fx.storeId, method, path, { id }, true);
+  for (const [method, path] of [["GET", "/admin/reports/profit"], ["GET", "/admin/purchases"], ["POST", "/admin/suppliers"], ["POST", "/admin/products"], ["PATCH", "/admin/products/:id"], ["POST", "/admin/vouchers"], ["POST", "/admin/payment-methods"], ["POST", "/admin/delivery-zones"], ["PATCH", "/admin/customers/:id/approval"], ["GET", "/admin/export"]] as const) {
+    const v = await floater(method, path);
+    assert.deepEqual([v.ok, v.ok ? 0 : v.status], [false, 403], `no home store: ${method} ${path} is for the owner`);
+  }
+  for (const [method, path] of [["GET", "/admin/products"], ["GET", "/admin/orders"], ["GET", "/admin/customers"]] as const) {
+    assert.equal((await floater(method, path)).ok, true, `no home store: ${method} ${path} stays open`);
+  }
+  assert.equal((await floater("GET", "/admin/orders/:id", fx.atLipa)).ok, true, "no home store: not tied to one store's orders");
 
   // The lists, read behind a wall.
   const ids = async () => (await prisma.order.findMany({ where: { storeId: fx.storeId, AND: [orderWall()] }, select: { id: true } })).map((o) => o.id).sort();

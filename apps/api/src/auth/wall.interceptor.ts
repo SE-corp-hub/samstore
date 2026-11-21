@@ -4,7 +4,7 @@ import { type CallHandler, type ExecutionContext, HttpException, Injectable, typ
 import { Observable } from "rxjs";
 import type { AuthPrincipal } from "./auth.guard.js";
 import { resolveTenant } from "./tenant-context.js";
-import { checkWall, runWithWall, wallFor, type Wall } from "./wall.js";
+import { checkWall, isCounterLogin, runWithWall, wallFor, type Wall } from "./wall.js";
 
 type Req_ = { user?: AuthPrincipal; headers: Record<string, string | string[] | undefined>; method: string; route?: { path?: string }; params?: Record<string, string> };
 
@@ -17,16 +17,18 @@ export class WallInterceptor implements NestInterceptor {
     if (!req.user || !path.startsWith("/admin")) return next.handle();
     let wall: Wall | null = null;
     let storeId = "";
+    let counter = false;
     try {
       const header = req.headers["x-store-id"];
       const ctx = await resolveTenant(req.user, typeof header === "string" ? header : undefined);
       storeId = ctx.storeId;
       wall = await wallFor(ctx.storeId, req.user.sub, ctx.role);
+      counter = wall !== null || await isCounterLogin(ctx.storeId, req.user.sub, ctx.role);
     } catch {
       // No store for this login: the route itself answers that (403), there is nothing to wall.
       return next.handle();
     }
-    const verdict = await checkWall(wall, storeId, req.method, path, req.params ?? {});
+    const verdict = await checkWall(wall, storeId, req.method, path, req.params ?? {}, counter);
     if (!verdict.ok) throw new HttpException({ type: verdict.status === 403 ? "forbidden" : "not_found", message: verdict.message }, verdict.status);
     // The handler runs when the stream is subscribed to: do that inside the wall so every query it makes sees it.
     return new Observable((subscriber) => runWithWall(wall, () => next.handle().subscribe(subscriber)));

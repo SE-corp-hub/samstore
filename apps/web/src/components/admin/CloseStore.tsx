@@ -56,7 +56,7 @@ interface Report {
 interface Cash {
   day: string; location: string; salesMinor: number; salesCount: number; walkInMinor: number; expectedMinor: number;
   /** Step 4 of the per-store build (an older server does not send these). */
-  creditPaidMinor?: number; addedMinor?: number; givenBackMinor?: number; paidOutMinor?: number; handedOverMinor?: number;
+  creditPaidMinor?: number; addedMinor?: number; givenBackMinor?: number; paidOutMinor?: number; handedOverMinor?: number; handoverWaitingMinor?: number;
   saved: { countedMinor: number; expectedMinor: number; diffMinor: number; note: string | null; at: string } | null;
   /** The closing of that day at this store, made here or on Reports, Closing & stock (an older server does not send it). */
   closed?: { countedMinor: number; expectedMinor: number; diffMinor: number; at: string; fromThisCount: boolean } | null;
@@ -270,6 +270,7 @@ function CashStep({ countId, cash, onSaved, onSkip }: { countId: string; cash: C
           {!!cash.paidOutMinor && <div className="cash-row"><span>Less: expenses paid from the drawer</span><span>−{peso(cash.paidOutMinor)}</span></div>}
           {!!cash.handedOverMinor && <div className="cash-row"><span>Less: cash handed over to the owner</span><span>−{peso(cash.handedOverMinor)}</span></div>}
           <div className="cash-row total"><span>Cash you should have</span><span>{peso(cash.expectedMinor)}</span></div>
+          {!!cash.handoverWaitingMinor && <p className="mb-0 mt-1"><i className="bi bi-hourglass-split me-1" aria-hidden="true"></i>{peso(cash.handoverWaitingMinor)} handed over is not marked Received by the owner yet, so it is still counted here. Ask the owner to tap Received on Cash drawer.</p>}
         </div>
         <div className="col-lg-6">
         <label className="form-label" htmlFor="cash-counted">Cash you counted (₱)</label>

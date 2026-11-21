@@ -94,19 +94,17 @@ export class CreditController {
     return data;
   }
 
-  /** POST /admin/credit/:storeCustomerId/pay — record a cash payment against utang. */
+  /**
+   * POST /admin/credit/:storeCustomerId/pay — CLOSED (2026-11-21, review finding 4).
+   * This old door lowered a customer's credit with no cash or GCash coming in (method "credit"),
+   * and sales agents could use it. Credit is paid only through POST /admin/utang/payments
+   * ("Pay credit" on the Credit screen), which takes the cash or GCash into a drawer.
+   */
   @Post("credit/:storeCustomerId/pay")
-  async recordPayment(
-    @Req() req: Request & { user?: AuthPrincipal },
-    @Param("storeCustomerId") storeCustomerId: string,
-    @Body() body: { amountMinor: number; note?: string; signatureData?: string },
-    @Headers("x-store-id") headerStoreId?: string,
-  ) {
-    const user = req.user;
-        requireUser(user);
-        const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.VIEW);
-    const result = await this.creditSvc.recordPayment(storeId, storeCustomerId, body.amountMinor, body.note, user.sub, body.signatureData);
-    if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
-    return result.value;
+  closedPayDoor(): never {
+    throw new HttpException(
+      { type: "conflict", message: "This old credit-payment button is closed. Use Pay credit on the Credit screen, so the cash or GCash is counted." },
+      HttpStatus.GONE,
+    );
   }
 }

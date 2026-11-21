@@ -21,22 +21,6 @@ test("checkCredit unknown customer → not ok", async () => {
   assert.equal(r.ok, false);
 });
 
-test("recordPayment rejects non-positive", async () => {
-  const r = await svc.recordPayment("s1", "sc1", 0, "x", "a");
-  assert.equal(r.ok, false);
-  if (!r.ok) assert.equal(r.error.type, "validation");
-});
-
-test("recordPayment unknown customer → not_found", async () => {
-  const r = await svc.recordPayment("s1", "nope", 100, "x", "a", "data:image/png;base64,abc");
-  assert.equal(r.ok, false);
-  if (!r.ok) assert.equal(r.error.type, "not_found");
-});
-
-test("recordPayment requires signature (v4)", async () => {
-  for (const bad of [undefined, "", "   ", "not-an-image"]) {
-    const r = await svc.recordPayment("s1", "sc1", 100, "x", "a", bad);
-    assert.equal(r.ok, false);
-    if (!r.ok) assert.ok(JSON.stringify(r.error).includes("Signature is required"));
-  }
+test("the old credit pay door is gone: no service method clears credit without money", () => {
+  assert.equal((svc as unknown as Record<string, unknown>).recordPayment, undefined);
 });
