@@ -84,14 +84,14 @@ test("the wall: who is behind it, what it refuses, and what the lists show", asy
   const ask = (w: Wall | null, method: string, path: string, id?: string) => checkWall(w, fx.storeId, method, path, { id });
   for (const [method, path] of [
     ["GET", "/admin/reports/profit"], ["GET", "/admin/reports/sales-by-payment"], ["GET", "/admin/analytics/summary"], ["GET", "/admin/purchases"], ["POST", "/admin/purchases"],
-    ["GET", "/admin/suppliers"], ["GET", "/admin/purchase-orders"], ["GET", "/admin/purchase-orders/owed"], ["GET", "/admin/customers/export.csv"], ["GET", "/admin/crm/customers"],
+    ["GET", "/admin/suppliers"], ["POST", "/admin/purchase-orders"], ["GET", "/admin/purchase-orders/owed"], ["GET", "/admin/purchase-orders/suppliers"], ["POST", "/admin/purchase-orders/:id/cancel"], ["GET", "/admin/customers/export.csv"], ["GET", "/admin/crm/customers"],
     ["GET", "/admin/export"], ["GET", "/admin/rice/weekly"], ["POST", "/admin/products"], ["PATCH", "/admin/products/:id"], ["DELETE", "/admin/products/:id"], ["PUT", "/admin/products/:id/photo"],
   ] as const) {
     const v = await ask(bt, method, path);
     assert.deepEqual([v.ok, v.ok ? 0 : v.status], [false, 403], `${method} ${path} is for the owner`);
     assert.equal((await ask(null, method, path)).ok, true, `${method} ${path} stays open to the owner`);
   }
-  for (const [method, path] of [["GET", "/admin/products"], ["GET", "/admin/products/categories"], ["GET", "/admin/orders"], ["GET", "/admin/customers"], ["GET", "/admin/customers/:id"], ["GET", "/admin/rice/daily"], ["GET", "/admin/analytics/daily"], ["GET", "/admin/expenses"]] as const) {
+  for (const [method, path] of [["GET", "/admin/products"], ["GET", "/admin/products/categories"], ["GET", "/admin/orders"], ["GET", "/admin/customers"], ["GET", "/admin/customers/:id"], ["GET", "/admin/rice/daily"], ["GET", "/admin/analytics/daily"], ["GET", "/admin/expenses"], ["GET", "/admin/purchase-orders"]] as const) {
     assert.equal((await ask(bt, method, path)).ok, true, `${method} ${path} stays open to a store login`);
   }
   for (const path of ["/admin/orders/:id", "/admin/orders/:id/status", "/admin/orders/:id/payments", "/admin/orders/:id/void", "/admin/orders/:id/refund", "/admin/orders/:id/receipt", "/admin/pos/holds/:id/complete", "/admin/pos/preorders/:id/finalize", "/admin/pos/sells/:id/for-delivery"]) {
@@ -153,7 +153,8 @@ test("every route that names an order in its address is covered by the wall", ()
     const src = readFileSync(file, "utf8");
     const prefix = /@Controller\(\s*"([^"]*)"\s*\)/.exec(src)?.[1] ?? "";
     if (!prefix.startsWith("admin")) continue;
-    for (const m of src.matchAll(/@(?:Get|Post|Patch|Put|Delete)\(\s*"([^"]*)"\s*\)/g)) routes.push(`/${prefix}/${m[1]}`.replace(/\/+/g, "/"));
+    // @Get() with no path is the controller's own address (e.g. GET /admin/purchase-orders).
+    for (const m of src.matchAll(/@(?:Get|Post|Patch|Put|Delete)\(\s*(?:"([^"]*)")?\s*\)/g)) routes.push(`/${prefix}/${m[1] ?? ""}`.replace(/\/+/g, "/").replace(/(.)\/$/, "$1"));
   }
   assert.ok(routes.length > 100, "the controllers were read");
   const orderRoutes = routes.filter((r) => /\/(orders|holds|preorders|sells)\/:/.test(r) && !/\/(agent-orders|purchase-orders|erp)\//.test(r)); // the ledger routes are owner and manager only

@@ -7,6 +7,8 @@ import type { ApiError } from "@sam-store/contracts";
 import { JwtAuthGuard, type AuthPrincipal } from "../auth/auth.guard.js";
 import { requireUser, resolveTenant, TENANT_ROLES } from "../auth/tenant-context.js";
 import { PurchaseOrderService } from "./purchase-order.service.js";
+import { ALL_LOCATION_ROLES } from "../domain/people.js";
+import { loadActor } from "../people/people.service.js";
 
 function statusFor(error: ApiError): HttpStatus {
   switch (error.type) {
@@ -70,7 +72,16 @@ export class PurchaseOrderController {
   /** GET /admin/purchase-orders?status=open|all|OPEN|PARTLY|RECEIVED|CANCELLED&locationId=&supplierId= — counter staff always get open orders without costs. */
   @Get()
   async list(@Req() req: Req_, @Query("status") status?: string, @Query("locationId") locationId?: string, @Query("supplierId") supplierId?: string, @Headers("x-store-id") h?: string) {
-    const { storeId, role } = await this.counter(req, h);
+    const { storeId, role, userId } = await this.counter(req, h);
+    // A store login sees only its own store's deliveries (and never costs: see the service).
+    if (!(ALL_LOCATION_ROLES as readonly string[]).includes(role)) {
+      const actor = await loadActor(storeId, userId, role);
+      if (!(ALL_LOCATION_ROLES as readonly string[]).includes(actor.role)) {
+        if (!actor.homeLocationId) return { orders: [] };
+        if (locationId && locationId !== actor.homeLocationId) throw new HttpException({ type: "forbidden", message: "You can see your own store's deliveries only" } satisfies ApiError, HttpStatus.FORBIDDEN);
+        locationId = actor.homeLocationId;
+      }
+    }
     return unwrap(await this.orders.list(storeId, role, { status, locationId, supplierId }));
   }
 
