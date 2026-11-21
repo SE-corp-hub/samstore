@@ -256,7 +256,7 @@ export default function StoreReportPanel({ role, onNavigate }: { role?: string; 
             <div className="col-6 col-md-3"><div className="border rounded p-2"><div className="small text-muted">Maya / bank / other</div><div className="fs-5">{peso(sales.sales.otherMinor)}</div></div></div>
           </div>
           {sales.sales.takenBack && sales.sales.takenBack.count > 0 && (
-            <div className="small mb-1"><i className="bi bi-arrow-counterclockwise me-1" aria-hidden="true"></i>Taken back in these dates: {sales.sales.takenBack.count} {sales.sales.takenBack.count === 1 ? "sale" : "sales"}, {peso(sales.sales.takenBack.totalMinor)}. Already taken off the numbers above.</div>
+            <div className="small mb-1"><i className="bi bi-arrow-counterclockwise me-1" aria-hidden="true"></i>Taken back or returned in these dates: {sales.sales.takenBack.count}, {peso(sales.sales.takenBack.totalMinor)}. Already taken off the numbers above.</div>
           )}
           <div className="small mb-3">Cash received {peso(sales.cashInMinor)} · Credit collected {peso(sales.creditCollectedMinor)}{owner && sales.sales.grossProfitMinor !== undefined ? <> · <span className={sales.sales.grossProfitMinor < 0 ? "text-danger fw-bold" : "text-success fw-bold"}>Profit {peso(sales.sales.grossProfitMinor)}</span>{sales.sales.profitShareMinor ? <span className="text-muted"> (incl. profit share {sales.sales.profitShareMinor > 0 ? "+" : "−"}{peso(Math.abs(sales.sales.profitShareMinor))})</span> : null}</> : null}</div>
           <div className="d-flex flex-wrap align-items-center gap-2 mb-1">

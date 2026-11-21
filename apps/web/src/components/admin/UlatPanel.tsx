@@ -420,7 +420,7 @@ function Daily({ owner, onNavigate }: { owner: boolean; onNavigate?: (tab: strin
               <div className="fs-4 mt-1">Sales {peso(s.sales.totalMinor)} <span className="fs-6 text-muted">({s.sales.count})</span></div>
               <div className="small">Cash {peso(s.sales.cashMinor)} · GCash {peso(s.sales.gcashMinor)} · Credit {peso(s.sales.utangMinor)}{s.sales.encodedLater ? ` · ${s.sales.encodedLater} from paper slips` : ""}</div>
               {s.sales.takenBack && s.sales.takenBack.count > 0 && (
-                <div className="small"><i className="bi bi-arrow-counterclockwise me-1" aria-hidden="true"></i>Taken back this day: {s.sales.takenBack.count} {s.sales.takenBack.count === 1 ? "sale" : "sales"}, {peso(s.sales.takenBack.totalMinor)}. Already taken off the sales above.</div>
+                <div className="small"><i className="bi bi-arrow-counterclockwise me-1" aria-hidden="true"></i>Taken back or returned this day: {s.sales.takenBack.count}, {peso(s.sales.takenBack.totalMinor)}. Already taken off the sales above.</div>
               )}
               {owner && <div className="small">Profit (gross) {peso(s.sales.grossProfitMinor)}{s.sales.profitShareMinor ? <span className="text-muted"> (incl. profit share {s.sales.profitShareMinor > 0 ? "+" : "−"}{peso(Math.abs(s.sales.profitShareMinor))})</span> : null}</div>}
               <div className="small">Kilos: {s.kilosByVariety.map((v) => `${v.variety} ${kg(v.grams)}`).join(" · ") || "—"}</div>
