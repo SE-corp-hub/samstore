@@ -389,6 +389,10 @@ export class PaymentsService {
   private async restoreTaken(tx: Prisma.TransactionClient, storeId: string, orderId: string, items: { productId: string | null; quantity: number }[], type: string, actorId: string): Promise<void> {
     const moved = await tx.stockMovement.groupBy({ by: ["productId"], where: { storeId, orderId, type: { notIn: ["RESERVE", "RELEASE_RESERVATION"] } }, _sum: { delta: true } });
     const taken = new Map(moved.map((m) => [m.productId, -(m._sum.delta ?? 0)]));
+    // Rice the customer already brought back with Returns (good went back on the shelf, damaged was put
+    // aside) is no longer out with the customer: refunding the whole sale must not put it back again.
+    const returned = await tx.stockReturn.groupBy({ by: ["productId"], where: { storeId, orderId }, _sum: { quantity: true } });
+    for (const r of returned) taken.set(r.productId, (taken.get(r.productId) ?? 0) - (r._sum.quantity ?? 0));
     const lines: { productId: string; quantity: number }[] = [];
     for (const it of items) {
       if (!it.productId) continue;
