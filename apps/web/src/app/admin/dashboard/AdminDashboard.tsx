@@ -50,7 +50,7 @@ const panelLoading = () => (
 const panel = (loader: () => Promise<{ default: React.ComponentType<PanelProps> }>) =>
   dynamic(loader, { ssr: false, loading: panelLoading });
 
-interface PanelProps { onNavigate?: (tab: string) => void; role?: string }
+interface PanelProps { onNavigate?: (tab: string) => void; role?: string; onAgentOrders?: () => void }
 
 const OrdersPanel = panel(() => import("../../../components/admin/OrdersPanel"));
 const ProductsPanel = panel(() => import("../../../components/admin/ProductsPanel"));
@@ -769,7 +769,7 @@ function OrdersWithAgents() {
           <i className="bi bi-person-lines-fill me-1" aria-hidden="true"></i>Agent orders
         </button>
       </div>
-      {which === "all" ? <OrdersPanel /> : <AgentOrdersPanel />}
+      {which === "all" ? <OrdersPanel onAgentOrders={() => setWhich("agent")} /> : <AgentOrdersPanel />}
     </>
   );
 }

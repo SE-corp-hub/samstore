@@ -2,6 +2,8 @@
 
 import { availableOf } from "../domain/stock-tracking.js";
 import { lockOrder, OrderChanged } from "../domain/order-lock.js";
+import { isKiloItem } from "../domain/kilo.js";
+import { amountForGrams, formatKilos } from "../domain/weight.js";
 import { prisma } from "../persistence/prisma-repositories.js";
 import { cacheBust, cacheKey } from "../persistence/ttl-cache.js";
 import { deductStock, InsufficientStockError, restoreStock } from "../domain/movements.js";
@@ -17,6 +19,9 @@ import { settleHandedOverOrder } from "../selling/settle-sale.js";
 import { priceAt } from "../domain/selling.js";
 import { txOptions } from "../persistence/tx-options.js";
 import type { ApiError } from "@sam-store/contracts";
+
+/** Largest kilo rice line in Change items: 1,000 kg (in grams). */
+const MAX_KILO_LINE_GRAMS = 1_000_000;
 
 /** One line of an edited order: a changed price needs its reason (see domain/price-override). */
 export interface OrderEditLine { productId: string; quantity: number; unitPriceMinorOverride?: number | null; priceOverrideReason?: string | null }
@@ -44,6 +49,11 @@ export class OrderAdminService {
     if (!order) return { ok: false, error: { type: "not_found", message: "Order not found" } };
 
     const from = order.status as OrderState;
+    // An agent's order moves on in Agent orders (Approve makes the delivery trips that take its rice; Delivered /
+    // Not delivered settle them). Moved on here, its rice would never leave the shelf. Before approval it may be cancelled.
+    if (order.source === "AGENT" && !(from === "RECEIVED" && toStatus === "CANCELLED")) {
+      return { ok: false, error: { type: "conflict", message: "This is an agent's order: approve it, and mark it delivered or not delivered, in Orders → Agent orders." } };
+    }
     // Delivery orders must stay in the delivery pipeline — COMPLETED only via courier DELIVERED (or prepaid payment).
     if (toStatus === "COMPLETED" && this.isDeliveryOrder(order)) {
       return { ok: false, error: { type: "conflict", message: "Delivery orders must go through the delivery pipeline" } };
@@ -150,7 +160,8 @@ export class OrderAdminService {
       return { ok: false, error: { type: "validation", errors: ["At least one item with positive quantity is required"] } };
     }
     for (const it of items) {
-      if (!it || typeof it.productId !== "string" || !Number.isInteger(it.quantity) || it.quantity <= 0 || it.quantity > 999) {
+      // Kilo rice is counted in grams (up to 1,000 kg a line); everything else up to 999 a line (checked below, per product).
+      if (!it || typeof it.productId !== "string" || !Number.isInteger(it.quantity) || it.quantity <= 0 || it.quantity > MAX_KILO_LINE_GRAMS) {
         return { ok: false, error: { type: "validation", errors: ["quantity must be a positive whole number (max 999)"] } };
       }
     }
@@ -164,6 +175,10 @@ export class OrderAdminService {
     }
     // A credit sale over the limit waits for the owner in Para sa iyo with its rice held: only that decision may change it.
     if (order.source === "UTANG_PENDING") return { ok: false, error: { type: "conflict", message: "This credit sale is waiting for the owner. Approve or decline it first." } };
+    // An agent's order takes its rice on delivery trips when it is approved (Agent orders → Approve). Before that
+    // nothing has left the shelf, so a change moves no rice; after it, the trips carry the old lines.
+    const agentOrder = order.source === "AGENT";
+    if (agentOrder && order.status !== "RECEIVED") return { ok: false, error: { type: "conflict", message: "This agent order is already approved and its rice is on delivery trips. Change it only before it is approved." } };
     // A pre-order may be taken below zero (the count is fixed later), as when it was made.
     const preOrder = order.source === "PRE_ORDER";
     const reserved = await prisma.$transaction((tx) => hasActiveReservation(tx, storeId, orderId));
@@ -184,7 +199,7 @@ export class OrderAdminService {
       const p = products.find((x) => x.id === it.productId)!;
       const available = availableOf(p, p.stockLevels.reduce((s, l) => s + l.quantityOnHand, 0), p.stockLevels.reduce((s, l) => s + l.quantityReserved, 0)) + mine(p.id);
       if (available < it.quantity && !preOrder) {
-        return { ok: false, error: { type: "conflict", message: `Only ${available} in stock for ${p.name}` } };
+        return { ok: false, error: { type: "conflict", message: `Only ${isKiloItem(p) ? formatKilos(Math.max(0, available)) : available} in stock for ${p.name}` } };
       }
     }
 
@@ -195,19 +210,34 @@ export class OrderAdminService {
     const own = order.sellingLocationId
       ? new Map((await prisma.locationPrice.findMany({ where: { storeId, warehouseId: order.sellingLocationId, productId: { in: ids } }, select: { productId: true, priceMinor: true } })).map((x) => [x.productId, x.priceMinor]))
       : new Map<string, number>();
-    const newLines: { productId: string; productName: string; sku: string; unitPriceMinor: number; quantity: number; lineTotalMinor: number; priceOverridden: boolean; priceOverrideReason: string | null; catalogUnitPriceMinor: number | null }[] = [];
+    const newLines: {
+      productId: string; productName: string; sku: string; unitPriceMinor: number; quantity: number; lineTotalMinor: number; priceOverridden: boolean; priceOverrideReason: string | null; catalogUnitPriceMinor: number | null;
+      soldBy: string; grams: number | null; enteredAmountMinor: number | null; sourceLocationId: string | null;
+    }[] = [];
     for (const it of items) {
       const p = products.find((x) => x.id === it.productId)!;
+      const kilo = isKiloItem(p);
+      if (!kilo && it.quantity > 999) return { ok: false, error: { type: "validation", errors: ["quantity must be a positive whole number (max 999)"] } };
       let price;
       try {
         price = resolveLinePrice({ catalogUnitPriceMinor: priceAt(p.priceMinor, own.get(p.id)), override: it.unitPriceMinorOverride, reason: it.priceOverrideReason });
       } catch (e) {
         return { ok: false, error: { type: "validation", errors: [`${p.name}: ${e instanceof Error ? e.message : "Invalid price"}`] } };
       }
+      // The same product's line before the change: where it is taken from stays, and a kilo line sold as
+      // "₱100 worth" stays that line when neither its weight nor its price changed.
+      const was = oldItems.find((o) => o.productId === p.id) ?? null;
+      const keepPeso = kilo && was?.soldBy === "PESO" && was.quantity === it.quantity && was.unitPriceMinor === price.unitPriceMinor && was.enteredAmountMinor !== null;
       newLines.push({
         productId: p.id, productName: p.name, sku: p.sku, unitPriceMinor: price.unitPriceMinor, quantity: it.quantity,
-        lineTotalMinor: price.unitPriceMinor * it.quantity, priceOverridden: price.overridden, priceOverrideReason: price.reason,
+        // Kilo rice: the price is per kilo and the quantity is grams.
+        lineTotalMinor: keepPeso ? was!.enteredAmountMinor! : kilo ? amountForGrams(it.quantity, Math.max(1, price.unitPriceMinor)) : price.unitPriceMinor * it.quantity,
+        priceOverridden: price.overridden, priceOverrideReason: price.reason,
         catalogUnitPriceMinor: price.overridden ? price.catalogUnitPriceMinor : null,
+        soldBy: keepPeso ? "PESO" : kilo ? "KILO" : "PIECE",
+        grams: kilo ? it.quantity : (p.stockBaseUnit ?? "").toLowerCase() === "g" && p.stockBaseQuantity ? p.stockBaseQuantity * it.quantity : null,
+        enteredAmountMinor: keepPeso ? was!.enteredAmountMinor : null,
+        sourceLocationId: was?.sourceLocationId ?? null,
       });
     }
     if (role !== undefined) {
@@ -218,7 +248,7 @@ export class OrderAdminService {
       if (tooLow) return { ok: false, error: { type: "validation", errors: [tooLow] } };
     }
     // Totals (no delivery fee change: keep the order's original decision; recompute lines only)
-    const totals = computeOrderTotals({ lines: newLines.map((l) => ({ unitPriceMinor: l.unitPriceMinor, quantity: l.quantity })) });
+    const totals = computeOrderTotals({ lines: newLines.map((l) => ({ unitPriceMinor: l.lineTotalMinor, quantity: 1 })) });
     const totalMinor = Math.max(0, totals.totalMinor + order.deliveryFeeMinor - order.discountMinor);
     const actor = actorId ?? "admin";
     const overriddenAt = new Date();
@@ -229,7 +259,10 @@ export class OrderAdminService {
         const locked = await lockOrder(tx, storeId, orderId);
         if (!locked || !OrderAdminService.EDITABLE.includes(locked.status)) throw new OrderChanged("This order was completed or cancelled meanwhile. Open it again.");
         const nowItems = await tx.orderItem.findMany({ where: { orderId }, select: { productId: true, quantity: true } });
-        if (reserved) {
+        if (agentOrder) {
+          // Not approved yet: no rice was taken, so none goes back and none is taken now.
+          if (locked.status !== "RECEIVED") throw new OrderChanged("This agent order was approved meanwhile. Open it again.");
+        } else if (reserved) {
           // Online / hub order: the units are still on the shelf, only the hold moves to the new lines.
           await moveOrderReservation(tx, { id: orderId, storeId }, newLines, actor);
         } else {
@@ -251,6 +284,7 @@ export class OrderAdminService {
           data: newLines.map((l) => ({
             orderId, storeId, productId: l.productId, productName: l.productName, sku: l.sku,
             unitPriceMinor: l.unitPriceMinor, quantity: l.quantity, lineTotalMinor: l.lineTotalMinor,
+            soldBy: l.soldBy, grams: l.grams, enteredAmountMinor: l.enteredAmountMinor, sourceLocationId: l.sourceLocationId,
             priceOverridden: l.priceOverridden,
             priceOverrideReason: l.priceOverrideReason,
             priceOverriddenById: l.priceOverridden ? actorId : null,
@@ -292,6 +326,7 @@ export class OrderAdminService {
   async sendForDelivery(storeId: string, orderId: string): Promise<AdminResult<{ id: string; status: string }>> {
     const order = await prisma.order.findFirst({ where: { storeId, id: orderId } });
     if (!order) return { ok: false, error: { type: "not_found", message: "Order not found" } };
+    if (order.source === "AGENT") return { ok: false, error: { type: "conflict", message: "This is an agent's order: approve it, and mark it delivered or not delivered, in Orders → Agent orders." } };
     if (!this.isDeliveryOrder(order)) {
       return { ok: false, error: { type: "conflict", message: "Only delivery-type orders can be sent for delivery" } };
     }

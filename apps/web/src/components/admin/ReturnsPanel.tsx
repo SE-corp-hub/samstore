@@ -10,11 +10,11 @@ import { adminHeaders } from "../../lib/admin";
 import { toast } from "../../lib/toast";
 import { sendStep } from "../../lib/offlineQueue";
 import StoreBar from "./StoreBar";
-import { kg } from "../../lib/number-format";
+import { cleanTyping, kg, kilosToGrams } from "../../lib/number-format";
 
 interface Place { id: string; name: string; code: string | null; isActive: boolean }
-interface ProductOption { id: string; name: string }
-interface ReturnRow { id: string; docNumber: string; productName: string; quantity: number; condition: "GOOD" | "DAMAGED"; reason: string; locationName: string; orderNumber: string | null; at: string }
+interface ProductOption { id: string; name: string; loose: boolean }
+interface ReturnRow { id: string; docNumber: string; productName: string; quantity: number; loose?: boolean; condition: "GOOD" | "DAMAGED"; reason: string; locationName: string; orderNumber: string | null; at: string }
 interface SaleChoice { orderId: string; orderNumber: string; at: string; customerName: string | null; paymentMethod: string; bought: number; returned: number; left: number; loose: boolean }
 type Body = { message?: string; errors?: string[]; docNumber?: string };
 
@@ -52,7 +52,9 @@ export default function ReturnsPanel() {
       setPlaces(active);
       setHome(me?.homeLocationId ?? null);
       setLocationId(me?.homeLocationId ?? active[0]?.id ?? "");
-      setProducts(((ps?.products ?? ps?.items ?? []) as ProductOption[]).map((p) => ({ id: p.id, name: p.name })));
+      // Kilo rice (stock kept in grams, 1 g per unit) is returned in kilos, not in pieces.
+      type Raw = { id: string; name: string; stockBaseUnit?: string | null; stockBaseQuantity?: number | null };
+      setProducts(((ps?.products ?? ps?.items ?? []) as Raw[]).map((p) => ({ id: p.id, name: p.name, loose: p.stockBaseUnit === "g" && p.stockBaseQuantity === 1 })));
       await loadRows();
     })().catch(() => setError("Could not load the stores"));
   }, [loadRows]);
@@ -70,13 +72,26 @@ export default function ReturnsPanel() {
     return () => { cancelled = true; };
   }, [locationId, productId]);
 
+  const loose = products.find((p) => p.id === productId)?.loose ?? false;
   const n = Number(qty || "0");
-  const ready = !!locationId && !!productId && n >= 1 && reason.trim().length >= 3;
+  const grams = loose ? kilosToGrams(qty) ?? 0 : 0;
+  const ready = !!locationId && !!productId && (loose ? grams >= 1 : n >= 1) && reason.trim().length >= 3;
+  /** Loose rice goes up and down by half a kilo; sacks by one. */
+  const step = (dir: 1 | -1) => {
+    if (!loose) { setQty(String(Math.max(1, n + dir))); return; }
+    const next = Math.max(500, (Math.round(grams / 500) + dir) * 500);
+    setQty(String(next / 1000));
+  };
+  const pickProduct = (id: string) => {
+    setProductId(id);
+    setQty(products.find((p) => p.id === id)?.loose ? "1" : String(Math.max(1, Math.trunc(n) || 1)));
+  };
 
   const submit = async () => {
     setBusy(true);
     setError(null);
-    const r = await sendStep("/admin/returns", { locationId, productId, quantity: n, condition, reason: reason.trim(), ...(orderId ? { orderId } : {}) }, "Customer return");
+    const amount = loose ? { kilos: (grams / 1000).toString() } : { quantity: n };
+    const r = await sendStep("/admin/returns", { locationId, productId, ...amount, condition, reason: reason.trim(), ...(orderId ? { orderId } : {}) }, "Customer return");
     setBusy(false);
     if (r.status === "queued") { setQty("1"); setReason(""); setProductId(""); setCondition("GOOD"); setOrderId(""); return; } // saved offline: shown in the upload bar
     const d = r.data as Body | null;
@@ -92,7 +107,7 @@ export default function ReturnsPanel() {
       {error && <div className="alert alert-danger py-2">{error}</div>}
       <StoreBar label="Returned to" locations={places} value={locationId} homeLocationId={home} onPick={setLocationId} />
       <label className="form-label small text-muted" htmlFor="rt-product">Product</label>
-      <select id="rt-product" className="form-select form-select-lg mb-3" value={productId} onChange={(e) => setProductId(e.target.value)}>
+      <select id="rt-product" className="form-select form-select-lg mb-3" value={productId} onChange={(e) => pickProduct(e.target.value)}>
         <option value="">Choose the product…</option>
         {products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
       </select>
@@ -110,11 +125,13 @@ export default function ReturnsPanel() {
           <div className="form-text mb-3">Pick the sale so the refund or the lower credit can be worked out. At a consignment store it also takes the charge for this rice off.</div>
         </>
       )}
-      <label className="form-label small text-muted" htmlFor="rt-qty">How many came back</label>
-      <div className="input-group input-group-lg mb-3" style={{ maxWidth: 280 }}>
-        <button type="button" className="btn btn-outline-dark" style={{ minWidth: 64, fontSize: 28 }} aria-label="One less" disabled={n <= 1} onClick={() => setQty(String(Math.max(1, n - 1)))}>−</button>
-        <input id="rt-qty" className="form-control text-center" style={{ fontSize: 28 }} inputMode="numeric" value={qty} onChange={(e) => setQty(e.target.value.replace(/\D/g, "").slice(0, 5))} />
-        <button type="button" className="btn btn-outline-dark" style={{ minWidth: 64, fontSize: 28 }} aria-label="One more" onClick={() => setQty(String(n + 1))}>+</button>
+      <label className="form-label small text-muted" htmlFor="rt-qty">{loose ? "How many kilos came back" : "How many came back"}</label>
+      <div className="input-group input-group-lg mb-3" style={{ maxWidth: loose ? 320 : 280 }}>
+        <button type="button" className="btn btn-outline-dark" style={{ minWidth: 64, fontSize: 28 }} aria-label={loose ? "Half a kilo less" : "One less"} disabled={loose ? grams <= 500 : n <= 1} onClick={() => step(-1)}>−</button>
+        <input id="rt-qty" className="form-control text-center" style={{ fontSize: 28 }} inputMode={loose ? "decimal" : "numeric"} value={qty}
+          onChange={(e) => setQty(loose ? cleanTyping(e.target.value, "kilo").slice(0, 9) : e.target.value.replace(/\D/g, "").slice(0, 5))} />
+        {loose && <span className="input-group-text" style={{ fontSize: 22 }}>kg</span>}
+        <button type="button" className="btn btn-outline-dark" style={{ minWidth: 64, fontSize: 28 }} aria-label={loose ? "Half a kilo more" : "One more"} onClick={() => step(1)}>+</button>
       </div>
       <div className="d-flex gap-2 mb-3" role="group" aria-label="Condition">
         <button type="button" className={`btn btn-lg flex-fill ${condition === "GOOD" ? "btn-success" : "btn-outline-success"}`} onClick={() => setCondition("GOOD")}>Good — back on the shelf</button>
@@ -128,7 +145,7 @@ export default function ReturnsPanel() {
         <ul className="list-group">
           {rows.map((r) => (
             <li key={r.id} className="list-group-item small">
-              <b>{r.quantity} × {r.productName}</b> · <span className={r.condition === "GOOD" ? "text-success" : "text-danger"}>{r.condition === "GOOD" ? "good" : "damaged"}</span> · {r.locationName}
+              <b>{r.loose ? `${kg(r.quantity)} ${r.productName}` : `${r.quantity} × ${r.productName}`}</b> · <span className={r.condition === "GOOD" ? "text-success" : "text-danger"}>{r.condition === "GOOD" ? "good" : "damaged"}</span> · {r.locationName}
               <div className="text-muted">{r.docNumber}{r.orderNumber ? ` · order ${r.orderNumber}` : ""} · {r.reason} · {new Date(r.at).toLocaleString()}</div>
             </li>
           ))}
