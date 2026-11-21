@@ -875,7 +875,7 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
   const pickSection = newItemOpen ? (
     <div className="fit-scroll">
       {itemsLead}
-      <div className="mt-2"><NewItemForm preorder onCancel={() => setNewItemOpen(false)} onDone={async () => { setNewItemOpen(false); await loadBuilder(); }} /></div>
+      <div className="mt-2"><NewItemForm preorder via="PREORDER" locationId={locationId || undefined} onCancel={() => setNewItemOpen(false)} onDone={async () => { setNewItemOpen(false); await loadBuilder(); }} /></div>
     </div>
   ) : (
     <>

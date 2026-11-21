@@ -404,6 +404,9 @@ model Product {
   photoKey              String?
   // 2026-11-20 sell per kilo: a kilo item ("Sinandomeng · per kilo") points at the sack rice it is opened from.
   kiloOfId              String?
+  // 2026-11-21 where it was made: the store (Warehouse.id) and the screen (domain/added-where.ts). Empty = from before.
+  addedAtId             String?
+  addedVia              String?
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
 
@@ -430,6 +433,7 @@ model Product {
 
   @@unique([storeId, sku])
   @@index([storeId, kiloOfId])
+  @@index([storeId, addedAtId])
   @@unique([storeId, barcode]) // M5: scannable barcode unique per store
   @@unique([storeId, id]) // M3: composite target for tenant-consistent children
 }
@@ -1674,6 +1678,10 @@ model StoreCustomer {
   creditBalanceMinor   Int                    @default(0) // open balance (positive = owes)
   // P8: CRM tags (free-form, e.g. ["vip", "bday"]) + campaign recipients.
   tags                 String[]               @default([])
+  // 2026-11-21 where this customer was added: the store (Warehouse.id), who, and the screen (domain/added-where.ts). Empty = from before.
+  addedAtId            String?
+  addedById            String?
+  addedVia             String?
   createdAt            DateTime               @default(now())
   updatedAt            DateTime               @updatedAt
 
@@ -1686,6 +1694,7 @@ model StoreCustomer {
 
   @@unique([storeId, customerId])
   @@unique([storeId, id]) // M3: composite target for tenant-consistent children
+  @@index([storeId, addedAtId])
 }
 
 model CreditEntry {

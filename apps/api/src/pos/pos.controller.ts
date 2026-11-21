@@ -5,6 +5,7 @@ import { resolveTenant, TENANT_ROLES } from "../auth/tenant-context.js";
 import { prisma } from "../persistence/prisma-repositories.js";
 import { loadActor } from "../people/people.service.js";
 import { POS_SERVICE, PosService } from "./pos.service.js";
+import { addedAtStore } from "../domain/added-where.js";
 
 function statusFor(error: ApiError): HttpStatus {
   switch (error.type) {
@@ -155,11 +156,12 @@ export class PosController {
 
   /** POST /admin/pos/quick-customer — create/reuse a store customer (no login account), for POS autosave. */
   @Post("quick-customer")
-  async quickCustomer(@Req() req: Request & { user?: AuthPrincipal }, @Body() body: { name: string; phone?: string }, @Headers("x-store-id") headerStoreId?: string) {
-    const user = req.user!;
-    const storeId = await this.guardAndStore(req, headerStoreId);
+  async quickCustomer(@Req() req: Request & { user?: AuthPrincipal }, @Body() body: { name: string; phone?: string; locationId?: string; via?: string }, @Headers("x-store-id") headerStoreId?: string) {
+    const { storeId, actor } = await this.guardAndActor(req, headerStoreId);
     if (!body?.name?.trim()) throw new HttpException({ type: "validation", errors: ["name is required"] }, HttpStatus.UNPROCESSABLE_ENTITY);
-    const id = await this.pos.quickCustomer(storeId, body.name, body.phone);
+    // Made at the store the screen is at (POS or Pre-order "Who is buying?").
+    const where = { locationId: await addedAtStore(storeId, actor, typeof body.locationId === "string" ? body.locationId : null), userId: actor.userId, via: body.via === "PREORDER" ? "PREORDER" as const : "POS" as const };
+    const id = await this.pos.quickCustomer(storeId, body.name, body.phone, where);
     if (!id) throw new HttpException({ type: "validation", errors: ["name is required"] }, HttpStatus.UNPROCESSABLE_ENTITY);
     return { id, storeId };
   }

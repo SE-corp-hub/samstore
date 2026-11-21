@@ -943,3 +943,10 @@ html[data-text-size] .start-cust.chosen, .start-cust.chosen { border: 3px solid 
 @media (min-width: 700px) {
   .drawer-grid { grid-template-columns: minmax(0, 22rem) minmax(0, 1fr); align-items: start; }
 }
+
+/* §20 Where a customer or an item was made (2026-11-21): one quiet line under the name, "Check" for the owner. */
+.added-line { display: inline; font-size: 0.875rem; font-weight: 400; line-height: 1.4; overflow-wrap: anywhere; color: var(--sam-muted, #5a4d42); }
+.added-line.added-unknown { font-style: italic; }
+.added-row { display: block; margin-top: 0.125rem; }
+.check-badge { background: #fff4d6; color: #6f4800; border: 1px solid #8a5a00; font-weight: 600; }
+.btn-looks-right { min-height: 44px; }

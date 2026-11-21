@@ -9,6 +9,7 @@
 //     balance is reduced (a cash sale gets a refund row to pay out from the drawer).
 //   * Reminders: a monthly balance text and an overdue text, once per period.
 
+import { addedAtStore, customerAdded } from "../domain/added-where.js";
 import { dayGate } from "../day/day-gate.js";
 import { offlineSoldAt } from "../domain/selling.js";
 import { storeOwedFirst } from "../cash/cash-book.js";
@@ -155,8 +156,9 @@ export class UtangService {
   }
 
   /** Add a customer to the list (name + mobile). On credit with NO limit unless the owner/manager gives one. */
-  async addCustomer(storeId: string, actor: Actor, input: { name?: string; phone?: string; limitMinor?: unknown }) {
+  async addCustomer(storeId: string, actor: Actor, input: { name?: string; phone?: string; limitMinor?: unknown; locationId?: string; via?: "POS" | "CREDIT" }) {
     return this.run(async () => {
+      const at = await addedAtStore(storeId, actor, input.locationId);
       const name = input.name?.trim().replace(/\s+/g, " ") ?? "";
       if (name.length < 2 || name.length > 80) throw new UtangError("Enter the name");
       const phone = toE164(input.phone ?? "");
@@ -173,7 +175,7 @@ export class UtangService {
         const before = await tx.storeCustomer.findUnique({ where: { storeId_customerId: { storeId, customerId: customer.id } }, select: { id: true } });
         if (before) throw new StepError(conflict("This number is already on the list"));
         const sc = await tx.storeCustomer.create({
-          data: { storeId, customerId: customer.id, ...(typeof limit === "number" ? { creditLimitMinor: limit, creditApproved: limit > 0, creditUnlimited: false } : { creditApproved: true, creditUnlimited: true }) },
+          data: { storeId, customerId: customer.id, ...customerAdded({ locationId: at, userId: actor.userId, via: input.via ?? "CREDIT" }), ...(typeof limit === "number" ? { creditLimitMinor: limit, creditApproved: limit > 0, creditUnlimited: false } : { creditApproved: true, creditUnlimited: true }) },
           select: { id: true, creditApproved: true, creditLimitMinor: true, creditUnlimited: true },
         });
         await tx.auditLog.create({ data: { storeId, actorType: "USER", actorId: actor.userId, action: "utang.customer_add", entityType: "StoreCustomer", entityId: sc.id, after: { name, limitMinor: typeof limit === "number" ? limit : null } } });

@@ -1,4 +1,5 @@
 import { summarizeOrderItems, OPEN_ITEM_STATUSES } from "../domain/order-items-summary.js";
+import { addedAtStore, addedTagReader } from "../domain/added-where.js";
 import { orderWall, wallKey } from "../auth/wall.js";
 import {
   Body,
@@ -20,7 +21,7 @@ import {
   UseGuards,
 } from "@nestjs/common";
 import { redactCost, seesCost } from "../domain/cost-redact.js";
-import { productEditRefusal } from "../domain/product-edit-rights.js";
+import { ownsProducts, productEditRefusal } from "../domain/product-edit-rights.js";
 import { canSetLocationLock, cleanScreenIds, isOneStoreLogin, lockPinMatches, newLockSecret, readFeatureLock, readLocationLocks, writeFeatureLock, type LocationLock } from "../domain/feature-lock.js";
 import { verifyPassword } from "../auth/auth.domain.js";
 import { isOwnerSide, requireOwner } from "../auth/owner-only.js";
@@ -702,7 +703,9 @@ export class AdminController {
     requireUser(user);
     const { storeId, role } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
     refuseProductEdit(role, "owner-only");
-    const result = await this.productsAdmin.create(storeId, body, user.sub);
+    // Made on Products: at the store its opening stock goes to, else the login's own store.
+    const placeAt = await addedAtStore(storeId, await loadActor(storeId, user.sub, role), body?.stockLocationId ?? null);
+    const result = await this.productsAdmin.create(storeId, body, user.sub, { locationId: placeAt, userId: user.sub, via: "PRODUCTS" });
         if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
         await cacheBust(cacheKey("products", storeId));
         await cacheBust(cacheKey("inventory", storeId));
@@ -723,10 +726,24 @@ export class AdminController {
     refuseProductEdit(role, "edit", body);
     const result = await this.productsAdmin.update(storeId, id, body, user.sub);
         if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
+        // The owner saving a counter-made item on its form has looked at it: its "Check" goes away.
+        if (ownsProducts(role)) await this.productsAdmin.markChecked(storeId, id, user.sub);
         await cacheBust(cacheKey("products", storeId));
         await cacheBust(cacheKey("inventory", storeId));
         return result.value;
       }
+
+  /** POST /admin/products/:id/checked — the owner confirms a counter-made "New item" (its cost and price look right). */
+  @Post("products/:id/checked")
+  async productChecked(@Req() req: Request & { user?: AuthPrincipal }, @Param("id") id: string, @Headers("x-store-id") headerStoreId?: string) {
+    const user = req.user;
+    requireUser(user);
+    const { storeId, role } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
+    refuseProductEdit(role, "owner-only");
+    const done = await this.productsAdmin.markChecked(storeId, id, user.sub);
+    await cacheBust(cacheKey("products", storeId));
+    return { id, checked: true, changed: done };
+  }
 
   /** GET /admin/products/:id/price-history — every cost and price change, newest first. */
   @Get("products/:id/price-history")
@@ -1391,10 +1408,11 @@ export class AdminController {
       approvalStatus,
       onlyUtang: onlyUtang === "true",
     });
+    const tagOf = await addedTagReader(storeId, customers);
     return {
       customers: customers.map((sc) => {
               const row = LoyaltyService.toAdminRow(sc);
-              return { ...row, loyaltyPoints: sc.loyaltyBalancePoints };
+              return { ...row, loyaltyPoints: sc.loyaltyBalancePoints, ...tagOf(sc) };
             }),
       storeId,
     };
@@ -1404,7 +1422,7 @@ export class AdminController {
   @Post("customers")
   async createCustomer(
     @Req() req: Request & { user?: AuthPrincipal },
-    @Body() body: { name: string; phone?: string; email?: string; address?: string; creditApproved?: boolean; creditLimitMinor?: number; creditUnlimited?: boolean },
+    @Body() body: { name: string; phone?: string; email?: string; address?: string; creditApproved?: boolean; creditLimitMinor?: number; creditUnlimited?: boolean; locationId?: string },
     @Headers("x-store-id") headerStoreId?: string,
   ) {
     const user = req.user;
@@ -1414,7 +1432,10 @@ export class AdminController {
     if (body?.creditLimitMinor !== undefined && !(["OWNER", "STORE_OWNER", "MANAGER", "PLATFORM_ADMIN"] as string[]).includes(role)) {
       throw new HttpException({ type: "forbidden", message: "Only the owner or manager can set a credit limit" }, HttpStatus.FORBIDDEN);
     }
-    const result = await this.loyalty.createCustomer(storeId, body);
+    // Kept with the customer: the store the screen is at (else the login's own store), who, and "Customers".
+    const actor = await loadActor(storeId, user.sub, role);
+    const where = { locationId: await addedAtStore(storeId, actor, typeof body?.locationId === "string" ? body.locationId : null), userId: user.sub, via: "CUSTOMERS" as const };
+    const result = await this.loyalty.createCustomer(storeId, body, where);
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
     await cacheBust(cacheKey("customers", storeId));
     return { ...result.value, storeId };
@@ -1427,6 +1448,7 @@ export class AdminController {
     requireUser(user);
     const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
     const customers = await this.loyalty.adminCustomers(storeId, {});
+    const tagOf = await addedTagReader(storeId, customers);
     const rows = customers.map((sc) => ({
       name: sc.customer.name ?? "",
       email: sc.customer.email ?? "",
@@ -1437,12 +1459,13 @@ export class AdminController {
       creditLimitPesos: (sc.creditLimitMinor / 100).toFixed(2),
       utangBalancePesos: (sc.creditBalanceMinor / 100).toFixed(2),
       joinedAt: sc.createdAt.toISOString(),
+      addedAt: tagOf(sc).addedAt?.name ?? "",
     }));
     const esc = (v: string | number | boolean) => {
       const s = String(v);
       return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
     };
-    const header = ["name", "email", "phone", "approvalStatus", "loyaltyPoints", "creditApproved", "creditLimitPesos", "utangBalancePesos", "joinedAt"];
+    const header = ["name", "email", "phone", "approvalStatus", "loyaltyPoints", "creditApproved", "creditLimitPesos", "utangBalancePesos", "joinedAt", "addedAt"];
     const csv = [header.join(","), ...rows.map((r) => header.map((h) => esc(r[h as keyof typeof r])).join(","))].join("\n");
     res?.setHeader?.("Content-Type", "text/csv; charset=utf-8");
     res?.setHeader?.("Content-Disposition", `attachment; filename="customers-${new Date().toISOString().slice(0, 10)}.csv"`);

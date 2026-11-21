@@ -274,7 +274,7 @@ export default function BentaPanel() {
       const stop = new AbortController();
       const timer = setTimeout(() => stop.abort(), 8000); // a sleeping server: keep the name on the tablet instead of waiting
       try {
-        const res = await fetch(`${API_URL}/admin/pos/quick-customer`, { method: "POST", headers: { "Content-Type": "application/json", ...adminHeaders() }, body: JSON.stringify({ name, phone: phone || undefined }), signal: stop.signal });
+        const res = await fetch(`${API_URL}/admin/pos/quick-customer`, { method: "POST", headers: { "Content-Type": "application/json", ...adminHeaders() }, body: JSON.stringify({ name, phone: phone || undefined, locationId: locationId || undefined, via: "POS" }), signal: stop.signal });
         const d = (await res.json().catch(() => null)) as ApiBody | null;
         if (res.ok && d?.id) {
           const id = String(d.id);
@@ -1311,7 +1311,7 @@ export default function BentaPanel() {
                  )}
                  {/* The new-customer form takes the signature's place on the right, where there is room for it. */}
                  {pay === "utang" && (newCust ? (
-                   <QuickCustomer onCancel={() => setNewCust(false)} onAdded={async (id) => {
+                   <QuickCustomer locationId={locationId} onCancel={() => setNewCust(false)} onAdded={async (id) => {
                      const res = await fetch(`${API_URL}/admin/customers`, { headers: adminHeaders() });
                      if (res.ok) setCustomers(((await res.json()).customers ?? []) as Customer[]);
                      setCustomerId(id); setCustomerSig(null); setNewCust(false);
@@ -1398,14 +1398,14 @@ export function OpenDrawer({ onOpened }: { onOpened: () => void }) {
 }
 
 /** Add a customer from the POS: name + mobile. On credit with no limit until the owner sets one. */
-function QuickCustomer({ onCancel, onAdded }: { onCancel: () => void; onAdded: (storeCustomerId: string) => void | Promise<void> }) {
+function QuickCustomer({ onCancel, onAdded, locationId }: { onCancel: () => void; onAdded: (storeCustomerId: string) => void | Promise<void>; /** The POS's store: the customer is tagged "made at" it. */ locationId?: string }) {
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const save = async () => {
     setBusy(true); setError(null);
-    const res = await fetch(`${API_URL}/admin/utang/customers`, { method: "POST", headers: { "Content-Type": "application/json", ...adminHeaders() }, body: JSON.stringify({ name: name.trim(), phone: phone.trim() }) });
+    const res = await fetch(`${API_URL}/admin/utang/customers`, { method: "POST", headers: { "Content-Type": "application/json", ...adminHeaders() }, body: JSON.stringify({ name: name.trim(), phone: phone.trim(), locationId: locationId || undefined, via: "POS" }) });
     const d = (await res.json().catch(() => null)) as ApiBody | null;
     setBusy(false);
     if (!res.ok) { setError(errText(d, "Could not add")); return; }
@@ -1427,7 +1427,7 @@ function QuickCustomer({ onCancel, onAdded }: { onCancel: () => void; onAdded: (
 }
 
 /** New item: name, sold as, weight, price, cost, what is on hand now — signed by staff. */
-export function NewItemForm({ locationId, onCancel, onDone, preorder = false }: { locationId?: string; onCancel: () => void; onDone: (created?: { productId: string; name: string; costMinor: number; priceMinor: number }) => void | Promise<void>; /** Pre-order / stock in: only the cost and the selling price; nothing is on hand yet, and no signature. */ preorder?: boolean }) {
+export function NewItemForm({ locationId, onCancel, onDone, preorder = false, via = "POS" }: { locationId?: string; /** The screen it is made on: kept with the item ("Made at Lipa · Pre-order"). */ via?: "POS" | "PREORDER" | "STOCK_IN"; onCancel: () => void; onDone: (created?: { productId: string; name: string; costMinor: number; priceMinor: number }) => void | Promise<void>; /** Pre-order / stock in: only the cost and the selling price; nothing is on hand yet, and no signature. */ preorder?: boolean }) {
   const [name, setName] = useState("");
   const [soldAs, setSoldAs] = useState<"SACK" | "KILO" | "PIECE">("SACK");
   const [kilosPerSack, setKilosPerSack] = useState("25");
@@ -1452,7 +1452,7 @@ export function NewItemForm({ locationId, onCancel, onDone, preorder = false }: 
     }
     setBusy(true); setError(null);
     const body = {
-      name: name.trim(), soldAs, locationId,
+      name: name.trim(), soldAs, locationId, via,
       gramsPerSack: soldAs === "SACK" ? Math.round(Number(kilosPerSack) * 1000) : undefined,
       priceMinor, costMinor,
       ...(preorder ? { noOpeningStock: true } : {}),

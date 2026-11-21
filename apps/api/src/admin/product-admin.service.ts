@@ -1,5 +1,6 @@
 // Product admin service — tenant-scoped product CRUD + stock.
 
+import { addedTagReader, productAdded, type AddedWhere } from "../domain/added-where.js";
 import { UNLIMITED_STOCK, isTracked, trackOffRefusal } from "../domain/stock-tracking.js";
 import { prisma } from "../persistence/prisma-repositories.js";
 import { ensureDefaultLocation, recordMovement } from "../domain/movements.js";
@@ -75,6 +76,7 @@ export class ProductAdminService {
     const rackRows = await prisma.rackSack.findMany({ where: { storeId, kiloProductId: { in: products.filter((p) => p.soldByWeight).map((p) => p.id) } }, orderBy: { createdAt: "asc" }, select: { kiloProductId: true, sackProductId: true } });
     const rackOf = new Map<string, string[]>();
     for (const r of rackRows) rackOf.set(r.kiloProductId, [...(rackOf.get(r.kiloProductId) ?? []), r.sackProductId]);
+    const tagOf = await addedTagReader(storeId, products.map((p) => ({ addedAtId: p.addedAtId, addedById: p.createdById })));
     return products.map((p) => {
       const tracked = isTracked(p);
       const onHand = tracked ? p.stockLevels.reduce((s, l) => s + l.quantityOnHand, 0) : UNLIMITED_STOCK;
@@ -104,6 +106,9 @@ export class ProductAdminService {
       kiloOfId: p.kiloOfId,
       kiloItem: kiloBySack.get(p.id) ?? null,
       rackSackIds: rackOf.get(p.id) ?? [],
+      // Where it was made (store, screen, who) and whether the owner still has to check it.
+      ...tagOf({ addedAtId: p.addedAtId, addedById: p.createdById, addedVia: p.addedVia }),
+      toCheck: p.reviewStatus === "FOR_REVIEW",
       related: link("related"),
       upsell: link("upsell"),
       category: p.category,
@@ -136,7 +141,7 @@ export class ProductAdminService {
   }
 
   /** Create a product (optional existing/new category, unit cost, and opening stock). */
-  async create(storeId: string, input: ProductInput, actorId?: string): Promise<AdminResult<{ id: string }>> {
+  async create(storeId: string, input: ProductInput, actorId?: string, where?: AddedWhere | null): Promise<AdminResult<{ id: string }>> {
     const validation = validateProductInput(input);
     if (!validation.ok) return { ok: false, error: { type: "validation", errors: validation.errors } };
 
@@ -197,6 +202,7 @@ export class ProductAdminService {
           featured: input.featured ?? false,
           tags: (input.tags ?? []).map((t) => t.trim()),
           categoryId,
+          ...productAdded(where),
         },
       });
 
@@ -243,6 +249,13 @@ export class ProductAdminService {
   }
 
   /** Update a product (price, name, description, stock, category, active). */
+  /** A counter-made item the owner has checked: it leaves "Check" (To review). True when it was waiting. */
+  async markChecked(storeId: string, productId: string, actorId?: string): Promise<boolean> {
+    const r = await prisma.product.updateMany({ where: { id: productId, storeId, reviewStatus: "FOR_REVIEW" }, data: { reviewStatus: "ACTIVE" } });
+    if (r.count) await prisma.auditLog.create({ data: { storeId, actorType: "USER", actorId: actorId ?? null, action: "product.checked", entityType: "Product", entityId: productId } });
+    return r.count > 0;
+  }
+
   async update(storeId: string, productId: string, input: Partial<ProductInput>, actorId?: string): Promise<AdminResult<{ id: string }>> {
     const product = await prisma.product.findFirst({ where: { id: productId, storeId } });
     if (!product) return { ok: false, error: { type: "not_found", message: "Product not found" } };
@@ -418,6 +431,7 @@ export class ProductAdminService {
           stockBaseUnit: "g", stockBaseQuantity: 1, stockConversionFamily: sack.stockConversionFamily,
           priceMinor: kiloPriceFrom(sack.priceMinor, grams), costMinor: kiloCostFrom(sack.costMinor, grams),
           trackStock: true, isActive: true, categoryId: kiloGroup, photoKey: sack.photoKey, kiloOfId: sack.id,
+          ...productAdded({ locationId: null, userId: null, via: "KILO" }),
         },
         select: { id: true, name: true, isActive: true, priceMinor: true },
       });
