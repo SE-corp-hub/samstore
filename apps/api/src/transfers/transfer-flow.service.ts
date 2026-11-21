@@ -17,6 +17,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../persistence/prisma-repositories.js";
 import { recordCostIn, shelfCostFor } from "../domain/shelf-cost.js";
 import { coverShortage } from "../domain/buffer.js";
+import { isKiloItem } from "../domain/kilo.js";
 import { addForTrip, deductStock, InsufficientStockError, releaseForTrip, reserveForTrip, transferStock, unreserveForTrip } from "../domain/movements.js";
 import {
   checkArrival, checkRelease, checkReturnBack, deliveryOutcome, readBack, receiveOutcome, returnOutcome,
@@ -442,8 +443,11 @@ export class TransferFlowService {
     if (!from || !to) return invalid("Unknown place");
     // Staff may move rice out of, or into, their own store — not between two other places.
     if (locationRefusal(actor, from.id) && locationRefusal(actor, to.id)) return forbidden(locationRefusal(actor, from.id) ?? "Not your store");
-    const product = input.productId ? await prisma.product.findFirst({ where: { id: input.productId, storeId }, select: { id: true, name: true } }) : null;
+    const product = input.productId ? await prisma.product.findFirst({ where: { id: input.productId, storeId }, select: { id: true, name: true, stockBaseUnit: true, stockBaseQuantity: true } }) : null;
     if (!product) return invalid("Unknown product");
+    // Kilo rice is kept in grams and stays at its store (owner's choice, sell per kilo plan): "1" here
+    // would move 1 gram. Move the whole sacks instead and open them there.
+    if (isKiloItem(product)) return invalid(`${product.name} is kilo rice and stays at its store. Move whole sacks instead, then open them there with Open sacks.`);
     return this.step(async () => {
       let out: { id: string; docNumber: string; profitShareMinor?: number } = { id: "", docNumber: "" };
       await prisma.$transaction(async (tx) => {

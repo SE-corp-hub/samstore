@@ -159,8 +159,9 @@ test("Phase 3: Store 1 selling off Store 2's shelf, moving rice back, a below-ze
   assert.equal(await owes(fx, fx.s2), -160_000);
   assert.equal((await flow.moveNow(fx.storeId, fx.owner, { fromLocationId: fx.s1, toLocationId: fx.s2, productId: fx.jasmine.id, quantity: 3 })).ok, true);
   assert.equal(await owes(fx, fx.s2), -100_000);
-  assert.equal((await flow.moveNow(fx.storeId, fx.owner, { fromLocationId: fx.s1, toLocationId: fx.s2, productId: fx.loose.id, quantity: 2_000 })).ok, true);
-  assert.equal(await owes(fx, fx.s2), -100_000, "loose rice that was never shared takes nothing back");
+  // Kilo rice stays at its store (sell per kilo plan, 2026-11-20): Move stock refuses it, so nothing is shared or taken back.
+  assert.equal((await flow.moveNow(fx.storeId, fx.owner, { fromLocationId: fx.s1, toLocationId: fx.s2, productId: fx.loose.id, quantity: 2_000 })).ok, false);
+  assert.equal(await owes(fx, fx.s2), -100_000, "kilo rice is not moved, so it takes nothing back");
   assert.deepEqual(await kinds(fx), ["PROFIT_SHARE -40000", "PROFIT_SHARE -120000", "SHARE_BACK 60000"]);
 
   // Store 2 cannot "pay" a balance below zero; Store 1 pays it instead.

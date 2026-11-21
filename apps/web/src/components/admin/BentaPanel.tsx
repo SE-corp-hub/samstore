@@ -18,6 +18,7 @@ import { toast } from "../../lib/toast";
 import { sendStep } from "../../lib/offlineQueue";
 import { PROMO_OFF, PROMO_REASON, promoFrom, promoPrices, promoSacks, type QuotaPromo } from "../../lib/quota-promo";
 import { cachedGet, offlineRef, savedCopy, savedThenFresh, useOffline } from "../../lib/offlineCache";
+import { takeOffShelf } from "../../lib/offline-stock";
 
 /** Shown on a button that needs the internet while the tablet is offline. */
 export const NEEDS_NET = "Needs internet";
@@ -67,7 +68,7 @@ interface Item {
 interface Customer { id: string; name: string | null; phone: string | null; creditApproved: boolean; creditLimitMinor: number; creditUnlimited?: boolean; creditStatus?: string; creditAvailableMinor?: number | null; creditBalanceMinor: number }
 type Mode = "PIECE" | "KILO" | "PESO";
 interface CartLine { productId: string; mode: Mode; value: string; sourceLocationId: string | null; /** Manual price (centavos per piece / per kilo), only when it differs from the list price. */ price?: number; reason?: string }
-interface Held { id: string; label: string; at: number; locationId: string; cart: CartLine[] }
+interface Held { id: string; label: string; at: number; locationId: string; cart: CartLine[]; /** Who was buying: a customer id, "walkin", or missing (holds saved before 2026-11-21). */ who?: string }
 type Pay = "cash" | "gcash" | "maya" | "bank" | "split" | "utang";
 const PAY_LABEL: Record<Pay, string> = { cash: "Cash", gcash: "GCash", maya: "Maya", bank: "Bank transfer", split: "Split", utang: "Credit" };
 const STEPS = ["Pick items", "Check", "Pay", "Done"];
@@ -460,6 +461,9 @@ export default function BentaPanel() {
           releases: [], zeroCheck: [], customerName: buyerName,
         });
         setTextInfo(null);
+        // What this sale took leaves the shelf on this tablet too (the server catalog cannot be read offline),
+        // so "left" on the buttons stays true and kilo rice still asks to open a sack when it runs low.
+        setItems((prev) => takeOffShelf(prev, priced.map((l) => ({ productId: l.productId, units: lineOf(byId.get(l.productId), l).units, at: l.sourceLocationId ?? locationId }))));
         keyRef.current = null;
         try { window.sessionStorage.removeItem(cartKey()); } catch { /* convenience only */ }
         setStep("done");
@@ -672,11 +676,26 @@ export default function BentaPanel() {
     setError(null);
     setStep("check");
   };
-  const holdSale = () => {
+  /** This sale as a held one: its lines, its store and who is buying (their special prices come back with them). */
+  const heldNow = (): Held => {
     const first = byId.get(cart[0]!.productId)?.name ?? "Sale";
-    const h: Held = { id: `${Date.now()}`, label: `${first}${cart.length > 1 ? ` +${cart.length - 1}` : ""} · ${peso(total)}`, at: Date.now(), locationId, cart };
-    const all = [...holds, h]; setHolds(all); saveHolds(all);
-    keyRef.current = null; setCart([]); setError(null); toast("Sale put on hold");
+    const name = priceCustomer ? customers.find((c) => c.id === priceCustomer)?.name ?? (isNewId(priceCustomer) ? priceCustomer.slice(NEW_ID.length) : null) : null;
+    return { id: `${Date.now()}`, label: `${name ? `${name}: ` : ""}${first}${cart.length > 1 ? ` +${cart.length - 1}` : ""} · ${peso(total)}`, at: Date.now(), locationId, cart, who: priceCustomer || WALK_IN };
+  };
+  // Hold: the sale is parked WITH its customer, and the counter starts fresh for the next one (no name,
+  // no special prices left on the buttons, so the next buyer is never charged or credited as the last one).
+  const holdSale = () => {
+    const all = [...holds, heldNow()]; setHolds(all); saveHolds(all);
+    reset(); toast("Sale put on hold");
+  };
+  // Resume: the held lines and their customer come back. A sale already on screen is put on hold in its place.
+  const resumeHold = (h: Held) => {
+    const rest = [...holds.filter((x) => x.id !== h.id), ...(cart.length ? [heldNow()] : [])];
+    setHolds(rest); saveHolds(rest); setShowHeld(false);
+    keyRef.current = null; setError(null); setStep("pick");
+    setCart(h.cart); setStorePicked(true); setStartOpen(false);
+    if (h.who === WALK_IN) { setWalkIn(true); if (priceCustomer) void pickPriceCustomer(""); }
+    else if (h.who) { setWalkIn(false); if (h.who !== priceCustomer) void pickPriceCustomer(h.who); }
   };
   // Pieces count one each; a kilo or peso line counts once.
   const upright = fit && !wide;
@@ -948,7 +967,7 @@ export default function BentaPanel() {
           {/* The reason: three buttons, one already chosen, in one row right under the pad (no drop-down, no
               scrolling). Always there, so nothing moves when the first digit is typed; it is only saved with a new price. */}
           <div className="mt-2"><ReasonButtons value={reasonOk(editing.reason) ? editing.reason! : lastReason()} onChange={(v) => setEditing({ ...editing, reason: v })} /></div>
-          {it.tracked && (fromOpen || short) && (
+          {it.tracked && !it.loose && (fromOpen || short) && (
             <div className="mt-2">
               <LocationPicker id="bt-from" size="md" label="Taken from (where the item comes from)" locations={fromChoices} value={from}
                 labelFor={(l) => `${l.name}${l.id === locationId ? " (here)" : ""} — ${it.loose ? kg(it.stock[l.id] ?? 0) : `${it.stock[l.id] ?? 0}`}`}
@@ -971,7 +990,8 @@ export default function BentaPanel() {
           <div className="d-flex align-items-stretch gap-2 mt-2 pos-actions">
             <button type="button" className="btn btn-outline-dark btn-lg text-nowrap" onClick={() => { setEditing(null); setEditIdx(null); }}>Back</button>
             {/* On the Back / Save line, so it costs no row of its own. */}
-            {it.tracked && fromChoices.length > 1 && !fromOpen && !short && (
+            {/* Kilo rice is scooped from this store's rack only (open a sack here when it runs out). */}
+            {it.tracked && !it.loose && fromChoices.length > 1 && !fromOpen && !short && (
               <button type="button" className="btn btn-outline-primary text-nowrap" aria-label="Take from another store" onClick={() => setFromOpen(true)}><i className="bi bi-shop me-1" aria-hidden="true"></i>Other store</button>
             )}
             <button type="button" className="btn btn-success btn-lg flex-grow-1 text-nowrap" disabled={c.totalMinor <= 0 || short || !reasonGiven}
@@ -1031,10 +1051,7 @@ export default function BentaPanel() {
           <li key={h.id} className="d-flex justify-content-between align-items-center py-1 border-bottom">
             <span>{h.label}<span className="small text-muted"> · {new Date(h.at).toLocaleTimeString("en-PH", { hour: "numeric", minute: "2-digit" })}</span></span>
             <span className="text-nowrap">
-              <button type="button" className="btn btn-success btn-sm me-1" onClick={() => {
-                setCart([...cart, ...h.cart]);
-                const rest = holds.filter((x) => x.id !== h.id); setHolds(rest); saveHolds(rest); setShowHeld(false);
-              }}>Resume</button>
+              <button type="button" className="btn btn-success btn-sm me-1" onClick={() => resumeHold(h)}>Resume</button>
               <button type="button" className="btn btn-outline-danger btn-sm" onClick={() => { const rest = holds.filter((x) => x.id !== h.id); setHolds(rest); saveHolds(rest); }}>Delete</button>
             </span>
           </li>
