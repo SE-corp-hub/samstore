@@ -1,6 +1,7 @@
 // Order admin service — status transitions with the state machine + audit history.
 
 import { availableOf } from "../domain/stock-tracking.js";
+import { lockOrder, OrderChanged } from "../domain/order-lock.js";
 import { prisma } from "../persistence/prisma-repositories.js";
 import { cacheBust, cacheKey } from "../persistence/ttl-cache.js";
 import { deductStock, InsufficientStockError, restoreStock } from "../domain/movements.js";
@@ -161,6 +162,10 @@ export class OrderAdminService {
     if (!OrderAdminService.EDITABLE.includes(order.status)) {
       return { ok: false, error: { type: "conflict", message: `Cannot edit an order in ${order.status}` } };
     }
+    // A credit sale over the limit waits for the owner in Para sa iyo with its rice held: only that decision may change it.
+    if (order.source === "UTANG_PENDING") return { ok: false, error: { type: "conflict", message: "This credit sale is waiting for the owner. Approve or decline it first." } };
+    // A pre-order may be taken below zero (the count is fixed later), as when it was made.
+    const preOrder = order.source === "PRE_ORDER";
     const reserved = await prisma.$transaction((tx) => hasActiveReservation(tx, storeId, orderId));
 
     // Fresh products + availability
@@ -178,7 +183,7 @@ export class OrderAdminService {
     for (const it of items) {
       const p = products.find((x) => x.id === it.productId)!;
       const available = availableOf(p, p.stockLevels.reduce((s, l) => s + l.quantityOnHand, 0), p.stockLevels.reduce((s, l) => s + l.quantityReserved, 0)) + mine(p.id);
-      if (available < it.quantity) {
+      if (available < it.quantity && !preOrder) {
         return { ok: false, error: { type: "conflict", message: `Only ${available} in stock for ${p.name}` } };
       }
     }
@@ -220,6 +225,10 @@ export class OrderAdminService {
 
     try {
       await prisma.$transaction(async (tx) => {
+        // Two saves at once: the second waits here, then works from what the first one saved (no rice given back twice).
+        const locked = await lockOrder(tx, storeId, orderId);
+        if (!locked || !OrderAdminService.EDITABLE.includes(locked.status)) throw new OrderChanged("This order was completed or cancelled meanwhile. Open it again.");
+        const nowItems = await tx.orderItem.findMany({ where: { orderId }, select: { productId: true, quantity: true } });
         if (reserved) {
           // Online / hub order: the units are still on the shelf, only the hold moves to the new lines.
           await moveOrderReservation(tx, { id: orderId, storeId }, newLines, actor);
@@ -232,9 +241,9 @@ export class OrderAdminService {
             orderBy: { createdAt: "asc" },
             select: { warehouseId: true },
           });
-          await restoreStock(tx, storeId, oldItems.map((oi) => ({ productId: oi.productId ?? "", quantity: oi.quantity })), { type: "RELEASE", orderId, createdBy: actor, documentType: "ORDER_EDIT", documentId: orderId });
+          await restoreStock(tx, storeId, nowItems.map((oi) => ({ productId: oi.productId ?? "", quantity: oi.quantity })), { type: "RELEASE", orderId, createdBy: actor, documentType: "ORDER_EDIT", documentId: orderId });
           for (const nl of newLines) {
-            await deductStock(tx, storeId, [{ productId: nl.productId, quantity: nl.quantity }], { type: "CONSUME", orderId, createdBy: actor, warehouseId: firstTake?.warehouseId ?? null, documentType: "ORDER_EDIT", documentId: orderId });
+            await deductStock(tx, storeId, [{ productId: nl.productId, quantity: nl.quantity }], { type: "CONSUME", orderId, createdBy: actor, warehouseId: firstTake?.warehouseId ?? order.sellingLocationId ?? null, documentType: "ORDER_EDIT", documentId: orderId, allowBelowZero: preOrder });
           }
         }
         await tx.orderItem.deleteMany({ where: { orderId } });
@@ -267,6 +276,7 @@ export class OrderAdminService {
         });
       });
     } catch (e) {
+      if (e instanceof OrderChanged) return { ok: false, error: { type: "conflict", message: e.message } };
       if (e instanceof InsufficientStockError) {
         const name = products.find((p) => p.id === e.productId)?.name ?? "an item";
         return { ok: false, error: { type: "conflict", message: `Not enough stock for ${name}` } };
