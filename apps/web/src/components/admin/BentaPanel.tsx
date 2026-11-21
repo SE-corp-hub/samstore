@@ -28,7 +28,8 @@ import NumPad from "./NumPad";
 import SignaturePad from "./SignaturePad";
 import QuickCount from "./QuickCount";
 import StoreBar from "./StoreBar";
-import StartChoices, { ChosenRow, NewCustomerChoice, sameName } from "./StartChoices";
+import StartChoices, { ChosenRow, CustomerAreaFilter, NewCustomerChoice, sameName, useCustomerArea } from "./StartChoices";
+import { byArea } from "../../lib/customer-area";
 import { lastReason, reasonOk, ReasonButtons } from "./PriceReason";
 import { askBelowCost, saveUnitCost } from "./BelowCostDialog";
 import { isBelowCost, okKey, OWNER_COST_NOTE } from "../../lib/below-cost";
@@ -67,7 +68,7 @@ interface Item {
   lowestMinor?: number;
 }
 // Shape of GET /admin/customers (flat: name/phone on the row).
-interface Customer { id: string; name: string | null; phone: string | null; creditApproved: boolean; creditLimitMinor: number; creditUnlimited?: boolean; creditStatus?: string; creditAvailableMinor?: number | null; creditBalanceMinor: number }
+interface Customer { id: string; name: string | null; phone: string | null; address?: string | null; addedAt?: { id: string; name: string } | null; creditApproved: boolean; creditLimitMinor: number; creditUnlimited?: boolean; creditStatus?: string; creditAvailableMinor?: number | null; creditBalanceMinor: number }
 type Mode = "PIECE" | "KILO" | "PESO";
 interface CartLine { productId: string; mode: Mode; value: string; sourceLocationId: string | null; /** Manual price (centavos per piece / per kilo), only when it differs from the list price. */ price?: number; reason?: string }
 interface Held { id: string; label: string; at: number; locationId: string; cart: CartLine[]; /** Who was buying: a customer id, "walkin", or missing (holds saved before 2026-11-21). */ who?: string }
@@ -137,6 +138,8 @@ export default function BentaPanel() {
   const [homeLocationId, setHomeLocationId] = useState<string | null>(null);
   const [items, setItems] = useState<Item[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
+  // "All · Lipa · Bauan" above the customer list (remembered on this tablet).
+  const [area, setArea] = useCustomerArea();
   const [cleared, setCleared] = useState(0); // bumps to empty the search after an item goes in
   const [cart, setCart] = useState<CartLine[]>(() => savedCart()?.cart ?? []);
   const [editing, setEditing] = useState<CartLine | null>(null);
@@ -590,10 +593,13 @@ export default function BentaPanel() {
   // The customer picked at the counter (their special prices go on the product buttons): above the sale sideways, beside the steps upright.
   const customerSelect = customers.length > 0 && (
     <div className={wide ? "mb-2" : ""} style={wide ? undefined : { flex: "1 1 16rem", minWidth: 0 }}>
-      <select className="form-select" aria-label="Customer with special prices" disabled={cart.length > 0} value={priceCustomer} onChange={(e) => void pickPriceCustomer(e.target.value)}>
+      <div className="d-flex flex-wrap align-items-center gap-2">
+      {cart.length === 0 && <CustomerAreaFilter compact customers={customers} area={area} onArea={setArea} />}
+      <select className="form-select" style={{ flex: "1 1 14rem", minWidth: 0 }} aria-label="Customer with special prices" disabled={cart.length > 0} value={priceCustomer} onChange={(e) => void pickPriceCustomer(e.target.value)}>
         <option value="">Customer: walk-in (store prices)</option>
-        {customers.map((c) => <option key={c.id} value={c.id}>{c.name ?? c.phone ?? "—"}</option>)}
+        {byArea(customers, area, priceCustomer).map((c) => <option key={c.id} value={c.id}>{c.name ?? c.phone ?? "—"}</option>)}
       </select>
+      </div>
       {priceCustomer && <div className="small text-muted mt-1">{specialCount > 0 ? `${specialCount} special ${specialCount === 1 ? "price" : "prices"} for this customer.` : "No special prices for this customer — store prices apply."}</div>}
     </div>
   );
@@ -1045,10 +1051,11 @@ export default function BentaPanel() {
           {walkIn && <i className="bi bi-check-circle-fill me-2" aria-hidden="true"></i>}
           <span>Walk-in<small>No name needed · store prices</small></span>
         </button>
+        {customers.length > 0 && <CustomerAreaFilter customers={customers} area={area} onArea={setArea} />}
         {customers.length > 0 && (
           <select className={`form-select form-select-lg start-cust${priceCustomer ? " chosen" : ""}`} aria-label="A customer from the list" value={priceCustomer} onChange={(e) => startWho(e.target.value)}>
             <option value="">Choose a customer…</option>
-            {customers.map((c) => <option key={c.id} value={c.id}>{c.name ?? c.phone ?? "—"}{isNewId(c.id) ? " (new)" : ""}</option>)}
+            {byArea(customers, area, priceCustomer).map((c) => <option key={c.id} value={c.id}>{c.name ?? c.phone ?? "—"}{isNewId(c.id) ? " (new)" : ""}</option>)}
           </select>
         )}
         <NewCustomerChoice onAdd={addNewCustomer} />

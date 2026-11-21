@@ -950,3 +950,15 @@ html[data-text-size] .start-cust.chosen, .start-cust.chosen { border: 3px solid 
 .added-row { display: block; margin-top: 0.125rem; }
 .check-badge { background: #fff4d6; color: #6f4800; border: 1px solid #8a5a00; font-weight: 600; }
 .btn-looks-right { min-height: 44px; }
+
+/* §21 Customer area filter, "All · Lipa · Bauan" (2026-11-21): above the customer list on POS and Pre-order.
+   Chosen = dark with a tick (the same toggle as the store choice); the count is on every button. */
+.area-filter { display: flex; flex-wrap: wrap; gap: 0.5rem; grid-column: 1 / -1; }
+.area-btn { min-height: 3rem; min-width: 5.5rem; flex: 1 1 0; display: inline-flex; align-items: center; justify-content: center; gap: 0.15rem; font-weight: 600; white-space: nowrap; }
+.area-count { margin-left: 0.4rem; padding: 0 0.45rem; border-radius: 1rem; border: 1px solid currentColor; font-size: 0.85em; font-weight: 600; line-height: 1.4; }
+.area-filter.compact { flex-wrap: nowrap; gap: 0.35rem; flex: 0 0 auto; }
+.area-filter.compact .area-btn { min-height: 44px; min-width: 0; flex: 0 0 auto; padding: 0.25rem 0.6rem; }
+/* On the tablet a tapped button keeps its hover colour; an outline button that is not chosen stays white. */
+@media (hover: none) {
+  .area-btn.btn-outline-dark:not(:disabled):hover { background-color: transparent; color: var(--bs-btn-color); }
+}

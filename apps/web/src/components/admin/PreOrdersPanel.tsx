@@ -27,7 +27,8 @@ import { peso } from "../../lib/number-format";
 import ProductFinder from "./ProductFinder";
 import PickTile from "./PickTile";
 import StoreBar, { type StoreOption } from "./StoreBar";
-import StartChoices, { ChosenRow, NewCustomerChoice, sameName } from "./StartChoices";
+import StartChoices, { ChosenRow, CustomerAreaFilter, NewCustomerChoice, sameName, useCustomerArea } from "./StartChoices";
+import { byArea } from "../../lib/customer-area";
 import { noteUse } from "../../lib/product-find";
 import { printSlip, type Slip } from "../../lib/slip-print";
 import { cachedGet, offlineRef, savedCopy, savedThenFresh, useOffline } from "../../lib/offlineCache";
@@ -60,7 +61,7 @@ interface PosProduct {
   /** Kilo rice (sold per kilo): a pre-order counts whole items, so it is not offered here yet. */
   soldByWeight?: boolean;
 }
-interface PosCustomer { id: string; name: string | null; email: string | null; phone: string | null; }
+interface PosCustomer { id: string; name: string | null; email: string | null; phone: string | null; address?: string | null; addedAt?: { id: string; name: string } | null; }
 interface CartLine { product: PosProduct; quantity: number; variantId?: string | null; /** What is typed in the price box, kept while typing. */ priceText?: string; /** Manual price (centavos each) when it differs from the list price. */ price?: number; reason?: string }
 const unitOf = (l: CartLine) => l.price ?? l.product.priceMinor;
 const priceMissingReason = (l: CartLine) => l.price !== undefined && l.price !== l.product.priceMinor && !reasonOk(l.reason);
@@ -243,6 +244,8 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
   const [seesCost, setSeesCost] = useState(false);
   const keptBelow = useRef(new Set<string>()); // below-cost prices someone chose to keep
   const [buildCustomers, setBuildCustomers] = useState<PosCustomer[]>([]);
+  // "All · Lipa · Bauan" above the customer list (remembered on this tablet, same as POS).
+  const [area, setArea] = useCustomerArea();
   const [buildCart, setBuildCart] = useState<CartLine[]>([]);
   const [newItemOpen, setNewItemOpen] = useState(false);
   const [buildCustomerId, setBuildCustomerId] = useState("");
@@ -853,12 +856,13 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
         <h2 id="po-who" className="h5 mb-0 d-flex align-items-center text-nowrap"><Num n={1} />{whoOneRow ? <span className="visually-hidden">Who is it for?</span> : "Who is it for?"}</h2>
         {editingPre ? (
           <div className="fs-5 fw-semibold">{editingPre.customerName || "—"}</div>
-        ) : (
+        ) : (<>
+          {!buildCustomerId && <CustomerAreaFilter compact customers={buildCustomers} area={area} onArea={setArea} />}
           <select aria-label="Customer" className="form-select" style={whoOneRow ? { flex: "2 1 12rem" } : { flex: "1 1 14rem", maxWidth: "26rem" }} value={buildCustomerId} onChange={(e) => { setBuildCustomerId(e.target.value); if (e.target.value) { setBuildNewName(""); setBuildNewPhone(""); } }}>
             <option value="">{whoOneRow ? "Who is it for? Choose…" : "Choose a customer…"}</option>
-            {buildCustomers.map((c) => <option key={c.id} value={c.id}>{c.name ?? c.email ?? c.phone ?? "Customer"}</option>)}
+            {byArea(buildCustomers, area, buildCustomerId).map((c) => <option key={c.id} value={c.id}>{c.name ?? c.email ?? c.phone ?? "Customer"}</option>)}
           </select>
-        )}
+        </>)}
         {whoOneRow && !editingPre && !buildCustomerId && newCustomerInputs}
       </div>
       {!whoOneRow && !editingPre && !buildCustomerId && (
@@ -1014,11 +1018,12 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
     <StartChoices title="Start a pre-order" storeQuestion="Pre-order at which store?" locations={locations} storeId={storeKnown ? locationId : ""} onStore={startStore}
       whoQuestion="Who is it for?" whoDone={whoKnown} ready={storeKnown && whoKnown} goLabel="Tap the rice" onGo={() => { setStorePicked(true); setStartOpen(false); }}>
       <div className="start-choices">
+        {buildCustomers.length > 0 && <CustomerAreaFilter customers={buildCustomers} area={area} onArea={setArea} />}
         {buildCustomers.length > 0 && (
           <select aria-label="Customer" className={`form-select form-select-lg start-cust${buildCustomerId ? " chosen" : ""}`} value={buildCustomerId}
             onChange={(e) => { setBuildCustomerId(e.target.value); if (e.target.value) { setBuildNewName(""); setBuildNewPhone(""); if (storeKnown) setStartOpen(false); } }}>
             <option value="">Choose a customer…</option>
-            {buildCustomers.map((c) => <option key={c.id} value={c.id}>{c.name ?? c.email ?? c.phone ?? "Customer"}</option>)}
+            {byArea(buildCustomers, area, buildCustomerId).map((c) => <option key={c.id} value={c.id}>{c.name ?? c.email ?? c.phone ?? "Customer"}</option>)}
           </select>
         )}
         {/* Not on the list: the name (and mobile, if any) goes with the pre-order, and the server adds the customer — with no internet too. */}
