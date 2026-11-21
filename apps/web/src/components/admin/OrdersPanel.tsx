@@ -7,7 +7,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { API_URL } from "../../config";
-import { adminHeaders, type AdminOrder, getAdminRole, roleCan } from "../../lib/admin";
+import { adminHeaders, type AdminOrder, getAdminRole, getHomeLocation, roleCan } from "../../lib/admin";
 import ReceiptModal from "./ReceiptModal";
 import OrderEditor from "./OrderEditor";
 import { isKiloLine, lineText } from "../../lib/order-lines";
@@ -64,6 +64,11 @@ const OPEN_TABS = ["pending", "onprocess", "fordelivery"];
 /** "2× Alsa 25kg · 1× Planters 25kg": what to pack, readable on the row without opening the order. */
 const itemsLine = (o: AdminOrder) => (o.items ?? []).map(lineText).join(" · ");
 
+/** Each store keeps one colour on its tag (by its place in the list), so an order's store is seen at a glance.
+ *  Dark text on a light tint (contrast 7:1+); the name is always written too, never colour alone. */
+const STORE_TONES = ["store-tone-1", "store-tone-2", "store-tone-3", "store-tone-4", "store-tone-5"];
+interface StorePlace { id: string; name: string; code?: string | null; type?: string; isActive?: boolean }
+
 const HUB_CHANNEL: Record<string, string> = { messenger: "Messenger chat", order_form: "Order form", comment: "Comment", live: "Live", agent: "Agent", counter: "Counter" };
 const toPesos = (m: number) => peso(m);
 const dayRange = (d: Date) => ({ from: new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0).toISOString(), to: new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59).toISOString() });
@@ -113,6 +118,15 @@ export default function OrdersPanel({ onAgentOrders }: { /** Opens Agent orders 
   const [detailHistory, setDetailHistory] = useState<{ fromStatus: string | null; toStatus: string; createdAt: string; reason?: string | null; actorType?: string }[] | null>(null);
   const [detailToken, setDetailToken] = useState<string | null>(null);
   const [counts, setCounts] = useState<Record<string, number>>({});
+  // Stores: the owner and manager see every store's orders, so they pick one with the store buttons;
+  // a store login sees only its own store's (the server keeps it so) and gets its name, no buttons.
+  const walled = !["OWNER", "MANAGER", "PLATFORM_ADMIN"].includes(role) && !!getHomeLocation();
+  const [places, setPlaces] = useState<StorePlace[]>([]);
+  const [storeFilter, setStoreFilter] = useState(""); // "" = all stores | a store id | "none" = no store named yet
+  const [byStore, setByStore] = useState<Record<string, number>>({});
+  useEffect(() => {
+    void savedThenFresh<{ warehouses?: StorePlace[] }>("/admin/warehouses", (d) => setPlaces((d.warehouses ?? []).filter((w) => w.isActive !== false && w.type !== "WAREHOUSE" && w.type !== "BUFFER")));
+  }, []);
   const [openCounts, setOpenCounts] = useState<Record<string, number> | null>(null);
   // On-process editing
   const [editing, setEditing] = useState<{ id: string; orderNumber: string; customerName: string } | null>(null);
@@ -186,6 +200,7 @@ export default function OrdersPanel({ onAgentOrders }: { /** Opens Agent orders 
       if (sourceFilter) q.set("source", sourceFilter);
       if (paymentFilter) q.set("payment", paymentFilter);
       if (fulfillmentFilter) q.set("fulfillment", fulfillmentFilter);
+      if (storeFilter && !walled) q.set("location", storeFilter);
             // Offline in the store: the last list saved on this tablet for the same day and filters.
             const data = await cachedGet<{ orders?: AdminOrder[] }>(`/admin/orders?${q.toString()}`);
                         if (!data) throw new Error("Failed to load orders");
@@ -200,16 +215,17 @@ export default function OrdersPanel({ onAgentOrders }: { /** Opens Agent orders 
                         const day = range === "custom"
                           ? { from: q.get("from"), to: q.get("to") }
                           : dayRange(range === "today" ? new Date() : range === "yesterday" ? new Date(Date.now() - 86_400_000) : new Date(Date.now() + 86_400_000));
-                        for (const [k, v] of [["from", day.from], ["to", day.to], ["customer", q.get("customer")], ["source", q.get("source")], ["payment", q.get("payment")], ["fulfillment", q.get("fulfillment")]] as const) {
+                        for (const [k, v] of [["from", day.from], ["to", day.to], ["customer", q.get("customer")], ["source", q.get("source")], ["payment", q.get("payment")], ["fulfillment", q.get("fulfillment")], ["location", q.get("location")]] as const) {
                           if (v) cq.set(k, v);
                           if (v && k !== "from" && k !== "to") oq.set(k, v);
                         }
-                        cachedGet<{ counts?: typeof counts }>(`/admin/orders/counts?${cq.toString()}`)
-                          .then((d) => d?.counts && setCounts(d.counts))
+                        // Store buttons count the orders of the picked day(s), so they add up to the "All" number below.
+                        cachedGet<{ counts?: typeof counts; byLocation?: Record<string, number> }>(`/admin/orders/counts?${cq.toString()}`)
+                          .then((d) => { if (d?.counts) setCounts(d.counts); if (d?.byLocation) setByStore(d.byLocation); })
                           .catch(() => {});
                         if (range === "today") {
-                          cachedGet<{ counts?: typeof counts }>(`/admin/orders/counts?${oq.toString()}`)
-                            .then((d) => d?.counts && setOpenCounts(d.counts))
+                          cachedGet<{ counts?: typeof counts; byLocation?: Record<string, number> }>(`/admin/orders/counts?${oq.toString()}`)
+                            .then((d) => { if (d?.counts) setOpenCounts(d.counts); })
                             .catch(() => {});
                         } else setOpenCounts(null);
     } catch (e) {
@@ -217,7 +233,7 @@ export default function OrdersPanel({ onAgentOrders }: { /** Opens Agent orders 
     } finally {
       setLoading(false);
     }
-  }, [tab, range, customFrom, customTo, sourceFilter, paymentFilter, fulfillmentFilter, customer]);
+  }, [tab, range, customFrom, customTo, sourceFilter, paymentFilter, fulfillmentFilter, customer, storeFilter, walled]);
 
     useEffect(() => { load(); }, [load]);
     // The new-order form's product and customer lists: once per visit, both at once, from the copy
@@ -627,6 +643,18 @@ export default function OrdersPanel({ onAgentOrders }: { /** Opens Agent orders 
     return q.toString();
   };
 
+  /** The store tag on a row and in the details: name + colour; "No store yet" when the order names none. */
+  const storeTag = (o: AdminOrder, big = false) => {
+    if (walled) return null; // a store login sees only its own store's orders: the title already says which
+    const i = places.findIndex((p) => p.id === o.sellingLocationId);
+    const place = i >= 0 ? places[i] : null;
+    if (o.sellingLocationId && !place) return null; // the list of stores is not loaded yet
+    return place
+      ? <span className={`store-tag ${STORE_TONES[i % STORE_TONES.length]} ${big ? "store-tag-lg" : ""}`}><i className="bi bi-shop" aria-hidden="true"></i>{place.name}</span>
+      : <span className={`store-tag store-tone-none ${big ? "store-tag-lg" : ""}`} title="No store is named on this order yet. Bogs and Lucy's staff see it until it gets one."><i className="bi bi-question-circle" aria-hidden="true"></i>No store yet</span>;
+  };
+  const homeName = walled ? places.find((p) => p.id === getHomeLocation())?.name ?? null : null;
+
   const orderRow = (o: AdminOrder) => {
     const acts = actionsFor(o);
     const main = acts.find((x) => x.tone === "main");
@@ -641,6 +669,7 @@ export default function OrdersPanel({ onAgentOrders }: { /** Opens Agent orders 
         <button type="button" className="order-main" onClick={() => openDetail(o)} aria-current={open ? "true" : undefined}>
           <span className="min-w-0">
             <span className="d-block fw-bold text-truncate">{o.customerName}</span>
+            {storeTag(o) && <span className="d-block mb-1">{storeTag(o)}</span>}
             <span className="d-block small text-muted">
               {o.orderNumber} · {isDeliv(o) ? <><i className="bi bi-truck" aria-hidden="true"></i> Delivery</> : <><i className="bi bi-shop" aria-hidden="true"></i> Pickup</>}
               {o.paymentMethod === "credit" && <> · <i className="bi bi-journal-text" aria-hidden="true"></i> Credit</>}
@@ -693,6 +722,7 @@ export default function OrdersPanel({ onAgentOrders }: { /** Opens Agent orders 
         <div className="d-flex justify-content-between align-items-end gap-2 mb-2">
           <div className="min-w-0">
             <div className="fw-bold fs-5 text-truncate">{o.customerName}</div>
+            {storeTag(o, true) && <div className="my-1">{storeTag(o, true)}</div>}
             <div className="small text-muted">{isDeliv(o) ? "Delivery" : "Pickup"} · {o.source === "PRE_ORDER" ? "Pre-order" : o.source === "pos" ? "POS" : o.source === "hub" ? [o.sourcePage, HUB_CHANNEL[o.sourceChannel ?? ""], o.externalRef && `hub ${o.externalRef}`].filter(Boolean).join(" · ") || "SE Corp Hub" : "Online"} · {placedAt(o.createdAt)}</div>
           </div>
           <div className="fs-4 fw-bold num text-nowrap flex-shrink-0">{toPesos(o.totalMinor)}</div>
@@ -862,6 +892,7 @@ export default function OrdersPanel({ onAgentOrders }: { /** Opens Agent orders 
       <div className="orders-screen">
         <div className="d-flex flex-wrap align-items-center gap-2 mb-2">
           <h1 className="h4 mb-0"><i className="bi bi-receipt me-2" aria-hidden="true"></i>Orders</h1>
+          {homeName && <span className="store-tag store-tone-home store-tag-lg"><i className="bi bi-shop" aria-hidden="true"></i>{homeName} only</span>}
           {!offline && <span className="live-pill me-auto" title="New and changed orders show by themselves"><span className="live-dot" aria-hidden="true"></span>Live</span>}
           {offline && <span className="me-auto"></span>}
           <button type="button" className="btn btn-outline-primary fw-bold" onClick={() => setItemsOpen(true)}><i className="bi bi-table me-1" aria-hidden="true"></i>Items</button>
@@ -933,6 +964,25 @@ export default function OrdersPanel({ onAgentOrders }: { /** Opens Agent orders 
             </div>
           </div>
         )}
+
+        {/* Store buttons (owner and manager): every store's orders, or one store's. The count = orders still to do there. */}
+        {!walled && places.length > 1 && (() => {
+          const all = Object.values(byStore).reduce((a, n) => a + n, 0);
+          const none = byStore.none ?? 0;
+          const btn = (id: string, label: string, n: number, tone: string) => (
+            <button key={id || "all"} type="button" className={`btn store-chip ${tone} ${storeFilter === id ? "is-on" : ""}`} aria-pressed={storeFilter === id} onClick={() => { setStoreFilter(id); setOrderDetail(null); setSelected(new Set()); }}>
+              {id && id !== "none" && <i className="bi bi-shop me-1" aria-hidden="true"></i>}{label}
+              <span className="badge rounded-pill ms-2" aria-label={`${n} to do`}>{n > 99 ? "99+" : n}</span>
+            </button>
+          );
+          return (
+            <div className="d-flex flex-wrap gap-2 mb-2" role="group" aria-label="Which store">
+              {btn("", "All stores", all, "store-chip-all")}
+              {places.map((p, i) => btn(p.id, p.name, byStore[p.id] ?? 0, STORE_TONES[i % STORE_TONES.length] ?? "store-tone-1"))}
+              {(none > 0 || storeFilter === "none") && btn("none", "No store yet", none, "store-tone-none")}
+            </div>
+          );
+        })()}
 
         {/* Status chips: one row, in the order an order moves. The count is how many are there now. */}
         <div className="d-flex flex-wrap gap-2 mb-1" role="group" aria-label="Order status">

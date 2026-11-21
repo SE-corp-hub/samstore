@@ -88,6 +88,8 @@ export interface AdminOrder {
   sourceChannel?: string | null;
   sourcePage?: string | null;
   externalRef?: string | null;
+  /** The store the order belongs to; null = no store named yet (the main store's staff see these). */
+  sellingLocationId?: string | null;
   deliveryType?: string;
   paymentMethod?: string;
   signatureData?: string;
