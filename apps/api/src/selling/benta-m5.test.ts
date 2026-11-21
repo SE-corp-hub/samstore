@@ -172,7 +172,7 @@ test("M5: ₱100 at ₱52/kg = 1.923 kg for exactly ₱100; 1.25 kg = ₱65; Sto
   assert.equal(s2.ok && s2.value.locationId, fx.s2);
 });
 
-test("M5: a manual item sells at once and goes straight into Products (no owner review)", async () => {
+test("M5: a manual item sells at once; one made by counter staff waits for the owner's check (2026-11-21)", async () => {
   const fx = await fixture();
   const noSig = await svc.manualItem(fx.storeId, fx.staff1, { name: "Jasmine 25 kg", soldAs: "SACK", gramsPerSack: 25_000, priceMinor: 150_000, costMinor: 120_000, openingQty: 3 });
   assert.equal(noSig.ok, false);
@@ -184,12 +184,12 @@ test("M5: a manual item sells at once and goes straight into Products (no owner 
   if (!m.ok) return;
   assert.match(m.value.stockInDocNumber, /^IN-\d{6}$/);
   assert.equal(await onHand(fx, m.value.productId, fx.s1), 3);
-  assert.equal((await prisma.product.findUniqueOrThrow({ where: { id: m.value.productId } })).reviewStatus, "ACTIVE");
+  assert.equal((await prisma.product.findUniqueOrThrow({ where: { id: m.value.productId } })).reviewStatus, "FOR_REVIEW");
   assert.equal(m.value.approvalId, null);
   assert.equal(await prisma.approvalRequest.count({ where: { storeId: fx.storeId, kind: "MANUAL_ITEM" } }), 0, "no approval is asked");
   const sale = await svc.sell(fx.storeId, fx.staff1, { idempotencyKey: key(), lines: [{ productId: m.value.productId, quantity: 1 }], payment: { method: "cash" } });
   assert.equal(sale.ok && sale.value.totalMinor, 150_000, msg(sale));
-  assert.equal((await svc.reviewList(fx.storeId)).length, 0);
+  assert.deepEqual((await svc.reviewList(fx.storeId)).map((p) => p.id), [m.value.productId], "the owner sees it in To review");
 });
 
 test("M5: a pre-order item can be added with a cost and a price and nothing on hand", async () => {
@@ -200,7 +200,7 @@ test("M5: a pre-order item can be added with a cost and a price and nothing on h
   assert.equal(m.value.stockInDocNumber, "", "no stock-in was written");
   assert.equal((await onHand(fx, m.value.productId, fx.s1)) ?? 0, 0, "nothing on hand (no stock row, or a zero one)");
   const p = await prisma.product.findUniqueOrThrow({ where: { id: m.value.productId } });
-  assert.deepEqual([p.priceMinor, p.costMinor, p.reviewStatus], [180_000, 150_000, "ACTIVE"]);
+  assert.deepEqual([p.priceMinor, p.costMinor, p.reviewStatus], [180_000, 150_000, "FOR_REVIEW"]); // counter staff made it
 });
 
 test("M5: recent stock-ins are listed with their lines (for the receipt)", async () => {

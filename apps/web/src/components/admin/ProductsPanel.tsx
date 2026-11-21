@@ -1,5 +1,7 @@
 "use client";
 
+import { AddedAtFilter, AddedLine } from "./AddedTag";
+import { addedStores, matchesAddedAt } from "../../lib/added-where";
 import { ScopeTag } from "./WhoCan";
 import { PesoInput, WholeInput } from "../NumberBoxes";
 import { askBelowCost } from "./BelowCostDialog";
@@ -167,6 +169,12 @@ export interface AdminProduct {
   kiloItem?: { id: string; name: string; isActive: boolean; priceMinor: number } | null;
   /** A kilo rice (display rack): the other sacks that can fill it. */
   rackSackIds?: string[];
+  /** Where it was made (store, screen, who); empty = made before this was kept. */
+  addedAt?: { id: string; name: string } | null;
+  addedVia?: string | null;
+  addedBy?: string | null;
+  /** Made by counter staff: waits for the owner's "Looks right". */
+  toCheck?: boolean;
   related: { id: string; name: string; priceMinor: number; isActive: boolean }[];
   upsell: { id: string; name: string; priceMinor: number; isActive: boolean }[];
   category: { id: string; name: string; slug: string } | null;
@@ -313,6 +321,20 @@ export default function ProductsPanel({ role = "" }: { role?: string }) {
   // The Picture field: what happens to the product's picture on Save.
   const [photo, setPhoto] = useState<PhotoChange>({ kind: "keep" });
   const belowCount = products.filter((p) => isBelowCost(p.priceMinor, p.costMinor)).length;
+  // Where each one was made: the "Made at" filter, and counter-made items the owner still has to check.
+  const [madeAt, setMadeAt] = useState("");
+  const [onlyCheck, setOnlyCheck] = useState(false);
+  const checkCount = products.filter((p) => p.toCheck).length;
+  const [checking, setChecking] = useState<string | null>(null);
+  const looksRight = async (p: AdminProduct) => {
+    setChecking(p.id);
+    try {
+      const res = await fetch(`${API_URL}/admin/products/${encodeURIComponent(p.id)}/checked`, { method: "POST", headers: adminHeaders() });
+      if (!res.ok) { toast("Could not save. Try again.", "danger"); return; }
+      setProducts((ps) => ps.map((x) => (x.id === p.id ? { ...x, toCheck: false } : x)));
+      toast(`${p.name}: checked`, "success");
+    } catch { toast("No internet. Try again when it is back.", "danger"); } finally { setChecking(null); }
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -537,6 +559,12 @@ export default function ProductsPanel({ role = "" }: { role?: string }) {
           <button type="button" className="btn btn-outline-danger" aria-pressed={onlyBelow} onClick={() => setOnlyBelow((v) => !v)}>{onlyBelow ? "Show all" : "Show them"}</button>
         </div>
       )}
+      {checkCount > 0 && canSetUp && (
+        <div className="alert alert-warning d-flex flex-wrap align-items-center gap-2 py-2" role="status">
+          <span className="me-auto"><strong>{checkCount}</strong> new {checkCount === 1 ? "item was" : "items were"} added by staff at the counter. Check the cost and price, then tap <strong>Looks right</strong>.</span>
+          <button type="button" className="btn btn-outline-dark" aria-pressed={onlyCheck} onClick={() => setOnlyCheck((v) => !v)}>{onlyCheck ? "Show all" : "Show them"}</button>
+        </div>
+      )}
       {several && <AddSeveralProducts onClose={() => setSeveral(false)} onDone={load} />}
 
             {/* P7 filter bar */}
@@ -560,6 +588,9 @@ export default function ProductsPanel({ role = "" }: { role?: string }) {
                   <option value="true">Active</option>
                   <option value="false">Inactive</option>
                 </select>
+              </div>
+              <div className="col-6 col-lg-3">
+                <AddedAtFilter id="products-made-at" value={madeAt} onChange={setMadeAt} stores={addedStores(products)} />
               </div>
               <div className="col-6 col-lg-3">
                 <select className="form-select form-select-sm" aria-label="Sort" value={sort} onChange={(e) => setSort(e.target.value as "created" | "name" | "price" | "stock")}>
@@ -600,7 +631,8 @@ export default function ProductsPanel({ role = "" }: { role?: string }) {
               </tr>
             </thead>
             <tbody>
-              {(onlyBelow && belowCount > 0 ? products.filter((p) => isBelowCost(p.priceMinor, p.costMinor)) : products).map((p) => (
+              {(onlyBelow && belowCount > 0 ? products.filter((p) => isBelowCost(p.priceMinor, p.costMinor)) : products)
+                .filter((p) => matchesAddedAt(p, madeAt) && (!onlyCheck || checkCount === 0 || p.toCheck)).map((p) => (
                 <tr key={p.id} className={p.isActive ? "" : "table-secondary"}>
                   <td className="col-roomy">
                     <input
@@ -627,7 +659,14 @@ export default function ProductsPanel({ role = "" }: { role?: string }) {
                       {p.trackStock === false && <span className="badge text-bg-warning ms-1" title="Sells at any time — stock is not counted">Not tracked</span>}
                       {isBelowCost(p.priceMinor, p.costMinor) && <span className="badge text-bg-danger ms-1">Below cost</span>}
                       {!p.isActive && <span className="badge text-bg-secondary ms-1 d-sm-none">Hidden</span>}
+                      {p.toCheck && <span className="badge check-badge ms-1" title="Added by staff at the counter: check its cost and price">Check</span>}
                       <div className="small text-muted fw-normal d-lg-none">{p.sku}</div>
+                      <span className="added-row"><AddedLine tag={p} /></span>
+                      {p.toCheck && canSetUp && (
+                        <button type="button" className="btn btn-outline-dark btn-sm btn-looks-right mt-1" disabled={checking === p.id} aria-label={`${p.name}: cost and price look right`} onClick={() => void looksRight(p)}>
+                          <i className="bi bi-check2 me-1" aria-hidden="true"></i>{checking === p.id ? "Saving…" : "Looks right"}
+                        </button>
+                      )}
                     </div>
                     </div>
                     </td>

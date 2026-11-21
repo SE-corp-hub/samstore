@@ -1,6 +1,7 @@
 // Loyalty service — earn points on delivered orders, redeem at checkout, ledger.
 // Encapsulates the StoreCustomer balance updates + LoyaltyEntry audit trail.
 
+import { customerAdded, type AddedWhere } from "../domain/added-where.js";
 import { orderWall } from "../auth/wall.js";
 import { prisma } from "../persistence/prisma-repositories.js";
 import { cacheGet, cacheSet, cacheBust, cacheKey } from "../persistence/ttl-cache.js";
@@ -39,6 +40,7 @@ export const LOYALTY_SERVICE = Symbol("LOYALTY_SERVICE");
 interface AdminCustomerWithProfile {
   id: string; storeId: string; customerId: string; approvalStatus: string; loyaltyBalancePoints: number;
   creditApproved: boolean; creditLimitMinor: number; creditUnlimited: boolean; creditBalanceMinor: number; createdAt: Date; updatedAt: Date;
+  addedAtId: string | null; addedById: string | null; addedVia: string | null;
   customer: { id: string; email: string | null; name: string | null; phone: string | null; address: string | null };
 }
 
@@ -56,7 +58,8 @@ export class LoyaltyService implements LoyaltyGateway {
 
     return prisma.$transaction(async (tx) => {
       const sc = await tx.storeCustomer.create({
-        data: { storeId, customerId, loyaltyBalancePoints: welcome },
+        // Made by the customer's own online account (shop checkout / sign-up).
+        data: { storeId, customerId, loyaltyBalancePoints: welcome, ...customerAdded({ locationId: null, userId: null, via: "ONLINE" }) },
       });
       if (welcome > 0) {
         await tx.loyaltyEntry.create({
@@ -343,7 +346,7 @@ export class LoyaltyService implements LoyaltyGateway {
     }
 
   /** Admin: create a customer — find-or-create the global Customer by phone (then email), then create the store profile. */
-  async createCustomer(storeId: string, input: AdminCreateCustomerRequest): Promise<LoyaltyResult<AdminCustomerRow>> {
+  async createCustomer(storeId: string, input: AdminCreateCustomerRequest, where?: AddedWhere | null): Promise<LoyaltyResult<AdminCustomerRow>> {
     const name = typeof input.name === "string" ? input.name.trim() : "";
     if (!name) return { ok: false, error: { type: "validation", errors: ["name is required"] } };
     const phone = typeof input.phone === "string" && input.phone.trim() ? input.phone.trim() : null;
@@ -373,6 +376,7 @@ export class LoyaltyService implements LoyaltyGateway {
           creditApproved,
           creditLimitMinor,
           creditUnlimited,
+          ...customerAdded(where),
         },
         include: { customer: { select: { id: true, email: true, name: true, phone: true, address: true } } },
       });

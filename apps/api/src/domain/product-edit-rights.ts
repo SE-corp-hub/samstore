@@ -14,6 +14,9 @@ const NOT_FOR_STAFF_MESSAGE = "Only the owner or a manager can change products."
 
 export const ownsProducts = (role: string | undefined): boolean => OWNER_ROLES.includes(role ?? "");
 
+/** The owner or a manager (not a counter login). A counter "New item" made by anyone else waits for the owner's check. */
+export const ownerOrManager = (role: string | undefined): boolean => OWNER_MANAGER_ROLES.includes(role ?? "");
+
 /**
  * Why this login may not make this product change, or null when it may.
  * `owner-only`: add, delete, hide, per-kilo, rack sacks, variants, add-ons.

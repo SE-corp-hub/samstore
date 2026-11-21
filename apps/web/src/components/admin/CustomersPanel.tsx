@@ -1,5 +1,7 @@
 "use client";
 
+import { AddedAtFilter, AddedLine } from "./AddedTag";
+import { addedStores, matchesAddedAt } from "../../lib/added-where";
 import { useCallback, useEffect, useState } from "react";
 import { API_URL } from "../../config";
 import { adminHeaders } from "../../lib/admin";
@@ -24,6 +26,10 @@ interface CustomerRow {
   creditAvailableMinor?: number | null;
   creditBalanceMinor: number;
   joinedAt: string;
+  /** Where the customer was added (store, screen, who); empty = added before this was kept. */
+  addedAt?: { id: string; name: string } | null;
+  addedVia?: string | null;
+  addedBy?: string | null;
 }
 
 interface ProfileData {
@@ -79,6 +85,7 @@ export default function CustomersPanel() {
   const [search, setSearch] = useState("");
   const [approvalFilter, setApprovalFilter] = useState("");
   const [onlyUtang, setOnlyUtang] = useState(false);
+  const [madeAt, setMadeAt] = useState(""); // "Made at" filter (lib/added-where.ts)
   const [approveTarget, setApproveTarget] = useState<CustomerRow | null>(null);
   const [limitInput, setLimitInput] = useState("");
   const [profileTarget, setProfileTarget] = useState<string | null>(null);
@@ -126,6 +133,7 @@ export default function CustomersPanel() {
   }, [search, approvalFilter, onlyUtang]);
 
   useEffect(() => { const t = setTimeout(load, 250); return () => clearTimeout(t); }, [load]);
+  const shown = customers.filter((c) => matchesAddedAt(c, madeAt));
 
   const setApproval = async (id: string, status: string) => {
     await fetch(`${API_URL}/admin/customers/${id}/approval`, {
@@ -280,7 +288,7 @@ export default function CustomersPanel() {
       {error && <div className="alert alert-danger py-2 small">{error}</div>}
 
       <div className="row g-2 mb-2">
-        <div className="col-md-5">
+        <div className="col-md-4">
           <input className="form-control form-control-sm" aria-label="Search customers" placeholder="Search name or phone…" value={search} onChange={(e) => setSearch(e.target.value)} />
         </div>
         <div className="col-md-3">
@@ -288,6 +296,9 @@ export default function CustomersPanel() {
             <option value="">Everyone</option>
             {Object.keys(APPROVAL_BADGE).map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
+        </div>
+        <div className="col-md-3">
+          <AddedAtFilter id="customers-made-at" value={madeAt} onChange={setMadeAt} stores={addedStores(customers)} />
         </div>
         <div className="col-md-2">
           <div className="form-check form-switch">
@@ -299,8 +310,8 @@ export default function CustomersPanel() {
 
       {loading ? (
         <p className="text-muted">Loading…</p>
-      ) : customers.length === 0 ? (
-        <p>{search.trim() || onlyUtang || approvalFilter ? "No customers match. Clear the search to see everyone." : "No customers yet. A customer added on POS, Pre-order or with Add customer shows here."}</p>
+      ) : shown.length === 0 ? (
+        <p>{search.trim() || onlyUtang || approvalFilter || madeAt ? "No customers match. Clear the search to see everyone." : "No customers yet. A customer added on POS, Pre-order or with Add customer shows here."}</p>
       ) : (
         <div className="table-responsive">
         <table className="table table-hover align-middle">
@@ -315,11 +326,11 @@ export default function CustomersPanel() {
             </tr>
           </thead>
           <tbody>
-            {customers.map((c) => (
+            {shown.map((c) => (
               <tr key={c.id} style={{ cursor: "pointer" }} onClick={() => openProfile(c.id)}>
                 <td>
                   <div className="d-flex align-items-center flex-wrap gap-1">
-                    <span className="fw-semibold">{c.name ?? c.email ?? c.phone ?? "Guest"}<span className="d-block small text-muted fw-normal d-lg-none">{c.phone ?? c.email ?? ""}</span></span>
+                    <span className="fw-semibold">{c.name ?? c.email ?? c.phone ?? "Guest"}<span className="d-block small text-muted fw-normal d-lg-none">{c.phone ?? c.email ?? ""}</span><span className="added-row"><AddedLine tag={c} /></span></span>
                     <button
                                           className="btn btn-sm btn-outline-secondary ms-1"
                                           title="Edit customer"

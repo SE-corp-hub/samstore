@@ -17,6 +17,7 @@ import { isTracked } from "../domain/stock-tracking.js";
 import { prisma } from "../persistence/prisma-repositories.js";
 import { cacheBust, cacheKey } from "../persistence/ttl-cache.js";
 import { findOrMakeQuickCustomer } from "./quick-customer.js";
+import type { AddedWhere } from "../domain/added-where.js";
 import { deductStock, restoreStock as restoreStockLedger } from "../domain/movements.js";
 import { pickDeductionLevel } from "../domain/stock-location.js";
 import { RegisterService } from "../registers/register.service.js";
@@ -261,7 +262,8 @@ export class PosService {
     await restoreStockLedger(tx, storeId, lines, { type: "RELEASE", orderId: opts.orderId, createdBy: opts.createdBy });
   }
 
-  private async resolveCustomer(storeId: string, input: { customerId?: string; customerName?: string; customerPhone?: string }): Promise<{ storeCustomerId: string | null; displayName: string }> {
+  /** `where`: the store, login and screen a NEW customer (typed name) is made at. */
+  private async resolveCustomer(storeId: string, input: { customerId?: string; customerName?: string; customerPhone?: string }, where?: AddedWhere): Promise<{ storeCustomerId: string | null; displayName: string }> {
     if (input.customerId) {
       const sc = await prisma.storeCustomer.findFirst({ where: { storeId, id: input.customerId } });
       if (!sc) return { storeCustomerId: null, displayName: "Walk-in" };
@@ -269,15 +271,15 @@ export class PosService {
       return { storeCustomerId: sc.id, displayName: cust?.name ?? input.customerName ?? "Customer" };
     }
     if (input.customerName) {
-      const sc = await this.quickCustomer(storeId, input.customerName, input.customerPhone);
+      const sc = await this.quickCustomer(storeId, input.customerName, input.customerPhone, where);
       return { storeCustomerId: sc, displayName: input.customerName };
     }
     return { storeCustomerId: null, displayName: "Walk-in" };
   }
 
   /** A store customer without a login account: the same name (or mobile) is reused, never made twice. */
-  async quickCustomer(storeId: string, name: string, phone?: string): Promise<string | null> {
-    return findOrMakeQuickCustomer(storeId, name, phone);
+  async quickCustomer(storeId: string, name: string, phone?: string, where?: AddedWhere | null): Promise<string | null> {
+    return findOrMakeQuickCustomer(storeId, name, phone, where);
   }
 
   private async makeOrder(tx: any, storeId: string, actorId: string, data: {
@@ -467,7 +469,7 @@ export class PosService {
       return { ok: false, error: { type: "conflict", message: "Set a default location before selling from another location" } };
     }
 
-    const { storeCustomerId: custId, displayName } = await this.resolveCustomer(storeId, input);
+    const { storeCustomerId: custId, displayName } = await this.resolveCustomer(storeId, input, { locationId: sellingLocation?.id ?? null, userId: actorId, via: "POS" });
     if (input.paymentMethod === "credit" && !custId) {
       return { ok: false, error: { type: "validation", errors: ["Credit sales require a linked customer"] } };
     }
@@ -576,7 +578,7 @@ export class PosService {
     const holdAt = at.value?.id ?? null;
     const loaded = await this.loadProducts(storeId, input.items, { locationId: holdAt });
     if (!loaded.ok) return loaded;
-    const { storeCustomerId: custId, displayName } = await this.resolveCustomer(storeId, input);
+    const { storeCustomerId: custId, displayName } = await this.resolveCustomer(storeId, input, { locationId: holdAt, userId: actorId, via: "POS" });
     const store = await prisma.store.findUnique({ where: { id: storeId }, include: { settings: true } });
     if (!store) return { ok: false, error: { type: "not_found", message: "Store not found" } };
     const seq = await this.sequences.nextOrderSequence(storeId);
@@ -688,7 +690,7 @@ export class PosService {
     const loc = store_.value;
     const loaded = await this.loadProducts(storeId, input.items, { allowShort: true, locationId: loc?.id ?? null, pricedBy: { role: actor.role } });
     if (!loaded.ok) return loaded;
-    const { storeCustomerId: custId, displayName } = await this.resolveCustomer(storeId, input);
+    const { storeCustomerId: custId, displayName } = await this.resolveCustomer(storeId, input, { locationId: loc?.id ?? null, userId: actorId, via: "PREORDER" });
     if (!custId) {
       return { ok: false, error: { type: "validation", errors: ["Pre-orders require a linked customer"] } };
     }
@@ -1004,7 +1006,7 @@ export class PosService {
     }
 
     const { storeCustomerId: custId, displayName } = input.paymentMethod === "credit"
-      ? await this.resolveCustomer(storeId, input)
+      ? await this.resolveCustomer(storeId, input, { locationId: hold.sellingLocationId ?? null, userId: actorId, via: "POS" })
       : await this.resolveCustomer(storeId, { customerId: input.customerId, customerName: hold.customerName });
     if (input.paymentMethod === "credit" && !custId) {
       return { ok: false, error: { type: "validation", errors: ["Credit sales require a linked customer"] } };

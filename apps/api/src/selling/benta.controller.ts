@@ -132,6 +132,7 @@ export class BentaController {
       openingQty: body?.openingQty, locationId: str(body?.locationId), signatures: signaturesFrom(body?.signatures),
       trackStock: body?.trackStock === false ? false : undefined,
       noOpeningStock: body?.noOpeningStock === true ? true : undefined,
+      via: body?.via,
     }));
   }
 

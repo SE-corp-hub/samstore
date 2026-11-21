@@ -4,6 +4,7 @@
 // P1.portal: saved addresses (tenant-scoped via the store profile, PH-chain
 // validated + name snapshots) and DPA consent records (RA 10173, append-only).
 
+import { customerAdded } from "../domain/added-where.js";
 import { prisma } from "../persistence/prisma-repositories.js";
 import { hashPassword, verifyPassword, signToken, verifyToken, type AuthConfig } from "./auth.domain.js";
 import { AddressService } from "../address/address.service.js";
@@ -80,7 +81,7 @@ export class CustomerAuthService {
     if (existing) return existing;
     if (!storeId || typeof storeId !== "string" || storeId.length === 0) return null;
     return prisma.storeCustomer.create({
-      data: { storeId, customerId },
+      data: { storeId, customerId, ...customerAdded({ locationId: null, userId: null, via: "ONLINE" }) },
     });
   }
 

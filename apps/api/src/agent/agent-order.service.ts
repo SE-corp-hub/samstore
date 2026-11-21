@@ -11,6 +11,7 @@
 // Prices are the preferred store's, frozen when the agent orders. Tenant-scoped; staff
 // act only at their own location.
 
+import { customerAdded } from "../domain/added-where.js";
 import { dayGate } from "../day/day-gate.js";
 import { orderPrefixAt } from "../domain/store-identity.js";
 import type { ApiError } from "@sam-store/contracts";
@@ -136,7 +137,7 @@ export class AgentOrderService {
         if (!phone) throw new SellingError("Enter the customer's mobile number (09xx xxx xxxx)");
         const sc = await prisma.$transaction(async (tx) => {
           const c = (await tx.customer.findFirst({ where: { phone }, select: { id: true } })) ?? (await tx.customer.create({ data: { name, phone, email: null, passwordHash: null }, select: { id: true } }));
-          return tx.storeCustomer.upsert({ where: { storeId_customerId: { storeId, customerId: c.id } }, update: {}, create: { storeId, customerId: c.id }, select: { id: true } });
+          return tx.storeCustomer.upsert({ where: { storeId_customerId: { storeId, customerId: c.id } }, update: {}, create: { storeId, customerId: c.id, ...customerAdded({ locationId: loc.id, userId: actor.userId, via: "AGENT" }) }, select: { id: true } });
         });
         storeCustomerId = sc.id;
         customerName = name;

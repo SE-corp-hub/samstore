@@ -165,7 +165,7 @@ export default function PasokPanel({ role }: { role?: string; onNavigate?: (tab:
       </div>
       <StoreBar includeBuffer locations={locations} value={locationId} homeLocationId={homeLocationId} locked={adding || rows.some((r) => r.productId || r.amount)}
         lockedNote="Receive or clear what you started to switch store." onPick={(id) => { setLocationId(id); setJustDone(null); setPoId(""); }} />
-      {chosen && adding && <NewItemForm preorder onCancel={() => setAdding(false)} onDone={addCreated} locationId={locationId} />}
+      {chosen && adding && <NewItemForm preorder via="STOCK_IN" onCancel={() => setAdding(false)} onDone={addCreated} locationId={locationId} />}
       {chosen && !adding && (<>
       {error && <div className="alert alert-danger py-2" role="alert">{error}</div>}
       {justDone && (

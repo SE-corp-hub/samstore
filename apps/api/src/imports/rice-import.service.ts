@@ -7,6 +7,7 @@
 // opening utang is written once (a customer who already has utang in the system is
 // adjusted in the app, never overwritten by a file).
 
+import { customerAdded, productAdded } from "../domain/added-where.js";
 import bcrypt from "bcryptjs";
 import { prisma } from "../persistence/prisma-repositories.js";
 import {
@@ -196,7 +197,7 @@ export class RiceImportService {
           const before = await tx.product.findUnique({ where: { storeId_sku: { storeId, sku: row.sku } }, select: { id: true, priceMinor: true, costMinor: true } });
           const p = before
             ? await tx.product.update({ where: { id: before.id }, data: fields, select: { id: true } })
-            : await tx.product.create({ data: { storeId, sku: row.sku, createdById: actorUserId, ...fields, ...shape }, select: { id: true } });
+            : await tx.product.create({ data: { storeId, sku: row.sku, ...fields, ...shape, ...productAdded({ locationId: null, userId: actorUserId, via: "IMPORT" }) }, select: { id: true } });
           const keep: string[] = [];
           for (const [code, priceMinor] of Object.entries(row.locationPrices)) {
             const warehouseId = loaded.locByCode.get(code)!.id;
@@ -221,7 +222,7 @@ export class RiceImportService {
           const sc = await tx.storeCustomer.upsert({
             where: { storeId_customerId: { storeId, customerId: customer.id } },
             update: { creditLimitMinor: row.limitMinor, creditApproved: row.limitMinor > 0 },
-            create: { storeId, customerId: customer.id, creditLimitMinor: row.limitMinor, creditApproved: row.limitMinor > 0 },
+            create: { storeId, customerId: customer.id, creditLimitMinor: row.limitMinor, creditApproved: row.limitMinor > 0, ...customerAdded({ locationId: null, userId: actorUserId, via: "IMPORT" }) },
             select: { id: true, credit: { select: { id: true }, take: 1 } },
           });
           if (row.utangMinor > 0 && sc.credit.length === 0) {

@@ -52,6 +52,8 @@ import {
 import { txOptions } from "../persistence/tx-options.js";
 import { shelvesFor } from "../domain/sources.js";
 import { findOrMakeQuickCustomer } from "../pos/quick-customer.js";
+import { counterItemVia, productAdded } from "../domain/added-where.js";
+import { ownerOrManager } from "../domain/product-edit-rights.js";
 import { manilaDate } from "../domain/reports.js";
 
 export type BentaResult<T> = { ok: true; value: T } | { ok: false; error: ApiError };
@@ -368,7 +370,7 @@ export class BentaService {
 
       // A customer picked at the counter may have special prices; they beat the store's price (not a manual change, so no reason is needed).
       // A new customer typed at the counter while offline: put on the list now (same name = same customer, so a retry makes no second one).
-      if (!input.customerId && input.newCustomerName?.trim()) input = { ...input, customerId: (await findOrMakeQuickCustomer(storeId, input.newCustomerName, input.newCustomerPhone)) ?? undefined };
+      if (!input.customerId && input.newCustomerName?.trim()) input = { ...input, customerId: (await findOrMakeQuickCustomer(storeId, input.newCustomerName, input.newCustomerPhone, { locationId: loc.id, userId: actor.userId, via: "POS" })) ?? undefined };
       const pcust = input.customerId ? await prisma.storeCustomer.findFirst({ where: { storeId, id: input.customerId }, include: { customer: { select: { name: true } } } }) : null;
       const special = pcust ? new Map((await prisma.customerPrice.findMany({ where: { storeId, storeCustomerId: pcust.id, productId: { in: ids } }, select: { productId: true, priceMinor: true } })).map((x) => [x.productId, x.priceMinor])) : new Map<string, number>();
       const priced: (PricedLine & { product: P; catalogUnitPriceMinor: number; overridden: boolean; overrideReason: string | null; sourceLocationId: string | null })[] = [];
@@ -720,7 +722,7 @@ export class BentaService {
 
   async manualItem(
     storeId: string, actor: Actor,
-    input: ManualItemAsk & { locationId?: string; signatures?: SignatureInput[]; trackStock?: boolean; /** Pre-order: the item is added with a cost and a selling price but nothing on hand yet. */ noOpeningStock?: boolean },
+    input: ManualItemAsk & { locationId?: string; signatures?: SignatureInput[]; trackStock?: boolean; /** Pre-order: the item is added with a cost and a selling price but nothing on hand yet. */ noOpeningStock?: boolean; /** The screen it is made on (POS, Pre-order, Stock in). */ via?: unknown },
   ): Promise<BentaResult<{ productId: string; name: string; stockInDocNumber: string; approvalId: string | null }>> {
     return this.run(async () => {
       const loc = await this.location(storeId, actor, input.locationId);
@@ -737,7 +739,10 @@ export class BentaService {
             storeId, sku: `BAGO-${randomId().slice(-8).toUpperCase()}`, name: plan.name, priceMinor: plan.priceMinor, costMinor: plan.costMinor,
             stockBaseUnit: plan.stockBaseUnit, stockBaseQuantity: plan.stockBaseQuantity, soldByWeight: plan.soldByWeight,
             stockConversionFamily: plan.stockConversionFamily, unit: plan.soldAs === "KILO" ? "kilo" : plan.soldAs === "SACK" ? "sako" : "pc",
-            reviewStatus: "ACTIVE", createdById: actor.userId, trackStock: !untracked, // goes straight into Products — no owner review
+            // 2026-11-21 (owner's choice): it sells at once, but one made by counter staff shows "Check" in
+            // Products until the owner confirms its cost and price. The owner's or a manager's own is ready.
+            reviewStatus: ownerOrManager(actor.role) ? "ACTIVE" : "FOR_REVIEW", trackStock: !untracked,
+            ...productAdded({ locationId: loc.id, userId: actor.userId, via: counterItemVia(input.via) }),
           },
           select: productSelect,
         });
