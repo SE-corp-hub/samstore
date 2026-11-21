@@ -10,6 +10,7 @@ import { prisma } from "../persistence/prisma-repositories.js";
 import { adjustStock, InsufficientStockError, recordMovement } from "../domain/movements.js";
 import { planStockConversion } from "../domain/stock-conversion.js";
 import { costValue } from "../domain/counting.js";
+import { lowShelves } from "../domain/low-stock.js";
 import { costModeOf, effectiveCost } from "../domain/shelf-cost.js";
 import { cacheBust, cacheKey } from "../persistence/ttl-cache.js";
 import type { ApiError } from "@sam-store/contracts";
@@ -66,12 +67,15 @@ export class InventoryService {
       const levels = filters.warehouseId ? p.stockLevels.filter((l) => l.warehouseId === filters.warehouseId) : p.stockLevels;
       const onHand = levels.reduce((s, l) => s + l.quantityOnHand, 0);
       const reserved = levels.reduce((s, l) => s + l.quantityReserved, 0);
+      // One store picked: that store's level. All stores: the biggest, for the column only — "low" is
+      // decided store by store (domain/low-stock.ts), never on the total of every store.
       const threshold = Math.max(0, ...levels.map((l) => l.reorderThreshold));
       const available = onHand - reserved;
+      const lowAt = p.trackStock === false ? [] : lowShelves(levels).map((l) => l.warehouseId);
       let status: "in" | "low" | "out" | "untracked";
       if (p.trackStock === false) status = "untracked"; // sells at any time — never out or low
       else if (available <= 0 && onHand <= 0) status = "out";
-      else if (threshold > 0 && available <= threshold) status = "low";
+      else if (lowAt.length > 0) status = "low";
       else status = "in";
       // Value at cost, shelf by shelf: loose rice is kept in grams but its cost is per kilo (costValue
       // divides by 1000), and a store that counts cost per location uses each shelf's own cost.
@@ -86,6 +90,8 @@ export class InventoryService {
         quantityReserved: reserved,
          availableQuantity: available,
          reorderThreshold: threshold,
+         /** The stores (location ids) where this rice is low, emptiest first. */
+         lowAt,
          costMinor: p.costMinor,
          trackStock: p.trackStock !== false,
          stockBaseUnit: p.stockBaseUnit,

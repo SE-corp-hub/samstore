@@ -1,3 +1,4 @@
+import { lowShelves } from "../domain/low-stock.js";
 // Analytics service — tenant-scoped sales/order/product summaries.
 // All aggregation is pure SQL/Prisma; numbers come from the DB, never fabricated.
 
@@ -14,10 +15,10 @@ export class AnalyticsService {
       prisma.order.count({ where: { storeId, status: "DELIVERED" } }),
       prisma.order.aggregate({ where: { storeId }, _sum: { totalMinor: true } }),
       prisma.order.findMany({ where: { storeId }, distinct: ["customerPhone"], select: { customerPhone: true } }),
+      // Store by store, each against its own level (0 = no alert); not-tracked rice is never low.
       prisma.stockLevel.findMany({
-        where: { storeId, quantityOnHand: { lte: prisma.stockLevel.fields.reorderThreshold } },
-        include: { product: { select: { name: true, sku: true } } },
-        take: 10,
+        where: { storeId, reorderThreshold: { gt: 0 }, product: { isActive: true, trackStock: true } },
+        include: { product: { select: { name: true, sku: true } }, warehouse: { select: { name: true } } },
       }),
     ]);
 
@@ -26,7 +27,7 @@ export class AnalyticsService {
       deliveredOrders,
       revenueMinor: revenueAgg._sum.totalMinor ?? 0,
       uniqueCustomers: uniqueCustomers.length,
-      lowStock: lowStock.map((s) => ({ name: s.product.name, sku: s.product.sku, quantityOnHand: s.quantityOnHand, reorderThreshold: s.reorderThreshold })),
+      lowStock: lowShelves(lowStock).slice(0, 10).map((s) => ({ name: s.product.name, sku: s.product.sku, storeName: s.warehouse?.name ?? null, quantityOnHand: s.quantityOnHand, reorderThreshold: s.reorderThreshold })),
     };
   }
 

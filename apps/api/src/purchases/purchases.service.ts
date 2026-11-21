@@ -3,6 +3,7 @@
 // - Completing a purchase ADDS stock (default warehouse) and updates product costMinor (COGS feed).
 // - Replenishment list: products with available ≤ reorder threshold → one-tap purchase.
 
+import { lowShelves } from "../domain/low-stock.js";
 import { isUntracked } from "../domain/movements.js";
 import { prisma } from "../persistence/prisma-repositories.js";
 import type { ApiError } from "@sam-store/contracts";
@@ -126,20 +127,17 @@ export class PurchasesService {
     });
   }
 
-  /** Products needing replenishment: available <= reorder threshold (any warehouse). */
+  /** Rice needing replenishment: one row per store whose free stock is at or below its own reorder level. */
   async replenishmentList(storeId: string) {
     const products = await prisma.product.findMany({
-      where: { storeId, isActive: true, stockLevels: { some: {} } },
-      include: { stockLevels: true },
+      where: { storeId, isActive: true, trackStock: true, stockLevels: { some: { reorderThreshold: { gt: 0 } } } },
+      include: { stockLevels: { include: { warehouse: { select: { name: true, isActive: true } } } } },
     });
     return products
-      .filter((p) => p.trackStock !== false) // not tracked = never "low"
-      .map((p) => {
-        const available = p.stockLevels.reduce((s, l) => s + (l.quantityOnHand - l.quantityReserved), 0);
-        const threshold = Math.max(...p.stockLevels.map((l) => l.reorderThreshold), 0);
-        return { id: p.id, name: p.name, sku: p.sku, availableQuantity: available, reorderThreshold: threshold };
-      })
-      .filter((p) => p.reorderThreshold > 0 && p.availableQuantity <= p.reorderThreshold)
+      .flatMap((p) => lowShelves(p.stockLevels.filter((l) => l.warehouse?.isActive !== false)).map((l) => ({
+        id: p.id, name: p.name, sku: p.sku, locationId: l.warehouseId, storeName: l.warehouse?.name ?? null,
+        availableQuantity: l.quantityOnHand - l.quantityReserved, reorderThreshold: l.reorderThreshold,
+      })))
       .sort((a, b) => a.availableQuantity - b.availableQuantity);
   }
 }

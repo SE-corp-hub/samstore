@@ -12,7 +12,7 @@ interface Summary {
   deliveredOrders: number;
   revenueMinor: number;
   uniqueCustomers: number;
-  lowStock: { name: string; sku: string; quantityOnHand: number; reorderThreshold: number }[];
+  lowStock: { name: string; sku: string; storeName?: string | null; quantityOnHand: number; reorderThreshold: number }[];
 }
 
 export default function AnalyticsPanel() {
@@ -145,8 +145,8 @@ export default function AnalyticsPanel() {
           <div className="card-body">
             <h6 className="card-title text-warning"><i className="bi bi-exclamation-triangle me-1"></i>Low stock</h6>
             {summary.lowStock.map((s) => (
-              <div key={s.sku} className="small d-flex justify-content-between">
-                <span>{s.name} <span className="text-muted">({s.sku})</span></span>
+              <div key={`${s.sku}-${s.storeName ?? ""}`} className="small d-flex justify-content-between">
+                <span>{s.name}{s.storeName ? <> at <strong>{s.storeName}</strong></> : null} <span className="text-muted">({s.sku})</span></span>
                 <span className="text-danger fw-semibold">{s.quantityOnHand} left (threshold {s.reorderThreshold})</span>
               </div>
             ))}

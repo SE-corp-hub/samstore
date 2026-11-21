@@ -16,7 +16,7 @@ interface SalesData {
   topCustomers: { name: string; totalMinor: number; orders: number }[];
   utangAging: { currentMinor: number; over30Minor: number; rows: { name: string; balanceMinor: number; daysOld: number; bucket: string }[] };
 }
-interface StockLowRow { id: string; name: string; sku: string; barcode: string | null; unit: string | null; availableQuantity: number; reorderThreshold: number }
+interface StockLowRow { id: string; name: string; sku: string; barcode: string | null; unit: string | null; storeName?: string | null; availableQuantity: number; reorderThreshold: number }
 interface SoldStockRow { name: string; sku: string; sold: number; unit?: string }
 interface IncomeLossData { income: { revenueMinor: number; refundsMinor: number; netRevenueMinor: number; ordersCount: number }; expenses: { totalMinor: number; byCategory: Record<string, number>; lineItems: { category: string; amountMinor: number; note: string | null }[] }; cogsMinor: number; profitMinor: number }
 interface SalesByPaymentRow { method: string; totalMinor: number; orders: number; avgMinor: number }
@@ -157,7 +157,7 @@ export default function ReportsPanel() {
             <div>
               {stockLow && stockLow.count === 0 && <p className="text-muted">No low-stock products in this period.</p>}
               {stockLow && stockLow.count > 0 && (
-                <table className="table table-hover align-middle"><thead><tr><th>Product</th><th>SKU</th><th className="text-end">Available</th><th className="text-end">Threshold</th><th>Unit</th></tr></thead><tbody>{stockLow.rows.map((r) => (<tr key={r.id}><td>{r.name}</td><td className="small text-muted">{r.sku}</td><td className="text-end text-danger fw-semibold">{r.availableQuantity}</td><td className="text-end">{r.reorderThreshold}</td><td className="small">{r.unit ?? "—"}</td></tr>))}</tbody></table>
+                <table className="table table-hover align-middle"><thead><tr><th>Product</th><th>Store</th><th className="text-end">Free to sell</th><th className="text-end">Reorder at</th><th className="col-wide">SKU</th></tr></thead><tbody>{stockLow.rows.map((r) => (<tr key={r.id}><td>{r.name}</td><td>{r.storeName ?? "—"}</td><td className="text-end text-danger fw-semibold">{r.availableQuantity}</td><td className="text-end">{r.reorderThreshold}</td><td className="small text-muted col-wide">{r.sku}</td></tr>))}</tbody></table>
               )}
             </div>
           )}
