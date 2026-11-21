@@ -12,6 +12,9 @@
 //   5. Its cost is the cost saved on each line when it was sold (loose rice: per kilo). Old lines
 //      with no saved cost use the product's cost today.
 //   6. An agent order delivered in part counts for what was delivered, the same as what was paid.
+//   7. Rice brought back from a sale with Returns comes off on the day the owner approved its money
+//      back (the same amount the customer got back, or that came off the credit). Good rice that went
+//      back on the shelf takes its cost off too; damaged rice keeps its cost (it is a loss).
 
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { SOLD_STATES } from "../domain/order-state.js";
@@ -33,6 +36,8 @@ export interface BookEntry {
   createdAt: Date;
   totalMinor: number; paymentMethod: string; encodedLater: boolean; customerName: string | null; storeCustomerId: string | null;
   items: BookLine[];
+  /** Rule 7: this entry is rice returned from the sale (not the whole sale taken back). */
+  returned?: true;
 }
 export interface SalesBook {
   mainId: string | null;
@@ -130,6 +135,47 @@ export async function salesBook(db: Db, storeId: string, range: BookRange, opts:
     }
   }
 
+  // Rule 7: returns whose money back the owner approved in these dates.
+  const approved = await db.approvalRequest.findMany({
+    where: { storeId, kind: "REFUND", documentType: "RETURN", status: "APPROVED", decidedAt: range },
+    select: { documentId: true, decidedAt: true },
+  });
+  if (approved.length) {
+    const rets = await db.stockReturn.findMany({
+      where: { storeId, id: { in: approved.map((a) => a.documentId) }, orderId: { not: null }, ...(opts.productId ? { productId: opts.productId } : {}) },
+      select: { id: true, orderId: true, productId: true, quantity: true, condition: true },
+    });
+    const orders = rets.length ? await db.order.findMany({
+      where: { storeId, id: { in: [...new Set(rets.map((r) => r.orderId!))] }, AND: which },
+      select: { ...orderSelect, status: true },
+    }) : [];
+    const orderOf = new Map(orders.map((o) => [o.id, o]));
+    const when = new Map(approved.map((a) => [a.documentId, a.decidedAt!]));
+    for (const r of rets) {
+      const o = orderOf.get(r.orderId!);
+      // The same rules as the money back (utang.service REFUND handler): a sale cancelled as a whole is
+      // taken back whole (rule 4), and an agent order not paid yet gave nothing back.
+      if (!o || o.status === "CANCELLED" || (o.source === "AGENT" && o.status !== "COMPLETED")) continue;
+      const line = o.items.find((i) => i.productId === r.productId);
+      if (!line) continue;
+      const value = refundValue(line, r.quantity);
+      if (value <= 0) continue;
+      const units = Math.min(r.quantity, line.quantity);
+      const loose = line.soldBy === "KILO" || line.soldBy === "PESO";
+      entries.push({
+        ...entry(o, -1, when.get(r.id)!),
+        totalMinor: value,
+        returned: true,
+        items: [{
+          ...line, quantity: units, lineTotalMinor: value,
+          grams: loose ? units : line.grams !== null && line.quantity > 0 ? Math.round((line.grams * units) / line.quantity) : null,
+          // Damaged rice did not go back on the shelf: its cost stays in the profit as a loss.
+          unitCostMinor: r.condition === "GOOD" ? line.unitCostMinor : 0,
+        }],
+      });
+    }
+  }
+
   const splitIds = [...new Set(entries.filter((e) => e.paymentMethod === "split").map((e) => e.orderId))];
   const splits = new Map<string, { method: string; amountMinor: number }[]>();
   if (splitIds.length) {
@@ -147,14 +193,15 @@ export interface BookTotals {
   totalMinor: number;
   cashMinor: number; gcashMinor: number; creditMinor: number; otherMinor: number;
   encodedLater: number;
-  /** Sales taken back in the dates (already taken off the numbers above). */
+  /** Sales taken back in the dates, and rice returned from sales (rule 7): already taken off the numbers above. */
   takenBack: { count: number; totalMinor: number };
 }
 
 /** The money of a set of entries, by how it was paid. A split sale counts by what each part paid. */
 export function bookTotals(entries: BookEntry[], splits: SalesBook["splits"] = new Map()): BookTotals {
   const t: BookTotals = { count: 0, totalMinor: 0, cashMinor: 0, gcashMinor: 0, creditMinor: 0, otherMinor: 0, encodedLater: 0, takenBack: { count: 0, totalMinor: 0 } };
-  const backHere = new Set(entries.filter((e) => e.sign === -1).map((e) => e.orderId));
+  // Only a sale taken back WHOLE stops counting as a sale; rice returned from it leaves the sale counted.
+  const backHere = new Set(entries.filter((e) => e.sign === -1 && !e.returned).map((e) => e.orderId));
   for (const e of entries) {
     const s = e.sign;
     t.totalMinor += s * e.totalMinor;
@@ -164,7 +211,8 @@ export function bookTotals(entries: BookEntry[], splits: SalesBook["splits"] = n
       t.takenBack.count++;
       t.takenBack.totalMinor += e.totalMinor;
     }
-    if (e.paymentMethod === "split") {
+    // A return from a split sale: the money back is not split by method, so it is not taken off the parts.
+    if (e.paymentMethod === "split" && !e.returned) {
       let rest = e.totalMinor;
       for (const sp of splits.get(e.orderId) ?? []) {
         if (sp.method === "cash") t.cashMinor += s * sp.amountMinor; else if (sp.method === "gcash") t.gcashMinor += s * sp.amountMinor; else t.otherMinor += s * sp.amountMinor;
