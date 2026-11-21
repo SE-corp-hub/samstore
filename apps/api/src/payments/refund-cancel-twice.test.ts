@@ -8,6 +8,7 @@ import { prisma } from "../persistence/prisma-repositories.js";
 import { BentaService } from "../selling/benta.service.js";
 import { PaymentsService } from "./payments.service.js";
 import { PosService } from "../pos/pos.service.js";
+import { LoyaltyService } from "../loyalty/loyalty.service.js";
 import { OrderAdminService } from "../admin/order-admin.service.js";
 import { clearStoreActivity } from "../admin/clear-store-activity.js";
 import type { Actor } from "../people/people.service.js";
@@ -88,7 +89,7 @@ test("void of a credit sale tapped twice at once: the rice goes back once, and a
 
 test("pre-order cancelled twice at once: its rice goes back once", async () => {
   const fx = await fixture();
-  const pos = new PosService();
+  const pos = new PosService(new LoyaltyService());
   const who = { userId: fx.owner.userId, role: "OWNER", homeLocationId: null } as never;
   const po = await pos.createPreOrder(fx.storeId, who, { customerId: fx.sc.id, items: [{ productId: fx.sack.id, quantity: 2 }], idempotencyKey: key(), locationId: fx.s1.id });
   assert.ok(po.ok);
@@ -100,7 +101,7 @@ test("pre-order cancelled twice at once: its rice goes back once", async () => {
 
 test("a pre-order's items changed twice at once (Orders → Change items): the shelf follows the last save, and a pre-order may still go below zero", async () => {
   const fx = await fixture();
-  const pos = new PosService();
+  const pos = new PosService(new LoyaltyService());
   const who = { userId: fx.owner.userId, role: "OWNER", homeLocationId: null } as never;
   const po = await pos.createPreOrder(fx.storeId, who, { customerId: fx.sc.id, items: [{ productId: fx.sack.id, quantity: 2 }], idempotencyKey: key(), locationId: fx.s1.id });
   assert.ok(po.ok);
