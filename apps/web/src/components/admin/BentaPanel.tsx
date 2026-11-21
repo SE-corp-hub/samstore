@@ -37,6 +37,7 @@ import LocationPicker from "../LocationPicker";
 import { PesoInput } from "../NumberBoxes";
 import { buildText, openTextApp } from "../../lib/text-message";
 import { printSlip } from "../../lib/slip-print";
+import { saleReceipt } from "../../lib/sale-receipt";
 import { getPrinterSettings } from "../../lib/printer-settings";
 import { creditStatusWords } from "../../lib/credit-status";
 import { peso, kg } from "../../lib/number-format";
@@ -162,7 +163,7 @@ export default function BentaPanel() {
   const [slipTime, setSlipTime] = useState("");
   const [slipPhoto, setSlipPhoto] = useState<string | null>(null);
   const [staffSig, setStaffSig] = useState<string | null>(null);
-  const [last, setLast] = useState<{ status: "COMPLETED" | "WAITING_OWNER" | "DECLINED"; /** Saved on this tablet, not sent yet. */ offline?: boolean; /** Printed on the receipt; empty = walk-in. */ customerName?: string | null; smsStatus: string | null; orderNumber: string; totalMinor: number; changeMinor: number; lines: { name: string; soldBy: string | null; quantity: number; grams: number | null; lineTotalMinor: number }[]; releases: { docNumber: string }[]; zeroCheck: { productId: string; name: string }[]; belowCost?: string[] } | null>(null);
+  const [last, setLast] = useState<{ status: "COMPLETED" | "WAITING_OWNER" | "DECLINED"; /** Saved on this tablet, not sent yet. */ offline?: boolean; /** Printed on the receipt; empty = walk-in. */ customerName?: string | null; smsStatus: string | null; orderNumber: string; totalMinor: number; changeMinor: number; lines: { name: string; soldBy: string | null; quantity: number; grams: number | null; unitPriceMinor?: number | null; lineTotalMinor: number }[]; /** How it was paid, for the receipt. */ payLabel?: string | null; tenderedMinor?: number | null; releases: { docNumber: string }[]; zeroCheck: { productId: string; name: string }[]; belowCost?: string[] } | null>(null);
   const [checking, setChecking] = useState<{ productId: string; name: string } | null>(null);
   // "Open a sack" (sell per kilo): the kilo rice whose sack to open (null = choose it first, from the "Open sacks" button);
   // `addAfter` = a tap on it asked for one more kilo. `openCount` = how many sacks (filling the display rack).
@@ -339,13 +340,7 @@ export default function BentaPanel() {
   }, [locationId]);
   useEffect(() => { if (pay === "cash") void checkDrawer(); }, [pay, checkDrawer]);
 
-  const receiptSlip = (l: NonNullable<typeof last>) => ({
-    storeName: storeName || "SAM STORE", locationId, title: "SALES RECEIPT", reference: l.orderNumber, when: new Date().toLocaleString("en-PH"),
-    lines: [{ label: "Customer", value: l.customerName || "Walk-in" }],
-    rows: l.lines.map((x) => ({ name: x.name, qty: `${x.soldBy === "PIECE" || !x.grams ? `${x.quantity}` : kg(x.grams)}  ${peso(x.lineTotalMinor)}` })),
-    totals: [{ label: "TOTAL", value: peso(l.totalMinor) }, ...(l.changeMinor > 0 ? [{ label: "Change", value: peso(l.changeMinor) }] : [])],
-    footer: l.status === "WAITING_OWNER" ? "Waiting for owner approval" : l.offline ? "Saved offline · Salamat po!" : "Salamat po!",
-  });
+  const receiptSlip = (l: NonNullable<typeof last>) => saleReceipt(l, storeName || "SAM STORE", locationId);
   // "Print the receipt right after each sale" (Printer settings on this phone): once per sale.
   const printedFor = useRef<string | null>(null);
   useEffect(() => {
@@ -441,6 +436,8 @@ export default function BentaPanel() {
     // The buyer's name for the receipt (a customer added with no internet is still "new:<name>" here).
     const buyerId = pay === "utang" ? customerId : priceCustomer;
     const buyerName = buyerId ? (customers.find((c) => c.id === buyerId)?.name?.trim() || (isNewId(buyerId) ? buyerId.slice(NEW_ID.length) : null)) : null;
+    const payLabel = pay ? PAY_LABEL[pay] : null;
+    const tenderedMinor = pay === "cash" && tendered ? toMinor(tendered) : null;
     const body = {
       idempotencyKey: keyRef.current, locationId,
       lines: priced.map((l) => ({
@@ -470,9 +467,9 @@ export default function BentaPanel() {
           lines: priced.map((l) => {
             const it = byId.get(l.productId);
             const c = lineOf(it, l);
-            return { name: it?.name ?? "Item", soldBy: l.mode === "PIECE" ? "PIECE" : "WEIGHT", quantity: c.units, grams: c.grams, lineTotalMinor: c.totalMinor };
+            return { name: it?.name ?? "Item", soldBy: l.mode === "PIECE" ? "PIECE" : "WEIGHT", quantity: c.units, grams: c.grams, unitPriceMinor: l.price ?? it?.priceMinor ?? null, lineTotalMinor: c.totalMinor };
           }),
-          releases: [], zeroCheck: [], customerName: buyerName,
+          releases: [], zeroCheck: [], customerName: buyerName, payLabel, tenderedMinor,
         });
         setTextInfo(null);
         // What this sale took leaves the shelf on this tablet too (the server catalog cannot be read offline),
@@ -489,7 +486,7 @@ export default function BentaPanel() {
         setError(errText(d, "The sale did not go through"));
         return;
       }
-      setLast({ ...(d as unknown as NonNullable<typeof last>), customerName: buyerName });
+      setLast({ ...(d as unknown as NonNullable<typeof last>), customerName: buyerName, payLabel, tenderedMinor });
       setTextInfo(pay === "utang" && customer ? { customerId: customer.id, name: customer.name, phone: customer.phone, balanceAfterMinor: customer.creditBalanceMinor + total } : null);
       setTextPhone(customer?.phone ?? "");
       toast(d.status === "WAITING_OWNER" ? `Waiting for the owner: ${String(d.orderNumber)}` : `Sold: ${String(d.orderNumber)}`);

@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { btErrorText, pickWriter, plain, slipLines, slipToEscPos } from "./bt-print.js";
+import { btErrorText, pickWriter, plain, slipLines, slipPrintLines, slipToEscPos } from "./bt-print.js";
+import { saleReceipt } from "./sale-receipt.js";
 
 test("only plain characters reach the printer", () => {
   assert.equal(plain("₱1,500.00 × 2 — Jasmine"), "P1,500.00 x 2 - Jasmine");
@@ -56,5 +57,44 @@ test("Bluetooth errors are explained in plain words", () => {
 
 test("the Bluetooth receipt prints the address and contact lines under the name", () => {
   const lines = slipLines({ storeName: "Tindahan ni Sam", header: "Brgy. 1", contact: "0917 123 4567", title: "RECEIPT" }, 32).map((l) => l.trim());
-  assert.deepEqual(lines.slice(0, 4), ["Tindahan ni Sam", "Brgy. 1", "0917 123 4567", "RECEIPT"]);
+  assert.deepEqual(lines.slice(0, 5), ["Tindahan ni Sam", "Brgy. 1", "0917 123 4567", "", "RECEIPT"]);
+});
+
+const sale = saleReceipt({
+  status: "COMPLETED", orderNumber: "POS-000123", totalMinor: 259282, changeMinor: 40718, customerName: "Aling Nena", payLabel: "Cash", tenderedMinor: 300000,
+  lines: [
+    { name: "Sinandomeng 25kg", soldBy: "PIECE", quantity: 2, grams: 50000, unitPriceMinor: 125000, lineTotalMinor: 250000 },
+    { name: "Dinorado per kilo", soldBy: "WEIGHT", quantity: 1785, grams: 1785, unitPriceMinor: 5200, lineTotalMinor: 9282 },
+  ],
+}, "Bogs and Lucy", null, new Date(2026, 10, 21, 7, 37));
+
+test("the sales receipt: big store name, item detail under each name, tall TOTAL, cash and change", () => {
+  for (const w of [32, 48]) {
+    const lines = slipPrintLines(sale, w);
+    const width = (l: { text: string; mode: string }) => (l.mode === "big" ? l.text.length * 2 : l.text.length);
+    assert.ok(lines.every((l) => width(l) <= w), lines.map((l) => l.text).join("|"));
+    assert.equal(lines[0]!.mode, "big");
+    assert.equal(lines[0]!.text.trim(), "Bogs and Lucy");
+    const at = (t: string) => lines.findIndex((l) => l.text.includes(t));
+    assert.equal(lines[at("Sinandomeng")]!.mode, "bold");
+    assert.match(lines[at("Sinandomeng") + 1]!.text, /^ {2}2 x P1,250\.00 +P2,500\.00$/);
+    assert.match(lines[at("Dinorado") + 1]!.text, /1\.785 kg x P52\.00\/kg +P92\.82$/);
+    assert.equal(lines[at("TOTAL")]!.mode, "tall");
+    assert.ok(at("Cash given") > at("TOTAL") && at("Change") > at("Cash given"));
+    assert.match(lines[at("Customer")]!.text, /Aling Nena$/);
+    assert.match(lines[at("Date")]!.text, /Nov 21, 2026, 7:37 AM$/);
+    assert.ok(lines.every((l) => !l.text.includes("?")), "no unknown characters (the narrow space before am/pm)");
+  }
+});
+
+test("a store name too long for big letters prints bold at normal size", () => {
+  const lines = slipPrintLines({ storeName: "Bahay Tindahan ng Bigas at Iba Pa sa Bauan", title: "RECEIPT" }, 32);
+  assert.equal(lines[0]!.mode, "bold");
+});
+
+test("the print modes reach the printer and are reset at the end", () => {
+  const bytes = Array.from(slipToEscPos(sale, 32));
+  const modes = bytes.flatMap((b, i) => (b === 0x1b && bytes[i + 1] === 0x21 ? [bytes[i + 2]] : []));
+  assert.ok(modes.includes(0x38) && modes.includes(0x18) && modes.includes(0x08));
+  assert.equal(modes[modes.length - 1], 0x00);
 });

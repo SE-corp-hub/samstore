@@ -30,3 +30,9 @@ test("a contact line prints under the address", () => {
   const html = slipHtml({ storeName: "S", title: "T", header: "Brgy. 1, Bulacan", contact: "0917 123 4567" });
   assert.ok(html.indexOf("Brgy. 1, Bulacan") < html.indexOf("0917 123 4567"));
 });
+
+test("the HTML receipt shows the TOTAL large with a double line before cash and change", () => {
+  const html = slipHtml({ storeName: "S", title: "SALES RECEIPT", rows: [{ name: "Dinorado", qty: "", detail: "1.785 kg x ₱52.00/kg", amount: "₱92.82" }], totals: [{ label: "TOTAL", value: "₱92.82", strong: true }, { label: "Change", value: "₱7.18" }] });
+  assert.ok(html.includes('class="kv total"') && html.includes('hr class="double"'));
+  assert.ok(html.includes("1.785 kg x ₱52.00/kg") && html.includes("1 item"));
+});
