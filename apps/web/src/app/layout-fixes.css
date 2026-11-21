@@ -161,3 +161,26 @@
   .admin-shell td.product-actions .btn { display: block; margin: 0 0 0.35rem auto !important; }
   .admin-shell td .product-thumb-btn, .admin-shell td .product-thumb-thumb { display: none !important; }
 }
+
+/* Who can change what (2026-11-21): where a change lands, and a lock line when this login cannot change it.
+   Colours: whole business = dark ink, one store = Stock blue, this tablet / only you = grey. AA on white. */
+.scope-tag {
+  display: inline-flex; align-items: center; gap: 8px; margin: 0 0 12px; padding: 6px 12px; min-height: 40px;
+  border-radius: 999px; border: 2px solid currentColor; font-weight: 700; font-size: 1rem; line-height: 1.3; max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.scope-tag .bi { font-size: 1.15rem; flex-shrink: 0; }
+.scope-business { color: #1f1d1a; background: #f4f1ec; }
+.scope-store { color: #0B4F8A; background: #E3F0FB; }
+.scope-tablet, .scope-me { color: #4a4640; background: #fff; }
+.lock-note {
+  display: flex; align-items: flex-start; gap: 8px; margin: 0 0 12px; padding: 10px 12px;
+  border-radius: 10px; background: #f4f1ec; border: 1px solid #c9c4bc; color: #1f1d1a; font-size: 1rem;
+}
+.lock-note .bi { color: #4a4640; font-size: 1.1rem; margin-top: 1px; flex-shrink: 0; }
+/* A heading above each kind of setting in the Settings list. */
+.settings-scope-head { margin: 16px 0 6px; }
+.settings-scope-head:first-child { margin-top: 0; }
+.settings-scope-head h2 { font-size: 1.05rem; font-weight: 700; margin: 0; display: flex; align-items: center; gap: 8px; }
+.settings-scope-head p { margin: 2px 0 0; color: #4a4640; font-size: .95rem; }
+.settings-row .bi-lock-fill { color: #4a4640; }

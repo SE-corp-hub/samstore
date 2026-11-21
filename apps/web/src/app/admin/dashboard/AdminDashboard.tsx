@@ -467,7 +467,7 @@ export default function AdminDashboard() {
       case "analytics": return <AnalyticsPanel />;
       case "maintenance": return <MaintenancePanel />;
       case "useraccess": return <UserAccessPanel />;
-      case "warehouses": return <WarehousesPanel onNavigate={setTab} />;
+      case "warehouses": return <WarehousesPanel onNavigate={setTab} role={role} />;
       case "approvals": return <ApprovalsPanel />;
       case "drafts": return <DraftsPanel />;
       case "kargadors": return <KargadorsPanel />;

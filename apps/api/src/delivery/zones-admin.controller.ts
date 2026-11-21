@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, Headers, HttpException, HttpStatus, Inje
 import type { ApiError } from "@sam-store/contracts";
 import { JwtAuthGuard, type AuthPrincipal } from "../auth/auth.guard.js";
 import { requireUser, resolveTenant, TENANT_ROLES } from "../auth/tenant-context.js";
+import { requireOwner } from "../auth/owner-only.js";
 import { cacheBust, cacheKey } from "../persistence/ttl-cache.js";
 import { DeliveryZonesAdminService, type DeliveryZoneInput } from "./zones-admin.service.js";
 
@@ -37,7 +38,8 @@ export class DeliveryZonesAdminController {
   async create(@Req() req: Request & { user?: AuthPrincipal }, @Body() body: DeliveryZoneInput, @Headers("x-store-id") headerStoreId?: string) {
     const user = req.user;
     requireUser(user);
-    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
+    const { storeId, role } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
+    requireOwner(role);
     const result = await this.zones.upsert(storeId, null, body);
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
     await cacheBust(cacheKey("settings", storeId));
@@ -49,7 +51,8 @@ export class DeliveryZonesAdminController {
   async update(@Req() req: Request & { user?: AuthPrincipal }, @Param("id") id: string, @Body() body: DeliveryZoneInput, @Headers("x-store-id") headerStoreId?: string) {
     const user = req.user;
     requireUser(user);
-    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
+    const { storeId, role } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
+    requireOwner(role);
     const result = await this.zones.upsert(storeId, id, body);
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
     await cacheBust(cacheKey("settings", storeId));
@@ -61,7 +64,8 @@ export class DeliveryZonesAdminController {
   async remove(@Req() req: Request & { user?: AuthPrincipal }, @Param("id") id: string, @Headers("x-store-id") headerStoreId?: string) {
     const user = req.user;
     requireUser(user);
-    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
+    const { storeId, role } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
+    requireOwner(role);
     const result = await this.zones.remove(storeId, id);
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
     await cacheBust(cacheKey("settings", storeId));

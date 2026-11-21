@@ -9,6 +9,8 @@ import { useCallback, useEffect, useState } from "react";
 import { API_URL } from "../../config";
 import { adminHeaders } from "../../lib/admin";
 import { toast } from "../../lib/toast";
+import { canChange, lockNote, whoIs } from "../../lib/who-can";
+import { LockNote, ScopeTag } from "./WhoCan";
 
 type LocationType = "STORE" | "WAREHOUSE" | "BUFFER";
 interface Location {
@@ -76,7 +78,10 @@ const STATUS_BADGE: Record<string, string> = {
   COMPLETED: "text-bg-success", CANCELLED: "text-bg-secondary", RETURNING: "text-bg-warning",
 };
 
-export default function WarehousesPanel({ onNavigate }: { onNavigate?: (tab: string) => void }) {
+export default function WarehousesPanel({ onNavigate, role = "" }: { onNavigate?: (tab: string) => void; role?: string }) {
+  // 2026-11-21: adding, renaming and setting up places is the owner's (the server refuses others);
+  // a manager sees the list and is sent to Settings → This store for a store's own details.
+  const canEdit = canChange(whoIs(role, false), "locations");
   const [locations, setLocations] = useState<Location[]>([]);
   const [transfers, setTransfers] = useState<Transfer[]>([]);
   const [loading, setLoading] = useState(true);
@@ -161,10 +166,18 @@ export default function WarehousesPanel({ onNavigate }: { onNavigate?: (tab: str
     <div>
       <h1 className="h4 mb-1"><i className="bi bi-geo-alt me-2" aria-hidden="true"></i>Locations</h1>
       <p className="text-muted small mb-3">Your stores and warehouse: add one, change its name, receipt text, Facebook Page and where it takes rice from.</p>
+      <ScopeTag scope="business" />
       {error && <div className="alert alert-danger py-2 small" role="alert">{error}</div>}
 
       <div className="row g-3 mb-3">
         <div className="col-lg-5">
+          {!canEdit ? (
+            <div className="card h-100"><div className="card-body">
+              <LockNote text={lockNote("locations")} />
+              <p className="mb-2">To change one store&apos;s receipt text, Facebook Page, address or daily target, use This store.</p>
+              <button type="button" className="btn btn-outline-primary btn-lg" onClick={() => onNavigate?.("settings")}><i className="bi bi-shop me-1" aria-hidden="true"></i>Settings → This store</button>
+            </div></div>
+          ) : (
           <form onSubmit={saveLocation} className="card h-100">
             <div className="card-body">
               <h2 className="h6 card-title">{editingId ? "Edit location" : "Add a location"}</h2>
@@ -286,6 +299,7 @@ export default function WarehousesPanel({ onNavigate }: { onNavigate?: (tab: str
               {locations.length === 0 && <p className="text-muted small mt-2 mb-0">The first location becomes the default.</p>}
             </div>
           </form>
+          )}
         </div>
 
         <div className="col-lg-7">
@@ -331,7 +345,7 @@ export default function WarehousesPanel({ onNavigate }: { onNavigate?: (tab: str
                           </div>
                         )}
                       </div>
-                      <div className="d-flex flex-wrap gap-1 justify-content-end">
+                      {canEdit && <div className="d-flex flex-wrap gap-1 justify-content-end">
                         {l.needsReview && <button type="button" className="btn btn-sm btn-warning" onClick={() => void patchLocation(l, { needsReview: false }, `${l.name} checked`)}>Mark checked</button>}
                         <button type="button" className="btn btn-sm btn-outline-secondary" onClick={() => startEdit(l)}>Edit</button>
                         {!l.isDefault && l.isActive && (
@@ -342,7 +356,7 @@ export default function WarehousesPanel({ onNavigate }: { onNavigate?: (tab: str
                             {l.isActive ? "Switch off" : "Switch on"}
                           </button>
                         )}
-                      </div>
+                      </div>}
                     </div>
                   </li>
                 ))}

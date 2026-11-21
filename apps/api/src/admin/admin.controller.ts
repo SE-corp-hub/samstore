@@ -23,6 +23,7 @@ import { redactCost, seesCost } from "../domain/cost-redact.js";
 import { productEditRefusal } from "../domain/product-edit-rights.js";
 import { canSetLocationLock, cleanScreenIds, isOneStoreLogin, lockPinMatches, newLockSecret, readFeatureLock, readLocationLocks, writeFeatureLock, type LocationLock } from "../domain/feature-lock.js";
 import { verifyPassword } from "../auth/auth.domain.js";
+import { isOwnerSide, requireOwner } from "../auth/owner-only.js";
 import { Prisma } from "@prisma/client";
 import type { ApiError, PosHoldItemsRequest } from "@sam-store/contracts";
 import { JwtAuthGuard, type AuthPrincipal } from "../auth/auth.guard.js";
@@ -1098,7 +1099,9 @@ export class AdminController {
     const user = req.user;
     requireUser(user);
     const { storeId, role } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
-    if (role === "STAFF") throw new HttpException({ type: "forbidden", message: "Store settings are for the owner or manager — use Counter settings" }, HttpStatus.FORBIDDEN);
+    // These settings change every store at once (VAT, credit, quota promo, online shop, Messenger): the owner's.
+    // A store's own switches are on PATCH /admin/store-settings/:locationId.
+    requireOwner(role);
     const result = await this.settingsAdmin.update(storeId, body);
         if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
         await cacheBust(cacheKey("settings", storeId));
@@ -1255,7 +1258,8 @@ export class AdminController {
   async retentionPurge(@Req() req: Request & { user?: AuthPrincipal }, @Headers("x-store-id") headerStoreId?: string) {
     const user = req.user;
     requireUser(user);
-    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.OWNER_MANAGER);
+    const { storeId, role } = await resolveTenant(user, headerStoreId, TENANT_ROLES.OWNER_MANAGER);
+    requireOwner(role);
     const result = await this.privacyRetention.purge(storeId, user.sub);
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
     return result.value;
@@ -1670,7 +1674,8 @@ export class AdminController {
   ) {
     const user = req.user;
     requireUser(user);
-    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.OWNER_MANAGER);
+    const { storeId, role } = await resolveTenant(user, headerStoreId, TENANT_ROLES.OWNER_MANAGER);
+    requireOwner(role, "Only the owner can add a store or a warehouse.");
     const result = await this.warehouses.create(storeId, {
       name: body?.name,
       type: body?.type,
@@ -1707,7 +1712,10 @@ export class AdminController {
   ) {
     const user = req.user;
     requireUser(user);
-    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.OWNER_MANAGER);
+    const { storeId, role } = await resolveTenant(user, headerStoreId, TENANT_ROLES.OWNER_MANAGER);
+    // Menu → Locations sets up the places of the whole business (names, type, where each takes rice from): the owner's.
+    // A manager changes a store's own receipt text, Page and target on Settings → This store.
+    requireOwner(role, "Only the owner can change Locations. A store's receipt text, Facebook Page and target are on Settings → This store.");
     const result = await this.warehouses.update(storeId, id, {
       name: body?.name,
       type: body?.type,
@@ -1760,7 +1768,7 @@ export class AdminController {
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
     // The head of this store sees its cost and may change its prices; other staff see neither the cost nor the lowest price.
     const head = isHeadOf(await loadActor(storeId, user.sub, role), id);
-    const canSetLowest = (TENANT_ROLES.OWNER_MANAGER as readonly string[]).includes(role);
+    const canSetLowest = isOwnerSide(role);
     if (seesCost(role) || head) return { prices: result.value, storeId, canEdit: true, canSetLowest };
     return { prices: redactCost(result.value).map(({ floorPriceMinor: _f, lowestPriceMinor: _l, ...rest }) => rest), storeId, canEdit: false, canSetLowest: false };
   }
@@ -1798,7 +1806,8 @@ export class AdminController {
   ) {
     const user = req.user;
     requireUser(user);
-    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.OWNER_MANAGER);
+    const { storeId, role } = await resolveTenant(user, headerStoreId, TENANT_ROLES.OWNER_MANAGER);
+    requireOwner(role, "Only the owner sets the lowest price.");
     const floor = body?.floorPriceMinor === null || body?.floorPriceMinor === undefined ? null : Number(body.floorPriceMinor);
     const result = await this.warehouses.setFloorPrice(storeId, productId, floor, user.sub);
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
