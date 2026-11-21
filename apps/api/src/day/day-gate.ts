@@ -71,6 +71,22 @@ export async function dayGate(db: Db, storeId: string, locationId: string, opts:
 }
 
 /**
+ * Money in or out of the drawer that is not a sale (Cash in, an Expense paid from the drawer, a
+ * cash refund): refused only once the store's day is CLOSED for today. The Z-read already counted
+ * the drawer, so cash moved now would be in no Z-read at all. Before Open day it is allowed (it
+ * still lands in today's Z-read). Switch off, or a day reopened by the owner: never refused.
+ */
+export async function closedTodayRefusal(db: Db, storeId: string, locationId: string, opts: { now?: Date; storeName?: string } = {}): Promise<string | null> {
+  if (!(await dayModeOn(db, storeId, locationId))) return null;
+  const today = manilaDate(opts.now ?? new Date());
+  const open = await openDayAt(db, storeId, locationId);
+  if (open && open.businessDate === today) return null;
+  if (!(await closedDay(db, storeId, locationId, today))) return null;
+  const name = opts.storeName ?? (await db.warehouse.findFirst({ where: { id: locationId, storeId }, select: { name: true } }))?.name ?? "This store";
+  return `${name} is closed for today (Z-read done), so cash cannot go in or out of its drawer now. Only the owner can reopen the day.`;
+}
+
+/**
  * When the cash of a sale made at `at` counts in the drawer. A sale that waited offline keeps
  * its own time, so its cash lands on the day it was really taken; but if that day is already
  * closed at this store, the cash counts now (after the close), so a closed Z-read never moves.

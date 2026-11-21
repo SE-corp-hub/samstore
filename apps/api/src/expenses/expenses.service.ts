@@ -21,7 +21,7 @@ import { randomId } from "../persistence/repositories.js";
 import type { ApiError } from "@sam-store/contracts";
 import { ALL_LOCATION_ROLES } from "../domain/people.js";
 import { dayRange, manilaDate } from "../domain/reports.js";
-import { cashTimeFor } from "../day/day-gate.js";
+import { cashTimeFor, closedTodayRefusal } from "../day/day-gate.js";
 import { registerApprovalHandler, requestApproval } from "../people/people.service.js";
 
 /** What staff may take out of one store's drawer in a day without the owner's OK: ₱500. */
@@ -111,6 +111,11 @@ export class ExpensesService {
 
     if (late && locationId) spentAt = await cashTimeFor(prisma, storeId, locationId, spentAt);
     const fromDrawer = !!locationId && input.paidFromDrawer === true;
+    // Money taken from the drawer today, after the store's Z-read, would be in no Z-read.
+    if (fromDrawer && locationId && !late && manilaDate(spentAt) === manilaDate(new Date())) {
+      const closed = await closedTodayRefusal(prisma, storeId, locationId);
+      if (closed) return { ok: false, error: { type: "conflict", message: closed } };
+    }
     const note = input.note?.trim().slice(0, 200) || null;
     if (staff && fromDrawer && locationId) {
       if (!note || note.length < 3) return invalid("Write what the money from the drawer was for.");
