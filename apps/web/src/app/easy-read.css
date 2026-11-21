@@ -950,3 +950,28 @@ html[data-text-size] .start-cust.chosen, .start-cust.chosen { border: 3px solid 
 .added-row { display: block; margin-top: 0.125rem; }
 .check-badge { background: #fff4d6; color: #6f4800; border: 1px solid #8a5a00; font-weight: 600; }
 .btn-looks-right { min-height: 44px; }
+
+/* §21 Orders per store (2026-11-21): the owner's store buttons and a store tag on every order. Each store keeps
+   one colour (dark text on a light tint, 7:1+), and its name is always written, so colour is never the only cue. */
+.store-tag { display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.125rem 0.55rem; border-radius: 999px; border: 1px solid currentColor; font-size: 0.875rem; font-weight: 700; line-height: 1.4; white-space: normal; overflow-wrap: anywhere; }
+.store-tag-lg { font-size: 1rem; padding: 0.2rem 0.7rem; }
+.store-tone-1 { color: #14532d; background: #e7f5ec; }
+.store-tone-2 { color: #1e3a8a; background: #e8eefc; }
+.store-tone-3 { color: #7c2d12; background: #fdeee4; }
+.store-tone-4 { color: #581c87; background: #f3e8fd; }
+.store-tone-5 { color: #134e4a; background: #e3f4f2; }
+.store-tone-none { color: #6f4800; background: #fff4d6; border-style: dashed; }
+.store-tone-home { color: #2b2118; background: #f3ede4; }
+.store-chip { min-height: 48px; border-radius: 999px; border: 2px solid currentColor; font-weight: 700; display: inline-flex; align-items: center; }
+.store-chip-all { color: #2b2118; background: #fff; }
+.store-chip .badge { background: rgba(0, 0, 0, 0.12); color: inherit; }
+.store-chip.is-on { color: #fff; }
+.store-chip.is-on .badge { background: #fff; color: #2b2118; }
+.store-chip.store-chip-all.is-on { background: #2b2118; border-color: #2b2118; }
+.store-chip.store-tone-1.is-on { background: #14532d; border-color: #14532d; }
+.store-chip.store-tone-2.is-on { background: #1e3a8a; border-color: #1e3a8a; }
+.store-chip.store-tone-3.is-on { background: #7c2d12; border-color: #7c2d12; }
+.store-chip.store-tone-4.is-on { background: #581c87; border-color: #581c87; }
+.store-chip.store-tone-5.is-on { background: #134e4a; border-color: #134e4a; }
+.store-chip.store-tone-none.is-on { background: #6f4800; border-color: #6f4800; }
+.store-chip:focus-visible { outline: 3px solid #1F6F3F; outline-offset: 2px; }
