@@ -102,3 +102,67 @@
   .admin-shell main .table > tbody > tr,
   .admin-shell main .list-group-item-action { transition: none; }
 }
+
+/* ───────────── POS keyboard shortcuts (PC only), 2026-11-21 ─────────────
+   The key caps (<kbd class="pos-key">) and the keyboard button exist in the POS markup on every
+   device, but they are hidden by default and shown only where there is a mouse, so the tablet
+   looks exactly as before. Settings → Keyboard shortcuts can switch them off (no .pos-keys-on). */
+.pos-key, .pos-keys-btn, .pos-key-in-search { display: none; }
+
+@media (hover: hover) and (pointer: fine) {
+  .pos-keys-on .pos-key {
+    display: inline-block;
+    margin-left: 0.5em;
+    padding: 0.05em 0.4em;
+    min-width: 1.6em;
+    font: 600 0.72em/1.4 ui-monospace, "SFMono-Regular", Consolas, monospace;
+    text-align: center;
+    vertical-align: 0.12em;
+    color: inherit;
+    background: transparent;
+    border: 1px solid currentColor;
+    border-bottom-width: 2px;
+    border-radius: 0.3em;
+    opacity: 0.85;
+    letter-spacing: 0;
+  }
+  .pos-keys-on .pos-keys-btn { display: inline-flex; align-items: center; min-height: 44px; }
+  .pos-keys-on .pos-keys-btn .pos-key { margin-left: 0.35em; }
+  /* F1 inside the search box, on the right where the clear (×) button sits once there is text. */
+  .pos-keys-on .pos-key-in-search {
+    display: block;
+    position: absolute;
+    top: 50%;
+    right: 0.75rem;
+    transform: translateY(-50%);
+    pointer-events: none;
+    color: var(--sam-muted, #6b5d50);
+  }
+  .pos-keys-on .pos-key-in-search .pos-key { margin-left: 0; }
+}
+/* The list and Settings show key caps on any device (Settings says they are for a PC). */
+.pos-keys-table kbd, .pos-keys-settings kbd {
+  display: inline-block;
+  min-width: 2.2em;
+  padding: 0.1em 0.5em;
+  text-align: center;
+  font: 600 0.95em/1.4 ui-monospace, "SFMono-Regular", Consolas, monospace;
+  color: #1f1a14;
+  background: #fff;
+  border: 1px solid #6b5d50;
+  border-bottom-width: 3px;
+  border-radius: 0.35em;
+}
+@media (hover: hover) and (pointer: fine) {
+  /* Big buttons (Pay, the ways to pay): the key sits in the top-right corner, so the words keep their line. */
+  .pos-keys-on .pos-key.pos-key-corner {
+    position: absolute;
+    top: 0.3rem;
+    right: 0.4rem;
+    margin: 0;
+    font-size: 0.62em;
+  }
+}
+@media (hover: hover) and (pointer: fine) {
+  .pos-keys-on .pos-key.pos-key-below { display: block; width: fit-content; margin: 0.25rem auto 0; }
+}

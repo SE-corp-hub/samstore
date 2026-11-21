@@ -50,6 +50,8 @@ import OrderCheck, { type CheckLine } from "./OrderCheck";
 import ProductFinder from "./ProductFinder";
 import PickTile from "./PickTile";
 import { noteUse } from "../../lib/product-find";
+import { usePosKeys } from "../../lib/pos-keys";
+import { KeyHint, PosKeysContext, PosKeysHelp, usePosKeyboard } from "./PosKeys";
 
 interface Loc { id: string; name: string; code: string | null; type: string }
 interface Item {
@@ -72,6 +74,8 @@ interface Held { id: string; label: string; at: number; locationId: string; cart
 type Pay = "cash" | "gcash" | "maya" | "bank" | "split" | "utang";
 const PAY_LABEL: Record<Pay, string> = { cash: "Cash", gcash: "GCash", maya: "Maya", bank: "Bank transfer", split: "Split", utang: "Credit" };
 const STEPS = ["Pick items", "Check", "Pay", "Done"];
+/** The keys for the ways to pay (Settings → Keyboard shortcuts); the others are under "Other ways". */
+const PAY_KEY: Partial<Record<Pay, "cash" | "gcash" | "credit">> = { cash: "cash", gcash: "gcash", utang: "credit" };
 const PAY_ICON: Record<Pay, string> = { cash: "bi-cash", gcash: "bi-phone", maya: "bi-phone", bank: "bi-bank", split: "bi-pie-chart", utang: "bi-journal-text" };
 interface SplitPart { method: "cash" | "gcash" | "maya" | "bank"; amount: string; reference: string }
 const needsRef = (m: Pay) => m === "gcash" || m === "maya" || m === "bank";
@@ -199,6 +203,11 @@ export default function BentaPanel() {
   const [dayState, setDayState] = useState<DayState>("off");
   // "Cash in" / "Expense": drawer money that is not a sale (on the Z-read).
   const [drawer, setDrawer] = useState<DrawerKind | null>(null);
+
+  // PC keyboard shortcuts (F1 search, F8 next step …): Settings → Keyboard shortcuts. The tablet has no keyboard: nothing changes there.
+  const keysCfg = usePosKeys();
+  const [keysHelp, setKeysHelp] = useState(false);
+  const screenRef = useRef<HTMLDivElement | null>(null);
 
   const catalogAsk = useRef(0); // only the latest location asked for may fill the screen
   /** The price list of a location: the copy saved on this tablet at once, then the server's. Returns the location shown. */
@@ -490,11 +499,26 @@ export default function BentaPanel() {
     }
   };
 
+  // Keys for the last line of the sale (+ / − / Delete), the same as its − / + / trash buttons.
+  usePosKeyboard(screenRef, keysCfg, {
+    step,
+    more: () => { if (cart.length) bump(cart.length - 1, 1); },
+    less: () => { if (cart.length) bump(cart.length - 1, -1); },
+    removeLast: () => setCart((c) => c.slice(0, -1)),
+    escape: () => setShowHeld(false),
+    help: () => setKeysHelp(true),
+  });
+  const keysHelpModal = keysHelp && <PosKeysHelp cfg={keysCfg} onClose={() => setKeysHelp(false)} />;
+  // Root of both screens: the key caps on the buttons show only here, only on a PC with a mouse (desktop.css).
+  const keysRoot = (el: HTMLDivElement | null) => { screenRef.current = el; };
+
   // ───────────── screens ─────────────
 
   if (step === "done" && last) {
     return (
-      <div className="sell-screen tone-sell mx-auto" style={{ maxWidth: 520 }}>
+      <PosKeysContext.Provider value={keysCfg}>
+      <div ref={keysRoot} className={`sell-screen tone-sell mx-auto${keysCfg.on ? " pos-keys-on" : ""}`} style={{ maxWidth: 520 }}>
+        {keysHelpModal}
         <Steps items={STEPS} current={3} />
         {last.status === "WAITING_OWNER" ? (
           <div className="alert alert-warning">
@@ -521,7 +545,7 @@ export default function BentaPanel() {
           {last.changeMinor > 0 && <li className="list-group-item d-flex justify-content-between change-due text-success"><span>Change to give</span><span>{peso(last.changeMinor)}</span></li>}
         </ul>
         <div className="d-flex flex-wrap gap-2 mb-3">
-          <button type="button" className="btn btn-outline-primary btn-lg flex-fill" onClick={() => printSlip(receiptSlip(last))}><i className="bi bi-printer me-1"></i>Print receipt</button>
+          <button type="button" className="btn btn-outline-primary btn-lg flex-fill" data-pos-key="print" onClick={() => printSlip(receiptSlip(last))}><i className="bi bi-printer me-1"></i>Print receipt<KeyHint action="print" /></button>
         </div>
         {textInfo && last.status !== "DECLINED" && (
           <div className="card mb-3"><div className="card-body">
@@ -557,8 +581,9 @@ export default function BentaPanel() {
             </div>
           </div>
         )}
-        <button className="btn btn-success btn-lg w-100 py-3" onClick={reset}><i className="bi bi-plus-lg me-1"></i>New sale</button>
+        <button className="btn btn-success btn-lg w-100 py-3" data-pos-key="newSale" data-pos-enter onClick={reset}><i className="bi bi-plus-lg me-1"></i>New sale<KeyHint action="newSale" /></button>
       </div>
+      </PosKeysContext.Provider>
     );
   }
 
@@ -776,9 +801,9 @@ export default function BentaPanel() {
         </ul>
         <div className="sale-total mb-2"><span className="label">Total</span><span className="amount">{peso(total)}</span></div>
         <div className="d-flex gap-2">
-          <button type="button" className="btn btn-outline-dark btn-lg" onClick={holdSale}><i className="bi bi-pause-circle me-1" aria-hidden="true"></i>Hold</button>
-          <button type="button" className="btn btn-success btn-lg flex-fill py-3 fw-bold sale-pay" onClick={() => void goPay()}>
-            Pay {peso(total)}
+          <button type="button" className="btn btn-outline-dark btn-lg" data-pos-key="hold" onClick={holdSale}><i className="bi bi-pause-circle me-1" aria-hidden="true"></i>Hold<KeyHint action="hold" /></button>
+          <button type="button" className="btn btn-success btn-lg flex-fill py-3 fw-bold sale-pay position-relative" data-pos-key="next" data-pos-enter onClick={() => void goPay()}>
+            Pay {peso(total)}<KeyHint action="next" corner />
           </button>
         </div>
       </div>
@@ -816,7 +841,7 @@ export default function BentaPanel() {
       </div>
     );
     const backBtn = (to: (() => void) | null) => (
-      <button type="button" className="btn btn-outline-dark btn-lg w-100" disabled={openBusy} onClick={() => (to ? to() : setOpening(null))}>Back</button>
+      <button type="button" className="btn btn-outline-dark btn-lg w-100" data-pos-esc disabled={openBusy} onClick={() => (to ? to() : setOpening(null))}>Back<KeyHint text="Esc" /></button>
     );
     // From the "Open sacks" button: first choose which rack (kilo rice) to fill.
     if (!opening.kiloId) {
@@ -880,7 +905,7 @@ export default function BentaPanel() {
         </div>
       )}
       <div className="d-grid gap-2">
-        <button type="button" className="btn btn-success btn-lg py-3 fw-bold" disabled={openBusy} onClick={() => void openSack(kilo, sack, opening.addAfter, n)}>
+        <button type="button" className="btn btn-success btn-lg py-3 fw-bold" data-pos-enter disabled={openBusy} onClick={() => void openSack(kilo, sack, opening.addAfter, n)}>
           <i className="bi bi-box-arrow-up me-2" aria-hidden="true"></i>{openBusy ? "Opening…" : `Yes, open ${sacksWord}`}
         </button>
         <div className="d-flex gap-2">
@@ -922,9 +947,9 @@ export default function BentaPanel() {
           <NumPad startFresh value={amountText} onChange={setAmountText} decimals={byPeso ? 2 : 3} label={byPeso ? "Pesos worth" : "Kilos"} unit={byPeso ? "₱" : "kg"} lead={lead} />
           {!ok && <div className="mt-1 text-center text-danger">{byPeso ? "Type how many pesos" : "Type the kilos"}</div>}
           <div className="d-flex align-items-stretch gap-2 mt-2 pos-actions">
-            <button type="button" className="btn btn-outline-dark btn-lg text-nowrap" onClick={() => { setEditing(null); setEditIdx(null); }}>Back</button>
-            <button type="button" className="btn btn-success btn-lg flex-grow-1 text-nowrap" disabled={!ok}
-              onClick={() => { const at = editIdx; if (at === null) return; setCart(cart.map((x, j) => (j === at ? line : x))); setEditing(null); setEditIdx(null); }}>Save</button>
+            <button type="button" className="btn btn-outline-dark btn-lg text-nowrap" data-pos-esc onClick={() => { setEditing(null); setEditIdx(null); }}>Back<KeyHint text="Esc" /></button>
+            <button type="button" className="btn btn-success btn-lg flex-grow-1 text-nowrap" data-pos-enter disabled={!ok}
+              onClick={() => { const at = editIdx; if (at === null) return; setCart(cart.map((x, j) => (j === at ? line : x))); setEditing(null); setEditIdx(null); }}>Save<KeyHint text="Enter" /></button>
           </div>
         </div>
       </div>
@@ -988,14 +1013,14 @@ export default function BentaPanel() {
             </div>
           )}
           <div className="d-flex align-items-stretch gap-2 mt-2 pos-actions">
-            <button type="button" className="btn btn-outline-dark btn-lg text-nowrap" onClick={() => { setEditing(null); setEditIdx(null); }}>Back</button>
+            <button type="button" className="btn btn-outline-dark btn-lg text-nowrap" data-pos-esc onClick={() => { setEditing(null); setEditIdx(null); }}>Back<KeyHint text="Esc" /></button>
             {/* On the Back / Save line, so it costs no row of its own. */}
             {/* Kilo rice is scooped from this store's rack only (open a sack here when it runs out). */}
             {it.tracked && !it.loose && fromChoices.length > 1 && !fromOpen && !short && (
               <button type="button" className="btn btn-outline-primary text-nowrap" aria-label="Take from another store" onClick={() => setFromOpen(true)}><i className="bi bi-shop me-1" aria-hidden="true"></i>Other store</button>
             )}
-            <button type="button" className="btn btn-success btn-lg flex-grow-1 text-nowrap" disabled={c.totalMinor <= 0 || short || !reasonGiven}
-              onClick={async () => { const line = editing, at = editIdx; if (!(await passesCost(line, at))) return; setCart(at === null ? [...cart, line] : cart.map((x, j) => (j === at ? line : x))); setEditing(null); setEditIdx(null); setCleared((n) => n + 1); }}>{editIdx === null ? "Add to sale" : "Save"}</button>
+            <button type="button" className="btn btn-success btn-lg flex-grow-1 text-nowrap" data-pos-enter disabled={c.totalMinor <= 0 || short || !reasonGiven}
+              onClick={async () => { const line = editing, at = editIdx; if (!(await passesCost(line, at))) return; setCart(at === null ? [...cart, line] : cart.map((x, j) => (j === at ? line : x))); setEditing(null); setEditIdx(null); setCleared((n) => n + 1); }}>{editIdx === null ? "Add to sale" : "Save"}<KeyHint text="Enter" /></button>
             {/* editIdx is null only when the below-cost popup's "Fix selling price" opened this card for a product not in the sale yet. */}
           </div>
         </div>
@@ -1038,8 +1063,8 @@ export default function BentaPanel() {
       onChange={cart.length === 0 && step === "pick" ? () => setStartOpen(true) : undefined} />
   );
   const heldBtn = !asking && holds.some((h) => h.locationId === locationId) && (
-    <button type="button" className="btn btn-warning" onClick={() => setShowHeld(!showHeld)}>
-      <i className="bi bi-pause-circle me-1"></i>Held sales ({holds.filter((h) => h.locationId === locationId).length})
+    <button type="button" className="btn btn-warning" data-pos-key="held" aria-expanded={showHeld} onClick={() => setShowHeld(!showHeld)}>
+      <i className="bi bi-pause-circle me-1"></i>Held sales ({holds.filter((h) => h.locationId === locationId).length})<KeyHint action="held" />
     </button>
   );
   const heldCard = showHeld && (
@@ -1105,14 +1130,21 @@ export default function BentaPanel() {
   // so the sale below keeps that height for its lines.
   const drawerBtns = step === "pick" && !newItem && !editing && !checking && !opening && !!locationId && (!mustChoose || storeKnown) && !dayBlocked
     && <DrawerMoneyButtons onOpen={setDrawer} />;
+  // PC only (hidden on touch screens by desktop.css): the list of keyboard shortcuts, also the "?" key.
+  const keysBtn = keysCfg.on && step === "pick" && (
+    <button type="button" className="btn btn-outline-dark pos-keys-btn" aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)" onClick={() => setKeysHelp(true)}>
+      <i className="bi bi-keyboard" aria-hidden="true"></i><KeyHint action="help" />
+    </button>
+  );
   // Sideways, the steps sit above the sale; they step aside while the number pad needs the whole column.
   const stepsRow = !(sideBySide && (editing || checking || opening)) && (
     <div className="d-flex flex-wrap align-items-center gap-2 mb-2">
       <Steps className="mb-0 me-auto" items={STEPS} current={step === "pay" ? 2 : step === "check" ? 1 : 0} />
       {heldBtn}
+      {!sideBySide && keysBtn}
       {step === "pick" && !newItem && !editing && !checking && !opening && kiloItems.length > 0 && (
-        <button type="button" className="btn btn-outline-success open-sacks-btn" onClick={() => setOpening({ kiloId: null, addAfter: false })}>
-          <i className="bi bi-box-arrow-up me-1" aria-hidden="true"></i>Open sacks
+        <button type="button" className="btn btn-outline-success open-sacks-btn" data-pos-key="openSacks" onClick={() => setOpening({ kiloId: null, addAfter: false })}>
+          <i className="bi bi-box-arrow-up me-1" aria-hidden="true"></i>Open sacks<KeyHint action="openSacks" />
         </button>
       )}
       {!sideBySide && drawerBtns}
@@ -1121,9 +1153,11 @@ export default function BentaPanel() {
   );
   const drawerModal = drawer && <DrawerMoney kind={drawer} locationId={locationId} placeName={here?.name ?? storeName} onClose={() => setDrawer(null)} />;
   return (
-    <div ref={fitRef} className="sell-screen tone-sell sell-fit">
+    <PosKeysContext.Provider value={keysCfg}>
+    <div ref={(el) => { fitRef.current = el; keysRoot(el); }} className={`sell-screen tone-sell sell-fit${keysCfg.on ? " pos-keys-on" : ""}`}>
       <h1 className="visually-hidden">POS</h1>
       {drawerModal}
+      {keysHelpModal}
       {sideBySide ? (
         <div className="fit-row">
           <div className="fit-col fit-main">
@@ -1137,8 +1171,8 @@ export default function BentaPanel() {
             {!editing && !checking && !opening && (mustChoose
               ? (chosenRow || drawerBtns) && <div className="side-who-row mb-2">{chosenRow && drawerBtns && locationId
                 ? <ChosenRow store={locations.find((l) => l.id === locationId)} who={whoName} compact onChange={cart.length === 0 && step === "pick" ? () => setStartOpen(true) : undefined} />
-                : chosenRow}{drawerBtns && <span className="side-drawer-btns">{drawerBtns}</span>}</div>
-              : <>{customerSelect}{drawerBtns && <div className="side-who-row mb-2"><span className="side-drawer-btns">{drawerBtns}</span></div>}</>)}
+                : chosenRow}{keysBtn}{drawerBtns && <span className="side-drawer-btns">{drawerBtns}</span>}</div>
+              : <>{customerSelect}{(drawerBtns || keysBtn) && <div className="side-who-row mb-2">{keysBtn}{drawerBtns && <span className="side-drawer-btns">{drawerBtns}</span>}</div>}</>)}
             {/* Sideways the store buttons sit here, on the empty side, so the price list on the left has the whole
                 height. They only work before a sale starts anyway; during a sale its title names the store. */}
             {openCard || quickCount || editCard || cartCard || (
@@ -1179,8 +1213,8 @@ export default function BentaPanel() {
               </div>
               <div className="d-grid gap-2 mb-3" style={{ gridTemplateColumns: "repeat(3, 1fr)" }} role="group" aria-label="How are they paying?">
                 {(["cash", "gcash", "utang", ...(allPay ? ["maya", "bank", "split"] : [])] as Pay[]).map((p) => (
-                  <button key={p} type="button" className={`btn btn-lg px-2 ${pay === p ? "btn-dark" : "btn-outline-dark"}`} aria-pressed={pay === p} onClick={() => setPay(p)}>
-                    <i className={`bi ${PAY_ICON[p]} me-1`} aria-hidden="true"></i>{PAY_LABEL[p]}
+                  <button key={p} type="button" className={`btn btn-lg px-2 ${pay === p ? "btn-dark" : "btn-outline-dark"}`} aria-pressed={pay === p} data-pos-key={PAY_KEY[p]} onClick={() => setPay(p)}>
+                    <i className={`bi ${PAY_ICON[p]} me-1`} aria-hidden="true"></i>{PAY_LABEL[p]}{PAY_KEY[p] && <KeyHint action={PAY_KEY[p]} below />}
                   </button>
                 ))}
               </div>
@@ -1188,8 +1222,8 @@ export default function BentaPanel() {
               {pay === "cash" && !(drawerOpen === false && shiftRequired) && (
                 <div className="d-flex flex-wrap justify-content-center gap-2 mb-2" role="group" aria-label="Quick cash amounts">
                   {quickCash(total).map((m) => (
-                    <button key={m} type="button" className={`btn btn-lg ${tendered && toMinor(tendered) === m ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setTendered(String(m / 100))}>
-                      {m === total ? "Exact" : peso(m)}
+                    <button key={m} type="button" className={`btn btn-lg ${tendered && toMinor(tendered) === m ? "btn-dark" : "btn-outline-dark"}`} data-pos-key={m === total ? "exact" : undefined} onClick={() => setTendered(String(m / 100))}>
+                      {m === total ? <>Exact<KeyHint action="exact" /></> : peso(m)}
                     </button>
                   ))}
                 </div>
@@ -1198,11 +1232,11 @@ export default function BentaPanel() {
                 <div className="cash-to mb-3">
                   <div className="fw-semibold mb-1" id="bt-cashto">Who keeps the cash?</div>
                   <div className="d-grid gap-2" style={{ gridTemplateColumns: "1fr 1fr" }} role="group" aria-labelledby="bt-cashto">
-                    <button type="button" className={`btn btn-lg px-2 ${cashTo === "drawer" ? "btn-dark" : "btn-outline-dark"}`} aria-pressed={cashTo === "drawer"} onClick={() => setCashTo("drawer")}>
-                      <i className="bi bi-inbox me-1" aria-hidden="true"></i>{saleStore?.code || saleStore?.name || "Store"} drawer
+                    <button type="button" className={`btn btn-lg px-2 ${cashTo === "drawer" ? "btn-dark" : "btn-outline-dark"}`} aria-pressed={cashTo === "drawer"} data-pos-key="toDrawer" onClick={() => setCashTo("drawer")}>
+                      <i className="bi bi-inbox me-1" aria-hidden="true"></i>{saleStore?.code || saleStore?.name || "Store"} drawer<KeyHint action="toDrawer" />
                     </button>
-                    <button type="button" className={`btn btn-lg px-2 ${cashTo === "owner" ? "btn-dark" : "btn-outline-dark"}`} aria-pressed={cashTo === "owner"} onClick={() => setCashTo("owner")}>
-                      <i className="bi bi-person-check me-1" aria-hidden="true"></i>I keep it (owner)
+                    <button type="button" className={`btn btn-lg px-2 ${cashTo === "owner" ? "btn-dark" : "btn-outline-dark"}`} aria-pressed={cashTo === "owner"} data-pos-key="toOwner" onClick={() => setCashTo("owner")}>
+                      <i className="bi bi-person-check me-1" aria-hidden="true"></i>I keep it (owner)<KeyHint action="toOwner" />
                     </button>
                   </div>
                   {cashTo === "owner" && <div className="small mt-1">The store&apos;s Close day will not expect this cash in its drawer. It shows on the Z-read as the owner&apos;s sale.</div>}
@@ -1320,8 +1354,8 @@ export default function BentaPanel() {
               )}
 
               <div className="d-flex gap-2 mt-2 pos-actions">
-                <button type="button" className="btn btn-outline-dark btn-lg" disabled={busy} onClick={() => setStep("check")}>Back</button>
-                <button type="button" className="btn btn-success btn-lg flex-fill py-3 fw-bold sale-pay" disabled={!canSubmit} onClick={() => void submit()}>{busy ? "Please wait…" : "Finish sale"}</button>
+                <button type="button" className="btn btn-outline-dark btn-lg" data-pos-esc disabled={busy} onClick={() => setStep("check")}>Back<KeyHint text="Esc" /></button>
+                <button type="button" className="btn btn-success btn-lg flex-fill py-3 fw-bold sale-pay" data-pos-key="next" data-pos-enter disabled={!canSubmit} onClick={() => void submit()}>{busy ? "Please wait…" : <>Finish sale<KeyHint action="next" /></>}</button>
               </div>
               {pay === "cash" && !tendered && <div className="text-center text-muted mt-1">{drawerOpen === false && shiftRequired ? "Open the cash drawer first." : "Tap Exact or enter the cash received first."}</div>}
             </div>
@@ -1331,6 +1365,7 @@ export default function BentaPanel() {
         </div>
       )}
     </div>
+    </PosKeysContext.Provider>
   );
 }
 
@@ -1357,7 +1392,7 @@ export function OpenDrawer({ onOpened }: { onOpened: () => void }) {
       <div className="fw-semibold mb-2">The cash drawer is closed. Open it before taking cash.</div>
       {error && <div className="text-danger mb-2">{error}</div>}
       <NumPad value={float} onChange={setFloat} decimals={2} label="Cash in the drawer now (change fund)" unit="₱" />
-      <button type="button" className="btn btn-success btn-lg w-100 mt-2" disabled={busy || offline} onClick={() => void open()}>{offline ? <><i className="bi bi-lock me-1"></i>{NEEDS_NET} to open the drawer — use GCash or Credit, or connect</> : busy ? "Please wait…" : "Open the cash drawer"}</button>
+      <button type="button" className="btn btn-success btn-lg w-100 mt-2" data-pos-enter disabled={busy || offline} onClick={() => void open()}>{offline ? <><i className="bi bi-lock me-1"></i>{NEEDS_NET} to open the drawer — use GCash or Credit, or connect</> : busy ? "Please wait…" : "Open the cash drawer"}</button>
     </div>
   );
 }

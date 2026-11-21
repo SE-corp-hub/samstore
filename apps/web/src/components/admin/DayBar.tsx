@@ -8,6 +8,7 @@
 //   open                  one slim row: "Day open since 7:02 AM", X-read, Close day
 // An Open day with no signal waits on the tablet and the day counts as open, so selling never stops.
 
+import { KeyHint } from "./PosKeys";
 import { useCallback, useEffect, useState } from "react";
 import { API_URL } from "../../config";
 import { adminHeaders, getAdminRole } from "../../lib/admin";
@@ -147,7 +148,7 @@ export default function DayBar({ locationId, storeName, heldCount, onState, comp
       <div className={`day-bar d-flex align-items-center flex-wrap gap-2 mb-2${compact ? " day-bar-compact" : ""}`}>
         <span className="day-chip day-chip-open"><i className="bi bi-unlock me-1" aria-hidden="true"></i>{compact ? "Open" : "Day open"}<span className="day-chip-detail">&nbsp;· since {timeText(day.open.openedAt)}{day.open.id === "pending" ? " (not sent yet)" : ""}</span></span>
         <span className="ms-auto d-flex gap-2">
-          <button type="button" className="btn btn-outline-primary" disabled={busy || offline || day.open.id === "pending"} onClick={() => void showX()} title={offline ? "Needs internet" : undefined}>X-read</button>
+          <button type="button" className="btn btn-outline-primary" disabled={busy || offline || day.open.id === "pending"} onClick={() => void showX()} title={offline ? "Needs internet" : undefined} data-pos-key="xread">X-read<KeyHint action="xread" /></button>
           <button type="button" className="btn btn-outline-dark" disabled={busy || day.open.id === "pending"} onClick={() => setClosing(true)}><i className="bi bi-lock me-1" aria-hidden="true"></i>Close day</button>
         </span>
         {err && <div className="w-100">{err}</div>}
