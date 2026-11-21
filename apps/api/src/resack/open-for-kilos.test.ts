@@ -19,6 +19,7 @@ after(async () => {
   await prisma.stockMovement.deleteMany({ where });
   await prisma.stockLevel.deleteMany({ where });
   await prisma.rackSack.deleteMany({ where });
+  await prisma.storeSettings.deleteMany({ where });
   await prisma.product.deleteMany({ where });
   await prisma.storeCounter.deleteMany({ where });
   await prisma.warehouse.deleteMany({ where });
@@ -97,4 +98,38 @@ test("Display rack ₱50: filled from two rice; asks which; cost = average by we
   assert.equal(await level(rack.id), 50_000);
   assert.equal(await cost(), 5_000, "25 kg at ₱52 + 25 kg at ₱48 = ₱50 a kilo");
   assert.equal(await level(sin.id), 1);
+});
+
+test("Kilo cost is one number for every store: a top-up at Store 2 averages with the kilos at Store 1 too", async () => {
+  const store = await prisma.store.create({ data: { name: `${run} two`, slug: `${run}-t`, status: "ACTIVE" } });
+  storeIds.push(store.id);
+  const s1 = await prisma.warehouse.create({ data: { storeId: store.id, name: "Store 1", code: "S1", type: "STORE", isDefault: true, sellPerKilo: true } });
+  const s2 = await prisma.warehouse.create({ data: { storeId: store.id, name: "Store 2", code: "S2", type: "STORE", sellPerKilo: true } });
+  const sin = await prisma.product.create({ data: { storeId: store.id, sku: "SIN25", name: "Sinandomeng 25kg", priceMinor: 135_000, costMinor: 130_000, stockBaseUnit: "g", stockBaseQuantity: 25_000 } });
+  const mik = await prisma.product.create({ data: { storeId: store.id, sku: "MIK25", name: "Mikami 25kg", priceMinor: 125_000, costMinor: 120_000, stockBaseUnit: "g", stockBaseQuantity: 25_000 } });
+  const rack = await prisma.product.create({ data: { storeId: store.id, sku: "RACK", name: "Rack ₱50", priceMinor: 5_000, costMinor: 0, stockBaseUnit: "g", stockBaseQuantity: 1, soldByWeight: true } });
+  await prisma.rackSack.createMany({ data: [{ storeId: store.id, kiloProductId: rack.id, sackProductId: sin.id }, { storeId: store.id, kiloProductId: rack.id, sackProductId: mik.id }] });
+  const owner: Actor = { userId: `${run}-o3`, role: "OWNER", homeLocationId: null };
+  const cost = () => prisma.product.findUniqueOrThrow({ where: { id: rack.id } }).then((p) => p.costMinor);
+  assert.equal((await svc.openSackForKilos(store.id, owner, { locationId: s1.id, kiloProductId: rack.id, sackProductId: sin.id, sacks: 3 })).ok, true);
+  assert.equal(await cost(), 5_200);
+  assert.equal((await svc.openSackForKilos(store.id, owner, { locationId: s2.id, kiloProductId: rack.id, sackProductId: mik.id })).ok, true);
+  // 75 kg at ₱52 (Store 1) + 25 kg at ₱48 (Store 2) = ₱51 a kilo — not ₱48 as if Store 1 had none.
+  assert.equal(await cost(), 5_100);
+});
+
+test("Store counts cost per location: the opened sack uses this shelf's sack cost, and the kilo shelf gets its own cost", async () => {
+  const store = await prisma.store.create({ data: { name: `${run} pl`, slug: `${run}-pl`, status: "ACTIVE" } });
+  storeIds.push(store.id);
+  await prisma.storeSettings.create({ data: { storeId: store.id, costMode: "PER_LOCATION" } });
+  const s1 = await prisma.warehouse.create({ data: { storeId: store.id, name: "Store 1", code: "S1", type: "STORE", isDefault: true, sellPerKilo: true } });
+  const sack = await prisma.product.create({ data: { storeId: store.id, sku: "SIN25", name: "Sinandomeng 25kg", priceMinor: 135_000, costMinor: 130_000, stockBaseUnit: "g", stockBaseQuantity: 25_000 } });
+  const kilo = await prisma.product.create({ data: { storeId: store.id, sku: "SIN-K", name: "Sinandomeng · per kilo", priceMinor: 5_600, costMinor: 0, stockBaseUnit: "g", stockBaseQuantity: 1, soldByWeight: true, kiloOfId: sack.id } });
+  await prisma.stockLevel.create({ data: { storeId: store.id, productId: sack.id, warehouseId: s1.id, quantityOnHand: 2, costMinor: 125_000 } });
+  const owner: Actor = { userId: `${run}-o4`, role: "OWNER", homeLocationId: null };
+  assert.equal((await svc.openSackForKilos(store.id, owner, { locationId: s1.id, kiloProductId: kilo.id })).ok, true);
+  const shelf = await prisma.stockLevel.findFirstOrThrow({ where: { storeId: store.id, productId: kilo.id, warehouseId: s1.id } });
+  assert.deepEqual([shelf.quantityOnHand, shelf.costMinor], [25_000, 5_000], "₱1,250 ÷ 25 on this shelf");
+  const job = await prisma.resackJob.findFirstOrThrow({ where: { storeId: store.id } });
+  assert.equal(job.inputValueMinor, 125_000);
 });

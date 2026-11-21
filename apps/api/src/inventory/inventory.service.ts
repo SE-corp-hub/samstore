@@ -9,6 +9,8 @@
 import { prisma } from "../persistence/prisma-repositories.js";
 import { adjustStock, InsufficientStockError, recordMovement } from "../domain/movements.js";
 import { planStockConversion } from "../domain/stock-conversion.js";
+import { costValue } from "../domain/counting.js";
+import { costModeOf, effectiveCost } from "../domain/shelf-cost.js";
 import { cacheBust, cacheKey } from "../persistence/ttl-cache.js";
 import type { ApiError } from "@sam-store/contracts";
 
@@ -58,6 +60,7 @@ export class InventoryService {
       },
       orderBy: { name: "asc" },
     });
+    const costMode = await costModeOf(prisma, storeId);
 
     const rows = products.map((p) => {
       const levels = filters.warehouseId ? p.stockLevels.filter((l) => l.warehouseId === filters.warehouseId) : p.stockLevels;
@@ -70,7 +73,9 @@ export class InventoryService {
       else if (available <= 0 && onHand <= 0) status = "out";
       else if (threshold > 0 && available <= threshold) status = "low";
       else status = "in";
-      const valueMinor = p.trackStock === false ? 0 : onHand * p.costMinor;
+      // Value at cost, shelf by shelf: loose rice is kept in grams but its cost is per kilo (costValue
+      // divides by 1000), and a store that counts cost per location uses each shelf's own cost.
+      const valueMinor = p.trackStock === false ? 0 : levels.reduce((s, l) => s + costValue({ ...p, costMinor: effectiveCost(costMode, l.costMinor, p.costMinor) }, l.quantityOnHand), 0);
       return {
         id: p.id,
         name: p.name,

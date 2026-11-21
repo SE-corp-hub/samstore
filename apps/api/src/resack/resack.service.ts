@@ -18,6 +18,7 @@ import { addForTrip, deductStock, InsufficientStockError, releaseForTrip, type T
 import { gramsOf, planResack, ResackError, valueOf, type ResackPlan } from "../domain/resack.js";
 import { formatKilos } from "../domain/weight.js";
 import { isKiloItem, kiloCostFrom, rackCostAfter } from "../domain/kilo.js";
+import { recordCostIn, shelfCostFor } from "../domain/shelf-cost.js";
 import { chargeResackLoss } from "../payable/charges.js";
 import {
   captureSignatures, locationRefusal, nextDocNumber, requestApproval, requireSignatures, signatureErrorResult,
@@ -232,9 +233,12 @@ export class ResackService {
       const sack = (await this.products(storeId, [sackId])).get(sackId);
       if (!sack || !sack.isActive) throw new ResackError(`That sack rice is not for sale any more`);
       const grams = gramsOf(sack, n);
-      const value = valueOf(sack, n);
       let out = { id: "", docNumber: "" };
       await prisma.$transaction(async (tx) => {
+        // The sacks cost what they cost on THIS shelf (a store that counts cost per location), else the product cost.
+        const sackCost = await shelfCostFor(tx, storeId, sack.id, loc.id);
+        const value = n * sackCost;
+        const addCostPerKilo = kiloCostFrom(sackCost, grams / n);
         const docNumber = await nextDocNumber(tx, storeId, "RSK");
         const now = new Date();
         const job = await tx.resackJob.create({
@@ -249,12 +253,17 @@ export class ResackService {
         // else the store goes below zero. The rice is in the staff's hands, so the next count fixes the number.
         await coverShortage(tx, storeId, { productId: sack.id, warehouseId: loc.id, needed: n, actorId: actor.userId, documentType: "RESACK", documentId: job.id, reason: `open ${n === 1 ? "a sack" : `${n} sacks`} ${docNumber}` });
         await deductStock(tx, storeId, [{ productId: sack.id, quantity: n }], { type: "RESACK_OUT", createdBy: actor.userId, warehouseId: loc.id, documentType: "RESACK", documentId: job.id, allowBelowZero: true });
-        const onRack = await tx.stockLevel.findFirst({ where: { storeId, productId: kilo.id, warehouseId: loc.id }, select: { quantityOnHand: true } });
+        // The kilo rice's one cost (the product cost) is shared by every store, so it averages over the kilos
+        // at every store, not only here (else a top-up at one store wipes out what the other store's kilos cost).
+        const kilosEverywhere = await tx.stockLevel.findMany({ where: { storeId, productId: kilo.id }, select: { quantityOnHand: true } });
         await tx.resackOutput.create({ data: { storeId, jobId: job.id, productId: kilo.id, quantity: grams, grams, valueMinor: value } });
+        // A store that counts cost per location: this shelf's own cost blends in the opened sacks (before they land).
+        await recordCostIn(tx, { storeId, productId: kilo.id, warehouseId: loc.id }, grams, addCostPerKilo);
         await addForTrip(tx, this.leg(storeId, kilo.id, loc.id, actor, job.id, docNumber), grams, "RESACK_IN");
         // The kilo rice costs what its sacks cost, per kilo (profit and the store payable per kilo sold). A rack
         // holding two rice at one price: the average by weight of what was on it and what came in.
-        const perKilo = rackCostAfter(onRack?.quantityOnHand ?? 0, kilo.costMinor, grams, kiloCostFrom(sack.costMinor, grams / n));
+        const onRackGrams = kilosEverywhere.reduce((sum, l) => sum + Math.max(0, l.quantityOnHand), 0);
+        const perKilo = rackCostAfter(onRackGrams, kilo.costMinor, grams, addCostPerKilo);
         if (perKilo > 0 && perKilo !== kilo.costMinor) await tx.product.update({ where: { id: kilo.id }, data: { costMinor: perKilo } });
         await tx.auditLog.create({
           data: { storeId, actorType: "USER", actorId: actor.userId, action: "resack.open_sack_pos", entityType: "ResackJob", entityId: job.id, after: { sack: sack.name, sacks: n, kilo: kilo.name, grams, locationId: loc.id } },

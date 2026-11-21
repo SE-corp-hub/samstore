@@ -7,6 +7,7 @@ import { StoreRole, StoreStatus } from "@prisma/client";
 import type { ApiError } from "@sam-store/contracts";
 import { toE164 } from "../domain/phone.js";
 import { bustMemberships } from "../auth/membership-cache.js";
+import { costValue } from "../domain/counting.js";
 
 export type AdminResult<T> = { ok: true; value: T } | { ok: false; error: ApiError };
 
@@ -154,9 +155,9 @@ export class StoreAdminService {
     });
     const stock = await prisma.stockLevel.findMany({
       where: { storeId },
-      select: { quantityOnHand: true, product: { select: { costMinor: true } } },
+      select: { quantityOnHand: true, product: { select: { costMinor: true, stockBaseUnit: true, stockBaseQuantity: true } } },
     });
-    const inventoryValueMinor = stock.reduce((acc, s) => acc + s.quantityOnHand * s.product.costMinor, 0);
+    const inventoryValueMinor = stock.reduce((acc, s) => acc + costValue(s.product, s.quantityOnHand), 0); // loose rice: grams × cost per kilo
     const customers = await prisma.storeCustomer.count({ where: { storeId } });
     const members = await prisma.userStore.count({ where: { storeId, status: "ACTIVE" } });
     const last = await prisma.order.findFirst({
