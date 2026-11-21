@@ -95,6 +95,7 @@ export class InventoryService {
            warehouseId: level.warehouseId,
            quantityOnHand: level.quantityOnHand,
            quantityReserved: level.quantityReserved,
+           reorderThreshold: level.reorderThreshold,
          })),
          variants: p.variants.map((variant) => ({
            id: variant.id,
@@ -133,19 +134,20 @@ export class InventoryService {
     if ((input.delta === undefined) === (input.setTo === undefined)) {
       return { ok: false, error: { type: "validation", errors: ["provide either delta (+/−) or setTo (counted quantity)"] } };
     }
+    // 2026-11-21: an adjustment always names its store. Without one it used to land on the main store
+    // (or, with no main store, on whichever row came first), so a fix meant for Lipa changed Bogs and Lucy.
+    if (!input.warehouseId) return { ok: false, error: { type: "validation", errors: ["Choose the store whose stock you are changing"] } };
     const product = await prisma.product.findFirst({ where: { id: input.productId, storeId }, select: { id: true } });
     if (!product) return { ok: false, error: { type: "not_found", message: "Product not found" } };
-    if (input.warehouseId) {
-      const wh = await prisma.warehouse.findFirst({ where: { id: input.warehouseId, storeId }, select: { id: true } });
-      if (!wh) return { ok: false, error: { type: "not_found", message: "Warehouse not found" } };
-    }
+    const wh = await prisma.warehouse.findFirst({ where: { id: input.warehouseId, storeId, isActive: true }, select: { id: true } });
+    if (!wh) return { ok: false, error: { type: "not_found", message: "That store is not in this business (or is turned off)" } };
 
     try {
       const result = await prisma.$transaction(async (tx) => {
         const out = await adjustStock(tx, {
           storeId,
           productId: input.productId,
-          warehouseId: input.warehouseId ?? null,
+          warehouseId: wh.id,
           delta: input.delta,
           setTo: input.setTo,
           reason,
@@ -160,7 +162,7 @@ export class InventoryService {
             action: "stock.adjust",
             entityType: "Product",
             entityId: input.productId,
-            after: { delta: out.delta, balanceAfter: out.balanceAfter, reason, allowNegative: input.allowNegative === true } as object,
+            after: { warehouseId: wh.id, delta: out.delta, balanceAfter: out.balanceAfter, reason, allowNegative: input.allowNegative === true } as object,
           },
         });
         return out;
@@ -178,6 +180,43 @@ export class InventoryService {
       const msg = e instanceof Error ? e.message : "Adjustment failed";
       return { ok: false, error: { type: "conflict", message: msg } };
     }
+  }
+
+  /**
+   * One store's reorder level for one rice (2026-11-21). Each store has its own: Bogs and Lucy may want a
+   * new delivery at 5 sacks while Bodega waits until 20. "Low" on Inventory and the reports reads each
+   * store against its own level.
+   */
+  async setReorder(
+    storeId: string,
+    actorId: string,
+    input: { productId?: string; warehouseId?: string; reorderThreshold?: number },
+  ): Promise<InventoryResult<{ productId: string; warehouseId: string; reorderThreshold: number }>> {
+    const level = input.reorderThreshold;
+    if (typeof level !== "number" || !Number.isInteger(level) || level < 0 || level > 1_000_000) {
+      return { ok: false, error: { type: "validation", errors: ["Reorder level must be a whole number, 0 or more (0 = no alert)"] } };
+    }
+    if (!input.warehouseId) return { ok: false, error: { type: "validation", errors: ["Choose the store"] } };
+    const [product, wh] = await Promise.all([
+      input.productId ? prisma.product.findFirst({ where: { id: input.productId, storeId }, select: { id: true } }) : null,
+      prisma.warehouse.findFirst({ where: { id: input.warehouseId, storeId, isActive: true }, select: { id: true, name: true } }),
+    ]);
+    if (!product) return { ok: false, error: { type: "not_found", message: "Product not found" } };
+    if (!wh) return { ok: false, error: { type: "not_found", message: "That store is not in this business (or is turned off)" } };
+    const before = await prisma.stockLevel.findUnique({ where: { storeId_productId_warehouseId: { storeId, productId: product.id, warehouseId: wh.id } }, select: { reorderThreshold: true } });
+    await prisma.$transaction([
+      prisma.stockLevel.upsert({
+        where: { storeId_productId_warehouseId: { storeId, productId: product.id, warehouseId: wh.id } },
+        create: { storeId, productId: product.id, warehouseId: wh.id, quantityOnHand: 0, reorderThreshold: level },
+        update: { reorderThreshold: level },
+      }),
+      prisma.auditLog.create({
+        data: { storeId, actorType: "USER", actorId, action: "stock.reorder", entityType: "Product", entityId: product.id, before: { reorderThreshold: before?.reorderThreshold ?? 0 }, after: { warehouseId: wh.id, store: wh.name, reorderThreshold: level } },
+      }),
+    ]);
+    await cacheBust(cacheKey("products", storeId));
+    await cacheBust(cacheKey("inventory", storeId));
+    return { ok: true, value: { productId: product.id, warehouseId: wh.id, reorderThreshold: level } };
   }
 
   /** Convert tracked stock between sellable products/variants in one audited transaction. */
@@ -296,10 +335,11 @@ export class InventoryService {
         }
 
         const needsWarehouse = !sourceVariant || !destinationVariant;
-        const defaultWarehouse = needsWarehouse && !requestedWarehouseId
-          ? await tx.warehouse.findFirst({ where: { storeId, isDefault: true }, select: { id: true } })
-          : null;
-        const warehouseId = needsWarehouse ? (requestedWarehouseId ?? defaultWarehouse?.id ?? null) : null;
+        // A conversion of shelf stock names its store (it never falls back to the main store).
+        if (needsWarehouse && !requestedWarehouseId) {
+          return { ok: false, error: { type: "validation", errors: ["Choose the store whose stock you are converting"] } };
+        }
+        const warehouseId = needsWarehouse ? requestedWarehouseId : null;
 
         let sourceBalanceAfter: number;
         let sourceWarehouseId: string | null = null;

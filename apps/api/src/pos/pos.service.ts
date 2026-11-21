@@ -26,7 +26,7 @@ import { settleForStatus } from "../domain/stock-settlement.js";
 import { taxColumnsFor } from "../domain/tax-store.js";
 import { priceAt, saleKey, SellingError } from "../domain/selling.js";
 import { ALL_LOCATION_ROLES } from "../domain/people.js";
-import { locationRefusal, type Actor } from "../people/people.service.js";
+import { loadActor, locationRefusal, type Actor } from "../people/people.service.js";
 import { freezeLineCosts, settleHandedOverOrder, settleSaleAtStore } from "../selling/settle-sale.js";
 import { Prisma } from "@prisma/client";
 import { formatOrderNumber } from "../domain/order-number.js";
@@ -215,11 +215,11 @@ export class PosService {
   // ─── pre-orders follow their store (per-store build, step 1a) ─────────────────────
 
   /**
-   * The store a NEW pre-order belongs to: the one asked for, else the login's home store,
-   * else the main store. A request with no store (an old copy of the app, or one saved
+   * The store a NEW sale, hold or pre-order belongs to: the one asked for, else the login's home store,
+   * else the main store. A login tied to one store is refused any other store. A request with no store (an old copy of the app, or one saved
    * offline) is never refused for that. `null` only for a legacy store with no locations.
    */
-  private async preorderStore(storeId: string, actor: Actor, asked: unknown): Promise<PosResult<{ id: string; name: string } | null>> {
+  private async sellingStore(storeId: string, actor: Actor, asked: unknown): Promise<PosResult<{ id: string; name: string } | null>> {
     const pick = (id: string) => prisma.warehouse.findFirst({ where: { id, storeId, isActive: true }, select: { id: true, name: true, type: true } });
     if (typeof asked === "string" && asked.length > 0) {
       const loc = await pick(asked);
@@ -451,12 +451,16 @@ export class PosService {
       return { ok: false, error: { type: "validation", errors: ["tenderedMinor must be an integer"] } };
     }
 
-    const loaded = await this.loadProducts(storeId, input.items, { allowRemote: true });
+    // 2026-11-21: the sale belongs to a store (asked → the login's own → the main store) and takes its
+    // rice from that store's shelf. Before, this path always sold from the main store, even for a Lipa login.
+    const at = await this.sellingStore(storeId, await loadActor(storeId, actorId, "STAFF"), input.locationId);
+    if (!at.ok) return at;
+    const sellingLocation = at.value;
+    const loaded = await this.loadProducts(storeId, input.items, { allowRemote: true, locationId: sellingLocation?.id ?? null });
     if (!loaded.ok) return loaded;
     const { products, lines, totals } = loaded.value;
-    const localLines = lines.filter((l) => !l.sourceLocationId);
-    const remoteLines = lines.filter((l) => l.sourceLocationId);
-    const sellingLocation = remoteLines.length ? await prisma.warehouse.findFirst({ where: { storeId, isDefault: true }, select: { id: true } }) : null;
+    const localLines = lines.filter((l) => !l.sourceLocationId || l.sourceLocationId === sellingLocation?.id);
+    const remoteLines = lines.filter((l) => l.sourceLocationId && l.sourceLocationId !== sellingLocation?.id);
     if (remoteLines.length && !sellingLocation) {
       return { ok: false, error: { type: "conflict", message: "Set a default location before selling from another location" } };
     }
@@ -515,7 +519,6 @@ export class PosService {
 
     let changeMinor = 0;
     const releases: { id: string; docNumber: string }[] = [];
-    const defaultLocationId = sellingLocation?.id ?? (await prisma.warehouse.findFirst({ where: { storeId, isDefault: true }, select: { id: true } }))?.id ?? null;
     await prisma.$transaction(async (tx) => {
       await this.makeOrder(tx, storeId, actorId, {
         id, orderNumber, status: "COMPLETED", paymentMethod: input.paymentMethod,
@@ -525,7 +528,7 @@ export class PosService {
         signatureData: kinds.hasCredit ? input.signatureData : null,
         registerSessionId,
         idempotencyKey: key,
-        sellingLocationId: defaultLocationId,
+        sellingLocationId: sellingLocation?.id ?? null,
       });
       if (plan.hasCash) changeMinor = plan.changeMinor;
       await writeTenders(tx, {
@@ -534,7 +537,7 @@ export class PosService {
         registerSessionId,
         creditTerms: { startAt: input.startAt, dueAt: input.dueAt },
       });
-      if (localLines.length) await this.decrementStock(tx, storeId, localLines, { orderId: id, createdBy: actorId });
+      if (localLines.length) await this.decrementStock(tx, storeId, localLines, { orderId: id, createdBy: actorId, warehouseId: sellingLocation?.id ?? null });
       // Lines served from another location leave that location at once (no release step).
       for (const l of remoteLines) {
         await coverShortage(tx, storeId, { productId: l.productId, warehouseId: l.sourceLocationId!, needed: l.quantity, actorId, documentType: "SALE", documentId: id, reason: "sale" });
@@ -566,7 +569,10 @@ export class PosService {
     if (!this.validateItems(input.items)) {
       return { ok: false, error: { type: "validation", errors: ["At least one item with positive quantity is required"] } };
     }
-    const loaded = await this.loadProducts(storeId, input.items);
+    const at = await this.sellingStore(storeId, await loadActor(storeId, actorId, "STAFF"), input.locationId);
+    if (!at.ok) return at;
+    const holdAt = at.value?.id ?? null;
+    const loaded = await this.loadProducts(storeId, input.items, { locationId: holdAt });
     if (!loaded.ok) return loaded;
     const { storeCustomerId: custId, displayName } = await this.resolveCustomer(storeId, input);
     const store = await prisma.store.findUnique({ where: { id: storeId }, include: { settings: true } });
@@ -580,8 +586,9 @@ export class PosService {
       await this.makeOrder(tx, storeId, actorId, {
         id, orderNumber, status: "ON_HOLD", paymentMethod: "cash", paymentStatus: "PENDING",
         currencyCode: store.currencyCode, totals, storeCustomerId: custId, customerName: displayName, lines,
+        sellingLocationId: holdAt,
       });
-      await this.decrementStock(tx, storeId, lines, { orderId: id, createdBy: actorId });
+      await this.decrementStock(tx, storeId, lines, { orderId: id, createdBy: actorId, warehouseId: holdAt });
     }, txOptions());
     return { ok: true, value: { orderId: id, orderNumber, totalMinor: totals.totalMinor } };
   }
@@ -674,7 +681,7 @@ export class PosService {
       return { ok: false, error: { type: "validation", errors: ["At least one item with positive quantity is required"] } };
     }
     // The pre-order belongs to one store: that store's price, and the rice is taken from that store's shelf.
-    const store_ = await this.preorderStore(storeId, actor, input.locationId);
+    const store_ = await this.sellingStore(storeId, actor, input.locationId);
     if (!store_.ok) return store_;
     const loc = store_.value;
     const loaded = await this.loadProducts(storeId, input.items, { allowShort: true, locationId: loc?.id ?? null, pricedBy: { role: actor.role } });
@@ -781,7 +788,7 @@ export class PosService {
     if (refusal) return { ok: false, error: { type: "forbidden", message: refusal } };
     let locId = order.sellingLocationId;
     if (!locId) {
-      const fallback = await this.preorderStore(storeId, actor, undefined);
+      const fallback = await this.sellingStore(storeId, actor, undefined);
       locId = fallback.ok ? fallback.value?.id ?? null : null;
     }
     // Open day (switch on): handing over a pre-order is a sale, so its store's day must be open

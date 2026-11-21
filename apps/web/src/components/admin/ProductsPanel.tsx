@@ -346,8 +346,18 @@ export default function ProductsPanel({ role = "" }: { role?: string }) {
 
   useEffect(() => { const t = setTimeout(load, 250); return () => clearTimeout(t); }, [load]);
 
+  // The stores (for "Opening stock goes to" on a new rice). The main store comes first.
+  const [places, setPlaces] = useState<{ id: string; name: string; isDefault: boolean }[]>([]);
+  const [stockAt, setStockAt] = useState("");
+  const mainPlace = places.find((w) => w.isDefault) ?? null;
+  useEffect(() => {
+    void fetch(`${API_URL}/admin/warehouses`, { headers: adminHeaders() }).then((r) => (r.ok ? r.json() : null)).then((d) => {
+      setPlaces(((d?.warehouses ?? []) as { id: string; name: string; isDefault: boolean; isActive?: boolean; type?: string }[]).filter((w) => w.isActive !== false && w.type !== "BUFFER"));
+    }).catch(() => undefined);
+  }, []);
   const openCreate = () => {
     setForm(EMPTY_FORM);
+    setStockAt("");
     setPhoto({ kind: "keep" });
     setCreatingCategory(false);
     setModal({ open: true, editing: null });
@@ -420,6 +430,8 @@ export default function ProductsPanel({ role = "" }: { role?: string }) {
         stockConversionFamily: form.conversionEnabled ? form.stockConversionFamily.trim() || null : null,
         // Opening stock is for a new product only: an edit never changes stock (the box showed every store's total).
         stock: modal.editing || form.stock === "" ? undefined : parseInt(form.stock, 10),
+        // The store that gets the opening stock (empty = the main store).
+        ...(!modal.editing && form.stock !== "" && stockAt ? { stockLocationId: stockAt } : {}),
         categorySlug: creatingCategory ? undefined : form.categorySlug || undefined,
         categoryName: !modal.editing && creatingCategory ? form.categoryName.trim() || undefined : undefined,
         description: form.description || undefined,
@@ -792,11 +804,20 @@ export default function ProductsPanel({ role = "" }: { role?: string }) {
                         <fieldset className="col-6 mb-2" disabled={locked}>
                           <label className="form-label small">Opening stock</label>
                           <WholeInput value={form.stock} onChange={(v) => setForm({ ...form, stock: v })} placeholder="0" />
+                          {places.length > 1 && (
+                            <>
+                              <label className="form-label small mt-2 mb-1" htmlFor="openingStockAt">Goes to which store</label>
+                              <select id="openingStockAt" className="form-select" value={stockAt || mainPlace?.id || ""} onChange={(e) => setStockAt(e.target.value)}>
+                                {places.map((w) => <option key={w.id} value={w.id}>{w.name}{w.isDefault ? " (main)" : ""}</option>)}
+                              </select>
+                            </>
+                          )}
                         </fieldset>
                       )}
                       <fieldset className="col-6 mb-2" disabled={viewOnly}>
-                        <label className="form-label small">Reorder at</label>
-                        <WholeInput placeholder="0" title="Flag LOW stock at or below this on-hand qty" value={form.reorderThreshold} onChange={(v) => setForm({ ...form, reorderThreshold: v })} />
+                        <label className="form-label small" htmlFor="reorderAtMain">Reorder at{mainPlace ? ` (${mainPlace.name})` : " (main store)"}</label>
+                        <WholeInput id="reorderAtMain" placeholder="0" title="Flag LOW stock at or below this on-hand qty" value={form.reorderThreshold} onChange={(v) => setForm({ ...form, reorderThreshold: v })} />
+                        <div className="small text-muted mt-1">Other stores: Inventory → Adjust.</div>
                       </fieldset>
                     </div>
                     <fieldset disabled={locked}>

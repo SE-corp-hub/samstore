@@ -695,7 +695,7 @@ export class AdminController {
   @Post("products")
   async createProduct(
     @Req() req: Request & { user?: AuthPrincipal },
-    @Body() body: { name: string; sku: string; priceMinor: number; costMinor?: number; stock?: number; categorySlug?: string; categoryName?: string; stockBaseUnit?: string | null; stockBaseQuantity?: number | null; stockConversionFamily?: string | null; description?: string; barcode?: string | null; unit?: string | null; soldByWeight?: boolean; trackStock?: boolean; featured?: boolean; tags?: string[]; reorderThreshold?: number },
+    @Body() body: { name: string; sku: string; priceMinor: number; costMinor?: number; stock?: number; categorySlug?: string; categoryName?: string; stockBaseUnit?: string | null; stockBaseQuantity?: number | null; stockConversionFamily?: string | null; description?: string; barcode?: string | null; unit?: string | null; soldByWeight?: boolean; trackStock?: boolean; featured?: boolean; tags?: string[]; reorderThreshold?: number; stockLocationId?: string | null },
     @Headers("x-store-id") headerStoreId?: string,
   ) {
     const user = req.user;

@@ -2,7 +2,7 @@
 
 import { UNLIMITED_STOCK, isTracked, trackOffRefusal } from "../domain/stock-tracking.js";
 import { prisma } from "../persistence/prisma-repositories.js";
-import { recordMovement } from "../domain/movements.js";
+import { ensureDefaultLocation, recordMovement } from "../domain/movements.js";
 import { priceChanges } from "../domain/price-history.js";
 import { validateProductInput, slugify, type ProductInput } from "../domain/product-validation.js";
 import { newPhotoKey, parsePhoto, isPhotoKey } from "../domain/product-photo.js";
@@ -12,6 +12,9 @@ import { isKiloItem, KILO_GROUP_NAME, KILO_GROUP_SLUG, kiloCostFrom, kiloName, k
 import { varietyOf } from "../domain/resack.js";
 
 /** The store's "1 kg" group (Products → Group) for kilo rice: the owner's own "1kg" / "1 kg" if there is one, else made. */
+/** The opening stock named a store that is not this business's (or is turned off). */
+class OpeningStoreError extends Error {}
+
 export async function kiloCategoryId(tx: Prisma.TransactionClient, storeId: string): Promise<string> {
   const found = await tx.category.findFirst({ where: { storeId, slug: { in: [KILO_GROUP_SLUG, "1kg"] } }, orderBy: { createdAt: "asc" }, select: { id: true, isActive: true } });
   if (found) {
@@ -108,7 +111,8 @@ export class ProductAdminService {
       quantityReserved: reserved,
       availableQuantity: onHand - reserved,
       // The main store's row: the one update() writes (any row used to be read, so a save copied it over).
-      reorderThreshold: (p.stockLevels.find((l) => l.warehouse?.isDefault) ?? p.stockLevels[0])?.reorderThreshold ?? 0,
+      // The main store's row: the one update() writes. (Each store's own level is on Inventory.)
+      reorderThreshold: p.stockLevels.find((l) => l.warehouse?.isDefault)?.reorderThreshold ?? 0,
       variants: p.variants.map((v) => ({
         id: v.id,
         name: v.name,
@@ -153,7 +157,8 @@ export class ProductAdminService {
       if (dup) return { ok: false, error: { type: "conflict", message: "A product with this barcode already exists" } };
     }
 
-    return prisma.$transaction(async (tx): Promise<AdminResult<{ id: string }>> => {
+    try {
+    return await prisma.$transaction(async (tx): Promise<AdminResult<{ id: string }>> => {
       let categoryId: string | null = null;
       if (input.categorySlug) {
         const category = await tx.category.findUnique({
@@ -196,23 +201,23 @@ export class ProductAdminService {
       });
 
       // Opening stock and its ledger receipt are committed with the product/category.
+      // 2026-11-21: it goes to the store the form names (stockLocationId), else the main store; the reorder
+      // level is the main store's, like on the edit form. Each is its own store's row, never "the first row".
       if ((input.stock !== undefined || input.reorderThreshold !== undefined) && input.trackStock !== false) {
-        const defaultWarehouse = await tx.warehouse.findFirst({ where: { storeId, isDefault: true } });
+        const mainId = await ensureDefaultLocation(tx, storeId);
         const openingStock = input.stock ?? 0;
-        const level = await tx.stockLevel.create({
-          data: {
-            storeId,
-            productId: product.id,
-            warehouseId: defaultWarehouse?.id ?? null,
-            quantityOnHand: openingStock,
-            reorderThreshold: input.reorderThreshold ?? 0,
-          },
-        });
+        let stockAt = mainId;
+        if (openingStock > 0 && input.stockLocationId && input.stockLocationId !== mainId) {
+          const place = await tx.warehouse.findFirst({ where: { id: input.stockLocationId, storeId, isActive: true }, select: { id: true } });
+          if (!place) throw new OpeningStoreError();
+          stockAt = place.id;
+        }
         if (openingStock > 0) {
+          await tx.stockLevel.create({ data: { storeId, productId: product.id, warehouseId: stockAt, quantityOnHand: openingStock } });
           await recordMovement(tx, {
             storeId,
             productId: product.id,
-            warehouseId: level.warehouseId,
+            warehouseId: stockAt,
             delta: openingStock,
             type: "RECEIPT",
             createdBy: actorId ?? null,
@@ -220,10 +225,21 @@ export class ProductAdminService {
             balanceAfter: openingStock,
           });
         }
+        if (input.reorderThreshold !== undefined || openingStock === 0) {
+          await tx.stockLevel.upsert({
+            where: { storeId_productId_warehouseId: { storeId, productId: product.id, warehouseId: mainId } },
+            create: { storeId, productId: product.id, warehouseId: mainId, quantityOnHand: 0, reorderThreshold: input.reorderThreshold ?? 0 },
+            update: { reorderThreshold: input.reorderThreshold ?? 0 },
+          });
+        }
       }
 
       return { ok: true, value: { id: product.id } };
     }, { timeout: 30_000 });
+    } catch (e) {
+      if (e instanceof OpeningStoreError) return { ok: false, error: { type: "validation", errors: ["Choose a store for the opening stock"] } };
+      throw e;
+    }
   }
 
   /** Update a product (price, name, description, stock, category, active). */
@@ -337,25 +353,14 @@ export class ProductAdminService {
       // written to the main store (rename a rice with 10 at each of 4 places → main store 40).
       // Stock changes go through Stock in, Move stock, Count or Inventory → Adjust.
       // (input.stock is ignored here on purpose.)
-      // P3f: set the reorder threshold on the same stock row the stock logic targets
-      // (default warehouse, else a legacy warehouse-less row); create it when absent.
       if (input.reorderThreshold !== undefined) {
-        const defaultWarehouse = await tx.warehouse.findFirst({ where: { storeId, isDefault: true } });
-        const existing = await tx.stockLevel.findFirst({
-          where: { storeId, productId, warehouseId: defaultWarehouse?.id ?? null },
+        // The main store's reorder level (each store sets its own in Inventory → Adjust).
+        const mainId = await ensureDefaultLocation(tx, storeId);
+        await tx.stockLevel.upsert({
+          where: { storeId_productId_warehouseId: { storeId, productId, warehouseId: mainId } },
+          create: { storeId, productId, warehouseId: mainId, quantityOnHand: 0, reorderThreshold: input.reorderThreshold },
+          update: { reorderThreshold: input.reorderThreshold },
         });
-        if (existing) {
-          await tx.stockLevel.update({ where: { id: existing.id }, data: { reorderThreshold: input.reorderThreshold } });
-        } else if (defaultWarehouse) {
-          await tx.stockLevel.create({ data: { storeId, productId, warehouseId: defaultWarehouse.id, quantityOnHand: 0, reorderThreshold: input.reorderThreshold } });
-        } else {
-          const anyRow = await tx.stockLevel.findFirst({ where: { storeId, productId } });
-          if (anyRow) {
-            await tx.stockLevel.update({ where: { id: anyRow.id }, data: { reorderThreshold: input.reorderThreshold } });
-          } else {
-            await tx.stockLevel.create({ data: { storeId, productId, quantityOnHand: 0, reorderThreshold: input.reorderThreshold } });
-          }
-        }
       }
     });
     return { ok: true, value: { id: productId } };

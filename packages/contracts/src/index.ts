@@ -282,6 +282,8 @@ export interface PosTender {
 }
 
 export interface PosSellRequest {
+  /** The store that sells (left out = the login's own store, else the main store). */
+  locationId?: string;
   /** optional store customer to link the sale to (must belong to the store) */
   customerId?: string;
   customerName?: string;
@@ -307,6 +309,8 @@ export interface PosSellRequest {
 }
 
 export interface PosHoldRequest {
+  /** The store the hold belongs to (left out = the login's own store, else the main store). */
+  locationId?: string;
   customerId?: string;
   customerName?: string;
   customerPhone?: string;

@@ -35,8 +35,10 @@ export interface ProductInput {
   relatedProductIds?: string[];
   /** P3d: same-store product ids shown as upsell/"Upgrade" (replace-all, max 12). */
   upsellProductIds?: string[];
-  /** P3f: quantity-on-hand at/below which the item is flagged LOW stock. */
+  /** P3f: quantity-on-hand at/below which the item is flagged LOW stock (the main store's). */
   reorderThreshold?: number;
+  /** Create only: the store that gets the opening `stock` (left out = the main store). */
+  stockLocationId?: string | null;
 }
 
 export type ProductValidation = { ok: true } | { ok: false; errors: string[] };
