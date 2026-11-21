@@ -10,6 +10,7 @@
 // and writes its lines in the same breath. Everything here runs inside the caller's
 // transaction, so a sale and its charge stand or fall together.
 
+import { mainLocationId } from "../domain/main-store.js";
 import type { Prisma } from "@prisma/client";
 import { shelfCostFor } from "../domain/shelf-cost.js";
 import { isLoose } from "../domain/selling.js";
@@ -101,7 +102,7 @@ export async function settleHandedOverOrder(
     select: { orderNumber: true, source: true, sellingLocationId: true, paymentMethod: true, totalMinor: true },
   });
   if (!order || !HANDED_OVER_SOURCES.includes(order.source)) return;
-  const locationId = order.sellingLocationId ?? (await tx.warehouse.findFirst({ where: { storeId, isDefault: true, isActive: true }, select: { id: true } }))?.id ?? null;
+  const locationId = order.sellingLocationId ?? (await mainLocationId(tx, storeId)) ?? null;
   if (!locationId) return; // a store with no locations set up: nothing is per store there
   const actorId = input.actorId ?? "system";
   const at = input.at ?? new Date();

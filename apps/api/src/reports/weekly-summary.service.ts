@@ -3,6 +3,7 @@
 //   when it last paid, what is owed to suppliers and which orders are late, count shortages by reason, and what is running out.
 // Read-only. The week is the 7 days ending on the chosen day (today by default); last week is the 7 days before that.
 
+import { mainLocation } from "../domain/main-store.js";
 import type { ApiError } from "@sam-store/contracts";
 import { prisma } from "../persistence/prisma-repositories.js";
 import { manilaDate } from "../domain/reports.js";
@@ -76,7 +77,7 @@ export class WeeklySummaryService {
     if (consignStores.length > 0) {
       const ids = consignStores.map((c) => c.id);
       const weekStart = new Date(`${w.thisFrom}T00:00:00+08:00`);
-      const mainName = (await prisma.warehouse.findFirst({ where: { storeId, isDefault: true }, select: { name: true } }))?.name ?? "The main store";
+      const mainName = (await mainLocation(prisma, storeId))?.name ?? "The main store";
       const owes = await prisma.storePayableEntry.groupBy({ by: ["locationId"], where: { storeId, locationId: { in: ids } }, _sum: { amountMinor: true } });
       // A payment by the store is below 0; the main store paying the store its profit share is above 0.
       const pay = (toStore: boolean) => ({ storeId, locationId: { in: ids }, kind: "PAYMENT", amountMinor: toStore ? { gt: 0 } : { lt: 0 } });

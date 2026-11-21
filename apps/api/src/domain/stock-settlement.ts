@@ -25,6 +25,7 @@
 //   CONSUME                on-hand -= qty (and reserved -= qty) — the on-hand ledger row
 // Both reserved-only types are excluded from on-hand reconciliation.
 
+import { mainLocationId } from "./main-store.js";
 import type { MovementTx } from "./movements.js";
 import { holdAcrossLevels, InsufficientStockError, recordMovement } from "./movements.js";
 import { shelvesFor } from "./sources.js";
@@ -258,7 +259,7 @@ export async function moveOrderReservation(
   const isTracked = new Set(tracked.map((p) => p.id));
   // The order's store keeps to its take-rice-from rule (an order with no store is the main store's).
   const sellingId = (await tx.order.findFirst({ where: { id: order.id, storeId: order.storeId }, select: { sellingLocationId: true } }))?.sellingLocationId
-    ?? (await tx.warehouse.findFirst({ where: { storeId: order.storeId, isDefault: true, isActive: true }, select: { id: true } }))?.id
+    ?? (await mainLocationId(tx, order.storeId))
     ?? null;
   const shelves = await shelvesFor(tx as never, order.storeId, sellingId);
   for (const line of lines) {

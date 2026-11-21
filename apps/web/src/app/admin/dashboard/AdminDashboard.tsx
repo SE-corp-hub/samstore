@@ -72,7 +72,6 @@ const CounterSettingsPanel = panel(() => import("../../../components/admin/Count
 const ExpensesPanel = panel(() => import("../../../components/admin/ExpensesPanel"));
 const CashPanel = panel(() => import("../../../components/admin/CashPanel"));
 const StorePricesPanel = panel(() => import("../../../components/admin/StorePricesPanel"));
-const PurchasesPanel = panel(() => import("../../../components/admin/PurchasesPanel"));
 const InventoryPanel = panel(() => import("../../../components/admin/InventoryPanel"));
 const StoreLinkPanel = panel(() => import("../../../components/admin/StoreLinkPanel"));
 const ExportPanel = panel(() => import("../../../components/admin/ExportPanel"));
@@ -453,7 +452,6 @@ export default function AdminDashboard() {
       case "storeprices": return <StorePricesPanel />;
       case "storelock": return <StoreLockSettings role={role} />;
       case "mystore": return <ThisStoreSettings standalone />;
-      case "purchases": return <PurchasesPanel />;
       case "storelink": return <StoreLinkPanel />;
       case "reports": return <ReportsPanel />;
       case "export": return <ExportPanel />;

@@ -16,6 +16,7 @@
 // Totals are server-computed. Stock leaves the selling location in the same
 // transaction as the order, its payment and its signatures.
 
+import { mainLocationId } from "../domain/main-store.js";
 import { orderPrefixAt } from "../domain/store-identity.js";
 import { switchesAt } from "../day/store-switches.js";
 import { costModeOf, effectiveCost, recordCostIn, shelfCostFor } from "../domain/shelf-cost.js";
@@ -209,7 +210,7 @@ export class BentaService {
 
   /** The selling location: the one asked for, else the person's home, else the store default. */
   private async location(storeId: string, actor: Actor, locationId: string | undefined) {
-    const id = locationId || actor.homeLocationId || (await prisma.warehouse.findFirst({ where: { storeId, isDefault: true }, select: { id: true } }))?.id;
+    const id = locationId || actor.homeLocationId || (await mainLocationId(prisma, storeId));
     const loc = id ? await prisma.warehouse.findFirst({ where: { id, storeId, isActive: true }, select: { id: true, name: true, type: true } }) : null;
     if (!loc) throw new StepError(invalid("Choose a location"));
     const refusal = locationRefusal(actor, loc.id);

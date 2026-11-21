@@ -8,6 +8,7 @@
 //   * A saved list always starts with the place itself, so "own shelf only" is a list of one.
 //   * A place on the list that was switched off (or deleted) is skipped.
 
+import { mainLocationId } from "./main-store.js";
 import type { Prisma, PrismaClient } from "@prisma/client";
 
 type Db = PrismaClient | Prisma.TransactionClient;
@@ -56,7 +57,7 @@ export function cleanFacebookPageUrl(raw: string | null | undefined): string | n
  * the shelves its rule allows. Null when that store has no rule yet (the caller keeps its old count).
  */
 export async function freeOnShelves(db: Db, storeId: string, locationId: string | null | undefined): Promise<Map<string, number> | null> {
-  const at = locationId ?? (await db.warehouse.findFirst({ where: { storeId, isDefault: true, isActive: true }, select: { id: true } }))?.id ?? null;
+  const at = locationId ?? (await mainLocationId(db, storeId)) ?? null;
   const shelves = await shelvesFor(db, storeId, at);
   if (!shelves) return null;
   const levels = await db.stockLevel.findMany({ where: { storeId, warehouseId: { in: shelves } }, select: { productId: true, quantityOnHand: true, quantityReserved: true } });

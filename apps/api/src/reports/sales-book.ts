@@ -51,10 +51,9 @@ const orderSelect = {
 /** A sold order that was cancelled afterwards: only a void or a refund writes this row. */
 const TAKEN_BACK = { toStatus: "CANCELLED", fromStatus: { in: SOLD_STATES } } as const;
 
-/** The main store (it owns the stock, and old orders with no store are its sales). */
-export async function mainLocationId(db: Db, storeId: string): Promise<string | null> {
-  return (await db.warehouse.findFirst({ where: { storeId, isDefault: true }, select: { id: true } }))?.id ?? null;
-}
+/** The main store (it owns the stock, and old orders with no store are its sales). One look-up for the app: domain/main-store.ts. */
+import { mainLocationId } from "../domain/main-store.js";
+export { mainLocationId };
 
 /** Orders that are `locationId`'s sales: the ones that name it, and for the main store the ones that name no store. */
 export function ordersOfStore(locationId: string, mainId: string | null): Prisma.OrderWhereInput {

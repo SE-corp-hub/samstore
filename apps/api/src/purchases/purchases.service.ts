@@ -1,121 +1,22 @@
-// Purchases & replenishment.
-// - Purchase + PurchaseItem store supplier/cost records.
-// - Completing a purchase ADDS stock (default warehouse) and updates product costMinor (COGS feed).
-// - Replenishment list: products with available ≤ reorder threshold → one-tap purchase.
+// Purchases (read only since 2026-11-21).
+// - Purchase + PurchaseItem keep the old supplier/cost records; the list still reads them.
+// - Recording a NEW purchase is closed: it added stock to the main store only, with no signature, beside
+//   Stock in, so one delivery could be counted twice and it could never say which store got the rice.
+//   Rice arrives through Stock in (it names the store); what is owed is on Supplier orders.
 
-import { lowShelves } from "../domain/low-stock.js";
-import { isUntracked } from "../domain/movements.js";
 import { prisma } from "../persistence/prisma-repositories.js";
 import type { ApiError } from "@sam-store/contracts";
-import { cacheBust, cacheKey } from "../persistence/ttl-cache.js";
 
 export type PurchaseResult<T> = { ok: true; value: T } | { ok: false; error: ApiError };
 
 export const PURCHASES_SERVICE = Symbol("PURCHASES_SERVICE");
 
+export const PURCHASES_CLOSED = "Purchases is closed. Receive rice with Stock in (it asks which store), and record what is owed on Supplier orders.";
+
 export class PurchasesService {
-  async create(storeId: string, actorId: string, input: { vendor?: string; supplierId?: string; note?: string; items: { productId: string; quantity: number; costMinor: number }[] }): Promise<PurchaseResult<{ id: string; totalCostMinor: number }>> {
-    if (!Array.isArray(input.items) || input.items.length === 0) {
-      return { ok: false, error: { type: "validation", errors: ["At least one purchase item is required"] } };
-    }
-    for (const it of input.items) {
-      if (!Number.isInteger(it.quantity) || it.quantity <= 0 || it.quantity > 9999) {
-        return { ok: false, error: { type: "validation", errors: ["quantity must be a positive integer (max 9999)"] } };
-      }
-      if (!Number.isInteger(it.costMinor) || it.costMinor < 0) {
-        return { ok: false, error: { type: "validation", errors: ["costMinor must be a non-negative integer"] } };
-      }
-    }
-
-    // Resolve supplierId + vendor text
-    let vendorId: string | null = null;
-    let vendorText: string | null = null;
-    if (input.supplierId) {
-      const supplier = await prisma.supplier.findFirst({ where: { id: input.supplierId, storeId }, select: { id: true, name: true } });
-      if (!supplier) return { ok: false, error: { type: "not_found", message: "Supplier not found in this store" } };
-      vendorId = supplier.id;
-      vendorText = supplier.name;
-    } else if (input.vendor) {
-      vendorText = input.vendor.trim() || null;
-    }
-
-    // Products must belong to the store
-    const ids = input.items.map((i) => i.productId);
-    const products = await prisma.product.findMany({ where: { storeId, id: { in: ids } }, select: { id: true } });
-    if (products.length !== new Set(ids).size) {
-      return { ok: false, error: { type: "not_found", message: "One or more products not found in this store" } };
-    }
-
-    const totalCostMinor = input.items.reduce((s, i) => s + i.quantity * i.costMinor, 0);
-    const defaultWarehouse = await prisma.warehouse.findFirst({ where: { storeId, isDefault: true } });
-
-    const purchase = await prisma.$transaction(async (tx) => {
-      const p = await tx.purchase.create({
-        data: {
-          storeId,
-          vendor: vendorText,
-          vendorId,
-          note: input.note?.trim() ?? null,
-          totalCostMinor,
-          createdBy: actorId,
-          items: {
-            create: input.items.map((i) => ({
-              storeId,
-              productId: i.productId,
-              quantity: i.quantity,
-              costMinor: i.costMinor,
-              lineCostMinor: i.quantity * i.costMinor,
-            })),
-          },
-        },
-      });
-      for (const it of input.items) {
-        // Track stock off: the cost is still recorded below, but there is no shelf to add to.
-        if (!(await isUntracked(tx, storeId, it.productId))) {
-          const level = defaultWarehouse
-            ? await tx.stockLevel.findFirst({ where: { storeId, productId: it.productId, warehouseId: defaultWarehouse.id } })
-            : await tx.stockLevel.findFirst({ where: { storeId, productId: it.productId, warehouseId: null } });
-          let balanceAfter: number;
-          if (level) {
-            const updated = await tx.stockLevel.update({ where: { id: level.id }, data: { quantityOnHand: { increment: it.quantity } } });
-            balanceAfter = updated.quantityOnHand;
-          } else {
-            const created = await tx.stockLevel.create({
-              data: {
-                storeId,
-                productId: it.productId,
-                warehouseId: defaultWarehouse?.id ?? null,
-                quantityOnHand: it.quantity,
-                quantityReserved: 0,
-              },
-            });
-            balanceAfter = created.quantityOnHand;
-          }
-          await tx.stockMovement.create({
-            data: {
-              storeId,
-              productId: it.productId,
-              warehouseId: defaultWarehouse?.id ?? null,
-              delta: it.quantity,
-              type: "RECEIPT",
-              orderId: null,
-              createdBy: actorId,
-              note: "purchase received",
-              balanceAfter,
-            },
-          });
-        }
-        const before = await tx.product.findUnique({ where: { id: it.productId }, select: { costMinor: true } });
-        if (before && before.costMinor !== it.costMinor) {
-          await tx.priceHistory.create({ data: { storeId, productId: it.productId, field: "COST", oldMinor: before.costMinor, newMinor: it.costMinor, source: "PURCHASE", changedById: actorId ?? null } });
-        }
-        await tx.product.update({ where: { id: it.productId }, data: { costMinor: it.costMinor } });
-      }
-      return p;
-    });
-    await cacheBust(cacheKey("products", storeId));
-
-    return { ok: true, value: { id: purchase.id, totalCostMinor } };
+  /** Closed: see the note at the top. Old copies of the app get a plain answer instead of a stock change. */
+  async create(_storeId: string, _actorId: string, _input: unknown): Promise<PurchaseResult<never>> {
+    return { ok: false, error: { type: "conflict", message: PURCHASES_CLOSED } };
   }
 
   async list(storeId: string) {
@@ -125,19 +26,5 @@ export class PurchasesService {
       take: 100,
       include: { items: { include: { product: { select: { name: true, sku: true } } } }, supplier: { select: { name: true } } },
     });
-  }
-
-  /** Rice needing replenishment: one row per store whose free stock is at or below its own reorder level. */
-  async replenishmentList(storeId: string) {
-    const products = await prisma.product.findMany({
-      where: { storeId, isActive: true, trackStock: true, stockLevels: { some: { reorderThreshold: { gt: 0 } } } },
-      include: { stockLevels: { include: { warehouse: { select: { name: true, isActive: true } } } } },
-    });
-    return products
-      .flatMap((p) => lowShelves(p.stockLevels.filter((l) => l.warehouse?.isActive !== false)).map((l) => ({
-        id: p.id, name: p.name, sku: p.sku, locationId: l.warehouseId, storeName: l.warehouse?.name ?? null,
-        availableQuantity: l.quantityOnHand - l.quantityReserved, reorderThreshold: l.reorderThreshold,
-      })))
-      .sort((a, b) => a.availableQuantity - b.availableQuantity);
   }
 }

@@ -2,6 +2,7 @@
 // Swap target for the in-memory repos once DATABASE_URL is live. Callers depend
 // only on the interfaces, so no service changes are required.
 
+import { mainLocationId } from "../domain/main-store.js";
 import { PrismaClient } from "@prisma/client";
 import type {
   StoreRecord,
@@ -633,7 +634,7 @@ export class PrismaOrderRepository implements OrderRepository {
       const untracked = await untrackedIds(tx, order.storeId, (effects.stockReservations ?? []).map((r) => r.productId));
       // An order that names no store is the main store's: its shelf is tried first, like a named store's is.
       const preferWarehouseId = effects.preferWarehouseId
-        ?? (await tx.warehouse.findFirst({ where: { storeId: order.storeId, isDefault: true, isActive: true }, select: { id: true } }))?.id
+        ?? (await mainLocationId(tx, order.storeId))
         ?? null;
       // Its take-rice-from rule: its own shelf, then the places it may take from, in order (null = no rule yet).
       const shelves = await shelvesFor(tx, order.storeId, preferWarehouseId);

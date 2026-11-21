@@ -4,6 +4,7 @@
 // Invariant: every stock-level change in the codebase goes through one of these
 // helpers so the ledger can never silently diverge from the balances.
 
+import { mainLocationId } from "./main-store.js";
 import type { Prisma } from "@prisma/client";
 import { allocateRestore, pickDeductionLevel, type LevelView } from "./stock-location.js";
 
@@ -68,11 +69,8 @@ export async function recordMovement(tx: MovementTx, m: MovementInput): Promise<
 /** Movement types that move `quantityReserved` only (mirrors stock-settlement.ts). */
 const RESERVED_ONLY_TYPES = ["RESERVE", "RELEASE_RESERVATION"];
 
-/** The store's default location id (null for a store that predates locations). */
-export async function defaultLocationId(tx: MovementTx, storeId: string): Promise<string | null> {
-  const def = await tx.warehouse.findFirst({ where: { storeId, isDefault: true }, select: { id: true } });
-  return def?.id ?? null;
-}
+/** The main store's location id (null for a store that predates locations). */
+const defaultLocationId = mainLocationId;
 
 /**
  * Rice Ops M1: the store's default location, creating one when the store has
