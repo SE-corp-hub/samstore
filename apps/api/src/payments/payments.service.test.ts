@@ -21,7 +21,7 @@ async function makeProduct(storeId: string) {
   await prisma.stockLevel.create({ data: { storeId, productId: p.id, quantityOnHand: 10 } });
   return p;
 }
-async function makeOrder(storeId: string, status: string, paymentStatus: string, items?: { productId: string; quantity: number }[]) {
+async function makeOrder(storeId: string, status: string, paymentStatus: string, items?: { productId: string; quantity: number }[], opts: { tookStock?: boolean } = {}) {
   const o = await prisma.order.create({
     data: {
       orderNumber: `${run}-${createdIds.length}-${storeId.slice(-4)}`,
@@ -39,6 +39,13 @@ async function makeOrder(storeId: string, status: string, paymentStatus: string,
   createdIds.push(o.id);
   if (items?.length) {
     await prisma.orderItem.createMany({ data: items.map((i) => ({ orderId: o.id, storeId, productId: i.productId, productName: "P", sku: "P", unitPriceMinor: 10000, quantity: i.quantity, lineTotalMinor: 10000 * i.quantity })) });
+    // As a real sale: the stock book shows what it took (a void or refund puts back only that).
+    for (const i of opts.tookStock === false ? [] : items) {
+      const level = await prisma.stockLevel.findFirst({ where: { storeId, productId: i.productId } });
+      if (!level) continue;
+      await prisma.stockLevel.update({ where: { id: level.id }, data: { quantityOnHand: { decrement: i.quantity } } });
+      await prisma.stockMovement.create({ data: { storeId, productId: i.productId, warehouseId: level.warehouseId, delta: -i.quantity, type: "CONSUME", orderId: o.id, balanceAfter: level.quantityOnHand - i.quantity } });
+    }
   }
   return o;
 }
@@ -199,7 +206,7 @@ test("a refund takes back the WHOLE sale: a part amount is refused, the money go
 test("a refund never puts back rice the sale did not take (no stock from nowhere)", async () => {
   const store = await makeStore();
   const product = await makeProduct(store.id);
-  const order = await makeOrder(store.id, "COMPLETED", "COLLECTED", [{ productId: product.id, quantity: 2 }]);
+  const order = await makeOrder(store.id, "COMPLETED", "COLLECTED", [{ productId: product.id, quantity: 2 }], { tookStock: false });
   await prisma.payment.create({ data: { orderId: order.id, storeId: store.id, method: "cash", amountMinor: 10000, type: "payment" } });
   const level = (await prisma.stockLevel.findFirst({ where: { storeId: store.id, productId: product.id } }))!;
   const r = await svc.refundOrder(order.id, store.id, "actor");

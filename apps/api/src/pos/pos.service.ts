@@ -6,6 +6,7 @@
 // Totals are always server-computed; stock mutations are atomic.
 
 import { dayGate } from "../day/day-gate.js";
+import { lockOrder, OrderChanged } from "../domain/order-lock.js";
 import { switchesAt } from "../day/store-switches.js";
 import { offlineSoldAt } from "../domain/selling.js";
 import { orderPrefixAt } from "../domain/store-identity.js";
@@ -889,10 +890,6 @@ export class PosService {
     const kept = new Map(before.filter((i) => i.priceOverridden && i.productId && !i.variantId).map((i) => [i.productId!, i.unitPriceMinor]));
     const loaded = await this.loadProducts(storeId, input.items, { allowShort: hold.source === "PRE_ORDER", locationId: preLoc, pricedBy: { role: actor.role, kept } });
     if (!loaded.ok) return loaded;
-    // Only the stock identity of the previous lines matters here (restore delta).
-    const oldLines = before.map((i) => ({
-      productId: i.productId ?? "", variantId: i.variantId ?? null, quantity: i.quantity,
-    }));
     const { lines, totals } = loaded.value;
     // M4: a re-price changes the VAT base — re-freeze it instead of keeping the
     // columns from the previous total (the receipt prints these).
@@ -903,29 +900,39 @@ export class PosService {
     );
     const overriddenAt = new Date();
 
-    await prisma.$transaction(async (tx) => {
-      // Restore stock for removed lines, decrement for added (delta approach).
-      await this.restoreStock(tx, storeId, oldLines, { orderId: holdId, createdBy: actorId });
-      await this.decrementStock(tx, storeId, lines, { orderId: holdId, createdBy: actorId, allowBelowZero: hold.source === "PRE_ORDER", warehouseId: preLoc });
-      await tx.orderItem.deleteMany({ where: { orderId: holdId } });
-      await tx.orderItem.createMany({
-        data: lines.map((l) => ({
-          orderId: holdId, storeId, productId: l.productId, productName: l.name, sku: l.sku,
-          // The variant identity must survive an edit, or a variant line silently
-          // becomes a plain product line.
-          variantId: l.variantId, variantName: l.variantName,
-          unitPriceMinor: l.unitPriceMinor, quantity: l.quantity, lineTotalMinor: l.unitPriceMinor * l.quantity,
-          priceOverridden: l.priceOverridden,
-          priceOverrideReason: l.priceOverrideReason,
-          priceOverriddenById: l.priceOverridden ? actorId : null,
-          priceOverriddenAt: l.priceOverridden ? overriddenAt : null,
-          catalogUnitPriceMinor: l.priceOverridden ? l.catalogUnitPriceMinor : null,
-        })),
-      });
-      await tx.order.update({ where: { id: holdId }, data: { subtotalMinor: totals.subtotalMinor, totalMinor: totals.totalMinor, snapshot: { lines, source: hold.source.toLowerCase(), paymentMethod: hold.paymentMethod } as object, ...taxCols } });
-      if (hold.source === "PRE_ORDER") await freezeLineCosts(tx, { storeId, orderId: holdId, locationId: preLoc });
-      await tx.orderStatusHistory.create({ data: { orderId: holdId, storeId, fromStatus: "ON_HOLD", toStatus: "ON_HOLD", reason: "items edited", actorType: "pos", actorId: actorId } });
-    }, txOptions());
+    try {
+      await prisma.$transaction(async (tx) => {
+        // Two saves at once: the second waits, then gives back what the first one left on the order (not the old lines again).
+        const locked = await lockOrder(tx, storeId, holdId);
+        if (!locked || locked.status !== "ON_HOLD") throw new OrderChanged("This order was already completed or cancelled");
+        const nowLines = (await tx.orderItem.findMany({ where: { orderId: holdId }, select: { productId: true, variantId: true, quantity: true } }))
+          .map((i) => ({ productId: i.productId ?? "", variantId: i.variantId ?? null, quantity: i.quantity }));
+        // Restore stock for removed lines, decrement for added (delta approach).
+        await this.restoreStock(tx, storeId, nowLines, { orderId: holdId, createdBy: actorId });
+        await this.decrementStock(tx, storeId, lines, { orderId: holdId, createdBy: actorId, allowBelowZero: hold.source === "PRE_ORDER", warehouseId: preLoc });
+        await tx.orderItem.deleteMany({ where: { orderId: holdId } });
+        await tx.orderItem.createMany({
+          data: lines.map((l) => ({
+            orderId: holdId, storeId, productId: l.productId, productName: l.name, sku: l.sku,
+            // The variant identity must survive an edit, or a variant line silently
+            // becomes a plain product line.
+            variantId: l.variantId, variantName: l.variantName,
+            unitPriceMinor: l.unitPriceMinor, quantity: l.quantity, lineTotalMinor: l.unitPriceMinor * l.quantity,
+            priceOverridden: l.priceOverridden,
+            priceOverrideReason: l.priceOverrideReason,
+            priceOverriddenById: l.priceOverridden ? actorId : null,
+            priceOverriddenAt: l.priceOverridden ? overriddenAt : null,
+            catalogUnitPriceMinor: l.priceOverridden ? l.catalogUnitPriceMinor : null,
+          })),
+        });
+        await tx.order.update({ where: { id: holdId }, data: { subtotalMinor: totals.subtotalMinor, totalMinor: totals.totalMinor, snapshot: { lines, source: hold.source.toLowerCase(), paymentMethod: hold.paymentMethod } as object, ...taxCols } });
+        if (hold.source === "PRE_ORDER") await freezeLineCosts(tx, { storeId, orderId: holdId, locationId: preLoc });
+        await tx.orderStatusHistory.create({ data: { orderId: holdId, storeId, fromStatus: "ON_HOLD", toStatus: "ON_HOLD", reason: "items edited", actorType: "pos", actorId: actorId } });
+      }, txOptions());
+    } catch (e) {
+      if (e instanceof OrderChanged) return { ok: false, error: { type: "conflict", message: e.message } };
+      throw e;
+    }
     return { ok: true, value: { id: holdId, totalMinor: totals.totalMinor, lines } };
   }
 
@@ -1110,13 +1117,21 @@ export class PosService {
     const items = await prisma.orderItem.findMany({ where: { orderId: holdId } });
     const lines: StockLine[] = items.map((i) => ({ productId: i.productId ?? "", variantId: i.variantId ?? null, quantity: i.quantity }));
 
-    await prisma.$transaction(async (tx) => {
-      await this.restoreStock(tx, storeId, lines, { orderId: holdId, createdBy: actorId });
-      await tx.order.update({ where: { id: holdId }, data: { status: "CANCELLED", paymentStatus: "CANCELLED_REFUND" } });
-      await tx.orderStatusHistory.create({
-        data: { orderId: holdId, storeId, fromStatus: "ON_HOLD", toStatus: "CANCELLED", reason: reason?.trim() ?? null, actorType: "pos_void", actorId: actorId },
-      });
-    }, txOptions());
+    try {
+      await prisma.$transaction(async (tx) => {
+        // Cancel tapped twice (or sent again by the offline queue): the second waits, then sees it is cancelled.
+        const locked = await lockOrder(tx, storeId, holdId);
+        if (!locked || locked.status !== "ON_HOLD") throw new OrderChanged("This order is already cancelled or completed");
+        await this.restoreStock(tx, storeId, lines, { orderId: holdId, createdBy: actorId });
+        await tx.order.update({ where: { id: holdId }, data: { status: "CANCELLED", paymentStatus: "CANCELLED_REFUND" } });
+        await tx.orderStatusHistory.create({
+          data: { orderId: holdId, storeId, fromStatus: "ON_HOLD", toStatus: "CANCELLED", reason: reason?.trim() ?? null, actorType: "pos_void", actorId: actorId },
+        });
+      }, txOptions());
+    } catch (e) {
+      if (e instanceof OrderChanged) return { ok: false, error: { type: "conflict", message: e.message } };
+      throw e;
+    }
     await cacheBust(cacheKey("products", storeId));
     await cacheBust(cacheKey("orders", storeId));
     return { ok: true, value: { id: holdId, status: "CANCELLED" } };

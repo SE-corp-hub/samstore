@@ -5,6 +5,7 @@
 // - Void (same-day, unfulfilled POS sale): reverses the sale, restores stock, order → CANCELLED.
 // - Refund: negative Payment + order → CANCELLED with reason (audited).
 
+import { lockOrder, OrderChanged } from "../domain/order-lock.js";
 import type { Prisma } from "@prisma/client";
 import { orderWall } from "../auth/wall.js";
 import { manilaDate } from "../domain/reports.js";
@@ -410,30 +411,40 @@ export class PaymentsService {
     if (order.paymentStatus === "COLLECTED") return { ok: false, error: { type: "conflict", message: "Collected sales must be refunded, not voided" } };
     if (order.status === "CANCELLED") return { ok: false, error: { type: "conflict", message: "Order is already cancelled" } };
 
-    await prisma.$transaction(async (tx) => {
-      // Stock is source-aware: an ONLINE order still holds a checkout reservation,
-      // so a void releases it (the units never left the shelf and on-hand must not
-      // grow). A POS/pre-order sale already consumed on-hand at sale time, so it is
-      // restored instead. `no-reservation` is the signal for the POS branch.
-      const settlement = await settleOrderReservations(tx, { id: orderId, storeId }, "RELEASED");
-      if (settlement.outcome === "no-reservation") {
-        await restoreStock(tx, storeId, order.items.map((it) => ({ productId: it.productId ?? "", quantity: it.quantity })), { type: "VOID_RESTORE", orderId, createdBy: actorId });
-      }
-      await tx.order.update({ where: { id: orderId }, data: { status: "CANCELLED", paymentStatus: "CANCELLED_REFUND" } });
-      await reverseSaleCharges(tx, storeId, orderId, actorId, reason?.trim() || "sale voided");
-      const registerSessionId = await this.registers.attachOpenSession(storeId);
-      await tx.payment.create({
-        data: { orderId, storeId, method: "cash", amountMinor: 0, note: `VOID: ${reason?.trim() ?? "same-day void"}`.slice(0, 200), type: "void", createdBy: actorId, registerSessionId },
+    try {
+      await prisma.$transaction(async (tx) => {
+        // Tapped twice, or two people at once: the second waits here, then sees the first one's void.
+        const locked = await lockOrder(tx, storeId, orderId);
+        if (!locked || locked.status === "CANCELLED") throw new OrderChanged("Order is already cancelled");
+        if (locked.paymentStatus === "COLLECTED") throw new OrderChanged("Collected sales must be refunded, not voided");
+        // Stock is source-aware: an ONLINE order still holds a checkout reservation,
+        // so a void releases it (the units never left the shelf and on-hand must not
+        // grow). A POS/pre-order sale already consumed on-hand at sale time, so it is
+        // restored instead. `no-reservation` is the signal for the POS branch.
+        const settlement = await settleOrderReservations(tx, { id: orderId, storeId }, "RELEASED");
+        if (settlement.outcome === "no-reservation") {
+          // Never more than this sale really took off the shelf (as the refund does).
+          await this.restoreTaken(tx, storeId, orderId, order.items, "VOID_RESTORE", actorId);
+        }
+        await tx.order.update({ where: { id: orderId }, data: { status: "CANCELLED", paymentStatus: "CANCELLED_REFUND" } });
+        await reverseSaleCharges(tx, storeId, orderId, actorId, reason?.trim() || "sale voided");
+        const registerSessionId = await this.registers.attachOpenSession(storeId);
+        await tx.payment.create({
+          data: { orderId, storeId, method: "cash", amountMinor: 0, note: `VOID: ${reason?.trim() ?? "same-day void"}`.slice(0, 200), type: "void", createdBy: actorId, registerSessionId },
+        });
+        // A credit sale that is cancelled is no longer owed (the cash book already gives back a voided sale's cash).
+        await this.undoCreditAndOwnerCash(tx, order, actorId, "Sale cancelled", registerSessionId);
+        await tx.orderStatusHistory.create({
+          data: { orderId, storeId, fromStatus: order.status, toStatus: "CANCELLED", reason: reason?.trim() ?? null, actorType: "pos_void", actorId },
+        });
+        await tx.paymentStatusHistory.create({
+          data: { storeId, orderId, paymentId: null, fromStatus: order.paymentStatus, toStatus: "CANCELLED_REFUND", reason: `void: ${reason?.trim() ?? "same-day void"}`.slice(0, 200), actorType: "admin", actorId },
+        });
       });
-      // A credit sale that is cancelled is no longer owed (the cash book already gives back a voided sale's cash).
-      await this.undoCreditAndOwnerCash(tx, order, actorId, "Sale cancelled", registerSessionId);
-      await tx.orderStatusHistory.create({
-        data: { orderId, storeId, fromStatus: order.status, toStatus: "CANCELLED", reason: reason?.trim() ?? null, actorType: "pos_void", actorId },
-      });
-      await tx.paymentStatusHistory.create({
-        data: { storeId, orderId, paymentId: null, fromStatus: order.paymentStatus, toStatus: "CANCELLED_REFUND", reason: `void: ${reason?.trim() ?? "same-day void"}`.slice(0, 200), actorType: "admin", actorId },
-      });
-    });
+    } catch (e) {
+      if (e instanceof OrderChanged) return { ok: false, error: { type: "conflict", message: e.message } };
+      throw e;
+    }
     // P3h: claw back points earned for this order (idempotent; no-op when none earned).
     await this.loyalty.reverseForOrder(orderId, "order voided");
     return { ok: true, value: { id: orderId, status: "CANCELLED" } };
@@ -469,34 +480,43 @@ export class PaymentsService {
       return { ok: false, error: { type: "conflict", message: `A refund takes back the whole sale (₱${(remaining / 100).toFixed(2)}). For rice returned in part, use Returns.` } };
     }
 
-    await prisma.$transaction(async (tx) => {
-      // N1: the cash leaves the drawer NOW — attribute the refund to the open shift
-      // so the X/Z report's expected cash accounts for it (null when off-counter).
-      const registerSessionId = await this.registers.attachOpenSession(storeId);
-      for (const [method, amount] of held) {
-        if (amount <= 0) continue;
-        await tx.payment.create({
-          data: { orderId, storeId, method, amountMinor: -amount, note: `REFUND: ${reason?.trim() ?? "customer refund"}`.slice(0, 200), type: "refund", createdBy: actorId, registerSessionId, locationId: order.sellingLocationId },
+    try {
+      await prisma.$transaction(async (tx) => {
+        // Tapped twice, or two people at once: the second waits here, then sees the first one's refund
+        // (else the cash would be given back twice).
+        const locked = await lockOrder(tx, storeId, orderId);
+        if (!locked || locked.status === "CANCELLED") throw new OrderChanged("Order is already cancelled (refunded)");
+        // N1: the cash leaves the drawer NOW — attribute the refund to the open shift
+        // so the X/Z report's expected cash accounts for it (null when off-counter).
+        const registerSessionId = await this.registers.attachOpenSession(storeId);
+        for (const [method, amount] of held) {
+          if (amount <= 0) continue;
+          await tx.payment.create({
+            data: { orderId, storeId, method, amountMinor: -amount, note: `REFUND: ${reason?.trim() ?? "customer refund"}`.slice(0, 200), type: "refund", createdBy: actorId, registerSessionId, locationId: order.sellingLocationId },
+          });
+        }
+        await tx.order.update({ where: { id: orderId }, data: { status: "CANCELLED", paymentStatus: "REFUNDED" } });
+        // The sale is taken back, so is what its store owed the main store for it (and any profit share it booked).
+        await reverseSaleCharges(tx, storeId, orderId, actorId, reason?.trim() || "sale refunded");
+        await this.undoCreditAndOwnerCash(tx, order, actorId, "Sale refunded", registerSessionId);
+        // The rice comes back. An online order refunded before it went out still only HOLDS its rice:
+        // the hold is given back. Rice that already left the shelf (a counter sale, or an order that
+        // was handed over) is put back on the shelf it left.
+        const settlement = await settleOrderReservations(tx, { id: orderId, storeId }, "RELEASED");
+        if (settlement.outcome === "no-reservation" || (settlement.outcome === "already-settled" && order.stockDisposition === "CONSUMED")) {
+          await this.restoreTaken(tx, storeId, orderId, order.items, "VOID_RESTORE", actorId);
+        }
+        await tx.orderStatusHistory.create({
+          data: { orderId, storeId, fromStatus: order.status, toStatus: "CANCELLED", reason: reason?.trim() ?? null, actorType: "pos_refund", actorId },
         });
-      }
-      await tx.order.update({ where: { id: orderId }, data: { status: "CANCELLED", paymentStatus: "REFUNDED" } });
-      // The sale is taken back, so is what its store owed the main store for it (and any profit share it booked).
-      await reverseSaleCharges(tx, storeId, orderId, actorId, reason?.trim() || "sale refunded");
-      await this.undoCreditAndOwnerCash(tx, order, actorId, "Sale refunded", registerSessionId);
-      // The rice comes back. An online order refunded before it went out still only HOLDS its rice:
-      // the hold is given back. Rice that already left the shelf (a counter sale, or an order that
-      // was handed over) is put back on the shelf it left.
-      const settlement = await settleOrderReservations(tx, { id: orderId, storeId }, "RELEASED");
-      if (settlement.outcome === "no-reservation" || (settlement.outcome === "already-settled" && order.stockDisposition === "CONSUMED")) {
-        await this.restoreTaken(tx, storeId, orderId, order.items, "VOID_RESTORE", actorId);
-      }
-      await tx.orderStatusHistory.create({
-        data: { orderId, storeId, fromStatus: order.status, toStatus: "CANCELLED", reason: reason?.trim() ?? null, actorType: "pos_refund", actorId },
+        await tx.paymentStatusHistory.create({
+          data: { storeId, orderId, paymentId: null, fromStatus: order.paymentStatus, toStatus: "REFUNDED", reason: `refund: ${reason?.trim() ?? "customer refund"}`.slice(0, 200), actorType: "admin", actorId },
+        });
       });
-      await tx.paymentStatusHistory.create({
-        data: { storeId, orderId, paymentId: null, fromStatus: order.paymentStatus, toStatus: "REFUNDED", reason: `refund: ${reason?.trim() ?? "customer refund"}`.slice(0, 200), actorType: "admin", actorId },
-      });
-    });
+    } catch (e) {
+      if (e instanceof OrderChanged) return { ok: false, error: { type: "conflict", message: e.message } };
+      throw e;
+    }
     // P3h: claw back points earned for this order (idempotent; no-op when none earned).
     await this.loyalty.reverseForOrder(orderId, "order refunded");
     return { ok: true, value: { id: orderId, status: "CANCELLED" } };
