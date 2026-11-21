@@ -33,6 +33,8 @@ after(async () => {
       await prisma.productRelation.deleteMany({ where: { storeId } });
       await prisma.product.deleteMany({ where: { id: { in: productIds } } });
     }
+    // Saving a reorder level makes the store's main location when it has none.
+    await prisma.warehouse.deleteMany({ where: { storeId } });
     await prisma.store.deleteMany({ where: { id: storeId } });
   }
   await prisma.$disconnect();

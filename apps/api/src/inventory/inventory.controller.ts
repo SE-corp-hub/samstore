@@ -42,7 +42,7 @@ export class InventoryController {
     const hit = await cacheGet<Record<string, unknown>>(key);
     if (hit) return shownTo(hit);
     const data = await this.inventorySvc.list(storeId, { search, categoryId, warehouseId, status });
-    const warehouses = await prisma.warehouse.findMany({ where: { storeId }, select: { id: true, name: true, isDefault: true } });
+    const warehouses = await prisma.warehouse.findMany({ where: { storeId }, select: { id: true, name: true, code: true, type: true, isActive: true, isDefault: true }, orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }] });
     const categories = await prisma.category.findMany({ where: { storeId, isActive: true }, select: { id: true, name: true } });
     const payload = { ...data, warehouses, categories };
     await cacheSet(key, payload, 15_000);
@@ -63,6 +63,21 @@ export class InventoryController {
     const result = await this.inventorySvc.adjust(storeId, user.sub, dto);
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
     await cacheBust(cacheKey("inventory", storeId)); // the panel must not show the pre-adjust balance
+    return result.value;
+  }
+
+  /** POST /admin/stock/reorder — { productId, warehouseId, reorderThreshold }: one store's reorder level (owner/manager). */
+  @Post("stock/reorder")
+  async reorder(
+    @Req() req: Request & { user?: AuthPrincipal },
+    @Body() body: { productId?: string; warehouseId?: string; reorderThreshold?: number },
+    @Headers("x-store-id") headerStoreId?: string,
+  ) {
+    const user = req.user;
+    if (!user) throw new HttpException({ type: "unauthorized", message: "Not authenticated" }, HttpStatus.UNAUTHORIZED);
+    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.OWNER_MANAGER);
+    const result = await this.inventorySvc.setReorder(storeId, user.sub, body ?? {});
+    if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
     return result.value;
   }
 

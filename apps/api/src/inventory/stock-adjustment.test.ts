@@ -55,7 +55,7 @@ test("M2: +delta records an ADJUST movement with the actor, the reason and balan
   const svc = new InventoryService();
   const fx = await fixture(10);
 
-  const res = await svc.adjust(fx.storeId, fx.actorId, { productId: fx.productId, delta: 5, reason: "Delivery received (5 pcs)" });
+  const res = await svc.adjust(fx.storeId, fx.actorId, { productId: fx.productId, warehouseId: fx.warehouseId, delta: 5, reason: "Delivery received (5 pcs)" });
   assert.equal(res.ok, true, JSON.stringify(res));
   assert.equal(res.ok && res.value.balanceAfter, 15);
   assert.equal(res.ok && res.value.delta, 5);
@@ -79,7 +79,7 @@ test("M2: removing more than is on hand is refused and writes nothing", async ()
   const svc = new InventoryService();
   const fx = await fixture(4);
 
-  const res = await svc.adjust(fx.storeId, fx.actorId, { productId: fx.productId, delta: -10, reason: "Shrinkage" });
+  const res = await svc.adjust(fx.storeId, fx.actorId, { productId: fx.productId, warehouseId: fx.warehouseId, delta: -10, reason: "Shrinkage" });
   assert.equal(res.ok, false);
   assert.equal(res.ok === false && res.error.type, "conflict");
   assert.match(res.ok === false && "message" in res.error ? (res.error.message ?? "") : "", /short by 6 unit/i);
@@ -92,15 +92,15 @@ test("M2: a stock-take (setTo) records the DIFFERENCE, and allowNegative lets a 
   const svc = new InventoryService();
   const fx = await fixture(10);
 
-  const counted = await svc.adjust(fx.storeId, fx.actorId, { productId: fx.productId, setTo: 7, reason: "Physical count" });
+  const counted = await svc.adjust(fx.storeId, fx.actorId, { productId: fx.productId, warehouseId: fx.warehouseId, setTo: 7, reason: "Physical count" });
   assert.equal(counted.ok, true, JSON.stringify(counted));
   assert.equal(counted.ok && counted.value.delta, -3, "the movement carries the difference");
   assert.equal(counted.ok && counted.value.balanceAfter, 7);
 
   // A correction that would go negative needs the explicit flag (manager stock-take).
-  const refused = await svc.adjust(fx.storeId, fx.actorId, { productId: fx.productId, delta: -100, reason: "Recount" });
+  const refused = await svc.adjust(fx.storeId, fx.actorId, { productId: fx.productId, warehouseId: fx.warehouseId, delta: -100, reason: "Recount" });
   assert.equal(refused.ok, false);
-  const forced = await svc.adjust(fx.storeId, fx.actorId, { productId: fx.productId, delta: -10, reason: "Recount after audit", allowNegative: true });
+  const forced = await svc.adjust(fx.storeId, fx.actorId, { productId: fx.productId, warehouseId: fx.warehouseId, delta: -10, reason: "Recount after audit", allowNegative: true });
   assert.equal(forced.ok, true, JSON.stringify(forced));
   assert.equal(forced.ok && forced.value.balanceAfter, -3, "an allowed negative count is recorded, not hidden");
 
@@ -117,13 +117,13 @@ test("M2: a reason is mandatory, and exactly one of delta/setTo is required", as
   const svc = new InventoryService();
   const fx = await fixture(10);
 
-  const noReason = await svc.adjust(fx.storeId, fx.actorId, { productId: fx.productId, delta: 1, reason: "  " });
+  const noReason = await svc.adjust(fx.storeId, fx.actorId, { productId: fx.productId, warehouseId: fx.warehouseId, delta: 1, reason: "  " });
   assert.equal(noReason.ok, false);
   assert.equal(noReason.ok === false && noReason.error.type, "validation");
 
-  const both = await svc.adjust(fx.storeId, fx.actorId, { productId: fx.productId, delta: 1, setTo: 5, reason: "Ambiguous" });
+  const both = await svc.adjust(fx.storeId, fx.actorId, { productId: fx.productId, warehouseId: fx.warehouseId, delta: 1, setTo: 5, reason: "Ambiguous" });
   assert.equal(both.ok, false);
-  const neither = await svc.adjust(fx.storeId, fx.actorId, { productId: fx.productId, reason: "Nothing to do" });
+  const neither = await svc.adjust(fx.storeId, fx.actorId, { productId: fx.productId, warehouseId: fx.warehouseId, reason: "Nothing to do" });
   assert.equal(neither.ok, false);
   assert.equal(await prisma.stockMovement.count({ where: { storeId: fx.storeId } }), 0);
 });
@@ -133,7 +133,7 @@ test("M2: tenant isolation — another store's product and warehouse are not adj
   const a = await fixture(10);
   const b = await fixture(10);
 
-  const foreignProduct = await svc.adjust(b.storeId, b.actorId, { productId: a.productId, delta: 1, reason: "Cross tenant" });
+  const foreignProduct = await svc.adjust(b.storeId, b.actorId, { productId: a.productId, warehouseId: b.warehouseId, delta: 1, reason: "Cross tenant" });
   assert.equal(foreignProduct.ok, false);
   assert.equal(foreignProduct.ok === false && foreignProduct.error.type, "not_found");
 
@@ -146,8 +146,8 @@ test("M2: adjustment history and the raw stock flow read back with actor names, 
   const svc = new InventoryService();
   const fx = await fixture(10);
 
-  await svc.adjust(fx.storeId, fx.actorId, { productId: fx.productId, delta: 2, reason: "First" });
-  await svc.adjust(fx.storeId, fx.actorId, { productId: fx.productId, delta: 3, reason: "Second" });
+  await svc.adjust(fx.storeId, fx.actorId, { productId: fx.productId, warehouseId: fx.warehouseId, delta: 2, reason: "First" });
+  await svc.adjust(fx.storeId, fx.actorId, { productId: fx.productId, warehouseId: fx.warehouseId, delta: 3, reason: "Second" });
 
   const history = await svc.adjustments(fx.storeId, { productId: fx.productId });
   assert.equal(history.count, 2, "adjustments() = ADJUST rows only");

@@ -249,7 +249,8 @@ export async function adjustStock(
   input: {
     storeId: string;
     productId: string;
-    warehouseId?: string | null;
+    /** The store whose shelf changes. Always named (2026-11-21): there is no "main store" guess here. */
+    warehouseId: string;
     /** Signed change (+add / −remove). Mutually exclusive with `setTo`. */
     delta?: number;
     /** Absolute counted quantity (stock-take). Mutually exclusive with `delta`. */
@@ -276,23 +277,13 @@ export async function adjustStock(
   }
   if (await isUntracked(tx, storeId, productId)) return { levelId: "", balanceAfter: 0, delta: 0 }; // Track stock off
 
-  // Resolve the level: the requested warehouse, else the store's default, else the first row.
-  let level = input.warehouseId
-    ? await tx.stockLevel.findFirst({ where: { storeId, productId, warehouseId: input.warehouseId } })
-    : await tx.stockLevel.findFirst({
-        where: { storeId, productId, warehouse: { isDefault: true } },
-      });
-  // Legacy: a location-less row, only when no location was asked for.
-  if (!level && !input.warehouseId) level = await tx.stockLevel.findFirst({ where: { storeId, productId, warehouseId: null } });
-  if (!level) {
-    // Rice Ops M1: a new row goes to the asked location, else the default location.
-    // (A store that predates locations keeps the legacy location-less row until the
-    // M1 migration / setup-locations script gives it one.)
-    const warehouseId = input.warehouseId ?? (await defaultLocationId(tx, storeId));
-    level = await tx.stockLevel.create({
-      data: { storeId, productId, warehouseId, quantityOnHand: 0, quantityReserved: 0 },
-    });
-  }
+  if (!input.warehouseId) throw new Error("adjustStock needs the store (warehouseId)");
+  // That store's shelf row, made (at 0) the first time this rice is counted there.
+  const level = await tx.stockLevel.upsert({
+    where: { storeId_productId_warehouseId: { storeId, productId, warehouseId: input.warehouseId } },
+    create: { storeId, productId, warehouseId: input.warehouseId, quantityOnHand: 0, quantityReserved: 0 },
+    update: {},
+  });
 
   const delta = input.setTo !== undefined ? input.setTo - level.quantityOnHand : (input.delta as number);
   if (delta === 0) {

@@ -400,7 +400,7 @@ export const STOCK_ADJUST_DTO: ObjectRule = {
   kind: "object",
   fields: {
     productId: { kind: "string", required: true, min: 6, max: 64 },
-    warehouseId: { kind: "string", min: 6, max: 64 },
+    warehouseId: { kind: "string", required: true, min: 6, max: 64 },
     // One of delta / setTo (enforced in the service so the error message is human).
     delta: { kind: "int", min: -1_000_000, max: 1_000_000 },
     setTo: { kind: "int", min: 0, max: 1_000_000 },

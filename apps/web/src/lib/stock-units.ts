@@ -14,3 +14,9 @@ export function adjustUnits(r: UnitsOf, text: string): number {
   if (isLooseItem(r)) return Math.round(n * 1000);
   return Number.isInteger(n) ? n : Number.NaN;
 }
+
+/** Stock units back to what people type: grams → kilos for loose rice. 0 = empty box. */
+export function unitsText(r: UnitsOf, units: number): string {
+  if (!units) return "";
+  return isLooseItem(r) ? String(units / 1000) : String(units);
+}

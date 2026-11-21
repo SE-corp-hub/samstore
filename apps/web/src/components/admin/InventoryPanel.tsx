@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { API_URL } from "../../config";
 import { adminHeaders, roleCan } from "../../lib/admin";
 import { kg, peso } from "../../lib/number-format";
-import { adjustUnits, isLooseItem } from "../../lib/stock-units";
+import { adjustUnits, isLooseItem, unitsText } from "../../lib/stock-units";
 
 interface InvItem {
   photoKey?: string | null;
@@ -14,10 +14,10 @@ interface InvItem {
   reorderThreshold: number; costMinor: number; valueMinor: number; status: "in" | "low" | "out";
   stockBaseUnit: string | null; stockBaseQuantity: number | null;
   stockConversionFamily: string | null;
-  stockLevels: { warehouseId: string | null; quantityOnHand: number; quantityReserved: number }[];
+  stockLevels: { warehouseId: string | null; quantityOnHand: number; quantityReserved: number; reorderThreshold?: number }[];
   variants: { id: string; name: string; sku: string; costMinor: number; stockBaseQuantity: number | null; quantityOnHand: number; quantityReserved: number; availableQuantity: number; isActive: boolean }[];
 }
-interface Warehouse { id: string; name: string; isDefault: boolean }
+interface Warehouse { id: string; name: string; isDefault: boolean; code?: string | null; type?: string; isActive?: boolean }
 interface Category { id: string; name: string }
 interface ConversionOption {
   key: string;
@@ -99,7 +99,35 @@ export default function InventoryPanel({ role = "" }: { role?: string }) {
   const [adjustError, setAdjustError] = useState<string | null>(null);
   // Which shelf Adjust changes: the location chosen in the filter, else the main store (asked in the dialog).
   const [adjustWh, setAdjustWh] = useState("");
-  const shelfOf = (r: InvItem, wh: string) => r.stockLevels.find((l) => l.warehouseId === wh) ?? { quantityOnHand: 0, quantityReserved: 0 };
+  const shelfOf = (r: InvItem, wh: string) => r.stockLevels.find((l) => l.warehouseId === wh) ?? { quantityOnHand: 0, quantityReserved: 0, reorderThreshold: 0 };
+  // The places stock can be changed at: open stores, Bodega and the Buffer (turned-off ones are left out).
+  const places = warehouses.filter((w) => w.isActive !== false);
+  const adjustPlace = places.find((w) => w.id === adjustWh) ?? null;
+  // Each store's own reorder level, saved from the Adjust dialog.
+  const [reorderAt, setReorderAt] = useState("");
+  const [reorderBusy, setReorderBusy] = useState(false);
+  const [reorderMsg, setReorderMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const saveReorder = async () => {
+    if (!adjust || !adjustWh) return;
+    const level = reorderAt.trim() === "" ? 0 : adjustUnits(adjust, reorderAt);
+    if (!Number.isFinite(level) || level < 0) { setReorderMsg({ ok: false, text: "Enter 0 or more" }); return; }
+    setReorderBusy(true);
+    try {
+      const res = await fetch(`${API_URL}/admin/stock/reorder`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...adminHeaders() },
+        body: JSON.stringify({ productId: adjust.id, warehouseId: adjustWh, reorderThreshold: level }),
+      });
+      const d = await res.json().catch(() => null);
+      if (!res.ok) { setReorderMsg({ ok: false, text: d?.message ?? (Array.isArray(d?.errors) ? d.errors.join("; ") : "Could not save") }); return; }
+      setReorderMsg({ ok: true, text: level > 0 ? `Saved. ${adjustPlace?.name ?? "This store"} shows Low at ${qtyText(adjust, level)} or less.` : `Saved. No low-stock alert at ${adjustPlace?.name ?? "this store"}.` });
+      await load();
+    } catch {
+      setReorderMsg({ ok: false, text: "Could not save" });
+    } finally {
+      setReorderBusy(false);
+    }
+  };
   const [historyProduct, setHistoryProduct] = useState("");
   const [history, setHistory] = useState<{
     id: string; productName: string; sku: string | null; variantName?: string | null; variantSku?: string | null; delta: number; type: string;
@@ -433,7 +461,7 @@ export default function InventoryPanel({ role = "" }: { role?: string }) {
                   <td className="text-end">
                     {canChange && (
                       <button type="button" className="btn btn-sm btn-outline-primary text-nowrap" aria-label={`Adjust ${r.name}`}
-                        onClick={() => { setAdjust(r); setAdjustWh(warehouseId || warehouses.find((w) => w.isDefault)?.id || warehouses[0]?.id || ""); setAdjustMode("delta"); setAdjustQty(""); setAdjustReason(""); setAdjustAllowNegative(false); setAdjustError(null); }}>
+                        onClick={() => { const wh = warehouseId || places.find((w) => w.isDefault)?.id || places[0]?.id || ""; setAdjust(r); setAdjustWh(wh); setReorderAt(unitsText(r, shelfOf(r, wh).reorderThreshold ?? 0)); setReorderMsg(null); setAdjustMode("delta"); setAdjustQty(""); setAdjustReason(""); setAdjustAllowNegative(false); setAdjustError(null); }}>
                         <i className="bi bi-sliders me-1"></i>Adjust
                       </button>
                     )}
@@ -452,16 +480,22 @@ export default function InventoryPanel({ role = "" }: { role?: string }) {
             <div className="modal-dialog modal-dialog-centered">
               <div className="modal-content">
                 <div className="modal-header">
-                  <h5 className="modal-title" id="adjustModalTitle"><i className="bi bi-sliders me-1"></i>Adjust {adjust.name}</h5>
+                  <h5 className="modal-title" id="adjustModalTitle"><i className="bi bi-sliders me-1"></i>Adjust {adjust.name}{adjustPlace ? <> at <span className="text-nowrap">{adjustPlace.name}</span></> : null}</h5>
                   <button type="button" className="btn-close" aria-label="Close" onClick={() => setAdjust(null)}></button>
                 </div>
                 <div className="modal-body">
-                  <label className="form-label small mb-1" htmlFor="adjustWh">Store</label>
-                  <select id="adjustWh" className="form-select form-select-sm mb-2" value={adjustWh} onChange={(e) => setAdjustWh(e.target.value)}>
-                    {warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
-                  </select>
+                  <div className="small text-muted mb-1" id="adjustWhLabel">Which store's stock</div>
+                  <div className="d-flex flex-wrap gap-2 mb-2" role="group" aria-labelledby="adjustWhLabel">
+                    {places.map((w) => (
+                      <button key={w.id} type="button" aria-pressed={w.id === adjustWh}
+                        className={`btn ${w.id === adjustWh ? "btn-dark" : "btn-outline-dark"}`} style={{ minHeight: 44 }}
+                        onClick={() => { setAdjustWh(w.id); setReorderAt(unitsText(adjust, shelfOf(adjust, w.id).reorderThreshold ?? 0)); setReorderMsg(null); }}>
+                        {w.code ? `${w.code} · ` : ""}{w.name}
+                      </button>
+                    ))}
+                  </div>
                   <p className="small mb-2">
-                    Now at this store: <strong>{qtyText(adjust, shelfOf(adjust, adjustWh).quantityOnHand)}</strong> on hand · {qtyText(adjust, shelfOf(adjust, adjustWh).quantityReserved)} held for orders
+                    Now at <strong>{adjustPlace?.name ?? "this store"}</strong>: <strong>{qtyText(adjust, shelfOf(adjust, adjustWh).quantityOnHand)}</strong> on hand · {qtyText(adjust, shelfOf(adjust, adjustWh).quantityReserved)} held for orders
                   </p>
                   <div className="btn-group btn-group-sm w-100 mb-2" role="group" aria-label="Adjustment mode">
                     <button type="button" className={`btn ${adjustMode === "delta" ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setAdjustMode("delta")}>
@@ -489,6 +523,15 @@ export default function InventoryPanel({ role = "" }: { role?: string }) {
                     </div>
                   )}
                   {adjustError && <div className="alert alert-danger py-1 px-2 small mt-2 mb-0">{adjustError}</div>}
+                  <hr className="my-3" />
+                  <label className="form-label small mb-1" htmlFor="reorderAt">Reorder at {adjustPlace?.name ?? "this store"}{isLooseItem(adjust) ? ", in kilos" : ""} <span className="text-muted">(0 = no alert)</span></label>
+                  <div className="d-flex gap-2">
+                    <input id="reorderAt" className="form-control" type="number" min={0} step={isLooseItem(adjust) ? "0.5" : "1"} inputMode="decimal" value={reorderAt} onChange={(e) => { setReorderAt(e.target.value); setReorderMsg(null); }} placeholder="0" />
+                    <button type="button" className="btn btn-outline-primary text-nowrap" style={{ minHeight: 44 }} disabled={reorderBusy} onClick={() => void saveReorder()}>
+                      {reorderBusy ? "Saving…" : "Save level"}
+                    </button>
+                  </div>
+                  {reorderMsg && <div className={`small mt-1 ${reorderMsg.ok ? "text-success" : "text-danger"}`} role="status">{reorderMsg.text}</div>}
                 </div>
                 <div className="modal-footer">
                   <button type="button" className="btn btn-outline-secondary" onClick={() => setAdjust(null)}>Cancel</button>
