@@ -967,7 +967,7 @@ export default function BentaPanel() {
           {/* The reason: three buttons, one already chosen, in one row right under the pad (no drop-down, no
               scrolling). Always there, so nothing moves when the first digit is typed; it is only saved with a new price. */}
           <div className="mt-2"><ReasonButtons value={reasonOk(editing.reason) ? editing.reason! : lastReason()} onChange={(v) => setEditing({ ...editing, reason: v })} /></div>
-          {it.tracked && (fromOpen || short) && (
+          {it.tracked && !it.loose && (fromOpen || short) && (
             <div className="mt-2">
               <LocationPicker id="bt-from" size="md" label="Taken from (where the item comes from)" locations={fromChoices} value={from}
                 labelFor={(l) => `${l.name}${l.id === locationId ? " (here)" : ""} — ${it.loose ? kg(it.stock[l.id] ?? 0) : `${it.stock[l.id] ?? 0}`}`}
@@ -990,7 +990,8 @@ export default function BentaPanel() {
           <div className="d-flex align-items-stretch gap-2 mt-2 pos-actions">
             <button type="button" className="btn btn-outline-dark btn-lg text-nowrap" onClick={() => { setEditing(null); setEditIdx(null); }}>Back</button>
             {/* On the Back / Save line, so it costs no row of its own. */}
-            {it.tracked && fromChoices.length > 1 && !fromOpen && !short && (
+            {/* Kilo rice is scooped from this store's rack only (open a sack here when it runs out). */}
+            {it.tracked && !it.loose && fromChoices.length > 1 && !fromOpen && !short && (
               <button type="button" className="btn btn-outline-primary text-nowrap" aria-label="Take from another store" onClick={() => setFromOpen(true)}><i className="bi bi-shop me-1" aria-hidden="true"></i>Other store</button>
             )}
             <button type="button" className="btn btn-success btn-lg flex-grow-1 text-nowrap" disabled={c.totalMinor <= 0 || short || !reasonGiven}
