@@ -35,6 +35,7 @@ after(async () => {
   }
   if (createdStoreIds.length > 0) {
     await prisma.category.deleteMany({ where: { storeId: { in: createdStoreIds } } });
+    await prisma.warehouse.deleteMany({ where: { storeId: { in: createdStoreIds } } });
     await prisma.store.deleteMany({ where: { id: { in: createdStoreIds } } });
   }
   await prisma.$disconnect();
@@ -269,4 +270,24 @@ test("rename a rice with stock whose family differs only in case", async () => {
   assert.equal(after.stockConversionFamily, "Bigas", "the saved spelling stays");
   const moved = await svc.update(store.id, p.id, { stockBaseUnit: "g", stockBaseQuantity: 5000, stockConversionFamily: "bigas" });
   assert.equal(moved.ok, false, "a real size change with stock is still refused");
+});
+
+// 2026-11-21: the edit form sent the total of all stores as "stock"; saving wrote it to the main store.
+// An edit must leave every store's stock alone, and the reorder level shown is the main store's.
+test("editing a product never changes stock at any store", async () => {
+  const store = await makeStore();
+  const main = await prisma.warehouse.create({ data: { storeId: store.id, name: "Main", isDefault: true } });
+  const s2 = await prisma.warehouse.create({ data: { storeId: store.id, name: "S2" } });
+  const p = await prisma.product.create({ data: { storeId: store.id, name: `${run} Dinorado`, sku: tag("DIN"), priceMinor: 160000, unit: "sako", stockBaseUnit: "g", stockBaseQuantity: 25000, stockConversionFamily: "bigas" } });
+  createdProductIds.push(p.id);
+  await prisma.stockLevel.create({ data: { storeId: store.id, productId: p.id, warehouseId: s2.id, quantityOnHand: 10, reorderThreshold: 9 } });
+  await prisma.stockLevel.create({ data: { storeId: store.id, productId: p.id, warehouseId: main.id, quantityOnHand: 10, reorderThreshold: 3 } });
+  const listed = (await svc.listFiltered(store.id, {})).find((x) => x.id === p.id)!;
+  assert.equal(listed.quantityOnHand, 20, "the list shows the total of all stores");
+  assert.equal(listed.reorderThreshold, 3, "the reorder level is the main store's");
+  const r = await svc.update(store.id, p.id, { name: `${run} Dinorado new`, stock: listed.quantityOnHand, reorderThreshold: listed.reorderThreshold });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  const rows = await prisma.stockLevel.findMany({ where: { productId: p.id }, orderBy: { quantityOnHand: "asc" } });
+  assert.deepEqual(rows.map((x) => x.quantityOnHand), [10, 10], "both stores keep 10");
+  assert.equal(rows.find((x) => x.warehouseId === s2.id)?.reorderThreshold, 9, "S2's reorder level is not touched");
 });

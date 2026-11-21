@@ -418,7 +418,8 @@ export default function ProductsPanel({ role = "" }: { role?: string }) {
         stockBaseUnit: measure.stockBaseUnit,
         stockBaseQuantity: measure.stockBaseQuantity,
         stockConversionFamily: form.conversionEnabled ? form.stockConversionFamily.trim() || null : null,
-        stock: form.stock === "" ? undefined : parseInt(form.stock, 10),
+        // Opening stock is for a new product only: an edit never changes stock (the box showed every store's total).
+        stock: modal.editing || form.stock === "" ? undefined : parseInt(form.stock, 10),
         categorySlug: creatingCategory ? undefined : form.categorySlug || undefined,
         categoryName: !modal.editing && creatingCategory ? form.categoryName.trim() || undefined : undefined,
         description: form.description || undefined,
@@ -782,10 +783,17 @@ export default function ProductsPanel({ role = "" }: { role?: string }) {
                     </fieldset>
                     {modal.editing && <PriceHistoryList productId={modal.editing.id} />}
                     <div className="row">
-                      <fieldset className="col-6 mb-2" disabled={locked}>
-                        <label className="form-label small">Opening stock</label>
-                        <WholeInput value={form.stock} onChange={(v) => setForm({ ...form, stock: v })} placeholder="0" />
-                      </fieldset>
+                      {modal.editing ? (
+                        <div className="col-6 mb-2">
+                          <div className="form-label small">Stock</div>
+                          <div className="small text-muted">Change stock with Stock in, Move stock, Count or Inventory → Adjust.</div>
+                        </div>
+                      ) : (
+                        <fieldset className="col-6 mb-2" disabled={locked}>
+                          <label className="form-label small">Opening stock</label>
+                          <WholeInput value={form.stock} onChange={(v) => setForm({ ...form, stock: v })} placeholder="0" />
+                        </fieldset>
+                      )}
                       <fieldset className="col-6 mb-2" disabled={viewOnly}>
                         <label className="form-label small">Reorder at</label>
                         <WholeInput placeholder="0" title="Flag LOW stock at or below this on-hand qty" value={form.reorderThreshold} onChange={(v) => setForm({ ...form, reorderThreshold: v })} />
