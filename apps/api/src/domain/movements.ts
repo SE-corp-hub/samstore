@@ -208,7 +208,7 @@ export async function deductStock(
         continue;
       }
       const available = pick.reason === "short" ? pick.available : 0;
-      throw new InsufficientStockError(l.productId, l.quantity - available, pick.elsewhere);
+      throw new InsufficientStockError(l.productId, l.quantity - available, "elsewhere" in pick ? pick.elsewhere : 0);
     }
     const balanceAfter = await takeAvailable(tx, pick.level.id, l.quantity);
     if (balanceAfter === null && opts?.allowBelowZero) {
