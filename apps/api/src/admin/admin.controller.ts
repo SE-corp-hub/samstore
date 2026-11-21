@@ -400,6 +400,8 @@ export class AdminController {
       @Query("payment") payment?: string,
       @Query("fulfillment") fulfillment?: string,
       @Headers("x-store-id") headerStoreId?: string,
+      /** One store's orders (owner/manager store buttons): a location id, or "none" = no store named yet. */
+      @Query("location") location?: string,
     ) {
       const user = req.user;
     requireUser(user);
@@ -410,7 +412,7 @@ export class AdminController {
               throw new HttpException({ type: "validation", errors: [`${key} must be an ISO date`] }, HttpStatus.UNPROCESSABLE_ENTITY);
             }
           }
-          const cacheKeyStr = cacheKey("orders", storeId, wallKey(), status ?? "", from ?? "", to ?? "", customer ?? "", source ?? "", payment ?? "", fulfillment ?? "");
+          const cacheKeyStr = cacheKey("orders", storeId, wallKey(), status ?? "", from ?? "", to ?? "", customer ?? "", source ?? "", payment ?? "", fulfillment ?? "", location ?? "");
                   const hit = await cacheGet<unknown[]>(cacheKeyStr);
                   if (hit) return { orders: hit, storeId };
                   // Step 6: a store login lists its own store's orders only.
@@ -438,6 +440,7 @@ export class AdminController {
                     if (payment) where.paymentMethod = payment; // cod | credit
                     // M8: the fulfillment facet now filters the EXPLICIT fulfillmentType enum.
                     if (fulfillment) where.fulfillmentType = fulfillment === "pickup" ? "PICKUP" : "DELIVERY";
+                    if (location) where.sellingLocationId = location === "none" ? null : location;
       const list = await prisma.order.findMany({
             where,
             orderBy: { createdAt: "desc" },
@@ -448,6 +451,8 @@ export class AdminController {
                         deliveryType: true, deliveryAddressLine1: true, fulfillmentType: true,
                         // SE Corp Hub orders: the channel, the selling page and the hub's own number (row label).
                         sourceChannel: true, sourcePage: true, externalRef: true, updatedAt: true,
+                        // Which store the order belongs to (null: none named yet): the store tag on the row.
+                        sellingLocationId: true,
                         // What to pack, on the row: name and how many (no money, so it stays small).
                         items: { select: { productName: true, quantity: true, soldBy: true } }, // soldBy: kilo rice is grams, shown in kg
                                                 // signatureData (a picture, often 10+ KB) only comes with one order (GET orders/:id):
@@ -462,7 +467,7 @@ export class AdminController {
           /** GET /admin/orders/counts — per-status order counts (for tab badges). Cached 5s.
                         Accepts the SAME range/customer filters as the list so badges match the visible rows. */
                     @Get("orders/counts")
-                    async orderCounts(@Req() req: Request & { user?: AuthPrincipal }, @Query("status") status?: string, @Query("from") from?: string, @Query("to") to?: string, @Query("customer") customer?: string, @Query("source") source?: string, @Query("payment") payment?: string, @Query("fulfillment") fulfillment?: string, @Headers("x-store-id") headerStoreId?: string) {
+                    async orderCounts(@Req() req: Request & { user?: AuthPrincipal }, @Query("status") status?: string, @Query("from") from?: string, @Query("to") to?: string, @Query("customer") customer?: string, @Query("source") source?: string, @Query("payment") payment?: string, @Query("fulfillment") fulfillment?: string, @Headers("x-store-id") headerStoreId?: string, @Query("location") location?: string) {
                                           const user = req.user;
     requireUser(user);
                                           const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.VIEW);
@@ -471,9 +476,9 @@ export class AdminController {
                                               throw new HttpException({ type: "validation", errors: [`${key} must be an ISO date`] }, HttpStatus.UNPROCESSABLE_ENTITY);
                                             }
                                           }
-                                          const key = cacheKey("orders-counts", storeId, wallKey(), status ?? "", from ?? "", to ?? "", customer ?? "", source ?? "", payment ?? "", fulfillment ?? "");
-                                          const hit = await cacheGet<unknown>(key);
-                                          if (hit) return { counts: hit, storeId };
+                                          const key = cacheKey("orders-counts", storeId, wallKey(), status ?? "", from ?? "", to ?? "", customer ?? "", source ?? "", payment ?? "", fulfillment ?? "", location ?? "");
+                                          const hit = await cacheGet<{ counts: Record<string, number>; byLocation: Record<string, number> }>(key);
+                                          if (hit && typeof hit === "object" && "byLocation" in hit) return { ...hit, storeId };
                                           const where: Record<string, unknown> = { storeId, AND: [orderWall()] };
                                           if (from || to) {
                                             where.createdAt = {};
@@ -495,11 +500,20 @@ export class AdminController {
                                                                   if (statuses.length === 0) return { counts: {}, storeId };
                                                                   where.status = { in: statuses };
                                                                 }
-                                                                const groups = await prisma.order.groupBy({ by: ["status"], where, _count: { _all: true } });
+                                                                // Store buttons: how many orders each store has ("none" = no store named yet), with the same
+                                                                // day and filters as the list, so the numbers match what the owner sees.
+                                                                const byLocationWhere = { ...where };
+                                                                if (location) where.sellingLocationId = location === "none" ? null : location;
+                                                                const [groups, places] = await Promise.all([
+                                                                  prisma.order.groupBy({ by: ["status"], where, _count: { _all: true } }),
+                                                                  prisma.order.groupBy({ by: ["sellingLocationId"], where: byLocationWhere as never, _count: { _all: true } }),
+                                                                ]);
                                           const counts: Record<string, number> = {};
                                           for (const g of groups) counts[g.status] = g._count._all;
-                                          await cacheSet(key, counts, 5_000);
-                                          return { counts, storeId };
+                                          const byLocation: Record<string, number> = {};
+                                          for (const g of places) byLocation[g.sellingLocationId ?? "none"] = g._count._all;
+                                          await cacheSet(key, { counts, byLocation }, 5_000);
+                                          return { counts, byLocation, storeId };
                                         }
 
   /**
