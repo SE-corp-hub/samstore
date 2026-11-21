@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   getAdminToken, getAdminStoreId, setAdminStoreId, getAdminRole, clearAdminSession,
-  NAV_GROUPS, MENU_HIDDEN, REPORT_SECTIONS, isReportSection, allowedTabs, setHomeLocation, adminHeaders, defaultTabFor, isOwnerRole, handleUnauthorized, STORES_CHANGED_EVENT, navItemFor, navGroupFor, toneFor, getHomeLocation, isStoreLogin,
+  NAV_GROUPS, MENU_HIDDEN, REPORT_SECTIONS, isReportSection, allowedTabs, setHomeLocation, adminHeaders, defaultTabFor, isOwnerRole, handleUnauthorized, STORES_CHANGED_EVENT, navItemFor, navGroupFor, toneFor, getHomeLocation, isStoreLogin, isStoreHead,
 } from "../../../lib/admin";
 import dynamic from "next/dynamic";
 import { API_URL } from "../../../config";
@@ -33,7 +33,7 @@ import { OPEN_ORDER_EVENT, OPEN_ORDER_KEY } from "../../../lib/order-pulse";
 import { anyLockFor, isScreenClosed, isScreenLocked, lockAgain, storeLockOf, whoLocks, useFeatureLock } from "../../../lib/feature-lock";
 
 /** Rice Ops M10: the store screens get the large, high-contrast look (globals.css .rice-ui). */
-const RICE_TABS = new Set(["zreads", "pos", "preorders", "orders", "utang", "utangrice", "agentorders", "agent", "approvals", "moves", "returns", "resack", "pasok", "purchaseorders", "bilangin", "storereport", "profit", "payable", "ulat", "drafts", "kargadors", "settings", "expenses", "cash", "storeprices", "storelock", "mystore", "storelink",
+const RICE_TABS = new Set(["zreads", "pos", "preorders", "orders", "utang", "utangrice", "agentorders", "agent", "approvals", "moves", "returns", "resack", "pasok", "purchaseorders", "bilangin", "storereport", "profit", "payable", "ulat", "drafts", "kargadors", "settings", "expenses", "cash", "storeprices", "storelock", "mystore", "whatican", "storelink",
   // 2026-11-12, step 4 of the app review: the last old-look screens get the same large, easy-read look.
   "products", "inventory", "warehouses", "customers", "overview", "reports"]);
 // The landing panel stays eager (it is the first paint); every other panel loads when
@@ -55,6 +55,8 @@ interface PanelProps { onNavigate?: (tab: string) => void; role?: string; onAgen
 const OrdersPanel = panel(() => import("../../../components/admin/OrdersPanel"));
 const ProductsPanel = panel(() => import("../../../components/admin/ProductsPanel"));
 const SettingsPanel = panel(() => import("../../../components/admin/SettingsPanel"));
+import { roleWord } from "../../../lib/who-can";
+const WhatICanDo = panel(() => import("../../../components/admin/WhatICanDo"));
 const VouchersPanel = panel(() => import("../../../components/admin/VouchersPanel"));
 const StoresPanel = panel(() => import("../../../components/admin/StoresPanel"));
 const CustomersPanel = panel(() => import("../../../components/admin/CustomersPanel"));
@@ -457,7 +459,8 @@ export default function AdminDashboard() {
       case "export": return <ExportPanel />;
       case "orders": return BAR_ROLES.includes(role) ? <OrdersWithAgents /> : <OrdersPanel />;
       case "products": return <ProductsPanel role={role} />;
-      case "settings": return <SettingsPanel role={role} />;
+      case "settings": return <SettingsPanel role={role} onNavigate={setTab} />;
+      case "whatican": return <WhatICanDo role={role} />;
       case "countersettings": return <CounterSettingsPanel />;
       case "vouchers": return <VouchersPanel />;
       case "team": return <TeamPanel />;
@@ -542,7 +545,7 @@ export default function AdminDashboard() {
             <i className="bi bi-person-circle" aria-hidden="true"></i>
             <div className="min-w-0">
               <div className="side-email" title={email || "Admin"}>{email || "Admin"}</div>
-              <div className="side-role" title={`${role}${active?.name ? ` · ${active.name}` : ""}`}>{role}{active?.name ? ` · ${active.name}` : ""}</div>
+              <div className="side-role" title={`${roleWord(role, isStoreHead())}${active?.name ? ` · ${active.name}` : ""}`}>{roleWord(role, isStoreHead())}{active?.name ? ` · ${active.name}` : ""}</div>
             </div>
           </div>
           <div className="side-actions">
@@ -561,7 +564,7 @@ export default function AdminDashboard() {
             <span className="menu-avatar" aria-hidden="true">{(email || "A").trim().charAt(0).toUpperCase()}</span>
             <div className="min-w-0">
               <div className="menu-who-name">{email || "Admin"}</div>
-              <div className="menu-who-role">{role}{active?.name ? ` · ${active.name}` : ""}</div>
+              <div className="menu-who-role">{roleWord(role, isStoreHead())}{active?.name ? ` · ${active.name}` : ""}</div>
             </div>
           </div>
           <button type="button" className="btn menu-act w-100" onClick={() => void switchUser()}>
@@ -658,7 +661,7 @@ export default function AdminDashboard() {
                 </button>
               )}
               <QueueBadge />
-              <span className="badge text-bg-primary role-badge text-uppercase d-none d-sm-inline">{role}</span>
+              <span className="badge text-bg-primary role-badge text-uppercase d-none d-sm-inline">{roleWord(role, isStoreHead())}</span>
 {/* Log out lives in the Menu (bottom) only: the picture-only button here was one wrong tap away from locking the tablet out. */}
             </div>
           </div>

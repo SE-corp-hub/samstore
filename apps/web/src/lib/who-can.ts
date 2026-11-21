@@ -63,7 +63,7 @@ export const WHO_SAYS: Record<Who, string> = {
 export const SCOPE_LABEL: Record<Scope, string> = {
   business: "Whole business",
   store: "Each store",
-  tablet: "This tablet only",
+  tablet: "Only this tablet (or this PC)",
   me: "Only you",
 };
 
@@ -71,7 +71,7 @@ export const SCOPE_LABEL: Record<Scope, string> = {
 export const SCOPE_SAYS: Record<Scope, string> = {
   business: "Changes every store at once.",
   store: "Changes one store. You choose which.",
-  tablet: "Changes only this tablet. Other tablets keep their own.",
+  tablet: "Changes only the tablet or PC you are using now. Others keep their own.",
   me: "Changes only your own login.",
 };
 
@@ -100,4 +100,13 @@ export function lockNote(id: string): string {
   if (!r) return "You cannot change this.";
   if (r.rights.manager === "yes" || r.rights.manager === "own") return "Only the owner or a manager can change this.";
   return "Only the owner can change this.";
+}
+
+/** The login's role in plain words, for the top bar and the menu ("STAFF" told a store head nothing). */
+export function roleWord(role: string, isHead: boolean): string {
+  if (role === "PLATFORM_ADMIN") return "Platform admin";
+  if (role === "SALES_AGENT") return "Sales agent";
+  if (role === "DELIVERY") return "Delivery";
+  const who = whoIs(role, isHead);
+  return who ? WHO_LABEL[who] : role;
 }

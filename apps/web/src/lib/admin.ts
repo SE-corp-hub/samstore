@@ -243,6 +243,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { id: "countersettings", label: "Counter & printer", icon: "bi-sliders", hint: "Cash drawer and printer here" },
       { id: "storelock", label: "Store PIN lock", icon: "bi-shield-lock", hint: "Screens that ask for this store's PIN" },
       { id: "mystore", label: "This store", icon: "bi-shop", hint: "Open day and Z-read, drawer, receipt details" },
+      { id: "whatican", label: "What I can do", icon: "bi-question-circle", hint: "What your login can change, and who to ask" },
       // Hidden: no role list includes them. Add the id to OWNER_TABS to show one again.
       // Purchases (2026-11-12): it added stock to the main store with no signature, a second way in beside Stock in,
       // so one delivery could be counted twice. Rice arrives through Stock in; what is owed is on Supplier orders.
@@ -307,7 +308,7 @@ export function toneFor(id: string): NavTone {
 
 // 2026-11-12 (one screen per job): Agent orders opens from Orders (a switch at the top), and Analytics
 // (platform-wide trends) is for the platform admin only; Purchases and Store Link are hidden (see NAV_GROUPS).
-const OWNER_TABS = ["overview", "pos", "preorders", "orders", "utang", "products", "inventory", "cash", "expenses", "team", "customers", "reports", "settings", "warehouses", "approvals", "moves", "returns", "resack", "drafts", "kargadors", "pasok", "purchaseorders", "utangrice", "bilangin", "storereport", "profit", "payable", "ulat", "export", "storeprices", "zreads"];
+const OWNER_TABS = ["overview", "pos", "preorders", "orders", "utang", "products", "inventory", "cash", "expenses", "team", "customers", "reports", "settings", "warehouses", "approvals", "moves", "returns", "resack", "drafts", "kargadors", "pasok", "purchaseorders", "utangrice", "bilangin", "storereport", "profit", "payable", "ulat", "export", "storeprices", "zreads", "whatican"];
 
 /** Tab visibility per staff role (GET-level permissions from live API probes). */
 export const TABS_BY_ROLE: Record<string, string[]> = {
@@ -321,7 +322,7 @@ export const TABS_BY_ROLE: Record<string, string[]> = {
   // 2026-11-20 (owner's ask "hide reports on staff"): no report screens for staff — no Reports, Today,
   // Closing & stock, Store report, Money or Z-reads. Staff close the day on Count ("Close the store")
   // or with Close day on POS, so they do not need the Closing screen.
-  STAFF: ["pos", "preorders", "orders", "utang", "products", "inventory", "cash", "expenses", "customers", "countersettings", "moves", "returns", "resack", "drafts", "kargadors", "pasok", "utangrice", "bilangin"],
+  STAFF: ["pos", "preorders", "orders", "utang", "products", "inventory", "cash", "expenses", "customers", "countersettings", "moves", "returns", "resack", "drafts", "kargadors", "pasok", "utangrice", "bilangin", "whatican"],
   SALES_AGENT: ["agent", "overview", "orders", "customers", "reports"],
   DELIVERY: [],
 };

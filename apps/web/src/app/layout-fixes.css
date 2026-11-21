@@ -179,8 +179,21 @@
 }
 .lock-note .bi { color: #4a4640; font-size: 1.1rem; margin-top: 1px; flex-shrink: 0; }
 /* A heading above each kind of setting in the Settings list. */
-.settings-scope-head { margin: 16px 0 6px; }
-.settings-scope-head:first-child { margin-top: 0; }
+.settings-scope-head { margin: 0 0 6px; }
+section + section > .settings-scope-head { margin-top: 22px; }
 .settings-scope-head h2 { font-size: 1.05rem; font-weight: 700; margin: 0; display: flex; align-items: center; gap: 8px; }
 .settings-scope-head p { margin: 2px 0 0; color: #4a4640; font-size: .95rem; }
 .settings-row .bi-lock-fill { color: #4a4640; }
+/* "What I can do": one card per kind of right, big readable rows. */
+.wicd-screen { max-width: 860px; }
+.wicd-who { display: flex; align-items: center; gap: 8px; font-size: 1.1rem; margin: 0 0 4px; }
+.wicd-card { background: #fff; border: 1px solid #c9c4bc; border-left-width: 6px; border-radius: 12px; padding: 14px 16px; margin: 0 0 14px; }
+.wicd-card h2 { font-size: 1.2rem; font-weight: 700; display: flex; align-items: center; gap: 8px; margin: 0 0 8px; }
+.wicd-yes { border-left-color: #1E7B34; }
+.wicd-look { border-left-color: #4a4640; }
+.wicd-no { border-left-color: #8A5A00; }
+.wicd-list, .wicd-list ul { list-style: none; padding: 0; margin: 0; }
+.wicd-list > li { margin: 0 0 12px; }
+.wicd-list > li > .scope-tag { margin-bottom: 6px; }
+.wicd-list ul li { padding: 8px 0; border-bottom: 1px solid #eee9e1; font-size: 1.05rem; overflow-wrap: anywhere; }
+.wicd-list ul li:last-child { border-bottom: 0; }

@@ -197,7 +197,7 @@ function Field({ id, label, help, problem, children }: { id: string; label: stri
   );
 }
 
-export default function SettingsPanel({ role = "" }: { role?: string }) {
+export default function SettingsPanel({ role = "", onNavigate }: { role?: string; onNavigate?: (tab: string) => void }) {
   const storeId = getAdminStoreId();
   const who = whoIs(role, false); // Settings is for the owner and managers; store heads use This store
   /** May this login change the group? (Groups with no rule decide inside, e.g. This store.) */
@@ -679,7 +679,7 @@ export default function SettingsPanel({ role = "" }: { role?: string }) {
     <div className="settings-screen">
       <div className="d-flex flex-wrap align-items-baseline justify-content-between gap-2 mb-3">
         <h1 className="h4 mb-0">Settings</h1>
-        {data && <span className="text-muted">{data.name} · {data.status === "ACTIVE" ? "Active" : data.status} · {data.currencyCode} · {data.timezone}</span>}
+        {onNavigate && <button type="button" className="btn btn-outline-dark btn-lg" onClick={() => onNavigate("whatican")}><i className="bi bi-question-circle me-1" aria-hidden="true"></i>What I can do</button>}
       </div>
       {!form && error && <div className="alert alert-danger py-2" role="alert">{error} <button type="button" className="btn btn-outline-dark btn-sm ms-2" onClick={() => void load()}>Try again</button></div>}
       {form && (wide ? (

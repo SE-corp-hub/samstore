@@ -5,6 +5,7 @@
 // The head of a store may change that store's prices, never under the lowest price. The server
 // checks every rule again; this screen only makes them easy to follow.
 
+import { LockNote, ScopeTag } from "./WhoCan";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { API_URL } from "../../config";
 import { adminHeaders } from "../../lib/admin";
@@ -141,9 +142,12 @@ export default function StorePricesPanel() {
     <div className="prices-screen">
       <h1 className="h4 mb-1"><i className="bi bi-tags me-2" aria-hidden="true"></i>Store prices</h1>
       <p className="text-muted mb-3">
-        {canSetLowest ? "Each store can sell at its own price. Set the lowest price a store head may go down to." : "Your store's own selling prices. You cannot go under the lowest price set by the owner."}
+        {canSetLowest ? "Each store can sell at its own price. Set the lowest price a store head may go down to."
+          : home ? "Your store's own selling prices. You cannot go under the lowest price set by the owner."
+          : "Each store can sell at its own price. The owner sets the lowest price."}
       </p>
       {places.length > 0 && <StoreBar label="Prices of" locations={places} value={locationId} homeLocationId={home} onPick={setLocationId} size="md" />}
+      {locationId && <ScopeTag scope="store" storeName={places.find((p) => p.id === locationId)?.name} />}
       {error && <div className="alert alert-danger py-2" role="alert">{error} <button type="button" className="btn btn-outline-dark ms-2" onClick={load}>Try again</button></div>}
       {loading && !data && <p className="text-muted">Loading…</p>}
 
@@ -153,7 +157,7 @@ export default function StorePricesPanel() {
             <label className="form-label fw-semibold mb-1" htmlFor="sp-find">Find a rice</label>
             <input id="sp-find" className="form-control form-control-lg" type="search" value={find} onChange={(e) => setFind(e.target.value)} placeholder="Type a name" autoComplete="off" />
           </div>
-          {!canEdit && <div className="alert alert-secondary py-2">Only the owner or the head of this store can change these prices.</div>}
+          {!canEdit && <LockNote text="Only the owner, a manager or the head of this store can change these prices." />}
           {rows.length === 0 && <p className="text-muted">{find ? "No rice with that name." : "No rice yet."}</p>}
           <ul className="list-unstyled mb-0">
             {rows.map((row) => {
