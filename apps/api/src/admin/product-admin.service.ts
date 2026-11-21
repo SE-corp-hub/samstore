@@ -54,7 +54,7 @@ export class ProductAdminService {
       orderBy: { createdAt: "asc" },
       include: {
         category: { select: { id: true, name: true, slug: true } },
-        stockLevels: { select: { quantityOnHand: true, quantityReserved: true, reorderThreshold: true } },
+        stockLevels: { select: { quantityOnHand: true, quantityReserved: true, reorderThreshold: true, warehouse: { select: { isDefault: true } } } },
         variants: { orderBy: { name: "asc" }, select: { id: true, name: true, sku: true, priceMinor: true, costMinor: true, stockBaseQuantity: true, quantityOnHand: true, quantityReserved: true, isActive: true } },
         addons: { orderBy: { sortOrder: "asc" }, include: { options: { orderBy: { sortOrder: "asc" }, select: { id: true, name: true, priceMinor: true, isActive: true } } } },
         relationsFrom: { orderBy: { sortOrder: "asc" }, select: { kind: true, targetProduct: { select: { id: true, name: true, priceMinor: true, isActive: true } } } },
@@ -107,7 +107,8 @@ export class ProductAdminService {
       quantityOnHand: onHand,
       quantityReserved: reserved,
       availableQuantity: onHand - reserved,
-      reorderThreshold: p.stockLevels[0]?.reorderThreshold ?? 0,
+      // The main store's row: the one update() writes (any row used to be read, so a save copied it over).
+      reorderThreshold: (p.stockLevels.find((l) => l.warehouse?.isDefault) ?? p.stockLevels[0])?.reorderThreshold ?? 0,
       variants: p.variants.map((v) => ({
         id: v.id,
         name: v.name,
@@ -332,39 +333,10 @@ export class ProductAdminService {
           });
         }
       }
-      if (input.stock !== undefined && nextTrack) {
-        // Update stock on the default warehouse (or warehouse-less legacy row) — first match. + ledger (ADJUST)
-        const defaultWarehouse = await tx.warehouse.findFirst({ where: { storeId, isDefault: true } });
-        const existing = await tx.stockLevel.findFirst({
-          where: { storeId, productId, warehouseId: defaultWarehouse?.id ?? null },
-        });
-        let warehouseId: string | null = null;
-        let delta = 0;
-        let balanceAfter = 0;
-        if (existing) {
-          delta = input.stock - existing.quantityOnHand;
-          const updated = await tx.stockLevel.update({ where: { id: existing.id }, data: { quantityOnHand: input.stock } });
-          warehouseId = updated.warehouseId; balanceAfter = updated.quantityOnHand;
-        } else if (defaultWarehouse) {
-          const created = await tx.stockLevel.create({ data: { storeId, productId, warehouseId: defaultWarehouse.id, quantityOnHand: input.stock } });
-          warehouseId = created.warehouseId; delta = input.stock; balanceAfter = created.quantityOnHand;
-        } else {
-          const anyRow = await tx.stockLevel.findFirst({ where: { storeId, productId } });
-          if (anyRow) {
-            delta = input.stock - anyRow.quantityOnHand;
-            const updated = await tx.stockLevel.update({ where: { id: anyRow.id }, data: { quantityOnHand: input.stock } });
-            warehouseId = updated.warehouseId; balanceAfter = updated.quantityOnHand;
-          } else {
-            const created = await tx.stockLevel.create({ data: { storeId, productId, quantityOnHand: input.stock } });
-            delta = input.stock; balanceAfter = created.quantityOnHand;
-          }
-        }
-        if (delta !== 0) {
-          await tx.stockMovement.create({
-            data: { storeId, productId, warehouseId, delta, type: "ADJUST", orderId: null, createdBy: null, note: "product edit stock", balanceAfter },
-          });
-        }
-      }
+      // 2026-11-21: an edit never sets stock. The form used to send the total of ALL stores, which was
+      // written to the main store (rename a rice with 10 at each of 4 places → main store 40).
+      // Stock changes go through Stock in, Move stock, Count or Inventory → Adjust.
+      // (input.stock is ignored here on purpose.)
       // P3f: set the reorder threshold on the same stock row the stock logic targets
       // (default warehouse, else a legacy warehouse-less row); create it when absent.
       if (input.reorderThreshold !== undefined) {

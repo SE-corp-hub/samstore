@@ -540,7 +540,7 @@ export default function InventoryPanel({ role = "" }: { role?: string }) {
                           <label className="form-label small" htmlFor="conversionDestination">Convert into</label>
                           <select id="conversionDestination" className="form-select" value={destinationKey} onChange={(e) => { setDestinationKey(e.target.value); setOutputQuantity(""); setConversionIdempotencyKey(null); }}>
                             <option value="">Select output item…</option>
-                            {conversionOptions.filter((item) => item.key !== sourceKey && (!sourceOption || (item.baseUnit === sourceOption.baseUnit && item.conversionFamily === sourceOption.conversionFamily))).map((item) => <option key={item.key} value={item.key}>{item.label} · {item.sku} · {formatBaseQty(item.baseQuantity, item.baseUnit)}</option>)}
+                            {conversionOptions.filter((item) => item.key !== sourceKey && (!sourceOption || (item.baseUnit === sourceOption.baseUnit && item.conversionFamily.toLowerCase() === sourceOption.conversionFamily.toLowerCase()))).map((item) => <option key={item.key} value={item.key}>{item.label} · {item.sku} · {formatBaseQty(item.baseQuantity, item.baseUnit)}</option>)}
                           </select>
                           {destinationOption && <small className="text-muted">Current stock here: {destinationOption.available}</small>}
                         </div>
