@@ -416,7 +416,7 @@ export default function TeamPanel() {
 
       {loading ? <p className="text-muted">Loading…</p> : (
         <div className="table-responsive">
-          <table className="table table-hover align-middle">
+          <table className="table table-hover align-middle team-table">
             <thead>
               <tr>
                 <th>Person</th>
@@ -430,7 +430,7 @@ export default function TeamPanel() {
             <tbody>
               {members.map((m) => (
                 <tr key={m.userId}>
-                  <td>
+                  <td className="tm-person">
                     <div className="fw-semibold">{m.name ?? "—"}{m.readyLabel && <span className="badge text-bg-warning ms-1">Ready login</span>}</div>
                     {(m.phone || m.email) && <div className="small d-lg-none text-nowrap">{m.phone ?? m.email}</div>}
                     <div className="small text-muted">
@@ -438,8 +438,8 @@ export default function TeamPanel() {
                       {m.lastReset && <><br />{m.lastReset.kind === "PIN" ? "PIN set" : "Password reset"}{m.lastReset.by ? ` by ${m.lastReset.by}` : ""} · {day(m.lastReset.at)}</>}
                     </div>
                   </td>
-                  <td className="small col-wide">{m.phone ?? ""}{m.phone && m.email ? <br /> : null}{m.email ?? ""}</td>
-                  <td>
+                  <td className="small col-wide tm-contact">{m.phone ?? ""}{m.phone && m.email ? <br /> : null}{m.email ?? ""}</td>
+                  <td className="tm-role" data-label="Role">
                     <select
                       className="form-select form-select-sm" style={{ width: 140 }} aria-label={`Role of ${m.name ?? m.userId}`}
                       value={m.role} disabled={!owner || m.role === "OWNER"}
@@ -448,7 +448,7 @@ export default function TeamPanel() {
                       {(m.role === "OWNER" ? ["OWNER"] : ROLES).map((r) => <option key={r} value={r}>{r}</option>)}
                     </select>
                   </td>
-                  <td>
+                  <td className="tm-loc" data-label="Location">
                     {owner && m.role !== "OWNER" && m.role !== "MANAGER" ? (
                       <>
                         <select
@@ -482,12 +482,12 @@ export default function TeamPanel() {
                       <span className="small">{m.role === "OWNER" || m.role === "MANAGER" ? "All locations" : locLabel(m.homeLocationId)}{m.isLocationHead ? " · Head" : ""}</span>
                     )}
                   </td>
-                  <td>
+                  <td className="tm-pin" data-label="PIN">
                     {m.pinLocked ? <span className="badge text-bg-danger">Locked</span>
                       : m.hasPin ? <span className="badge text-bg-success">Has PIN</span>
                       : <span className="badge text-bg-secondary">None yet</span>}
                   </td>
-                  <td className="text-end">
+                  <td className="text-end tm-actions">
                     {canManage && mayEdit(m) && (
                       <div className="d-flex flex-wrap gap-1 justify-content-end">
                         <button className="btn btn-sm btn-outline-success text-nowrap" onClick={() => { setPinFor(m.userId); setPinValue(""); }}>

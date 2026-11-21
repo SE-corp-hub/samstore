@@ -10,10 +10,10 @@
 // buttons never leave the screen.
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { finderGroups, matchesSearch, mostUsed, saveView, savedView, sizeOf, sizesFor, sortGroups, type FinderView } from "../../lib/product-find";
+import { finderGroups, matchesSearch, mostUsed, saveView, savedView, itemSize, sizeButtons, sortGroups, type FinderView } from "../../lib/product-find";
 import { useMediaQuery } from "../../lib/use-media-query";
 
-export default function ProductFinder<T extends { id: string; name: string; group?: string | null; photoKey?: string | null; kiloOfId?: string | null }>({ items, list, renderTile, colClass = "col-6 col-md-4 col-lg-3", clearSignal = 0, lead, footer, fit = false }: {
+export default function ProductFinder<T extends { id: string; name: string; group?: string | null; photoKey?: string | null; kiloOfId?: string | null; loose?: boolean }>({ items, list, renderTile, colClass = "col-6 col-md-4 col-lg-3", clearSignal = 0, lead, footer, fit = false }: {
   items: T[];
   /** Which list the "sold most" counts belong to (pos, preorder). */
   list: string;
@@ -51,11 +51,11 @@ export default function ProductFinder<T extends { id: string; name: string; grou
   const nameOf = new Map(items.map((i) => [i.id, i.name]));
   const sortName = (i: T) => (i.kiloOfId && nameOf.get(i.kiloOfId)) || i.name;
   const byName = (a: T, b: T) => sortName(a).localeCompare(sortName(b), undefined, { numeric: true }) || (a.kiloOfId ? 1 : 0) - (b.kiloOfId ? 1 : 0) || a.name.localeCompare(b.name);
-  // Size buttons (25kg / 5kg …) work together with the group buttons and the search box.
-  const sizes = sizesFor(items.map((i) => i.name));
+  // Size buttons (25kg / 5kg / 1kg for per kilo rice …) work together with the group buttons and the search box.
+  const sizes = sizeButtons(items.map(itemSize));
   const sizeOn = sizes.includes(size) ? size : "";
   const groupOn = groups.includes(group) ? group : "";
-  const found = items.filter((i) => matchesSearch(i.name, q) && (!groupOn || groupOf(i.name) === groupOn) && (!sizeOn || sizeOf(i.name) === sizeOn)).sort(byName);
+  const found = items.filter((i) => matchesSearch(i.name, q) && (!groupOn || groupOf(i.name) === groupOn) && (!sizeOn || itemSize(i) === sizeOn)).sort(byName);
   const filtering = q.trim() !== "" || groupOn !== "" || sizeOn !== "";
   const oftenItems = often.map((id) => items.find((i) => i.id === id)).filter((i): i is T => !!i).slice(0, view === "list" ? 6 : 8);
   const anyPhoto = items.some((i) => !!i.photoKey);

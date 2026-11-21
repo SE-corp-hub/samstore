@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { matchesSearch, groupOf, groupsFor, sizeOf, sizesFor } from "./product-find";
+import { matchesSearch, groupOf, groupsFor, sizeOf, sizesFor, itemSize, sizeButtons } from "./product-find";
 
 test("a typed word matches the start of any word in the name", () => {
   assert.ok(matchesSearch("Dinorado 25 kg", "din 25"));
@@ -61,4 +61,10 @@ test("the store's own groups win when most products have one", async () => {
   // Few products with a group: the kinds from the names, as before.
   const k = finderGroups([{ name: "Crystal Dinorado 25kg" }, { name: "Riz Dinorado 25kg", group: "Premium" }, { name: "Mango 25kg" }, { name: "Alsa 25kg" }, { name: "Planters 25kg" }]);
   assert.equal(k.get("Crystal Dinorado 25kg"), "Dinorado");
+});
+
+test("per kilo rice has its own 1kg size button, after 25kg and 5kg", () => {
+  const items = [{ name: "Mango 25kg" }, { name: "Mango 5kg" }, { name: "Mango · per kilo", loose: true }, { name: "Sinandomeng (tingi)", loose: true }];
+  assert.deepEqual(items.map(itemSize), ["25kg", "5kg", "1kg", "1kg"]);
+  assert.deepEqual(sizeButtons(items.map(itemSize)), ["25kg", "5kg", "1kg"]);
 });

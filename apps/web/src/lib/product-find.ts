@@ -38,9 +38,17 @@ export function sizeOf(name: string): string | null {
   return m ? `${Number(m[1])}kg` : null;
 }
 
+/** The size of an item on the size buttons: loose (per kilo) rice is "1kg", else the size in its name. */
+export function itemSize(i: { name: string; loose?: boolean }): string | null {
+  return i.loose ? "1kg" : sizeOf(i.name);
+}
+
 /** The sizes worth a button: at least two different ones, biggest first, at most four. */
 export function sizesFor(names: string[]): string[] {
-  const set = [...new Set(names.map(sizeOf).filter((x): x is string => !!x))];
+  return sizeButtons(names.map(sizeOf));
+}
+export function sizeButtons(sizes: (string | null)[]): string[] {
+  const set = [...new Set(sizes.filter((x): x is string => !!x))];
   set.sort((a, b) => parseFloat(b) - parseFloat(a));
   return set.length > 1 ? set.slice(0, 4) : [];
 }

@@ -646,3 +646,15 @@ test("A kilo item stands right after its sack on the price list", async () => {
   assert.equal(ids.indexOf(fx.loose.id), ids.indexOf(fx.sin25.id) + 1);
   assert.equal(list.value.products.find((p) => p.id === fx.loose.id)?.kiloOfId, fx.sin25.id);
 });
+
+test("Kilo rice is sold from this store's rack only: taking it from another store is refused (an offline sale is kept, from here)", async () => {
+  const fx = await fixture();
+  const sale = await svc.sell(fx.storeId, fx.staff1, { idempotencyKey: key(), locationId: fx.s1, lines: [{ productId: fx.loose.id, kilos: "2", sourceLocationId: fx.s2 }], payment: { method: "cash", tenderedMinor: 20_000 } });
+  assert.equal(sale.ok, false);
+  assert.match(msg(sale), /kilo rice/);
+  assert.equal(await onHand(fx, fx.loose.id, fx.s2), 10_000, "nothing held or taken at Store 2");
+  const offline = await svc.sell(fx.storeId, fx.staff1, { idempotencyKey: key(), locationId: fx.s1, soldAt: new Date(Date.now() - 30 * 60_000).toISOString(), lines: [{ productId: fx.loose.id, kilos: "2", sourceLocationId: fx.s2 }], payment: { method: "cash", tenderedMinor: 20_000 } });
+  assert.equal(offline.ok, true, msg(offline));
+  assert.equal(await onHand(fx, fx.loose.id, fx.s1), 48_000, "scooped here");
+  assert.equal(await onHand(fx, fx.loose.id, fx.s2), 10_000);
+});

@@ -382,10 +382,14 @@ export class BentaService {
         }
         const price = resolveLinePrice({ catalogUnitPriceMinor: catalog, override, reason: l.priceOverrideReason });
         const line = priceLine(p, price.unitPriceMinor, l);
-        priced.push({
-          ...line, product: p, catalogUnitPriceMinor: catalog, overridden: price.overridden, overrideReason: price.reason,
-          sourceLocationId: l.sourceLocationId && l.sourceLocationId !== loc.id ? l.sourceLocationId : null,
-        });
+        let from = l.sourceLocationId && l.sourceLocationId !== loc.id ? l.sourceLocationId : null;
+        // Kilo rice stays at its store (sell per kilo plan): it is scooped from this store's rack, never
+        // released from another store's. A sale that already happened (offline, paper slip) is kept, from here.
+        if (from && isLoose(p)) {
+          if (!input.paperSlip && !offlineSoldAt(input.soldAt, new Date())) throw new SellingError(`${p.name} is kilo rice: sell it from this store's rack. Open a sack here if it ran out.`);
+          from = null;
+        }
+        priced.push({ ...line, product: p, catalogUnitPriceMinor: catalog, overridden: price.overridden, overrideReason: price.reason, sourceLocationId: from });
       }
       // Staff may change a price only down to the lowest price (the owner's, else the cost). The owner and a manager: any price.
       const tooLow = await lowestPriceRefusal(prisma, { storeId, role: actor.role, locationId: loc.id, lines: priced.map((l) => ({ productId: l.product.id, name: l.product.name, unitPriceMinor: l.unitPriceMinor, overridden: l.overridden })) });

@@ -415,7 +415,7 @@ export default function InventoryPanel({ role = "" }: { role?: string }) {
                 <th>Product</th><th className="col-wide">SKU</th><th className="col-wide">Category</th>
                 <th className="text-end">On the shelf</th><th className="text-end col-wide">Held for orders</th>
                 <th className="text-end">Free to sell</th>{hasCost && <th className="text-end col-wide">Unit cost</th>}
-                {hasCost && <th className="text-end">Value</th>}<th>Status</th><th></th>
+                {hasCost && <th className="text-end col-roomy">Value</th>}<th>Status</th><th></th>
               </tr>
             </thead>
             <tbody>
@@ -428,7 +428,7 @@ export default function InventoryPanel({ role = "" }: { role?: string }) {
                   <td className="text-end text-muted col-wide">{qtyText(r, r.quantityReserved)}</td>
                   <td className="text-end fw-semibold">{qtyText(r, r.availableQuantity)}</td>
                   {hasCost && <td className="text-end col-wide">{toPesos(r.costMinor)}{isLooseItem(r) ? "/kg" : ""}</td>}
-                  {hasCost && <td className="text-end">{toPesos(r.valueMinor)}</td>}
+                  {hasCost && <td className="text-end col-roomy">{toPesos(r.valueMinor)}</td>}
                   <td><span className={`badge ${STATUS_BADGE[r.status]}`}>{STATUS_WORD[r.status]}{r.reorderThreshold > 0 ? ` (reorder at ${qtyText(r, r.reorderThreshold)})` : ""}</span></td>
                   <td className="text-end">
                     {canChange && (
