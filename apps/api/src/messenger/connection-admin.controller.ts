@@ -2,6 +2,7 @@ import { Body, Controller, Get, Headers, HttpException, HttpStatus, Param, Post,
 import type { ApiError } from "@sam-store/contracts";
 import { JwtAuthGuard, type AuthPrincipal } from "../auth/auth.guard.js";
 import { requireUser, resolveTenant, TENANT_ROLES } from "../auth/tenant-context.js";
+import { requireOwner } from "../auth/owner-only.js";
 import { cacheBust, cacheKey } from "../persistence/ttl-cache.js";
 import { prisma } from "../persistence/prisma-repositories.js";
 import { MessengerConnectionService } from "./connection.service.js";
@@ -38,7 +39,8 @@ export class MessengerConnectionAdminController {
   async connect(@Req() req: Request & { user?: AuthPrincipal }, @Body() body: { pageId: string; pageName: string; accessToken: string }, @Headers("x-store-id") headerStoreId?: string) {
     const user = req.user;
     requireUser(user);
-    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
+    const { storeId, role } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
+    requireOwner(role);
     const result = await this.messenger.connect(storeId, body);
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
     await cacheBust(cacheKey("settings", storeId));
@@ -50,7 +52,8 @@ export class MessengerConnectionAdminController {
   async disconnect(@Req() req: Request & { user?: AuthPrincipal }, @Headers("x-store-id") headerStoreId?: string) {
     const user = req.user;
     requireUser(user);
-    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
+    const { storeId, role } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
+    requireOwner(role);
     const result = await this.messenger.disconnect(storeId);
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
     await cacheBust(cacheKey("settings", storeId));
@@ -62,7 +65,8 @@ export class MessengerConnectionAdminController {
   async rotate(@Req() req: Request & { user?: AuthPrincipal }, @Headers("x-store-id") headerStoreId?: string) {
     const user = req.user;
     requireUser(user);
-    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
+    const { storeId, role } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
+    requireOwner(role);
     const result = await this.messenger.rotateWebhookToken(storeId);
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
     return result.value;

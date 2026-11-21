@@ -1,5 +1,6 @@
 "use client";
 
+import { ScopeTag } from "./WhoCan";
 import { PesoInput, WholeInput } from "../NumberBoxes";
 import { askBelowCost } from "./BelowCostDialog";
 import { isBelowCost } from "../../lib/below-cost";
@@ -679,6 +680,8 @@ export default function ProductsPanel({ role = "" }: { role?: string }) {
                     <button type="button" className="btn-close" onClick={() => setModal({ open: false, editing: null })}></button>
                   </div>
                   <div className="modal-body">
+                    {/* A product is the same rice at every store (2026-11-21: say so, so nobody thinks it changes one store only). */}
+                    <ScopeTag scope="business" />
                     {locked && (
                       <div className="alert alert-secondary d-flex gap-2 align-items-start py-2 mb-3" role="note">
                         <i className="bi bi-lock-fill mt-1" aria-hidden="true"></i>
@@ -746,8 +749,9 @@ export default function ProductsPanel({ role = "" }: { role?: string }) {
                     </fieldset>
                     <div className="row">
                       <fieldset className="col-6 mb-2" disabled={viewOnly}>
-                        <label className="form-label small" htmlFor="productSellingPrice">Selling price (₱) {form.soldByWeight ? "per kilo" : "per unit"} *</label>
-                        <PesoInput id="productSellingPrice" required value={form.priceMinor} onChange={(v) => setForm({ ...form, priceMinor: v })} placeholder="0.00" />
+                        <label className="form-label small" htmlFor="productSellingPrice">Price for all stores (₱) {form.soldByWeight ? "per kilo" : "per unit"} *</label>
+                        <PesoInput id="productSellingPrice" required value={form.priceMinor} onChange={(v) => setForm({ ...form, priceMinor: v })} placeholder="0.00" aria-describedby="productSellingPrice-help" />
+                        <small id="productSellingPrice-help" className="text-muted d-block">A store with its own price on Store prices sells at that price instead.</small>
                       </fieldset>
                       {hasCost && (
                         <fieldset className="col-6 mb-2" disabled={locked}>

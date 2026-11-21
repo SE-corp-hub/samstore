@@ -28,6 +28,8 @@ import PrinterSettingsCard from "./PrinterSettingsCard";
 import PosKeysSettings from "./PosKeysSettings";
 import { readPosKeys } from "../../lib/pos-keys";
 import { shopLinkOn } from "../../lib/shop-link";
+import { canChange, lockNote, SCOPE_LABEL, SCOPE_SAYS, whoIs, type Scope } from "../../lib/who-can";
+import { LockNote, ScopeTag } from "./WhoCan";
 
 interface StoreSettings {
   id: string;
@@ -153,19 +155,23 @@ function problems(g: ServerGroup, f: Form): Partial<Record<keyof Form, string>> 
   return p;
 }
 
-const GROUPS: { id: Group; icon: string; title: string; server: boolean }[] = [
-  { id: "business", icon: "bi-shop-window", title: "Business name", server: true },
-  { id: "store", icon: "bi-shop", title: "This store", server: true },
-  { id: "printer", icon: "bi-printer", title: "Printer and receipt text", server: false },
-  { id: "keys", icon: "bi-keyboard", title: "Keyboard shortcuts", server: false },
-  { id: "counter", icon: "bi-cash-coin", title: "Quota promo", server: true },
-  { id: "credit", icon: "bi-journal-text", title: "Credit (utang)", server: true },
-  { id: "receipt", icon: "bi-percent", title: "VAT and tax", server: true },
-  { id: "shop", icon: "bi-globe", title: "Online shop", server: true },
-  { id: "messenger", icon: "bi-chat-dots", title: "Messenger, points and privacy", server: true },
-  { id: "lock", icon: "bi-lock", title: "PIN lock", server: true },
-  { id: "account", icon: "bi-person", title: "My account", server: true },
+// 2026-11-21 (owner: "it isn't clear which store or setting is being changed"): the groups sit under four
+// headings by where a change lands: the whole business, one store, this tablet, only you. `rule` is the
+// row of lib/who-can.ts that says who may change the group; a login that may not sees it locked.
+const GROUPS: { id: Group; icon: string; title: string; server: boolean; scope: Scope; rule?: string }[] = [
+  { id: "business", icon: "bi-shop-window", title: "Business name", server: true, scope: "business", rule: "businessName" },
+  { id: "receipt", icon: "bi-percent", title: "VAT and tax", server: true, scope: "business", rule: "vat" },
+  { id: "credit", icon: "bi-journal-text", title: "Credit (utang)", server: true, scope: "business", rule: "credit" },
+  { id: "counter", icon: "bi-cash-coin", title: "Quota promo", server: true, scope: "business", rule: "quotaPromo" },
+  { id: "shop", icon: "bi-globe", title: "Online shop", server: true, scope: "business", rule: "onlineShop" },
+  { id: "messenger", icon: "bi-chat-dots", title: "Messenger, points and privacy", server: true, scope: "business", rule: "onlineShop" },
+  { id: "store", icon: "bi-shop", title: "This store", server: true, scope: "store" },
+  { id: "lock", icon: "bi-lock", title: "PIN lock", server: true, scope: "store" },
+  { id: "printer", icon: "bi-printer", title: "Printer and receipt text", server: false, scope: "tablet" },
+  { id: "keys", icon: "bi-keyboard", title: "Keyboard shortcuts", server: false, scope: "tablet" },
+  { id: "account", icon: "bi-person", title: "My account", server: true, scope: "me" },
 ];
+const SCOPES: Scope[] = ["business", "store", "tablet", "me"];
 
 /** One setting that is on or off: words on the left, a big switch on the right, the whole row taps. */
 function SwitchRow({ id, label, help, checked, onChange }: { id: string; label: ReactNode; help?: ReactNode; checked: boolean; onChange: (v: boolean) => void }) {
@@ -191,8 +197,11 @@ function Field({ id, label, help, problem, children }: { id: string; label: stri
   );
 }
 
-export default function SettingsPanel({ role = "" }: { role?: string }) {
+export default function SettingsPanel({ role = "", onNavigate }: { role?: string; onNavigate?: (tab: string) => void }) {
   const storeId = getAdminStoreId();
+  const who = whoIs(role, false); // Settings is for the owner and managers; store heads use This store
+  /** May this login change the group? (Groups with no rule decide inside, e.g. This store.) */
+  const mayChange = (g: Group) => { const r = GROUPS.find((x) => x.id === g)?.rule; return !r || canChange(who, r); };
   const wide = useMediaQuery(WIDE);
   const offline = useOffline();
   const [data, setData] = useState<StoreSettings | null>(null);
@@ -340,8 +349,14 @@ export default function SettingsPanel({ role = "" }: { role?: string }) {
 
   const menu = (
     <nav aria-label="Settings groups">
+      {SCOPES.map((sc) => (
+      <section key={sc} aria-labelledby={`settings-scope-${sc}`}>
+      <div className="settings-scope-head">
+        <h2 id={`settings-scope-${sc}`}>{SCOPE_LABEL[sc]}</h2>
+        <p>{SCOPE_SAYS[sc]}</p>
+      </div>
       <ul className="settings-menu">
-        {GROUPS.map((g) => (
+        {GROUPS.filter((g) => g.scope === sc).map((g) => (
           <li key={g.id}>
             <button type="button" className={`settings-row${shown === g.id ? " is-open" : ""}`} aria-current={shown === g.id ? "true" : undefined} onClick={() => void openGroup(g.id)}>
               <i className={`bi ${g.icon} settings-row-icon`} aria-hidden="true"></i>
@@ -349,12 +364,15 @@ export default function SettingsPanel({ role = "" }: { role?: string }) {
                 <span className="d-block fw-semibold">{g.title}{dirty(g.id) && <span className="badge text-bg-warning ms-2">Not saved</span>}</span>
                 <span className="d-block small text-muted settings-row-sum">{summary(g.id)}</span>
               </span>
+              {!mayChange(g.id) && <i className="bi bi-lock-fill fs-5" role="img" aria-label="Look only" title="Look only"></i>}
               {offline && g.server && <i className="bi bi-wifi-off fs-5 text-muted" role="img" aria-label="Needs internet" title="Needs internet"></i>}
               <i className="bi bi-chevron-right text-muted" aria-hidden="true"></i>
             </button>
           </li>
         ))}
       </ul>
+      </section>
+      ))}
     </nav>
   );
 
@@ -388,7 +406,7 @@ export default function SettingsPanel({ role = "" }: { role?: string }) {
     const p = g in PAYLOAD ? problems(g as ServerGroup, form) : {};
     switch (g) {
       case "business":
-        return <BusinessNameSection current={data?.name ?? ""} canChange={isOwnerRole(role) || role === "PLATFORM_ADMIN"} offline={offline}
+        return <BusinessNameSection current={data?.name ?? ""} canChange={mayChange("business")} offline={offline}
           onSaved={(name) => { setData((d) => (d ? { ...d, name } : d)); window.dispatchEvent(new Event(STORES_CHANGED_EVENT)); }} />;
       case "printer":
         return <div onChange={() => setPrinterTick((n) => n + 1)} onClick={() => setPrinterTick((n) => n + 1)}><PrinterSettingsCard storeName={data?.name} /></div>;
@@ -620,7 +638,10 @@ export default function SettingsPanel({ role = "" }: { role?: string }) {
         return (
           <>
             {/* The owner's lock (whole business); a manager sees only the stores' own locks below. */}
-            {(isOwnerRole(role) || role === "PLATFORM_ADMIN") && <PinLockSettings canChange onSaved={() => setPrinterTick((t) => t + 1)} />}
+            {canChange(who, "businessLock") && <>
+              <ScopeTag scope="business" />
+              <PinLockSettings canChange onSaved={() => setPrinterTick((t) => t + 1)} />
+            </>}
             <h3 className="h5 mt-4 mb-1">Each store&apos;s own PIN lock</h3>
             <p className="text-muted mb-3">A store head or a manager can set these too. If a store head forgets the store PIN, the owner sets a new one here.</p>
             <StoreLockSettings role={role} />
@@ -637,13 +658,16 @@ export default function SettingsPanel({ role = "" }: { role?: string }) {
       <h2 className="h5 d-flex align-items-center gap-2 mb-3" id="settings-group-title">
         <i className={`bi ${meta.icon}`} aria-hidden="true"></i>{meta.title}
       </h2>
+      {/* This store and PIN lock name their own store inside (one store at a time). */}
+      {meta.scope !== "store" && <ScopeTag scope={meta.scope} />}
+      {!mayChange(shown) && meta.rule && <LockNote text={lockNote(meta.rule)} />}
       {error && <div className="alert alert-danger py-2" role="alert">{error}</div>}
-      {meta.server && needsNet}
+      {meta.server && mayChange(shown) && needsNet}
       {meta.server ? (
-        <fieldset disabled={offline} className="border-0 p-0 m-0" style={{ minWidth: 0 }}>
+        <fieldset disabled={offline || !mayChange(shown)} className="border-0 p-0 m-0" style={{ minWidth: 0 }}>
           <div className="settings-group">
             {body(shown)}
-            {shown in PAYLOAD && saveBar(shown as ServerGroup)}
+            {shown in PAYLOAD && mayChange(shown) && saveBar(shown as ServerGroup)}
           </div>
           {shown === "shop" && form?.deliveryEnabled && <div className="mt-3"><DeliveryZonesCard /></div>}
         </fieldset>
@@ -655,7 +679,7 @@ export default function SettingsPanel({ role = "" }: { role?: string }) {
     <div className="settings-screen">
       <div className="d-flex flex-wrap align-items-baseline justify-content-between gap-2 mb-3">
         <h1 className="h4 mb-0">Settings</h1>
-        {data && <span className="text-muted">{data.name} · {data.status === "ACTIVE" ? "Active" : data.status} · {data.currencyCode} · {data.timezone}</span>}
+        {onNavigate && <button type="button" className="btn btn-outline-dark btn-lg" onClick={() => onNavigate("whatican")}><i className="bi bi-question-circle me-1" aria-hidden="true"></i>What I can do</button>}
       </div>
       {!form && error && <div className="alert alert-danger py-2" role="alert">{error} <button type="button" className="btn btn-outline-dark btn-sm ms-2" onClick={() => void load()}>Try again</button></div>}
       {form && (wide ? (
@@ -705,7 +729,6 @@ function BusinessNameSection({ current, canChange, offline, onSaved }: { current
       <Field id="biz-name" label="Business name" help="Shown at the top of the menu, and on receipts of a location that has no receipt name of its own (Menu → Locations).">
         <input id="biz-name" className="form-control form-control-lg" maxLength={60} value={name} disabled={!canChange} onChange={(e) => { setName(e.target.value); setMsg(null); }} placeholder="Bogs and Lucy Rice Store" />
       </Field>
-      {!canChange && <p className="text-muted mb-2">Only the owner can change the business name.</p>}
       {msg && <div className={`alert ${msg.ok ? "alert-success" : "alert-danger"} py-2`} role="status">{msg.text}</div>}
       {canChange && (
         <button type="button" className="btn btn-success btn-lg" disabled={busy || offline || clean === current} onClick={() => void save()}>

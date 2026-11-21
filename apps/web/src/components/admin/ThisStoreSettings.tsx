@@ -13,6 +13,8 @@ import { toast } from "../../lib/toast";
 import { cachedGet, saveCopy, savedCopy, useOffline } from "../../lib/offlineCache";
 import { PesoInput } from "../NumberBoxes";
 import { kg } from "../../lib/number-format";
+import { askConfirm } from "../../lib/ask";
+import { ScopeTag } from "./WhoCan";
 
 const PATH = "/admin/store-settings";
 
@@ -104,6 +106,13 @@ export default function ThisStoreSettings({ standalone = false, onSaved }: { sta
   const set = (patch: Partial<Form>) => setForm((f) => (f ? { ...f, ...patch } : f));
   const dirty = JSON.stringify(payload(form, place.sells)) !== JSON.stringify(payload(toForm(place), place.sells));
 
+  // Another store's button while this one has changes: ask first, so nothing is lost or saved to the wrong store.
+  const pick = async (id: string) => {
+    if (id === placeId) return;
+    if (dirty && !(await askConfirm(`${place.name} has changes that are not saved. Leave them?`, { ok: "Leave", cancel: "Stay", danger: true }))) return;
+    setPlaceId(id);
+  };
+
   const save = async () => {
     setBusy(true); setProblem(null);
     try {
@@ -134,7 +143,7 @@ export default function ThisStoreSettings({ standalone = false, onSaved }: { sta
           <div className="d-flex flex-wrap gap-2" role="group" aria-labelledby="ts-which">
             {places.map((p) => (
               <button key={p.id} type="button" className={`btn btn-lg ${placeId === p.id ? "btn-dark" : "btn-outline-dark"}`} aria-pressed={placeId === p.id}
-                disabled={busy} onClick={() => setPlaceId(p.id)}>
+                disabled={busy} onClick={() => void pick(p.id)}>
                 {p.name}
                 {p.sells && <span className={`badge ms-2 ${p.dayOpenClose ? "text-bg-success" : "text-bg-light"}`}>{p.dayOpenClose ? "Z-read on" : "Z-read off"}</span>}
                 {p.sells && p.sellPerKilo && <span className="badge ms-1 text-bg-success">Per kilo</span>}
@@ -143,6 +152,8 @@ export default function ThisStoreSettings({ standalone = false, onSaved }: { sta
           </div>
         </div>
       )}
+
+      <ScopeTag scope="store" storeName={place.name} />
 
       {offline && (
         <div className="alert alert-secondary d-flex align-items-center gap-2 py-2" role="status">
