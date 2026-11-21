@@ -199,7 +199,10 @@ export async function deductStock(
     if (defaultId === undefined) defaultId = await defaultLocationId(tx, storeId);
     const pick = pickDeductionLevel(levels, l.quantity, { warehouseId: opts?.warehouseId ?? null, defaultWarehouseId: defaultId });
     if (!pick.ok) {
-      if (pick.reason === "untracked") continue; // untracked product — no stock accounting
+      // No stock row anywhere yet: a new item sold before its first Stock in. A counter sale (which may go below
+      // zero) still takes it off the shelf, so the first Stock in or count starts from the right number.
+      // (Not tracked at all is Track stock off, handled above.) Other writers keep the old no-op.
+      if (pick.reason === "untracked" && !opts?.allowBelowZero) continue;
       if (opts?.allowBelowZero) {
         await takeBelowZero(tx, storeId, l.productId, opts.warehouseId ?? defaultId ?? null, l.quantity, type, opts);
         continue;
@@ -306,12 +309,15 @@ export async function adjustStock(
     data: { quantityOnHand: next },
   });
   let balanceAfter = next;
+  let balanceBefore = level.quantityOnHand;
   if (changed.count === 0) {
-    const fresh = await tx.stockLevel.findUnique({ where: { id: level.id }, select: { quantityOnHand: true } });
-    const retryFrom = fresh?.quantityOnHand ?? 0;
+    // Someone changed the shelf meanwhile (a sale): lock the row, read it, apply this change on top.
+    const fresh = await tx.$queryRaw<{ quantityOnHand: number }[]>`SELECT "quantityOnHand" FROM "StockLevel" WHERE id = ${level.id} FOR UPDATE`;
+    const retryFrom = fresh[0]?.quantityOnHand ?? 0;
     const retryTo = input.setTo !== undefined ? input.setTo : retryFrom + delta;
     if (retryTo < 0 && !input.allowNegative) throw new InsufficientStockError(productId, -retryTo);
     await tx.stockLevel.update({ where: { id: level.id }, data: { quantityOnHand: retryTo } });
+    balanceBefore = retryFrom;
     balanceAfter = retryTo;
   }
 
@@ -319,7 +325,8 @@ export async function adjustStock(
     storeId,
     productId,
     warehouseId: level.warehouseId,
-    delta: balanceAfter - level.quantityOnHand, // the change actually applied
+    // The change actually applied, from the balance it was applied to (else the stock book chain breaks).
+    delta: balanceAfter - balanceBefore,
     type: "ADJUST",
     createdBy: actorId,
     note: reason,
@@ -327,7 +334,7 @@ export async function adjustStock(
     documentType: input.documentType ?? "ADJUST",
     documentId: input.documentId ?? null,
   });
-  return { levelId: level.id, balanceAfter, delta: balanceAfter - level.quantityOnHand };
+  return { levelId: level.id, balanceAfter, delta: balanceAfter - balanceBefore };
 }
 
 /**
