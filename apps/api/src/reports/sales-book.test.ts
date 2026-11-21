@@ -262,3 +262,24 @@ test("net profit per store: each store's profit less its own expenses, and all o
   assert.equal(month.ok, true, msg(month));
   if (month.ok) assert.equal(month.value.profit.netProfitMinor, cmp.total.netProfitMinor, "and so does the month report");
 });
+
+test("Reports → Today's sales card (analytics/daily) reads the sales book: Manila day, refunds and unpaid orders left out", async () => {
+  const { AnalyticsService } = await import("../admin/analytics.service.js");
+  const fx = await fixture();
+  const today = manilaDate(new Date());
+  // 12:01 AM Manila is still "yesterday" in UTC: the old card put early-morning sales on the day before.
+  const early = new Date(dayRange(today).from.getTime() + 60_000);
+  await sale(fx, { at: early, locationId: fx.main, lines: [sacks(fx, 1)] });
+  // A sale refunded today: it is not a sale of today.
+  const back = await sale(fx, { at: new Date(), locationId: fx.main, lines: [sacks(fx, 2)] });
+  const r = await new PaymentsService().refundOrder(back.id, fx.storeId, fx.owner.userId, undefined, "wrong rice");
+  assert.equal(r.ok, true, msg(r));
+  // An online order nobody has handed over yet is not a sale.
+  await prisma.order.create({ data: { orderNumber: `${run}-pending-${seq}`, storeId: fx.storeId, status: "RECEIVED", source: "online", currencyCode: "PHP", subtotalMinor: 999_00, deliveryFeeMinor: 0, discountMinor: 0, totalMinor: 999_00, snapshot: {}, paymentMethod: "cod", paymentStatus: "PENDING", cartToken: `cart-${run}-p${seq}`, customerName: "Online", customerPhone: "", deliveryAddressLine1: "", sellingLocationId: fx.main } });
+
+  const { days } = await new AnalyticsService().dailyRevenue(fx.storeId, 7);
+  assert.equal(days.length, 7);
+  assert.equal(days[6]!.date, today, "today is last, by the Manila date");
+  assert.deepEqual({ count: days[6]!.count, revenueMinor: days[6]!.revenueMinor }, { count: 1, revenueMinor: 130_000 });
+  assert.equal(days[5]!.revenueMinor, 0, "nothing slid onto yesterday");
+});
