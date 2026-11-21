@@ -7,6 +7,7 @@
 // added up. A sale counts on the day it was sold, a sale taken back counts off on the day it was
 // taken back, and the cost is the cost saved with each sale.
 
+import { lowShelves } from "../domain/low-stock.js";
 import { prisma } from "../persistence/prisma-repositories.js";
 import { bookLines, bookTotals, salesBook, type BookEntry } from "./sales-book.js";
 
@@ -107,20 +108,18 @@ export class ReportsService {
 
   // ─────────────────────────────── M8 reports ───────────────────────────────
 
-  /** Stock (low): products where available ≤ reorder threshold. */
+  /** Stock (low): one row per store and rice whose free stock is at or below THAT store's reorder level. */
   async stockLow(storeId: string, from: Date, to: Date) {
     const products = await prisma.product.findMany({
-      where: { storeId, isActive: true, stockLevels: { some: {} } },
-      include: { stockLevels: true },
+      where: { storeId, isActive: true, trackStock: true, stockLevels: { some: { reorderThreshold: { gt: 0 } } } },
+      include: { stockLevels: { include: { warehouse: { select: { name: true, isActive: true } } } } },
     });
     const rows = products
-      .filter((p) => p.trackStock !== false) // not tracked = never "low"
-      .map((p) => {
-        const available = p.stockLevels.reduce((s, l) => s + (l.quantityOnHand - l.quantityReserved), 0);
-        const threshold = Math.max(...p.stockLevels.map((l) => l.reorderThreshold), 0);
-        return { id: p.id, name: p.name, sku: p.sku, barcode: p.barcode ?? null, unit: p.unit ?? null, availableQuantity: available, reorderThreshold: threshold, low: threshold > 0 && available <= threshold };
-      })
-      .filter((p) => p.low)
+      .flatMap((p) => lowShelves(p.stockLevels.filter((l) => l.warehouse?.isActive !== false)).map((l) => ({
+        id: `${p.id}:${l.warehouseId ?? ""}`, productId: p.id, name: p.name, sku: p.sku, barcode: p.barcode ?? null, unit: p.unit ?? null,
+        locationId: l.warehouseId, storeName: l.warehouse?.name ?? null,
+        availableQuantity: l.quantityOnHand - l.quantityReserved, reorderThreshold: l.reorderThreshold, low: true,
+      })))
       .sort((a, b) => a.availableQuantity - b.availableQuantity);
     return { from: from.toISOString(), to: to.toISOString(), rows, count: rows.length };
   }

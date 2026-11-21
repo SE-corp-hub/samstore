@@ -8,7 +8,7 @@ import { peso } from "../../lib/number-format";
 import { checkNewCosts } from "./BelowCostDialog";
 
 interface ProductOption { id: string; name: string; sku: string; availableQuantity: number; priceMinor?: number; soldByWeight?: boolean }
-interface ReplenishItem { id: string; name: string; sku: string; availableQuantity: number; reorderThreshold: number }
+interface ReplenishItem { id: string; name: string; sku: string; storeName?: string | null; availableQuantity: number; reorderThreshold: number }
 interface Line { productId: string; quantity: number; costMinor: number; productName?: string; unitCostPesos?: number }
 interface PurchaseRow {
   id: string; vendor: string | null; vendorId: string | null; supplier: { name: string } | null; note: string | null; totalCostMinor: number; purchasedAt: string;
@@ -113,9 +113,9 @@ export default function PurchasesPanel() {
         <div className="alert alert-warning py-2 small">
           <strong>Replenish needed:</strong>{" "}
           {replenish.slice(0, 6).map((r) => (
-            <button key={r.id} className="btn btn-outline-warning btn-sm me-1 mb-1"
+            <button key={`${r.id}-${r.storeName ?? ""}`} className="btn btn-outline-warning btn-sm me-1 mb-1"
               onClick={() => { setShowForm(true); addLine(r.id); }}>
-              {r.name} ({r.availableQuantity}/{r.reorderThreshold})
+              {r.name}{r.storeName ? ` at ${r.storeName}` : ""} ({r.availableQuantity}/{r.reorderThreshold})
             </button>
           ))}
           {replenish.length > 6 && <span>+{replenish.length - 6} more</span>}

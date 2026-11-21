@@ -194,3 +194,20 @@ test("Old POS hold: a Bahay Tindahan login holds from its own shelf, and the hol
   const refused = await pos.hold(fx.storeId, fx.bahay, { locationId: fx.s3, items: [{ productId: fx.riceId, quantity: 1 }] });
   assert.equal(refused.ok, false);
 });
+
+test("Low stock is judged store by store: an empty Lipa shelf is low even with plenty in Bodega", async () => {
+  const fx = await fixture();
+  // Lipa: 2 left, its own level 3. Bodega holds 10 with no level. The old check (total 32 vs level 3) said "in stock".
+  await prisma.stockLevel.updateMany({ where: { storeId: fx.storeId, productId: fx.riceId, warehouseId: fx.s3 }, data: { quantityOnHand: 2, reorderThreshold: 3 } });
+  const all = await inv.list(fx.storeId, {});
+  const row = all.items.find((i) => i.id === fx.riceId)!;
+  assert.equal(row.status, "low");
+  assert.deepEqual(row.lowAt, [fx.s3]);
+  assert.equal((await inv.list(fx.storeId, { warehouseId: fx.s3 })).items.find((i) => i.id === fx.riceId)!.status, "low");
+  assert.equal((await inv.list(fx.storeId, { warehouseId: fx.s1 })).items.find((i) => i.id === fx.riceId)!.status, "in");
+  assert.equal((await inv.list(fx.storeId, { status: "low" })).count, 1);
+  // The Stock low report names the store.
+  const { ReportsService } = await import("../reports/reports.service.js");
+  const rep = await new ReportsService().stockLow(fx.storeId, new Date(Date.now() - 86_400_000), new Date());
+  assert.deepEqual(rep.rows.map((r) => [r.locationId, r.storeName, r.availableQuantity, r.reorderThreshold]), [[fx.s3, "Lipa", 2, 3]]);
+});

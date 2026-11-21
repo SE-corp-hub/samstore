@@ -4,6 +4,7 @@ import ProductPhoto from "./ProductPhoto";
 import { useCallback, useEffect, useState } from "react";
 import { API_URL } from "../../config";
 import { adminHeaders, roleCan } from "../../lib/admin";
+import { cachedGet } from "../../lib/offlineCache";
 import { kg, peso } from "../../lib/number-format";
 import { adjustUnits, isLooseItem, unitsText } from "../../lib/stock-units";
 
@@ -12,6 +13,9 @@ interface InvItem {
   id: string; name: string; sku: string; category: string | null;
   quantityOnHand: number; quantityReserved: number; availableQuantity: number;
   reorderThreshold: number; costMinor: number; valueMinor: number; status: "in" | "low" | "out";
+  trackStock?: boolean;
+  /** The stores (location ids) where this rice is low against that store's own reorder level. */
+  lowAt?: (string | null)[];
   stockBaseUnit: string | null; stockBaseQuantity: number | null;
   stockConversionFamily: string | null;
   stockLevels: { warehouseId: string | null; quantityOnHand: number; quantityReserved: number; reorderThreshold?: number }[];
@@ -57,6 +61,14 @@ export default function InventoryPanel({ role = "" }: { role?: string }) {
   const [search, setSearch] = useState("");
   const [categoryId, setCategoryId] = useState("");
   const [warehouseId, setWarehouseId] = useState("");
+  // A login tied to one store opens on its own store (it can still look at the others' sack counts).
+  const [homeId, setHomeId] = useState<string | null>(null);
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    void cachedGet<{ homeLocationId?: string | null }>("/admin/me/rice").then((me) => {
+      if (me?.homeLocationId) { setHomeId(me.homeLocationId); setWarehouseId(me.homeLocationId); }
+    }).finally(() => setReady(true));
+  }, []);
   const [status, setStatus] = useState("");
   const [sort, setSort] = useState<"name" | "qty" | "value">("name");
 
@@ -86,7 +98,7 @@ export default function InventoryPanel({ role = "" }: { role?: string }) {
     }
   }, [search, categoryId, warehouseId, status, sort]);
 
-  useEffect(() => { const t = setTimeout(load, 250); return () => clearTimeout(t); }, [load]);
+  useEffect(() => { if (!ready) return; const t = setTimeout(load, 250); return () => clearTimeout(t); }, [load, ready]);
 
   // ── M2: reasoned adjustments + the ledger views ──
   const [view, setView] = useState<"stock" | "history">("stock");
@@ -103,6 +115,14 @@ export default function InventoryPanel({ role = "" }: { role?: string }) {
   // The places stock can be changed at: open stores, Bodega and the Buffer (turned-off ones are left out).
   const places = warehouses.filter((w) => w.isActive !== false);
   const adjustPlace = places.find((w) => w.id === adjustWh) ?? null;
+  const placeName = (id: string | null) => places.find((w) => w.id === id)?.name ?? "a store";
+  /** The badge words: one store picked → its own reorder level; all stores → where it is low. */
+  const statusText = (r: InvItem) => {
+    if (r.status !== "low") return STATUS_WORD[r.status];
+    if (warehouseId) return `${STATUS_WORD.low} (reorder at ${qtyText(r, r.reorderThreshold)})`;
+    const at = (r.lowAt ?? []).map(placeName);
+    return `${STATUS_WORD.low} at ${at.join(", ")}`;
+  };
   // Each store's own reorder level, saved from the Adjust dialog.
   const [reorderAt, setReorderAt] = useState("");
   const [reorderBusy, setReorderBusy] = useState(false);
@@ -327,6 +347,19 @@ export default function InventoryPanel({ role = "" }: { role?: string }) {
       <h1 className="h4 mb-3"><i className="bi bi-boxes me-2"></i>Inventory</h1>
       {error && <div className="alert alert-danger py-2 small">{error}</div>}
 
+      {/* Which store's stock is on screen: one store, or every store side by side. */}
+      <div className="d-flex flex-wrap align-items-center gap-2 mb-2">
+        <span className="fw-semibold me-1" id="invStoreLabel">Showing</span>
+        <span className="d-flex flex-wrap gap-2" role="group" aria-labelledby="invStoreLabel">
+          <button type="button" aria-pressed={warehouseId === ""} className={`btn ${warehouseId === "" ? "btn-dark" : "btn-outline-dark"}`} style={{ minHeight: 44 }} onClick={() => setWarehouseId("")}>All stores</button>
+          {places.map((w) => (
+            <button key={w.id} type="button" aria-pressed={warehouseId === w.id} className={`btn ${warehouseId === w.id ? "btn-dark" : "btn-outline-dark"}`} style={{ minHeight: 44 }} onClick={() => setWarehouseId(w.id)}>
+              {w.code ? `${w.code} · ` : ""}{w.name}{w.id === homeId ? " (yours)" : ""}
+            </button>
+          ))}
+        </span>
+      </div>
+
       <div className="row g-2 mb-2">
         <div className="col-12 col-lg-3">
           <input className="form-control form-control-sm" aria-label="Search products" placeholder="Search rice name or code…" value={search} onChange={(e) => setSearch(e.target.value)} />
@@ -335,12 +368,6 @@ export default function InventoryPanel({ role = "" }: { role?: string }) {
           <select className="form-select form-select-sm" aria-label="Category" value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
             <option value="">All categories</option>
             {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
-        </div>
-        <div className="col-6 col-lg-3">
-          <select className="form-select form-select-sm" aria-label="Location" value={warehouseId} onChange={(e) => setWarehouseId(e.target.value)}>
-            <option value="">All stores and Bodega</option>
-            {warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}{w.isDefault ? " (default)" : ""}</option>)}
           </select>
         </div>
         <div className="col-6 col-lg-2">
@@ -449,7 +476,21 @@ export default function InventoryPanel({ role = "" }: { role?: string }) {
             <tbody>
               {items.map((r) => (
                 <tr key={r.id}>
-                  <td className="fw-semibold"><div className="d-flex align-items-center gap-2"><ProductPhoto photoKey={r.photoKey} size="thumb" /><div>{r.name}<div className="small text-muted fw-normal d-lg-none">{r.sku}{r.quantityReserved > 0 ? ` · ${r.quantityReserved} reserved` : ""}</div></div></div></td>
+                  <td className="fw-semibold"><div className="d-flex align-items-center gap-2"><ProductPhoto photoKey={r.photoKey} size="thumb" /><div>{r.name}<div className="small text-muted fw-normal d-lg-none">{r.sku}{r.quantityReserved > 0 ? ` · ${r.quantityReserved} reserved` : ""}</div>
+                    {!warehouseId && r.trackStock !== false && places.length > 1 && (
+                      <div className="small fw-normal mt-1" aria-label={`${r.name}, free to sell at each store`}>
+                        {places.map((w) => {
+                          const sh = shelfOf(r, w.id);
+                          const low = (r.lowAt ?? []).includes(w.id);
+                          return (
+                            <span key={w.id} className={`d-inline-block text-nowrap me-2 ${low ? "px-1 rounded bg-warning-subtle text-warning-emphasis fw-semibold" : "text-muted"}`} title={low ? `Low at ${w.name}` : w.name}>
+                              {w.code || w.name} <span className="text-body fw-semibold">{qtyText(r, sh.quantityOnHand - sh.quantityReserved)}</span>{low ? " Low" : ""}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div></div></td>
                   <td className="small text-muted col-wide">{r.sku}</td>
                   <td className="small text-muted col-wide">{r.category ?? "—"}</td>
                   <td className="text-end">{qtyText(r, r.quantityOnHand)}</td>
@@ -457,7 +498,7 @@ export default function InventoryPanel({ role = "" }: { role?: string }) {
                   <td className="text-end fw-semibold">{qtyText(r, r.availableQuantity)}</td>
                   {hasCost && <td className="text-end col-wide">{toPesos(r.costMinor)}{isLooseItem(r) ? "/kg" : ""}</td>}
                   {hasCost && <td className="text-end col-roomy">{toPesos(r.valueMinor)}</td>}
-                  <td><span className={`badge ${STATUS_BADGE[r.status]}`}>{STATUS_WORD[r.status]}{r.reorderThreshold > 0 ? ` (reorder at ${qtyText(r, r.reorderThreshold)})` : ""}</span></td>
+                  <td><span className={`badge ${STATUS_BADGE[r.status]}`}>{statusText(r)}</span></td>
                   <td className="text-end">
                     {canChange && (
                       <button type="button" className="btn btn-sm btn-outline-primary text-nowrap" aria-label={`Adjust ${r.name}`}
