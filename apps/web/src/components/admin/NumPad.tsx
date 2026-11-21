@@ -56,7 +56,7 @@ export default function NumPad({
       {lead ? <div className="d-flex align-items-stretch gap-2 mb-2">{lead}{display}</div> : display}
       <div className="numpad-keys">
         {keys.map((k) => (
-          <button key={k} type="button" className="btn btn-light border numpad-key"
+          <button key={k} type="button" className="btn btn-light border numpad-key" data-numkey={k}
             aria-label={k === "⌫" ? "Delete last digit" : k === "C" ? "Clear all" : k} onClick={() => press(k)}>
             {k}
           </button>

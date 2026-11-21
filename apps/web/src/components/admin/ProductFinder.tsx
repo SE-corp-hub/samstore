@@ -12,6 +12,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { finderGroups, matchesSearch, mostUsed, saveView, savedView, itemSize, sizeButtons, sortGroups, type FinderView } from "../../lib/product-find";
 import { useMediaQuery } from "../../lib/use-media-query";
+import { KeyHint } from "./PosKeys";
 
 export default function ProductFinder<T extends { id: string; name: string; group?: string | null; photoKey?: string | null; kiloOfId?: string | null; loose?: boolean }>({ items, list, renderTile, colClass = "col-6 col-md-4 col-lg-3", clearSignal = 0, lead, footer, fit = false }: {
   items: T[];
@@ -77,8 +78,9 @@ export default function ProductFinder<T extends { id: string; name: string; grou
       {lead}
       <div className="finder-search">
         <i className="bi bi-search position-absolute top-50 translate-middle-y ms-3 text-muted" aria-hidden="true"></i>
-        <input type="text" enterKeyHint="search" autoComplete="off" className="form-control ps-5 pe-5" placeholder={lead ? "Search" : "Search: type a few letters"} aria-label="Search items"
+        <input type="text" enterKeyHint="search" autoComplete="off" className="form-control ps-5 pe-5" placeholder={lead ? "Search" : "Search: type a few letters"} aria-label="Search items" data-pos-key="search"
           value={q} onChange={(e) => { setQ(e.target.value); if (e.target.value.trim()) setGroup(""); }} />
+        {!q && <span className="pos-key-in-search"><KeyHint action="search" /></span>}
         {q && (
           <button type="button" className="btn btn-link position-absolute top-50 end-0 translate-middle-y text-dark py-0" style={{ minWidth: 48, minHeight: 44 }} aria-label="Clear search" onClick={() => setQ("")}>
             <i className="bi bi-x-circle-fill fs-4" aria-hidden="true"></i>

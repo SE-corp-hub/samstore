@@ -12,6 +12,7 @@ import { sendStep } from "../../lib/offlineQueue";
 import { peso } from "../../lib/number-format";
 import { toast } from "../../lib/toast";
 import NumPad from "./NumPad";
+import { KeyHint } from "./PosKeys";
 
 export type DrawerKind = "in" | "expense";
 
@@ -31,11 +32,11 @@ const errText = (d: { message?: string; errors?: string[] } | null, fallback: st
 export function DrawerMoneyButtons({ onOpen }: { onOpen: (k: DrawerKind) => void }) {
   return (
     <>
-      <button type="button" className="btn btn-outline-success drawer-btn" onClick={() => onOpen("in")}>
-        <i className="bi bi-box-arrow-in-down me-1" aria-hidden="true"></i>Cash in
+      <button type="button" className="btn btn-outline-success drawer-btn" data-pos-key="cashIn" onClick={() => onOpen("in")}>
+        <i className="bi bi-box-arrow-in-down me-1" aria-hidden="true"></i>Cash in<KeyHint action="cashIn" />
       </button>
-      <button type="button" className="btn btn-outline-danger drawer-btn" onClick={() => onOpen("expense")}>
-        <i className="bi bi-box-arrow-up me-1" aria-hidden="true"></i>Expense
+      <button type="button" className="btn btn-outline-danger drawer-btn" data-pos-key="expense" onClick={() => onOpen("expense")}>
+        <i className="bi bi-box-arrow-up me-1" aria-hidden="true"></i>Expense<KeyHint action="expense" />
       </button>
     </>
   );
@@ -135,7 +136,7 @@ export default function DrawerMoney({ kind, locationId, placeName, onClose, onSa
             </div>
             <div className="modal-footer py-2">
               <button type="button" className="btn btn-outline-secondary btn-lg" onClick={onClose}>Cancel</button>
-              <button type="button" className="btn btn-success btn-lg flex-grow-1" disabled={busy} aria-disabled={!canSave} onClick={() => void save()}>
+              <button type="button" className="btn btn-success btn-lg flex-grow-1" data-pos-enter disabled={busy} aria-disabled={!canSave} onClick={() => void save()}>
                 {busy ? "Saving…" : minor > 0 ? `Save ${title.toLowerCase()} ${peso(minor)}` : `Save ${title.toLowerCase()}`}
               </button>
             </div>

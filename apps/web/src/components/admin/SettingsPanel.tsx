@@ -25,6 +25,8 @@ import { PesoInput, WholeInput } from "../NumberBoxes";
 import DeliveryZonesCard from "./DeliveryZonesCard";
 import NoStoreScope from "./NoStoreScope";
 import PrinterSettingsCard from "./PrinterSettingsCard";
+import PosKeysSettings from "./PosKeysSettings";
+import { readPosKeys } from "../../lib/pos-keys";
 import { shopLinkOn } from "../../lib/shop-link";
 
 interface StoreSettings {
@@ -105,7 +107,7 @@ function formFrom(s: StoreSettings["settings"]): Form {
 }
 
 type ServerGroup = "counter" | "credit" | "receipt" | "shop" | "messenger";
-type Group = "business" | "store" | "printer" | ServerGroup | "lock" | "account";
+type Group = "business" | "store" | "printer" | "keys" | ServerGroup | "lock" | "account";
 
 /** What each group sends when saved. Also used to tell whether a group has unsaved changes. */
 const PAYLOAD: Record<ServerGroup, (f: Form) => Record<string, unknown>> = {
@@ -155,6 +157,7 @@ const GROUPS: { id: Group; icon: string; title: string; server: boolean }[] = [
   { id: "business", icon: "bi-shop-window", title: "Business name", server: true },
   { id: "store", icon: "bi-shop", title: "This store", server: true },
   { id: "printer", icon: "bi-printer", title: "Printer and receipt text", server: false },
+  { id: "keys", icon: "bi-keyboard", title: "Keyboard shortcuts", server: false },
   { id: "counter", icon: "bi-cash-coin", title: "Quota promo", server: true },
   { id: "credit", icon: "bi-journal-text", title: "Credit (utang)", server: true },
   { id: "receipt", icon: "bi-percent", title: "VAT and tax", server: true },
@@ -323,6 +326,7 @@ export default function SettingsPanel({ role = "" }: { role?: string }) {
     switch (g) {
       case "business": return data?.name ?? "";
       case "printer": { const p = getPrinterSettings(); return `${p.widthMm} mm · ${p.autoPrint ? "prints after each sale" : "print by hand"}${p.bluetooth ? " · Bluetooth" : ""}`; }
+      case "keys": { const k = readPosKeys(); return k.on ? `On for POS on this PC · ${k.keys.search} search, ${k.keys.next} pay` : "Off on this PC"; }
       case "store": return "Each store's Open day and Z-read, drawer, per kilo, receipt details";
       case "counter": return saved.promoOn ? `On · ${saved.promoMin} sacks or more, ${peso(toMinor(saved.promoOff))} less each` : "Off";
       case "credit": return toMinor(saved.creditLimit) > 0 ? `New customers ${peso(toMinor(saved.creditLimit))} · ${saved.creditTermDays} days to pay` : `No default limit · ${saved.creditTermDays} days to pay`;
@@ -388,6 +392,8 @@ export default function SettingsPanel({ role = "" }: { role?: string }) {
           onSaved={(name) => { setData((d) => (d ? { ...d, name } : d)); window.dispatchEvent(new Event(STORES_CHANGED_EVENT)); }} />;
       case "printer":
         return <div onChange={() => setPrinterTick((n) => n + 1)} onClick={() => setPrinterTick((n) => n + 1)}><PrinterSettingsCard storeName={data?.name} /></div>;
+      case "keys":
+        return <PosKeysSettings onSaved={() => setPrinterTick((n) => n + 1)} />;
       case "store":
         return <ThisStoreSettings />;
       case "counter":

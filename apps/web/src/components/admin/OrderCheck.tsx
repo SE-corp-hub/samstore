@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { peso } from "../../lib/number-format";
+import { KeyHint } from "./PosKeys";
 
 export type CheckLine = {
   key: string;
@@ -129,11 +130,11 @@ export default function OrderCheck({
   );
   const actions = (
     <div className="check-actions">
-      <button type="button" className="btn btn-outline-dark btn-lg" disabled={busy} onClick={onBack}>
-        <i className="bi bi-arrow-left me-1" aria-hidden="true"></i>{backLabel}
+      <button type="button" className="btn btn-outline-dark btn-lg" disabled={busy} data-pos-esc onClick={onBack}>
+        <i className="bi bi-arrow-left me-1" aria-hidden="true"></i>{backLabel}<KeyHint text="Esc" />
       </button>
-      <button type="button" className="btn btn-success btn-lg fw-bold check-go" disabled={busy} onClick={onGo}>
-        {busy ? "Please wait…" : <><i className="bi bi-check-lg me-1" aria-hidden="true"></i>{goLabel}</>}
+      <button type="button" className="btn btn-success btn-lg fw-bold check-go" disabled={busy} data-pos-key="next" data-pos-enter onClick={onGo}>
+        {busy ? "Please wait…" : <><i className="bi bi-check-lg me-1" aria-hidden="true"></i>{goLabel}<KeyHint action="next" /></>}
       </button>
     </div>
   );
