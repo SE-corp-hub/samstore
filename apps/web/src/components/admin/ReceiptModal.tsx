@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { printSlip, type Slip } from "../../lib/slip-print";
 import { cachedGet } from "../../lib/offlineCache";
+import { kg } from "../../lib/number-format";
+import { isKiloLine } from "../../lib/order-lines";
 
 // Printable receipt view (browser print). VAT display-only label per decision #2.
 
@@ -27,7 +29,7 @@ interface ReceiptData {
   createdAt: string;
   signatureData?: string;
   signatureAt?: string;
-  items: { productName: string; sku: string; unitPriceMinor: number; quantity: number; lineTotalMinor: number }[];
+  items: { productName: string; sku: string; unitPriceMinor: number; quantity: number; soldBy?: string | null; lineTotalMinor: number }[];
   payments: {
     id: string; method: string; methodLabel?: string; kind?: string;
     amountMinor: number; tenderedMinor?: number | null; changeMinor: number;
@@ -88,7 +90,7 @@ function receiptSlip(d: ReceiptData, header: string | null | undefined, footer: 
     storeName: d.storeName, locationId: d.locationId, contact: d.receiptContact || undefined, title: "RECEIPT", reference: d.orderNumber, when: new Date(d.createdAt).toLocaleString("en-PH"),
     header: header || (d.vat?.tin ? `TIN ${d.vat.tin}` : null),
     lines: [{ label: "Customer", value: d.customerName?.trim() || "Walk-in" }],
-    rows: d.items.map((i) => ({ name: i.productName, qty: `${i.quantity} × ${pesos(i.unitPriceMinor)} = ${pesos(i.lineTotalMinor)}` })),
+    rows: d.items.map((i) => ({ name: i.productName, qty: isKiloLine(i) ? `${kg(i.quantity)} × ${pesos(i.unitPriceMinor)}/kg = ${pesos(i.lineTotalMinor)}` : `${i.quantity} × ${pesos(i.unitPriceMinor)} = ${pesos(i.lineTotalMinor)}` })),
     totals,
     signatures: d.signatureData ? [{ role: "Customer", name: d.customerName || "Customer", imageData: d.signatureData }] : [],
     footer: footer || "Salamat po!",
@@ -130,7 +132,7 @@ export default function ReceiptModal({ orderId, onClose }: { orderId: string; on
                       {data.items.map((i, idx) => (
                         <tr key={idx}>
                           <td>{i.productName}</td>
-                          <td className="text-end">{i.quantity}</td>
+                          <td className="text-end">{isKiloLine(i) ? kg(i.quantity) : i.quantity}</td>
                           <td className="text-end">{pesos(i.lineTotalMinor)}</td>
                         </tr>
                       ))}

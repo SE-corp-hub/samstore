@@ -10,6 +10,7 @@ import { API_URL } from "../../config";
 import { adminHeaders, type AdminOrder, getAdminRole, roleCan } from "../../lib/admin";
 import ReceiptModal from "./ReceiptModal";
 import OrderEditor from "./OrderEditor";
+import { isKiloLine, lineText } from "../../lib/order-lines";
 import Steps from "./Steps";
 import { markOwnOrderChange, onOrderChanges, OPEN_ORDER_EVENT, OPEN_ORDER_KEY } from "../../lib/order-pulse";
 import SignaturePad from "./SignaturePad";
@@ -19,7 +20,7 @@ import OrderItemsTable from "./OrderItemsTable";
 import HubLinkCard from "./HubLinkCard";
 import { toast } from "../../lib/toast";
 import { useMediaQuery, WIDE } from "../../lib/use-media-query";
-import { peso } from "../../lib/number-format";
+import { kg, peso } from "../../lib/number-format";
 import { cachedGet, savedThenFresh, useOffline } from "../../lib/offlineCache";
 
 const STATUS_BADGE: Record<string, string> = {
@@ -61,13 +62,13 @@ interface OrderAction { key: string; label: string; icon: string; tone: "main" |
 const OPEN_STATUSES = ["RECEIVED", "CONFIRMED", "PREPARING", "READY", "ON_HOLD", "OUT_FOR_DELIVERY", "FAILED_DELIVERY"];
 const OPEN_TABS = ["pending", "onprocess", "fordelivery"];
 /** "2× Alsa 25kg · 1× Planters 25kg": what to pack, readable on the row without opening the order. */
-const itemsLine = (o: AdminOrder) => (o.items ?? []).map((i) => `${i.quantity}× ${i.productName}`).join(" · ");
+const itemsLine = (o: AdminOrder) => (o.items ?? []).map(lineText).join(" · ");
 
 const HUB_CHANNEL: Record<string, string> = { messenger: "Messenger chat", order_form: "Order form", comment: "Comment", live: "Live", agent: "Agent", counter: "Counter" };
 const toPesos = (m: number) => peso(m);
 const dayRange = (d: Date) => ({ from: new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0).toISOString(), to: new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59).toISOString() });
 
-export default function OrdersPanel() {
+export default function OrdersPanel({ onAgentOrders }: { /** Opens Agent orders (where an agent's order is approved and delivered). */ onAgentOrders?: () => void } = {}) {
   const role = getAdminRole();
   const canVoidRefund = roleCan(role, "voidRefund");
   const canWrite = roleCan(role, "write");
@@ -107,7 +108,7 @@ export default function OrdersPanel() {
   const [confirmAction, setConfirmAction] = useState<{ orderId: string; kind: "void" | "refund" | "voidHold" } | null>(null);
   const [orderDetail, setOrderDetail] = useState<AdminOrder | null>(null);
   const [detailSignature, setDetailSignature] = useState<string | null>(null);
-  const [detailItems, setDetailItems] = useState<{ productName: string; quantity: number; lineTotalMinor: number; unitPriceMinor?: number; priceOverridden?: boolean; priceOverrideReason?: string | null }[] | null>(null);
+  const [detailItems, setDetailItems] = useState<{ productName: string; quantity: number; soldBy?: string | null; lineTotalMinor: number; unitPriceMinor?: number; priceOverridden?: boolean; priceOverrideReason?: string | null }[] | null>(null);
   const [detailReceived, setDetailReceived] = useState<{ signerName: string; imagePng: string; createdAt: string }[]>([]);
   const [detailHistory, setDetailHistory] = useState<{ fromStatus: string | null; toStatus: string; createdAt: string; reason?: string | null; actorType?: string }[] | null>(null);
   const [detailToken, setDetailToken] = useState<string | null>(null);
@@ -477,6 +478,14 @@ export default function OrdersPanel() {
     const a: OrderAction[] = [];
     const s = o.status;
     const live = ["CONFIRMED", "PREPARING", "READY"].includes(s);
+    // An agent's order takes its rice on delivery trips: it is approved, delivered or sent back in Agent orders.
+    // Receive / Delivered here would move it on without the rice ever leaving the shelf.
+    if (canWrite && o.source === "AGENT" && s !== "COMPLETED" && s !== "CANCELLED") {
+      if (onAgentOrders) a.push({ key: "agent", label: s === "RECEIVED" ? "Approve in Agent orders" : "Open in Agent orders", icon: "bi-person-lines-fill", tone: "main", run: onAgentOrders });
+      if (s === "RECEIVED") a.push({ key: "edit", label: "Change items", icon: "bi-pencil", tone: "plain", run: () => openEdit(o) });
+      a.push({ key: "receipt", label: "Reprint receipt", icon: "bi-printer", tone: "plain", run: () => setReceiptOrder(o.id) });
+      return a;
+    }
     if (canWrite) {
       if (s === "ON_HOLD") {
         a.push({ key: "pay", label: "Pay", icon: "bi-cash", tone: "main", run: () => openPay(o, "cash") });
@@ -746,7 +755,7 @@ export default function OrdersPanel() {
                     {i.productName}
                     {i.priceOverridden && <span className="d-block small price-changed"><i className="bi bi-pencil-square me-1" aria-hidden="true"></i>Price changed{i.priceOverrideReason ? `: ${i.priceOverrideReason}` : ""}</span>}
                   </td>
-                  <td className="text-end text-nowrap">{i.quantity} × {typeof i.unitPriceMinor === "number" ? <span className="num">{toPesos(i.unitPriceMinor)}</span> : null}</td>
+                  <td className="text-end text-nowrap">{isKiloLine(i) ? `${kg(i.quantity)} × ` : `${i.quantity} × `}{typeof i.unitPriceMinor === "number" ? <span className="num">{toPesos(i.unitPriceMinor)}{isKiloLine(i) ? "/kg" : ""}</span> : null}</td>
                   <td className="text-end text-nowrap num">{toPesos(i.lineTotalMinor)}</td>
                 </tr>
               ))}

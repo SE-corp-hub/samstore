@@ -18,6 +18,7 @@ import { prisma } from "../persistence/prisma-repositories.js";
 import { recordCostIn, shelfCostFor } from "../domain/shelf-cost.js";
 import { coverShortage } from "../domain/buffer.js";
 import { isKiloItem } from "../domain/kilo.js";
+import { formatKilos, parseKilos } from "../domain/weight.js";
 import { addForTrip, deductStock, InsufficientStockError, releaseForTrip, reserveForTrip, transferStock, unreserveForTrip } from "../domain/movements.js";
 import {
   checkArrival, checkRelease, checkReturnBack, deliveryOutcome, readBack, receiveOutcome, returnOutcome,
@@ -374,9 +375,17 @@ export class TransferFlowService {
 
   async createReturn(
     storeId: string, actor: Actor,
-    input: { locationId?: string; productId?: string; quantity?: unknown; condition?: string; reason?: string; orderId?: string; kargadorId?: string; signatures?: SignatureInput[] },
+    input: { locationId?: string; productId?: string; quantity?: unknown; kilos?: unknown; condition?: string; reason?: string; orderId?: string; kargadorId?: string; signatures?: SignatureInput[] },
   ): Promise<FlowResult<{ id: string; docNumber: string; approvalId: string }>> {
-    const qty = input.quantity;
+    // Kilo rice is kept in grams: the screen sends the kilos that came back ("1.5"), never a count ("2" would be 2 grams).
+    let qty = input.quantity;
+    if (input.kilos !== undefined && input.kilos !== null && input.kilos !== "") {
+      try {
+        qty = parseKilos(String(input.kilos));
+      } catch {
+        return invalid("Enter the kilos that came back (e.g. 1.5)");
+      }
+    }
     if (typeof qty !== "number" || !Number.isInteger(qty) || qty < 1) return invalid("Enter how many came back (1 or more)");
     if (input.condition !== "GOOD" && input.condition !== "DAMAGED") return invalid("Choose: good (back to stock) or damaged");
     const reason = input.reason?.trim() ?? "";
@@ -385,15 +394,17 @@ export class TransferFlowService {
     if (!location) return invalid("Choose the location it was returned to");
     const refusal = locationRefusal(actor, location.id);
     if (refusal) return forbidden(refusal);
-    const product = input.productId ? await prisma.product.findFirst({ where: { id: input.productId, storeId }, select: { id: true, name: true } }) : null;
+    const product = input.productId ? await prisma.product.findFirst({ where: { id: input.productId, storeId }, select: { id: true, name: true, stockBaseUnit: true, stockBaseQuantity: true } }) : null;
     if (!product) return invalid("Unknown product");
+    if (isKiloItem(product) && (input.kilos === undefined || input.kilos === null || input.kilos === "")) return invalid(`${product.name} is kilo rice: enter the kilos that came back`);
+    if (!isKiloItem(product) && input.kilos !== undefined && input.kilos !== null && input.kilos !== "") return invalid(`${product.name} is counted by the sack or piece: enter how many came back`);
     let order: { id: string; orderNumber: string } | null = null;
     if (input.orderId) {
       order = await prisma.order.findFirst({ where: { id: input.orderId, storeId }, select: { id: true, orderNumber: true } });
       if (!order) return invalid("Order not found in this store");
       const sold = await prisma.orderItem.aggregate({ where: { orderId: order.id, productId: product.id }, _sum: { quantity: true } });
       const already = await prisma.stockReturn.aggregate({ where: { storeId, orderId: order.id, productId: product.id }, _sum: { quantity: true } });
-      if ((already._sum.quantity ?? 0) + qty > (sold._sum.quantity ?? 0)) return invalid(`Cannot return more than was bought (${sold._sum.quantity ?? 0})`);
+      if ((already._sum.quantity ?? 0) + qty > (sold._sum.quantity ?? 0)) return invalid(`Cannot return more than was bought (${isKiloItem(product) ? formatKilos(sold._sum.quantity ?? 0) : sold._sum.quantity ?? 0})`);
     }
     const kargador = input.kargadorId ? await prisma.kargador.findFirst({ where: { id: input.kargadorId, storeId, isActive: true }, select: { id: true } }) : null;
     if (input.kargadorId && !kargador) return invalid("Unknown porter");
@@ -415,7 +426,7 @@ export class TransferFlowService {
         }
         const approval = await requestApproval(tx, {
           storeId, kind: "REFUND", documentType: "RETURN", documentId: r.id, locationId: location.id,
-          summary: `Returned ${docNumber}: ${qty} × ${product.name} (${input.condition === "GOOD" ? "good, back in stock" : "damaged, cannot be sold"})${order ? ` from order ${order.orderNumber}` : ""} — ${reason}. Refund the payment or lower the credit.`,
+          summary: `Returned ${docNumber}: ${isKiloItem(product) ? `${formatKilos(qty as number)}` : `${qty} ×`} ${product.name} (${input.condition === "GOOD" ? "good, back in stock" : "damaged, cannot be sold"})${order ? ` from order ${order.orderNumber}` : ""} — ${reason}. Refund the payment or lower the credit.`,
           detail: { quantity: qty, condition: input.condition, orderId: order?.id ?? null },
           requestedById: actor.userId,
         });
@@ -525,9 +536,9 @@ export class TransferFlowService {
   async recentReturns(storeId: string, actor: Actor, locationId?: string) {
     const rows = await prisma.stockReturn.findMany({
       where: { storeId, ...(locationId ? { locationId } : {}) }, orderBy: { createdAt: "desc" }, take: 30,
-      include: { product: { select: { name: true } }, location: { select: { name: true } }, order: { select: { orderNumber: true } } },
+      include: { product: { select: { name: true, stockBaseUnit: true, stockBaseQuantity: true } }, location: { select: { name: true } }, order: { select: { orderNumber: true } } },
     });
-    return rows.map((r) => ({ id: r.id, docNumber: r.docNumber, productName: r.product.name, quantity: r.quantity, condition: r.condition, reason: r.reason, locationName: r.location.name, orderNumber: r.order?.orderNumber ?? null, at: r.createdAt }));
+    return rows.map((r) => ({ id: r.id, docNumber: r.docNumber, productName: r.product.name, quantity: r.quantity, loose: isKiloItem(r.product), condition: r.condition, reason: r.reason, locationName: r.location.name, orderNumber: r.order?.orderNumber ?? null, at: r.createdAt }));
   }
 
   /**
@@ -539,11 +550,15 @@ export class TransferFlowService {
     if (!input.locationId || !input.productId) return invalid("Choose the store and the product first");
     const refusal = locationRefusal(actor, input.locationId);
     if (refusal) return forbidden(refusal);
+    const product = await prisma.product.findFirst({ where: { id: input.productId, storeId }, select: { stockBaseUnit: true, stockBaseQuantity: true } });
+    if (!product) return invalid("Product not found");
+    // A 25 kg sack sale also carries its grams: only a kilo item is counted in grams here.
+    const loose = isKiloItem(product);
     const since = new Date(Date.now() - 60 * 86_400_000);
     const orders = await prisma.order.findMany({
       where: { storeId, sellingLocationId: input.locationId, status: { in: ["COMPLETED", "DELIVERED"] }, createdAt: { gte: since }, items: { some: { productId: input.productId } } },
       orderBy: { createdAt: "desc" }, take: 40,
-      select: { id: true, orderNumber: true, createdAt: true, occurredAt: true, customerName: true, paymentMethod: true, items: { where: { productId: input.productId }, select: { quantity: true, grams: true } } },
+      select: { id: true, orderNumber: true, createdAt: true, occurredAt: true, customerName: true, paymentMethod: true, items: { where: { productId: input.productId }, select: { quantity: true } } },
     });
     const back = await prisma.stockReturn.groupBy({ by: ["orderId"], where: { storeId, productId: input.productId, orderId: { in: orders.map((o) => o.id) } }, _sum: { quantity: true } });
     const returned = new Map<string, number>();
@@ -555,7 +570,7 @@ export class TransferFlowService {
       if (bought - already <= 0) continue;
       sales.push({
         orderId: o.id, orderNumber: o.orderNumber, at: (o.occurredAt ?? o.createdAt).toISOString(), customerName: o.customerName || null,
-        paymentMethod: o.paymentMethod, bought, returned: already, left: bought - already, loose: o.items.some((i) => i.grams !== null),
+        paymentMethod: o.paymentMethod, bought, returned: already, left: bought - already, loose,
       });
       if (sales.length >= 25) break;
     }

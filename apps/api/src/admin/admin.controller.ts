@@ -440,7 +440,7 @@ export class AdminController {
                         // SE Corp Hub orders: the channel, the selling page and the hub's own number (row label).
                         sourceChannel: true, sourcePage: true, externalRef: true, updatedAt: true,
                         // What to pack, on the row: name and how many (no money, so it stays small).
-                        items: { select: { productName: true, quantity: true } },
+                        items: { select: { productName: true, quantity: true, soldBy: true } }, // soldBy: kilo rice is grams, shown in kg
                                                 // signatureData (a picture, often 10+ KB) only comes with one order (GET orders/:id):
                                                 // up to 200 of them made every list load slow and filled the tablet's saved copies.
                                                 paymentMethod: true, signatureAt: true,

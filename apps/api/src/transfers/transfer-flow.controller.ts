@@ -101,12 +101,12 @@ export class TransferFlowController {
     return unwrap(await this.flow.cancel(storeId, actor, id, str(body?.reason)));
   }
 
-  /** POST /admin/returns — Ibinalik: { locationId, productId, quantity, condition, reason, orderId?, kargadorId?, signatures } */
+  /** POST /admin/returns — Ibinalik: { locationId, productId, quantity (or kilos for kilo rice), condition, reason, orderId?, kargadorId?, signatures } */
   @Post("returns")
   async createReturn(@Req() req: Req_, @Body() body: Record<string, unknown>, @Headers("x-store-id") h?: string) {
     const { storeId, actor } = await this.ctx(req, h, TENANT_ROLES.ADMIN);
     return unwrap(await this.flow.createReturn(storeId, actor, {
-      locationId: str(body?.locationId), productId: str(body?.productId), quantity: body?.quantity, condition: str(body?.condition),
+      locationId: str(body?.locationId), productId: str(body?.productId), quantity: body?.quantity, kilos: body?.kilos, condition: str(body?.condition),
       reason: str(body?.reason), orderId: str(body?.orderId), kargadorId: str(body?.kargadorId), signatures: signaturesFrom(body?.signatures),
     }));
   }

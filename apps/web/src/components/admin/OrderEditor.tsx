@@ -4,25 +4,31 @@
 // Works for every open order (shop link, SE Corp Hub, agent, POS hold, pre-order): the server picks the
 // right stock rule (PATCH /admin/orders/:id/items). Same line look as Pre-order: − / + (48 px), "Price each"
 // on the line, a reason when the price is not the usual one, and the below-cost popup before saving.
+// Kilo rice (stock kept in grams) shows kilos: − / + half a kilo, a kilos box, and the price per kilo.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { API_URL } from "../../config";
 import { adminHeaders, getAdminRole } from "../../lib/admin";
 import { savedThenFresh } from "../../lib/offlineCache";
-import { peso } from "../../lib/number-format";
+import { cleanTyping, kg, kilosToGrams, peso } from "../../lib/number-format";
 import { isBelowCost, okKey, seesCostRole } from "../../lib/below-cost";
 import { PesoInput } from "../NumberBoxes";
 import PriceReason, { reasonOk } from "./PriceReason";
 import { askBelowCost, saveUnitCost } from "./BelowCostDialog";
 import { toast } from "../../lib/toast";
 
-interface Product { id: string; name: string; sku: string; priceMinor: number; availableQuantity?: number; category?: { name: string } | null }
+interface Product { id: string; name: string; sku: string; priceMinor: number; availableQuantity?: number; category?: { name: string } | null; stockBaseUnit?: string | null; stockBaseQuantity?: number | null }
 interface Line {
   productId: string;
   name: string;
   /** The usual (list) price; null when the product is no longer sold. */
   listPrice: number | null;
+  /** Pieces or sacks; GRAMS for kilo rice. */
   quantity: number;
+  /** What is typed in the kilos box (kilo rice), kept while typing. */
+  kiloText?: string;
+  /** A kilo line sold as "₱100 worth": its weight, price and amount as saved, kept while neither changes. */
+  sold?: { grams: number; unitPriceMinor: number; amountMinor: number };
   /** What is typed in the price box, kept while typing. */
   priceText?: string;
   /** Price each when it differs from the list price (centavos). */
@@ -32,6 +38,9 @@ interface Line {
 interface Floor { floorMinor: number; ownShelfCost: boolean; unit: string }
 
 const unitOf = (l: Line) => l.price ?? l.listPrice ?? 0;
+const HALF_KG = 500;
+/** Kilo rice: one product counted in grams (1 g a unit). */
+const looseProduct = (p?: Pick<Product, "stockBaseUnit" | "stockBaseQuantity">) => !!p && p.stockBaseUnit === "g" && p.stockBaseQuantity === 1;
 const changed = (l: Line) => l.price !== undefined && l.price !== l.listPrice;
 const needsReason = (l: Line) => changed(l) && !reasonOk(l.reason);
 const readJson = (res: Response) => res.json().catch(() => null);
@@ -70,7 +79,7 @@ export default function OrderEditor({ orderId, orderNumber, customerName, onClos
         setExtraMinor((d?.deliveryFeeMinor ?? 0) - (d?.discountMinor ?? 0));
         setStorePrices(d?.storePrices && typeof d.storePrices === "object" ? d.storePrices as Record<string, number> : {});
         setStoreName(typeof d?.sellingLocationName === "string" ? d.sellingLocationName : null);
-        setLines(((d?.items ?? []) as { productId: string | null; productName: string; quantity: number; unitPriceMinor: number; catalogUnitPriceMinor?: number | null; priceOverridden?: boolean; priceOverrideReason?: string | null }[])
+        setLines(((d?.items ?? []) as { productId: string | null; productName: string; quantity: number; unitPriceMinor: number; lineTotalMinor?: number; soldBy?: string | null; enteredAmountMinor?: number | null; catalogUnitPriceMinor?: number | null; priceOverridden?: boolean; priceOverrideReason?: string | null }[])
           .filter((i) => i.productId)
           .map((i) => ({
             productId: i.productId!,
@@ -79,6 +88,7 @@ export default function OrderEditor({ orderId, orderNumber, customerName, onClos
             quantity: i.quantity,
             price: i.unitPriceMinor,
             reason: i.priceOverrideReason ?? undefined,
+            ...(i.soldBy === "PESO" && i.enteredAmountMinor ? { sold: { grams: i.quantity, unitPriceMinor: i.unitPriceMinor, amountMinor: i.enteredAmountMinor } } : {}),
           })));
       })
       .catch((e: Error) => alive && setError(e.message));
@@ -102,9 +112,28 @@ export default function OrderEditor({ orderId, orderNumber, customerName, onClos
     }));
   }, [byId, lines, products.length]);
 
+  const isLoose = (productId: string) => (byId.has(productId) ? looseProduct(byId.get(productId)) : floors.get(productId)?.unit === "kilo");
+  /** The line's amount: price × how many, or price per kilo × kilos for kilo rice (as the server works it out). */
+  const lineTotal = (l: Line) => {
+    const unit = unitOf(l);
+    if (!isLoose(l.productId)) return unit * l.quantity;
+    if (l.sold && l.sold.grams === l.quantity && l.sold.unitPriceMinor === unit) return l.sold.amountMinor;
+    return Math.round((unit * l.quantity) / 1000);
+  };
   const change = (productId: string, patch: (l: Line) => Line | null) =>
     setLines((cur) => cur && cur.flatMap((l) => (l.productId === productId ? (patch(l) ? [patch(l)!] : []) : [l])));
-  const setQty = (l: Line, qty: number) => change(l.productId, (x) => (qty <= 0 ? null : { ...x, quantity: Math.min(qty, 999) }));
+  const setQty = (l: Line, qty: number) => change(l.productId, (x) => (qty <= 0 ? null : { ...x, quantity: Math.min(qty, 999), kiloText: undefined }));
+  /** Kilo rice: − / + move to the next half kilo (1.785 kg → 1.5 kg or 2 kg); below half a kilo takes it off. */
+  const stepKilos = (l: Line, dir: 1 | -1) => {
+    const halves = dir > 0 ? Math.floor(l.quantity / HALF_KG) + 1 : Math.ceil(l.quantity / HALF_KG) - 1;
+    const grams = halves * HALF_KG;
+    change(l.productId, (x) => (grams <= 0 ? null : { ...x, quantity: Math.min(grams, 1_000_000), kiloText: undefined }));
+  };
+  const typeKilos = (l: Line, raw: string) => {
+    const text = cleanTyping(raw, "kilo").slice(0, 8);
+    const grams = kilosToGrams(text);
+    change(l.productId, (x) => ({ ...x, kiloText: text, quantity: grams && grams > 0 ? Math.min(grams, 1_000_000) : x.quantity }));
+  };
   const setPrice = (l: Line, v: string) => {
     const m = v.trim() === "" ? undefined : Math.round(Number(v.replace(/,/g, "")) * 100);
     const same = m === undefined || !Number.isFinite(m) || m === l.listPrice;
@@ -115,15 +144,16 @@ export default function OrderEditor({ orderId, orderNumber, customerName, onClos
     setLines((cur) => {
       const list = cur ?? [];
       return list.some((l) => l.productId === p.id)
-        ? list.map((l) => (l.productId === p.id ? { ...l, quantity: Math.min(l.quantity + 1, 999) } : l))
-        : [...list, { productId: p.id, name: p.name, listPrice: p.priceMinor, quantity: 1 }];
+        ? list.map((l) => (l.productId !== p.id ? l : looseProduct(p) ? { ...l, quantity: Math.min(l.quantity + 1000, 1_000_000), kiloText: undefined } : { ...l, quantity: Math.min(l.quantity + 1, 999) }))
+        : [...list, { productId: p.id, name: p.name, listPrice: p.priceMinor, quantity: looseProduct(p) ? 1000 : 1 }];
     });
   };
 
   const floorOf = (l: Line) => floors.get(l.productId)?.floorMinor ?? 0;
-  const itemsTotal = (lines ?? []).reduce((s, l) => s + unitOf(l) * l.quantity, 0);
+  const itemsTotal = (lines ?? []).reduce((s, l) => s + lineTotal(l), 0);
   const total = Math.max(0, itemsTotal + extraMinor);
-  const count = (lines ?? []).reduce((s, l) => s + l.quantity, 0);
+  // Sacks and pieces are counted; kilo rice is one line each (a count of grams means nothing).
+  const count = (lines ?? []).reduce((s, l) => s + (isLoose(l.productId) ? 1 : l.quantity), 0);
   const q = find.trim().toLowerCase();
   const matches = priced.filter((p) => !q || p.name.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q) || (p.category?.name ?? "").toLowerCase().includes(q));
 
@@ -211,6 +241,7 @@ export default function OrderEditor({ orderId, orderNumber, customerName, onClos
               {lines === null && !error && <div className="text-muted py-3" role="status"><span className="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>Opening the order…</div>}
               {lines !== null && lines.length === 0 && <p className="text-muted">No products yet. Add one below.</p>}
               {(lines ?? []).map((l) => {
+                const loose = isLoose(l.productId);
                 const isChanged = changed(l);
                 const below = isBelowCost(unitOf(l), floorOf(l));
                 const gone = products.length > 0 && !byId.has(l.productId);
@@ -218,20 +249,36 @@ export default function OrderEditor({ orderId, orderNumber, customerName, onClos
                   <div key={l.productId} className="border-bottom py-2">
                     <div className="d-flex justify-content-between align-items-baseline gap-2">
                       <div className="fw-semibold">{l.name}</div>
-                      <div className="fw-bold text-end text-nowrap num">{peso(unitOf(l) * l.quantity)}</div>
+                      <div className="fw-bold text-end text-nowrap num">{peso(lineTotal(l))}</div>
                     </div>
                     <div className="d-flex flex-wrap justify-content-between align-items-center gap-2 mt-2">
-                      <div className="d-flex align-items-center gap-1" role="group" aria-label={`How many ${l.name}`}>
-                        <button type="button" className={`btn qty-btn ${l.quantity === 1 ? "btn-outline-danger" : "btn-outline-dark"}`}
-                          aria-label={l.quantity === 1 ? `Take ${l.name} off the order` : `One less ${l.name}`} onClick={() => setQty(l, l.quantity - 1)}>
-                          {l.quantity === 1 ? <i className="bi bi-trash" aria-hidden="true"></i> : "−"}
-                        </button>
-                        <span className="qty-num" aria-live="polite">{l.quantity}</span>
-                        <button type="button" className="btn btn-outline-dark qty-btn" aria-label={`One more ${l.name}`} onClick={() => setQty(l, l.quantity + 1)}>+</button>
-                      </div>
+                      {loose ? (
+                        <div className="d-flex align-items-center gap-1" role="group" aria-label={`Kilos of ${l.name}`}>
+                          <button type="button" className={`btn qty-btn ${l.quantity <= HALF_KG ? "btn-outline-danger" : "btn-outline-dark"}`}
+                            aria-label={l.quantity <= HALF_KG ? `Take ${l.name} off the order` : `Half a kilo less ${l.name}`} onClick={() => stepKilos(l, -1)}>
+                            {l.quantity <= HALF_KG ? <i className="bi bi-trash" aria-hidden="true"></i> : "−"}
+                          </button>
+                          <span className="input-group" style={{ width: "8.5rem" }}>
+                            <input className="form-control text-center num fw-bold" inputMode="decimal" aria-label={`Kilos of ${l.name}`}
+                              value={l.kiloText ?? String(l.quantity / 1000)} onChange={(e) => typeKilos(l, e.target.value)}
+                              onBlur={() => change(l.productId, (x) => ({ ...x, kiloText: undefined }))} />
+                            <span className="input-group-text">kg</span>
+                          </span>
+                          <button type="button" className="btn btn-outline-dark qty-btn" aria-label={`Half a kilo more ${l.name}`} onClick={() => stepKilos(l, 1)}>+</button>
+                        </div>
+                      ) : (
+                        <div className="d-flex align-items-center gap-1" role="group" aria-label={`How many ${l.name}`}>
+                          <button type="button" className={`btn qty-btn ${l.quantity === 1 ? "btn-outline-danger" : "btn-outline-dark"}`}
+                            aria-label={l.quantity === 1 ? `Take ${l.name} off the order` : `One less ${l.name}`} onClick={() => setQty(l, l.quantity - 1)}>
+                            {l.quantity === 1 ? <i className="bi bi-trash" aria-hidden="true"></i> : "−"}
+                          </button>
+                          <span className="qty-num" aria-live="polite">{l.quantity}</span>
+                          <button type="button" className="btn btn-outline-dark qty-btn" aria-label={`One more ${l.name}`} onClick={() => setQty(l, l.quantity + 1)}>+</button>
+                        </div>
+                      )}
                       <label className="d-flex align-items-center gap-2 mb-0">
-                        <span className="text-muted">Price each</span>
-                        <PesoInput className={`form-control ${isChanged ? "border-warning bg-warning-subtle" : ""}`} style={{ width: "8.5rem" }} aria-label={`Price each of ${l.name}`}
+                        <span className="text-muted">{loose ? "Price per kilo" : "Price each"}</span>
+                        <PesoInput className={`form-control ${isChanged ? "border-warning bg-warning-subtle" : ""}`} style={{ width: "8.5rem" }} aria-label={`${loose ? "Price per kilo" : "Price each"} of ${l.name}`}
                           value={l.priceText ?? (unitOf(l) / 100).toFixed(2)} placeholder={((l.listPrice ?? 0) / 100).toFixed(2)} onChange={(v) => setPrice(l, v)} />
                       </label>
                     </div>
@@ -244,7 +291,7 @@ export default function OrderEditor({ orderId, orderNumber, customerName, onClos
                     )}
                     {isChanged && (
                       <div className="mt-2">
-                        <div className="text-muted mb-1">Usual price {peso(l.listPrice ?? 0)}. Why the new price?</div>
+                        <div className="text-muted mb-1">Usual price {peso(l.listPrice ?? 0)}{loose ? " a kilo" : ""}. Why the new price?</div>
                         <PriceReason className="form-select" invalid={needsReason(l)} value={reasonOk(l.reason) ? l.reason! : ""} onChange={(v) => change(l.productId, (x) => ({ ...x, reason: v }))} />
                       </div>
                     )}
@@ -258,14 +305,15 @@ export default function OrderEditor({ orderId, orderNumber, customerName, onClos
                 {matches.length === 0 && <p className="text-muted mb-0">{products.length === 0 ? "Loading products…" : "No product with that name."}</p>}
                 {matches.map((p) => {
                   const inOrder = lines?.find((l) => l.productId === p.id)?.quantity ?? 0;
+                  const loose = looseProduct(p);
                   return (
                     <div role="listitem" key={p.id}>
                       <button type="button" className={`btn w-100 text-start d-flex align-items-center gap-2 order-edit-add ${inOrder ? "btn-outline-success" : "btn-outline-dark"}`} onClick={() => add(p)}>
                         <span className="flex-grow-1 min-w-0">
                           <span className="d-block fw-semibold text-truncate">{p.name}</span>
-                          <span className="d-block text-muted small">{peso(p.priceMinor)}{inOrder ? ` · ${inOrder} in this order` : ""}</span>
+                          <span className="d-block text-muted small">{peso(p.priceMinor)}{loose ? " a kilo" : ""}{inOrder ? ` · ${loose ? kg(inOrder) : inOrder} in this order` : ""}</span>
                         </span>
-                        <span className="fw-bold text-nowrap"><i className="bi bi-plus-lg me-1" aria-hidden="true"></i>Add</span>
+                        <span className="fw-bold text-nowrap"><i className="bi bi-plus-lg me-1" aria-hidden="true"></i>{loose ? "Add 1 kg" : "Add"}</span>
                       </button>
                     </div>
                   );
