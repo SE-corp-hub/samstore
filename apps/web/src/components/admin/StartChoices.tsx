@@ -8,6 +8,7 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { StoreOption } from "./StoreBar";
+import { AREAS, areaCounts, type AreaInfo } from "../../lib/customer-area";
 
 const Num = ({ n, done }: { n: number; done: boolean }) => (
   <span className={`start-num${done ? " done" : ""}`} aria-hidden="true">{done ? <i className="bi bi-check-lg"></i> : n}</span>
@@ -151,6 +152,65 @@ export function NewCustomerChoice({ chosenName, onAdd }: {
           {busy ? "Adding…" : tooShort ? "Type the name" : "Add and choose"}
         </button>
       </div>
+    </div>
+  );
+}
+
+const AREA_KEY = "sam.customerArea";
+/** The area filter remembered on this tablet (Lipa / Bauan / everyone), shared by POS and Pre-order. */
+export function useCustomerArea(): [string, (a: string) => void] {
+  const [area, setArea] = useState("");
+  useEffect(() => { try { const v = localStorage.getItem(AREA_KEY); if (v && AREAS.some((a) => a.id === v)) setArea(v); } catch { /* private window */ } }, []);
+  const pick = (a: string) => { setArea(a); try { localStorage.setItem(AREA_KEY, a); } catch { /* private window */ } };
+  return [area, pick];
+}
+
+/**
+ * "All · Lipa · Bauan" above the customer list (2026-11-21): one tap and the list shows only that town's customers.
+ * Hidden when no customer has a town yet. `compact` = the one-line staff row (no counts shown, still 44 px tall), so it
+ * fits beside "Who is it for?" and the selling screen keeps its room.
+ */
+export function CustomerAreaFilter({ customers, area, onArea, compact = false }: {
+  customers: AreaInfo[];
+  area: string;
+  onArea: (a: string) => void;
+  compact?: boolean;
+}) {
+  const n = areaCounts(customers);
+  if (n.lipa + n.bauan === 0) return null;
+  const opts = [{ id: "", label: "All", count: customers.length }, ...AREAS.map((a) => ({ id: a.id as string, label: a.label, count: n[a.id] }))];
+  return (
+    <div className={`area-filter${compact ? " compact" : ""}`} role="group" aria-label="Show customers from">
+      {opts.map((o) => {
+        const on = o.id === area;
+        return (
+          <button key={o.id || "all"} type="button" className={`btn area-btn ${on ? "btn-dark" : "btn-outline-dark"}`} aria-pressed={on}
+            disabled={o.count === 0 && !on} onClick={() => onArea(o.id)}>
+            {on && <i className="bi bi-check-lg me-1" aria-hidden="true"></i>}{o.label}
+            {compact ? <span className="visually-hidden">, {o.count}</span> : <span className="area-count">{o.count}</span>}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * The customer list block in "Who is buying?": its own full-width box with the town buttons right above the list,
+ * so it is clear the buttons narrow THIS list (2026-11-21 alignment pass).
+ */
+export function CustomerListPick({ customers, area, onArea, children }: {
+  customers: AreaInfo[];
+  area: string;
+  onArea: (a: string) => void;
+  /** The customer drop-down. */
+  children: ReactNode;
+}) {
+  return (
+    <div className="start-list" role="group" aria-labelledby="start-list-title">
+      <div id="start-list-title" className="start-list-title"><i className="bi bi-people-fill me-2" aria-hidden="true"></i>From the customer list</div>
+      <CustomerAreaFilter customers={customers} area={area} onArea={onArea} />
+      {children}
     </div>
   );
 }

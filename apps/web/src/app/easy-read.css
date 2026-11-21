@@ -951,6 +951,41 @@ html[data-text-size] .start-cust.chosen, .start-cust.chosen { border: 3px solid 
 .check-badge { background: #fff4d6; color: #6f4800; border: 1px solid #8a5a00; font-weight: 600; }
 .btn-looks-right { min-height: 44px; }
 
+/* §21 Customer area filter, "All · Lipa · Bauan" (2026-11-21): above the customer list on POS and Pre-order.
+   Chosen = dark with a tick (the same toggle as the store choice); the count is on every button. */
+.area-filter { display: flex; flex-wrap: wrap; gap: 0.5rem; grid-column: 1 / -1; }
+.area-btn { min-height: 3rem; min-width: 0; flex: 1 1 0; padding-inline: 0.5rem; display: inline-flex; align-items: center; justify-content: center; gap: 0.15rem; font-weight: 600; white-space: nowrap; }
+.area-count { margin-left: 0.4rem; padding: 0 0.45rem; border-radius: 1rem; border: 1px solid currentColor; font-size: 0.85em; font-weight: 600; line-height: 1.4; }
+.area-filter.compact { flex-wrap: nowrap; gap: 0.35rem; flex: 0 0 auto; }
+.area-filter.compact .area-btn { min-height: 44px; min-width: 0; flex: 0 0 auto; padding: 0.25rem 0.6rem; }
+/* On the tablet a tapped button keeps its hover colour; an outline button that is not chosen stays white. */
+@media (hover: none) {
+  .area-btn.btn-outline-dark:not(:disabled):hover { background-color: transparent; color: var(--bs-btn-color); }
+}
+/* The list block (owner's start card): one box across the whole row, title, town buttons, then the list, all the
+   same width and left edge. On a narrow box (phone) the counts drop so the three words never get cut. */
+.start-list { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 0.5rem; padding: 0.75rem; border: 1px solid #d9d1c5;
+  border-radius: 0.75rem; background: #faf7f2; container-type: inline-size; }
+.start-list-title { font-weight: 700; color: var(--sam-text); display: flex; align-items: center; }
+.start-list .start-cust { width: 100%; }
+@container (max-width: 24rem) { .start-list .area-count { display: none; } }
+
+/* §22 POS stages alignment (2026-11-21): every payment way is the same shape (icon on top, word under it), the quick
+   cash amounts fill the same width as the buttons above them, and the Done screen keeps the steps on the left like
+   Pick items / Check / Pay. */
+.pay-way { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.15rem; line-height: 1.15; min-height: 3.75rem; }
+.pay-way .bi { font-size: 1.25em; }
+.quick-cash { display: grid; grid-template-columns: repeat(auto-fit, minmax(6.5rem, 1fr)); gap: 0.5rem; }
+.quick-cash .btn { white-space: nowrap; padding-inline: 0.5rem; }
+.steps.steps-start { justify-content: flex-start !important; }
+.sell-done { max-width: 35rem; }
+.done-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0 1.25rem; align-items: start; }
+@media (min-width: 900px) and (orientation: landscape) {
+  .sell-done { max-width: 66rem; }
+  .done-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .done-right > .alert:last-of-type, .done-right > .card:last-of-type { margin-bottom: 1rem; }
+}
+
 /* §21 Orders per store (2026-11-21): the owner's store buttons and a store tag on every order. Each store keeps
    one colour (dark text on a light tint, 7:1+), and its name is always written, so colour is never the only cue. */
 .store-tag { display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.125rem 0.55rem; border-radius: 999px; border: 1px solid currentColor; font-size: 0.875rem; font-weight: 700; line-height: 1.4; white-space: normal; overflow-wrap: anywhere; }
