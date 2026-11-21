@@ -98,6 +98,8 @@ export interface BentaInput {
   /** A customer added at the counter with no internet (not on the list yet): found or made by name when the sale arrives. */
   newCustomerName?: string;
   newCustomerPhone?: string;
+  /** The new customer's town ("Lipa", "Bauan"), chosen at the counter. */
+  newCustomerAddress?: string;
   signatures?: SignatureInput[];
   /** Galing sa papel: encode a paper slip (number + the real time it happened). */
   paperSlip?: { slipNo?: unknown; occurredAt?: unknown };
@@ -370,7 +372,7 @@ export class BentaService {
 
       // A customer picked at the counter may have special prices; they beat the store's price (not a manual change, so no reason is needed).
       // A new customer typed at the counter while offline: put on the list now (same name = same customer, so a retry makes no second one).
-      if (!input.customerId && input.newCustomerName?.trim()) input = { ...input, customerId: (await findOrMakeQuickCustomer(storeId, input.newCustomerName, input.newCustomerPhone, { locationId: loc.id, userId: actor.userId, via: "POS" })) ?? undefined };
+      if (!input.customerId && input.newCustomerName?.trim()) input = { ...input, customerId: (await findOrMakeQuickCustomer(storeId, input.newCustomerName, input.newCustomerPhone, { locationId: loc.id, userId: actor.userId, via: "POS" }, input.newCustomerAddress)) ?? undefined };
       const pcust = input.customerId ? await prisma.storeCustomer.findFirst({ where: { storeId, id: input.customerId }, include: { customer: { select: { name: true } } } }) : null;
       const special = pcust ? new Map((await prisma.customerPrice.findMany({ where: { storeId, storeCustomerId: pcust.id, productId: { in: ids } }, select: { productId: true, priceMinor: true } })).map((x) => [x.productId, x.priceMinor])) : new Map<string, number>();
       const priced: (PricedLine & { product: P; catalogUnitPriceMinor: number; overridden: boolean; overrideReason: string | null; sourceLocationId: string | null })[] = [];

@@ -29,7 +29,7 @@ import SignaturePad from "./SignaturePad";
 import QuickCount from "./QuickCount";
 import StoreBar from "./StoreBar";
 import StartChoices, { ChosenRow, CustomerAreaFilter, CustomerListPick, NewCustomerChoice, sameName, useCustomerArea } from "./StartChoices";
-import { byArea } from "../../lib/customer-area";
+import { alphabetical, byArea, nameWithTown } from "../../lib/customer-area";
 import { lastReason, reasonOk, ReasonButtons } from "./PriceReason";
 import { askBelowCost, saveUnitCost } from "./BelowCostDialog";
 import { isBelowCost, okKey, OWNER_COST_NOTE } from "../../lib/below-cost";
@@ -269,15 +269,15 @@ export default function BentaPanel() {
     if (who && storePicked) setStartOpen(false);
   };
   /** "New customer" in "Who is buying?": put on the list at once when online; with no internet the name goes with the sale. */
-  const addNewCustomer = async (name: string, phone: string): Promise<string | null> => {
+  const addNewCustomer = async (name: string, phone: string, town: string): Promise<string | null> => {
     const known = customers.find((c) => !isNewId(c.id) && sameName(c.name, name));
     if (known) { startWho(known.id); toast(`${known.name ?? name} is already on the list — chosen`); return null; }
-    const row = (id: string): Customer => ({ id, name, phone: phone || null, creditApproved: false, creditLimitMinor: 0, creditBalanceMinor: 0 });
+    const row = (id: string): Customer => ({ id, name, phone: phone || null, address: town || null, creditApproved: false, creditLimitMinor: 0, creditBalanceMinor: 0 });
     if (!offline) {
       const stop = new AbortController();
       const timer = setTimeout(() => stop.abort(), 8000); // a sleeping server: keep the name on the tablet instead of waiting
       try {
-        const res = await fetch(`${API_URL}/admin/pos/quick-customer`, { method: "POST", headers: { "Content-Type": "application/json", ...adminHeaders() }, body: JSON.stringify({ name, phone: phone || undefined, locationId: locationId || undefined, via: "POS" }), signal: stop.signal });
+        const res = await fetch(`${API_URL}/admin/pos/quick-customer`, { method: "POST", headers: { "Content-Type": "application/json", ...adminHeaders() }, body: JSON.stringify({ name, phone: phone || undefined, address: town || undefined, locationId: locationId || undefined, via: "POS" }), signal: stop.signal });
         const d = (await res.json().catch(() => null)) as ApiBody | null;
         if (res.ok && d?.id) {
           const id = String(d.id);
@@ -451,7 +451,7 @@ export default function BentaPanel() {
         ...(pay === "split" ? { tenders: parts.map((x) => ({ method: x.method, amountMinor: toMinor(x.amount || "0"), reference: x.method === "cash" ? undefined : x.reference.trim() })) } : {}),
       },
       ...(pay !== "utang" && isNewId(priceCustomer)
-        ? { newCustomerName: customers.find((c) => c.id === priceCustomer)?.name ?? priceCustomer.slice(NEW_ID.length), newCustomerPhone: customers.find((c) => c.id === priceCustomer)?.phone ?? undefined }
+        ? { newCustomerName: customers.find((c) => c.id === priceCustomer)?.name ?? priceCustomer.slice(NEW_ID.length), newCustomerPhone: customers.find((c) => c.id === priceCustomer)?.phone ?? undefined, newCustomerAddress: customers.find((c) => c.id === priceCustomer)?.address ?? undefined }
         : { customerId: pay === "utang" ? customerId : priceCustomer || undefined }),
       paperSlip: paper ? { slipNo: slipNo.trim(), occurredAt: new Date(slipTime).toISOString() } : undefined,
       ...(asksCashTo && cashTo === "owner" ? { cashToOwner: true } : {}),
@@ -603,7 +603,7 @@ export default function BentaPanel() {
       {cart.length === 0 && <CustomerAreaFilter compact customers={customers} area={area} onArea={setArea} />}
       <select className="form-select" style={{ flex: "1 1 14rem", minWidth: 0 }} aria-label="Customer with special prices" disabled={cart.length > 0} value={priceCustomer} onChange={(e) => void pickPriceCustomer(e.target.value)}>
         <option value="">Customer: walk-in (store prices)</option>
-        {byArea(customers, area, priceCustomer).map((c) => <option key={c.id} value={c.id}>{c.name ?? c.phone ?? "—"}</option>)}
+        {byArea(customers, area, priceCustomer).map((c) => <option key={c.id} value={c.id}>{nameWithTown(c, c.phone ?? "—")}</option>)}
       </select>
       </div>
       {priceCustomer && <div className="small text-muted mt-1">{specialCount > 0 ? `${specialCount} special ${specialCount === 1 ? "price" : "prices"} for this customer.` : "No special prices for this customer — store prices apply."}</div>}
@@ -1057,12 +1057,12 @@ export default function BentaPanel() {
           {walkIn && <i className="bi bi-check-circle-fill me-2" aria-hidden="true"></i>}
           <span>Walk-in<small>No name needed · store prices</small></span>
         </button>
-        <NewCustomerChoice onAdd={addNewCustomer} />
+        <NewCustomerChoice onAdd={addNewCustomer} defaultTown={area} />
         {customers.length > 0 && (
           <CustomerListPick customers={customers} area={area} onArea={setArea}>
             <select className={`form-select form-select-lg start-cust${priceCustomer ? " chosen" : ""}`} aria-label="A customer from the list" value={priceCustomer} onChange={(e) => startWho(e.target.value)}>
               <option value="">Choose a customer…</option>
-              {byArea(customers, area, priceCustomer).map((c) => <option key={c.id} value={c.id}>{c.name ?? c.phone ?? "—"}{isNewId(c.id) ? " (new)" : ""}</option>)}
+              {byArea(customers, area, priceCustomer).map((c) => <option key={c.id} value={c.id}>{nameWithTown(c, c.phone ?? "—")}{isNewId(c.id) ? " (new)" : ""}</option>)}
             </select>
           </CustomerListPick>
         )}
@@ -1268,7 +1268,7 @@ export default function BentaPanel() {
                   <div className="d-flex gap-2 mb-2">
                     <select id="bt-cust" className="form-select" style={{ minWidth: 0 }} disabled={!!priceCustomer} value={customerId} onChange={(e) => { setCustomerId(e.target.value); setCustomerSig(null); }}>
                       <option value="">Choose…</option>
-                      {customers.filter((c) => c.creditApproved).map((c) => <option key={c.id} value={c.id}>{c.name ?? c.phone ?? "—"} — owes {peso(c.creditBalanceMinor)} · {creditStatusWords(c.creditStatus).label}</option>)}
+                      {alphabetical(customers.filter((c) => c.creditApproved)).map((c) => <option key={c.id} value={c.id}>{nameWithTown(c, c.phone ?? "—")} — owes {peso(c.creditBalanceMinor)} · {creditStatusWords(c.creditStatus).label}</option>)}
                     </select>
                     {!newCust && <button type="button" className="btn btn-outline-success flex-shrink-0" disabled={offline} onClick={() => setNewCust(true)}>+ New customer{offline && <> · <i className="bi bi-lock"></i> {NEEDS_NET}</>}</button>}
                   </div>

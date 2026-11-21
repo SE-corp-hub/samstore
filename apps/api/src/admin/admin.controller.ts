@@ -1423,11 +1423,13 @@ export class AdminController {
       onlyUtang: onlyUtang === "true",
     });
     const tagOf = await addedTagReader(storeId, customers);
+    // 2026-11-21: A to Z by name (capitals and spaces ignored), the same order on every customer list.
+    const az = (n: string | null | undefined) => (n ?? "").trim().toLowerCase();
     return {
       customers: customers.map((sc) => {
               const row = LoyaltyService.toAdminRow(sc);
               return { ...row, loyaltyPoints: sc.loyaltyBalancePoints, ...tagOf(sc) };
-            }),
+            }).sort((a, b) => az(a.name).localeCompare(az(b.name)) || az(a.phone).localeCompare(az(b.phone))),
       storeId,
     };
   }

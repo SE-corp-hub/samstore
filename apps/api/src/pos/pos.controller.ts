@@ -156,12 +156,12 @@ export class PosController {
 
   /** POST /admin/pos/quick-customer — create/reuse a store customer (no login account), for POS autosave. */
   @Post("quick-customer")
-  async quickCustomer(@Req() req: Request & { user?: AuthPrincipal }, @Body() body: { name: string; phone?: string; locationId?: string; via?: string }, @Headers("x-store-id") headerStoreId?: string) {
+  async quickCustomer(@Req() req: Request & { user?: AuthPrincipal }, @Body() body: { name: string; phone?: string; address?: string; locationId?: string; via?: string }, @Headers("x-store-id") headerStoreId?: string) {
     const { storeId, actor } = await this.guardAndActor(req, headerStoreId);
     if (!body?.name?.trim()) throw new HttpException({ type: "validation", errors: ["name is required"] }, HttpStatus.UNPROCESSABLE_ENTITY);
     // Made at the store the screen is at (POS or Pre-order "Who is buying?").
     const where = { locationId: await addedAtStore(storeId, actor, typeof body.locationId === "string" ? body.locationId : null), userId: actor.userId, via: body.via === "PREORDER" ? "PREORDER" as const : "POS" as const };
-    const id = await this.pos.quickCustomer(storeId, body.name, body.phone, where);
+    const id = await this.pos.quickCustomer(storeId, body.name, body.phone, where, typeof body.address === "string" ? body.address : null);
     if (!id) throw new HttpException({ type: "validation", errors: ["name is required"] }, HttpStatus.UNPROCESSABLE_ENTITY);
     return { id, storeId };
   }

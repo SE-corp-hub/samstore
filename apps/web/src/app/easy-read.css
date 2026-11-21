@@ -1010,3 +1010,9 @@ html[data-text-size] .start-cust.chosen, .start-cust.chosen { border: 3px solid 
 .store-chip.store-tone-5.is-on { background: #134e4a; border-color: #134e4a; }
 .store-chip.store-tone-none.is-on { background: #6f4800; border-color: #6f4800; }
 .store-chip:focus-visible { outline: 3px solid #1F6F3F; outline-offset: 2px; }
+
+/* §23 New customer's town (2026-11-21): Lipa / Bauan / Other place, three equal buttons under the mobile box. */
+.town-choice { display: grid; grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr)); gap: 0.5rem; }
+.town-choice .btn { min-height: 3rem; padding-inline: 0.4rem; font-weight: 600; white-space: normal; line-height: 1.15; }
+.town-tag { display: inline-flex; align-items: center; gap: 0.25rem; margin-left: 0.4rem; padding: 0.05rem 0.5rem; border-radius: 999px;
+  border: 1px solid #0b4f8a; color: #0b4f8a; background: #eef5fc; font-size: 0.875rem; font-weight: 600; vertical-align: middle; white-space: nowrap; }

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { areaCounts, byArea, customerArea } from "./customer-area";
+import { alphabetical, areaCounts, byArea, customerArea, nameWithTown } from "./customer-area";
 
 test("the area comes from the name, then the address, then the store", () => {
   assert.equal(customerArea({ name: "Acel-bauan" }), "bauan");
@@ -21,4 +21,15 @@ test("filter by area keeps the chosen customer", () => {
   assert.deepEqual(byArea(list, "lipa").map((c) => c.id), ["b"]);
   assert.deepEqual(byArea(list, "lipa", "c").map((c) => c.id), ["b", "c"]);
   assert.deepEqual(areaCounts(list), { lipa: 1, bauan: 1 });
+});
+
+test("A to Z, and the town after the name when the name does not say it", () => {
+  const list = [{ id: "1", name: "rosa" }, { id: "2", name: "Acel-bauan" }, { id: "3", name: "  ben" }, { id: "4", name: "Carmen" }];
+  assert.deepEqual(alphabetical(list).map((c) => c.id), ["2", "3", "4", "1"]);
+  assert.deepEqual(byArea(list, "").map((c) => c.id), ["2", "3", "4", "1"]);
+  assert.equal(nameWithTown({ name: "Acel-bauan" }), "Acel-bauan");
+  assert.equal(nameWithTown({ name: "Aling Rosa", address: "Lipa" }), "Aling Rosa · Lipa");
+  assert.equal(nameWithTown({ name: "Ben", addedAt: { name: "Lipa" } }), "Ben · Lipa");
+  assert.equal(nameWithTown({ name: "Sample" }), "Sample");
+  assert.equal(nameWithTown({ name: null }), "—");
 });

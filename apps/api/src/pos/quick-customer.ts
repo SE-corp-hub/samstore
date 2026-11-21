@@ -11,10 +11,12 @@ export const cleanName = (name: string) => name.trim().replace(/\s+/g, " ").slic
  * The store customer for this name (and mobile, if given): an existing one when it matches, else a new one.
  * `where`: the store, login and screen it is made at, kept on a NEW customer only (an existing one keeps its own).
  */
-export async function findOrMakeQuickCustomer(storeId: string, name: string, phone?: string | null, where?: AddedWhere | null): Promise<string | null> {
+export async function findOrMakeQuickCustomer(storeId: string, name: string, phone?: string | null, where?: AddedWhere | null, address?: string | null): Promise<string | null> {
   const n = cleanName(name ?? "");
   if (!n) return null;
   const tel = phone?.trim() || null;
+  // 2026-11-21: where the customer is from ("Lipa", "Bauan"), chosen when added at the counter; the town filter reads it.
+  const addr = typeof address === "string" && address.trim() ? address.trim().replace(/\s+/g, " ").slice(0, 120) : null;
   let customerId: string | null = null;
   if (tel) customerId = (await prisma.customer.findFirst({ where: { phone: tel }, select: { id: true } }))?.id ?? null;
   if (!customerId) {
@@ -25,14 +27,16 @@ export async function findOrMakeQuickCustomer(storeId: string, name: string, pho
       orderBy: { createdAt: "asc" }, select: { id: true, customerId: true },
     });
     if (same) {
-      if (tel) {
-        await prisma.customer.update({ where: { id: same.customerId }, data: { phone: tel } });
+      // A mobile typed now goes on; a town only when they have no address yet (never overwrites one).
+      const noAddr = addr ? !(await prisma.customer.findUnique({ where: { id: same.customerId }, select: { address: true } }))?.address : false;
+      if (tel || noAddr) {
+        await prisma.customer.update({ where: { id: same.customerId }, data: { ...(tel ? { phone: tel } : {}), ...(noAddr ? { address: addr } : {}) } });
         await cacheBust(cacheKey("customers", storeId));
       }
       return same.id;
     }
   }
-  if (!customerId) customerId = (await prisma.customer.create({ data: { name: n, phone: tel, email: null, passwordHash: null } })).id;
+  if (!customerId) customerId = (await prisma.customer.create({ data: { name: n, phone: tel, email: null, passwordHash: null, address: addr } })).id;
   const sc = await prisma.storeCustomer.upsert({
     where: { storeId_customerId: { storeId, customerId } },
     update: {},
