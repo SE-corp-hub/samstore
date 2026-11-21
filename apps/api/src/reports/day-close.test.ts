@@ -15,6 +15,7 @@ import { RiceReportsService } from "./rice-reports.service.js";
 import { DayCloseService } from "./day-close.service.js";
 import { CashService } from "../cash/cash.service.js";
 import { ExpensesService } from "../expenses/expenses.service.js";
+import { PaymentsService } from "../payments/payments.service.js";
 import { manilaDate } from "../domain/reports.js";
 import type { Actor } from "../people/people.service.js";
 
@@ -34,6 +35,7 @@ after(async () => {
     if (orderIds.length) {
       await prisma.creditEntry.deleteMany({ where: { orderId: { in: orderIds } } });
       await prisma.orderStatusHistory.deleteMany({ where: { orderId: { in: orderIds } } });
+      await prisma.paymentStatusHistory.deleteMany({ where: { orderId: { in: orderIds } } });
       await prisma.orderItem.deleteMany({ where: { orderId: { in: orderIds } } });
     }
     await prisma.payment.deleteMany({ where });
@@ -43,6 +45,7 @@ after(async () => {
     await prisma.cashMovement.deleteMany({ where });
     await prisma.cashHandover.deleteMany({ where });
     await prisma.cashIn.deleteMany({ where });
+    await prisma.approvalRequest.deleteMany({ where });
     await prisma.expense.deleteMany({ where });
     await prisma.registerSession.deleteMany({ where });
     await prisma.register.deleteMany({ where });
@@ -280,4 +283,27 @@ test("Cash in and Expense on POS balance on the Z-read: change fund + cash sales
   assert.deepEqual(x.cashAdded?.map((c) => [c.what, c.amountMinor]), [["More change (panukli)", 50_000]]);
   const z = must(await day.close(fx.storeId, fx.staff, { cashCountedMinor: 260_000, gcashCountedMinor: 0, signatures: SIG }));
   assert.equal(z.cash.differenceMinor, 0, "the drawer balances");
+
+  // After the Z-read the drawer is counted: cash typed in or out NOW would be in no Z-read at all.
+  const lateIn = await new CashService().cashIn(fx.storeId, fx.staff, { amountMinor: 1_000, note: "More change (panukli)" });
+  assert.equal(lateIn.ok, false);
+  assert.match(why(lateIn), /closed for today/);
+  const lateOut = await new ExpensesService().create(fx.storeId, fx.staff, { category: "supplies", amountMinor: 1_000, note: "plastic bags", paidFromDrawer: true, fromPos: true });
+  assert.equal(lateOut.ok, false);
+  assert.match(why(lateOut), /closed for today/);
+  // An expense NOT from the drawer (the owner paid it) is still fine.
+  must(await new ExpensesService().create(fx.storeId, fx.owner, { category: "supplies", amountMinor: 1_000, note: "owner paid", locationId: fx.main, paidFromDrawer: false }));
+  // A cash refund of today's sale is refused too, until the owner reopens the day.
+  const sale = await prisma.order.findFirstOrThrow({ where: { storeId: fx.storeId, sellingLocationId: fx.main, status: "COMPLETED" } });
+  const payments = new PaymentsService();
+  const refund = await payments.refundOrder(sale.id, fx.storeId, fx.owner.userId, undefined, "customer came back");
+  assert.equal(refund.ok, false);
+  assert.match(why(refund), /closed for today/);
+  // Cash that waited on the tablet with no signal still goes in (after the close, like an offline sale).
+  must(await new CashService().cashIn(fx.storeId, fx.staff, { amountMinor: 1_000, note: "More change (panukli)", at: new Date(Date.now() - 5 * 60_000).toISOString() }));
+  const zId = (await prisma.registerSession.findFirstOrThrow({ where: { storeId: fx.storeId, zNumber: 1 } })).id;
+  assert.equal(must(await day.one(fx.storeId, fx.owner, zId)).cash.shouldBeMinor, 260_000, "the Z-read never moves");
+  // Reopened by the owner: the refund goes through.
+  must(await day.reopen(fx.storeId, fx.owner, { id: zId, reason: "customer came back" }));
+  must(await payments.refundOrder(sale.id, fx.storeId, fx.owner.userId, undefined, "customer came back"));
 });

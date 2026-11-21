@@ -9,6 +9,7 @@ import { lockOrder, OrderChanged } from "../domain/order-lock.js";
 import type { Prisma } from "@prisma/client";
 import { orderWall } from "../auth/wall.js";
 import { manilaDate } from "../domain/reports.js";
+import { closedTodayRefusal } from "../day/day-gate.js";
 import { reverseSaleCharges } from "../payable/charges.js";
 import { prisma } from "../persistence/prisma-repositories.js";
 import { randomId } from "../persistence/repositories.js";
@@ -482,6 +483,11 @@ export class PaymentsService {
     }
     if (amountMinor !== undefined && amountMinor < remaining) {
       return { ok: false, error: { type: "conflict", message: `A refund takes back the whole sale (₱${(remaining / 100).toFixed(2)}). For rice returned in part, use Returns.` } };
+    }
+    // Cash given back today after the store's Z-read would be in no Z-read: the owner reopens the day first.
+    if ((held.get("cash") ?? 0) > 0 && order.sellingLocationId) {
+      const closed = await closedTodayRefusal(prisma, storeId, order.sellingLocationId);
+      if (closed) return { ok: false, error: { type: "conflict", message: closed } };
     }
 
     try {

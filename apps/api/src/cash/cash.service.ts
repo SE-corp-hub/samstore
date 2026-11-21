@@ -8,7 +8,7 @@ import { prisma } from "../persistence/prisma-repositories.js";
 import { ALL_LOCATION_ROLES } from "../domain/people.js";
 import { dayRange, manilaDate } from "../domain/reports.js";
 import { locationRefusal, type Actor } from "../people/people.service.js";
-import { cashTimeFor } from "../day/day-gate.js";
+import { cashTimeFor, closedTodayRefusal } from "../day/day-gate.js";
 import { cashOfDay } from "./cash-book.js";
 
 type R<T> = { ok: true; value: T } | { ok: false; error: ApiError };
@@ -72,6 +72,11 @@ export class CashService {
     if (Number.isNaN(at.getTime())) return invalid("The time is not a time");
     // Only a step that really waited on the tablet is older than now, and never by more than a few days.
     if (at.getTime() > now.getTime() || now.getTime() - at.getTime() > OFFLINE_DAYS * 86_400_000) at = now;
+    // A cash in typed now (not one that waited offline) after the store's Z-read would be in no Z-read.
+    if (at.getTime() === now.getTime()) {
+      const closed = await closedTodayRefusal(prisma, storeId, loc.id, { now, storeName: loc.name });
+      if (closed) return { ok: false, error: { type: "conflict", message: closed } };
+    }
     const receivedAt = await cashTimeFor(prisma, storeId, loc.id, at, now);
     const row = await prisma.$transaction(async (tx) => {
       const c = await tx.cashIn.create({ data: { storeId, locationId: loc.id, amountMinor: amount, note, receivedAt, createdBy: actor.userId }, select: { id: true } });
