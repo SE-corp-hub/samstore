@@ -6,7 +6,7 @@
 // Totals are always server-computed; stock mutations are atomic.
 
 import { mainLocation, mainLocationId } from "../domain/main-store.js";
-import { dayGate } from "../day/day-gate.js";
+import { cashTimeFor, dayGate } from "../day/day-gate.js";
 import { lockOrder, OrderChanged } from "../domain/order-lock.js";
 import { switchesAt } from "../day/store-switches.js";
 import { offlineSoldAt } from "../domain/selling.js";
@@ -805,6 +805,12 @@ export class PosService {
     };
     const finalTotal = order.totalMinor;
     const signatureAt = new Date();
+    // Completed on the tablet with no internet and only sent now: the sale is on the day it really
+    // happened, and its cash too (unless that day is already closed here: then the cash counts now,
+    // so a closed Z-read never moves). The same rule as a POS sale (benta.service).
+    const offlineAt = offlineSoldAt(input.soldAt, signatureAt);
+    const soldAt = offlineAt ?? signatureAt;
+    const cashAt = offlineAt ? await cashTimeFor(prisma, storeId, locId, offlineAt, signatureAt) : undefined;
     // Fall back to the pre-order's agreed dates when the finalize request omits them.
     const pre = (order.snapshot as any)?.preorder ?? null;
     const startAt = input.startAt ?? pre?.startAt;
@@ -821,8 +827,8 @@ export class PosService {
         await prisma.$transaction(async (tx) => {
           const moved = await tx.order.updateMany({ where: { id, status: "ON_HOLD" }, data: { status: "COMPLETED", paymentStatus: "COLLECTED", paymentMethod: "cash", signatureData, signatureAt: signatureData ? signatureAt : null, registerSessionId: session.value } });
           if (moved.count !== 1) throw new Error("This pre-order was already completed");
-          await writeTenders(tx, { storeId, orderId: id, actorId, plan, note: "Pre-order paid in cash", registerSessionId: session.value, locationId: locId });
-          await becomeSale(tx, signatureAt);
+          await writeTenders(tx, { storeId, orderId: id, actorId, plan, note: "Pre-order paid in cash", registerSessionId: session.value, locationId: locId, ...(cashAt ? { receivedAt: cashAt } : {}) });
+          await becomeSale(tx, soldAt);
           await tx.orderStatusHistory.create({ data: { orderId: id, storeId, fromStatus: "ON_HOLD", toStatus: "COMPLETED", actorType: "pos_finalize", actorId } });
         }, txOptions());
       } catch (e) {
@@ -846,7 +852,7 @@ export class PosService {
           data: { status: "COMPLETED", paymentStatus: "PENDING", signatureData, signatureAt },
         });
         if (moved.count !== 1) throw new Error("This pre-order was already completed");
-        await becomeSale(tx as Prisma.TransactionClient, signatureAt);
+        await becomeSale(tx as Prisma.TransactionClient, soldAt);
         const entry = await tx.creditEntry.findFirst({ where: { orderId: id }, orderBy: { createdAt: "desc" } });
         creditEntryId = entry?.id ?? "";
         await tx.orderStatusHistory.create({

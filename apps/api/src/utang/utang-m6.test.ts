@@ -313,3 +313,22 @@ test("M6: the customer list — staff add, only the owner sets limits, another s
   const mine = await utang.customers(fx.storeId, { search: "maria" });
   assert.deepEqual(mine.map((c) => [c.name, c.limitMinor]), [["Maria Santos", 100_000]]);
 });
+
+test("Bayad sa utang that waited offline: its cash counts when it was taken, not when it was sent", async () => {
+  const fx = await fixture();
+  setSmsProviderForTests(new MockSmsProvider());
+  assert.equal((await sellUtang(fx, 1)).ok, true);
+  // Taken 2 hours ago with no internet, sent now.
+  const madeAt = new Date(Date.now() - 2 * 3_600_000);
+  const r = await utang.collect(fx.storeId, fx.staff1, { customerId: fx.customerId, amountMinor: 50_000, method: "cash", signatures: staffSig, madeAt: madeAt.toISOString() });
+  assert.equal(r.ok, true, msg(r));
+  if (!r.ok) return;
+  const pay = await prisma.payment.findUniqueOrThrow({ where: { id: r.value.paymentId } });
+  assert.equal(pay.receivedAt.getTime(), madeAt.getTime(), "dated when the cash went in the drawer");
+  // Taken just now: dated now.
+  const now = await utang.collect(fx.storeId, fx.staff1, { customerId: fx.customerId, amountMinor: 10_000, method: "cash", signatures: staffSig, madeAt: new Date().toISOString() });
+  assert.equal(now.ok, true, msg(now));
+  if (!now.ok) return;
+  const p2 = await prisma.payment.findUniqueOrThrow({ where: { id: now.value.paymentId } });
+  assert.ok(Date.now() - p2.receivedAt.getTime() < 60_000);
+});

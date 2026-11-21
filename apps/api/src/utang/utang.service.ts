@@ -10,7 +10,7 @@
 //   * Reminders: a monthly balance text and an overdue text, once per period.
 
 import { addedAtStore, customerAdded } from "../domain/added-where.js";
-import { dayGate } from "../day/day-gate.js";
+import { cashTimeFor, dayGate } from "../day/day-gate.js";
 import { offlineSoldAt } from "../domain/selling.js";
 import { storeOwedFirst } from "../cash/cash-book.js";
 import { mainLocationId } from "../reports/sales-book.js";
@@ -223,7 +223,12 @@ export class UtangService {
       const tender = prepared.value.prepared[0]!;
       // Open day (switch on): cash comes into this store's drawer only while its day is open (a payment
       // that waited offline is never refused).
-      const gate = await dayGate(prisma, storeId, loc.id, { offline: !!offlineSoldAt(input.madeAt, new Date()) });
+      const now = new Date();
+      const madeAt = offlineSoldAt(input.madeAt, now);
+      const gate = await dayGate(prisma, storeId, loc.id, { offline: !!madeAt });
+      // A payment that waited on the tablet: its cash counts on the day it was taken (unless that day is
+      // already closed here: then now), the same rule as a sale (benta.service).
+      const receivedAt = madeAt ? await cashTimeFor(prisma, storeId, loc.id, madeAt, now) : now;
       if (gate.refusal) throw new StepError(conflict(gate.refusal));
       const registerSessionId = gate.on ? gate.sessionId : await this.registers.sessionAt(storeId, loc.id);
       const hasCustomerSig = (input.signatures ?? []).some((s) => s.signerKind === "CUSTOMER");
@@ -239,7 +244,7 @@ export class UtangService {
         const payment = await tx.payment.create({
           data: {
             storeId, method, amountMinor: amount, tenderedMinor: tender.tenderedMinor, changeMinor: tender.changeMinor, reference: tender.reference,
-            type: "payment", status: "paid", note: `Credit payment (${loc.name})`, createdBy: actor.userId, registerSessionId, locationId: loc.id, forLocationId,
+            type: "payment", status: "paid", note: `Credit payment (${loc.name})`, createdBy: actor.userId, registerSessionId, locationId: loc.id, forLocationId, receivedAt,
           },
           select: { id: true },
         });

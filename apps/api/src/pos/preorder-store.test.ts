@@ -291,3 +291,20 @@ test("the list: a store login sees its own store's pre-orders (and old ones with
   assert.equal((await order(c.orderId)).sellingLocationId, fx.bt);
   assert.equal(await owes(fx, fx.bt), 115_000);
 });
+
+test("completed with no internet and sent later: the sale and its cash are on the time it was really completed", async () => {
+  const fx = await fixture();
+  const made = await take(fx, fx.lipaStaff, 1);
+  const soldAt = new Date(Date.now() - 2 * 3_600_000);
+  const done = await pos.finalizePreorder(fx.storeId, fx.lipaStaff, made.orderId, { paymentMethod: "cash", tenderedMinor: 140_000, idempotencyKey: key(), soldAt: soldAt.toISOString() });
+  assert.equal(done.ok, true, msg(done));
+  const o = await order(made.orderId);
+  assert.equal(o.occurredAt?.getTime(), soldAt.getTime(), "the sale is on the time it was completed on the tablet");
+  assert.deepEqual(o.payments.map((p) => p.receivedAt.getTime()), [soldAt.getTime()], "its cash too");
+
+  // On credit, the same.
+  const credit = await take(fx, fx.lipaStaff, 1);
+  const r = await pos.finalizePreorder(fx.storeId, fx.lipaStaff, credit.orderId, { signatureData: SIGNATURE, idempotencyKey: key(), soldAt: soldAt.toISOString() });
+  assert.equal(r.ok, true, msg(r));
+  assert.equal((await order(credit.orderId)).occurredAt?.getTime(), soldAt.getTime());
+});
