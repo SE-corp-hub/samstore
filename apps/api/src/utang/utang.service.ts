@@ -75,6 +75,7 @@ registerApprovalHandler("REFUND", async (tx, a) => {
   const line = order?.items[0];
   if (!order || !line) return;
   if (order.source === "AGENT" && order.status !== "COMPLETED") return; // not paid yet — nothing to give back
+  if (order.status === "CANCELLED") return; // the whole sale was refunded or voided already: its money went back then
   const value = refundValue(line, units);
   if (value <= 0) return;
   const note = `Returned (${order.orderNumber})`;
