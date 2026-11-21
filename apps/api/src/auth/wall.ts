@@ -85,7 +85,10 @@ export const WALL_RULES: readonly WallRule[] = [
   { kind: "owner-only", path: /^\/admin\/reports\//, what: "The business reports" },
   { kind: "owner-only", path: /^\/admin\/analytics\/(summary|products|vouchers)$/, what: "The business numbers" },
   { kind: "owner-only", path: /^\/admin\/(purchases|suppliers)(\/|$)/, what: "Purchases" },
-  { kind: "owner-only", path: /^\/admin\/purchase-orders(\/|$)/, what: "Supplier orders" },
+  // The open-order LIST stays readable (no costs, own store only, see PurchaseOrderController.list):
+  // Stock in receives a delivery against it. Everything else about supplier orders is the owner's.
+  { kind: "owner-only", path: /^\/admin\/purchase-orders\/.+/, what: "Supplier orders" },
+  { kind: "owner-only", methods: ["POST", "PATCH", "PUT", "DELETE"], path: /^\/admin\/purchase-orders$/, what: "Supplier orders" },
   { kind: "owner-only", path: /^\/admin\/customers\/export\.csv$/, what: "The customer list download" },
   { kind: "owner-only", path: /^\/admin\/crm\//, what: "Customer messages" },
   { kind: "owner-only", path: /^\/admin\/export$/, what: "Export data" },
