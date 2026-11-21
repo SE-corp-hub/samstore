@@ -20,7 +20,7 @@ test("an offline sale takes its sacks and kilos off this tablet's shelf numbers"
 
 test("sales and opened sacks still waiting on the tablet come off the store they were made at", async () => {
   const { waitingShelf } = await import("./offline-stock");
-  const items = [
+  const items: { id: string; stock: Record<string, number>; priceMinor: number; gramsPerUnit?: number; loose?: boolean }[] = [
     { id: "sack", stock: { s1: 5, s2: 3 }, priceMinor: 130_000, gramsPerUnit: 25_000 },
     { id: "kilo", stock: { s1: 2_000 }, priceMinor: 5_000, loose: true },
   ];
