@@ -15,6 +15,7 @@
 //   - may take up to STAFF_DRAWER_DAY_LIMIT_MINOR a day out of one store's drawer. Above that the
 //     expense waits for the owner's OK (Approvals) and lowers the expected cash only when approved.
 
+import { mainLocationId } from "../domain/main-store.js";
 import { prisma } from "../persistence/prisma-repositories.js";
 import { randomId } from "../persistence/repositories.js";
 import type { ApiError } from "@sam-store/contracts";
@@ -101,7 +102,7 @@ export class ExpensesService {
     } else {
       // An old copy of the app sends no store: the login's own store, else the whole business
       // (owner) or the main store (staff with no store set).
-      locationId = actor.homeLocationId ?? (seesAll(actor) ? null : (await prisma.warehouse.findFirst({ where: { storeId, isDefault: true }, select: { id: true } }))?.id ?? null);
+      locationId = actor.homeLocationId ?? (seesAll(actor) ? null : (await mainLocationId(prisma, storeId)) ?? null);
     }
     if (locationId) {
       const place = await prisma.warehouse.findFirst({ where: { storeId, id: locationId, isActive: true }, select: { id: true } });

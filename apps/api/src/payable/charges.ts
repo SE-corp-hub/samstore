@@ -1,6 +1,7 @@
 // Store payable — the automatic charges of a consignment store (one that sells the main store's rice).
 // Every function runs inside the caller's transaction, so a sale and its charge stand or fall together.
 
+import { mainLocationId } from "../domain/main-store.js";
 import type { Prisma } from "@prisma/client";
 import { shelfCostFor } from "../domain/shelf-cost.js";
 import { nextDocNumber } from "../people/people.service.js";
@@ -16,7 +17,8 @@ export function chargeAmount(loose: boolean, qty: number, unitMinor: number): nu
 export async function consignmentMain(tx: Tx, storeId: string, locationId: string): Promise<string | null> {
   const loc = await tx.warehouse.findFirst({ where: { id: locationId, storeId, consignment: true, isActive: true }, select: { id: true } });
   if (!loc) return null;
-  const main = await tx.warehouse.findFirst({ where: { storeId, isDefault: true }, select: { id: true } });
+  const mainId = await mainLocationId(tx, storeId);
+  const main = mainId ? { id: mainId } : null;
   return main && main.id !== loc.id ? main.id : null;
 }
 

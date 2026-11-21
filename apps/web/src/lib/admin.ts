@@ -245,9 +245,6 @@ export const NAV_GROUPS: NavGroup[] = [
       { id: "mystore", label: "This store", icon: "bi-shop", hint: "Open day and Z-read, drawer, receipt details" },
       { id: "whatican", label: "What I can do", icon: "bi-question-circle", hint: "What your login can change, and who to ask" },
       // Hidden: no role list includes them. Add the id to OWNER_TABS to show one again.
-      // Purchases (2026-11-12): it added stock to the main store with no signature, a second way in beside Stock in,
-      // so one delivery could be counted twice. Rice arrives through Stock in; what is owed is on Supplier orders.
-      { id: "purchases", label: "Purchases", icon: "bi-cart4", hint: "Stock bought and what was paid" },
       // Store Link (2026-11-12, the owner's decision): customers order through the stores' Facebook Pages only,
       // so the web shop link is not offered anywhere. Settings, Online shop has the one switch that turns an old link off.
       { id: "storelink", label: "Store Link", icon: "bi-link-45deg", hint: "Web link and QR code for customers" },

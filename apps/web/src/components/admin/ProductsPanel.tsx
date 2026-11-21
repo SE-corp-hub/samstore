@@ -593,7 +593,7 @@ export default function ProductsPanel({ role = "" }: { role?: string }) {
                 <th className="col-wide">SKU</th>
                 <th className="text-end">Selling price</th>
                 {hasCost && <th className="text-end col-wide">Unit cost</th>}
-                <th className="text-end col-roomy">Stock</th>
+                <th className="text-end col-roomy">Stock, all stores</th>
                 <th className="col-wide">Category</th>
                 <th className="col-roomy">Status</th>
                 <th className="text-end">Actions</th>
@@ -637,9 +637,9 @@ export default function ProductsPanel({ role = "" }: { role?: string }) {
                   </td>
                   <td className="text-end">{toPesos(p.priceMinor)}</td>
                   {hasCost && <td className="text-end text-muted col-wide">{toPesos(p.costMinor)}</td>}
-                  <td className={`text-end col-roomy ${p.trackStock !== false && p.reorderThreshold > 0 && p.availableQuantity <= p.reorderThreshold ? "text-danger fw-semibold" : ""}`}>
+                  {/* The total of every store. Low stock is per store: see Inventory (each store against its own level). */}
+                  <td className="text-end col-roomy">
                     {p.trackStock === false ? <span className="text-muted">—</span> : p.soldByWeight ? kg(p.availableQuantity) : p.availableQuantity}
-                    {p.trackStock !== false && p.reorderThreshold > 0 && <small className="text-muted"> ≤{p.reorderThreshold}</small>}
                     {p.quantityReserved > 0 && <small className="text-muted"> ({p.soldByWeight ? kg(p.quantityReserved) : p.quantityReserved} held for orders)</small>}
                   </td>
                   <td className="small col-wide">{p.category?.name ?? "—"}</td>

@@ -62,12 +62,4 @@ export class PurchasesController {
     const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
     return { purchases: await this.purchasesSvc.list(storeId) };
   }
-
-  @Get("purchases/replenishment")
-  async replenishment(@Req() req: Request & { user?: AuthPrincipal }, @Headers("x-store-id") headerStoreId?: string) {
-    const user = req.user;
-    requireUser(user);
-    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
-    return { items: await this.purchasesSvc.replenishmentList(storeId) };
-  }
 }

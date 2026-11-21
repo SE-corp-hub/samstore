@@ -5,6 +5,7 @@
 //                     with optional line replacement (resume-edit), void restores stock.
 // Totals are always server-computed; stock mutations are atomic.
 
+import { mainLocation, mainLocationId } from "../domain/main-store.js";
 import { dayGate } from "../day/day-gate.js";
 import { lockOrder, OrderChanged } from "../domain/order-lock.js";
 import { switchesAt } from "../day/store-switches.js";
@@ -113,7 +114,8 @@ export class PosService {
     const variantMap = new Map(variants.map((v) => [v.id, v]));
     // Rice Ops M1: a counter sale takes stock from THIS store's location (the
     // default), never silently from another store — the same rule deductStock uses.
-    const defaultLocation = opts.locationId ? { id: opts.locationId } : await prisma.warehouse.findFirst({ where: { storeId, isDefault: true }, select: { id: true } });
+    const mainId = opts.locationId ? null : await mainLocationId(prisma, storeId);
+    const defaultLocation = opts.locationId ? { id: opts.locationId } : mainId ? { id: mainId } : null;
     // The selling store's own prices (no own price for a rice = the main price).
     const ownPrices = opts.locationId
       ? new Map((await prisma.locationPrice.findMany({ where: { storeId, warehouseId: opts.locationId, productId: { in: ids } }, select: { productId: true, priceMinor: true } })).map((x) => [x.productId, x.priceMinor]))
@@ -231,7 +233,7 @@ export class PosService {
     }
     const home = actor.homeLocationId ? await pick(actor.homeLocationId) : null;
     if (home && home.type !== "BUFFER") return { ok: true, value: { id: home.id, name: home.name } };
-    const main = await prisma.warehouse.findFirst({ where: { storeId, isDefault: true }, select: { id: true, name: true } });
+    const main = await mainLocation(prisma, storeId);
     return { ok: true, value: main };
   }
 

@@ -117,7 +117,7 @@ export class UtangService {
   }
 
   private async location(storeId: string, actor: Actor, locationId: string | undefined) {
-    const id = locationId || actor.homeLocationId || (await prisma.warehouse.findFirst({ where: { storeId, isDefault: true }, select: { id: true } }))?.id;
+    const id = locationId || actor.homeLocationId || (await mainLocationId(prisma, storeId));
     const loc = id ? await prisma.warehouse.findFirst({ where: { id, storeId, isActive: true }, select: { id: true, name: true } }) : null;
     if (!loc) throw new StepError(invalid("Choose a location"));
     const refusal = locationRefusal(actor, loc.id);

@@ -14,6 +14,11 @@ import { InventoryService } from "./inventory.service.js";
 import { ProductAdminService } from "../admin/product-admin.service.js";
 import { PosService } from "../pos/pos.service.js";
 import { LoyaltyService } from "../loyalty/loyalty.service.js";
+import { CountService } from "../counts/count.service.js";
+import { ResackService } from "../resack/resack.service.js";
+import { TransferFlowService } from "../transfers/transfer-flow.service.js";
+import { BentaService } from "../selling/benta.service.js";
+import type { Actor } from "../people/people.service.js";
 
 const run = `SEP${Date.now()}${Math.floor(Math.random() * 1000)}`;
 const storeIds: string[] = [];
@@ -38,6 +43,9 @@ after(async () => {
       await prisma.orderItem.deleteMany({ where: { orderId: { in: orderIds } } });
     }
     await prisma.payment.deleteMany({ where });
+    await prisma.stockCountLine.deleteMany({ where });
+    await prisma.stockCount.deleteMany({ where });
+    await prisma.stockTransfer.deleteMany({ where });
     await prisma.stockMovement.deleteMany({ where });
     await prisma.order.deleteMany({ where });
     await prisma.paymentMethod.deleteMany({ where });
@@ -210,4 +218,39 @@ test("Low stock is judged store by store: an empty Lipa shelf is low even with p
   const { ReportsService } = await import("../reports/reports.service.js");
   const rep = await new ReportsService().stockLow(fx.storeId, new Date(Date.now() - 86_400_000), new Date());
   assert.deepEqual(rep.rows.map((r) => [r.locationId, r.storeName, r.availableQuantity, r.reorderThreshold]), [[fx.s3, "Lipa", 2, 3]]);
+});
+
+test("Each role at each store: a counter login changes only its own store's stock; the owner any store", async () => {
+  const fx = await fixture();
+  const owner: Actor = { userId: fx.owner, role: "OWNER", homeLocationId: null };
+  const lipa: Actor = { userId: fx.lipa, role: "STAFF", homeLocationId: fx.s3 };
+  const bahay: Actor = { userId: fx.bahay, role: "STAFF", homeLocationId: fx.s2 };
+  const counts = new CountService();
+  const resacks = new ResackService();
+  const flow = new TransferFlowService();
+  const benta = new BentaService();
+  const refused = (r: { ok: boolean; error?: { type: string } }, what: string) => {
+    assert.equal(r.ok, false, `${what} should be refused`);
+    assert.equal((r as { error: { type: string } }).error.type, "forbidden", `${what}: ${msg(r)}`);
+  };
+  // Another store's shelf: refused for Lipa and Bahay Tindahan, whatever the screen sends.
+  for (const [who, other] of [[lipa, fx.s1], [lipa, fx.s2], [bahay, fx.s3], [bahay, fx.wh]] as const) {
+    refused(await counts.start(fx.storeId, who, { locationId: other }), "count at another store");
+    refused(await counts.quick(fx.storeId, who, { locationId: other, productId: fx.riceId, counted: 1 }), "quick count at another store");
+    refused(await benta.stockIn(fx.storeId, who, { locationId: other, lines: [{ productId: fx.riceId, quantity: 1 }] }), "stock in at another store");
+    refused(await resacks.start(fx.storeId, who, { locationId: other, inputProductId: fx.riceId, inputQty: 1 }), "resack at another store");
+    refused(await flow.moveNow(fx.storeId, who, { fromLocationId: other, toLocationId: other === fx.s1 ? fx.wh : fx.s1, productId: fx.riceId, quantity: 1 }), "move between two other stores");
+  }
+  // Their own store: a count starts there; with no store named, it is their own store.
+  const own = await counts.start(fx.storeId, lipa, {});
+  assert.equal(own.ok, true, msg(own));
+  const c = await prisma.stockCount.findFirstOrThrow({ where: { storeId: fx.storeId, startedById: fx.lipa } });
+  assert.equal(c.locationId, fx.s3);
+  // Moving rice out of their own store to another is allowed (the other store receives it).
+  const out = await flow.moveNow(fx.storeId, bahay, { fromLocationId: fx.s2, toLocationId: fx.s1, productId: fx.riceId, quantity: 2 });
+  assert.equal(out.ok, true, msg(out));
+  // The owner may count at any store.
+  for (const w of [fx.s1, fx.s2, fx.wh]) assert.equal((await counts.start(fx.storeId, owner, { locationId: w })).ok, true);
+  // Nothing moved but the one move: Bahay Tindahan 10 → 8, Bogs and Lucy 10 → 12.
+  assert.deepEqual(await shelves(fx), { s1: 12, s2: 8, s3: 10, wh: 10 });
 });
