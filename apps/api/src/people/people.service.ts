@@ -71,6 +71,27 @@ export const isHeadOf = (actor: Actor, locationId: string | null | undefined): b
 export const canManageLocation = (actor: Actor, locationId: string | null | undefined): boolean =>
   ["OWNER", "STORE_OWNER", "PLATFORM_ADMIN", "MANAGER"].includes(actor.role) || isHeadOf(actor, locationId);
 
+/**
+ * May this login change the team here? The owner: anything. A manager (every store) and the head of a
+ * store (that store only) look after COUNTER logins: add them, fix the name, PIN and password, unlock.
+ * Only the owner gives other roles, chooses heads, moves people between stores of someone else, or removes.
+ * `target`: the person being changed (null when adding). `change`: what is being set.
+ */
+export function teamRefusal(
+  actor: Actor,
+  target: { role: string; homeLocationId: string | null; isLocationHead: boolean } | null,
+  change: { homeLocationId?: string | null; isLocationHead?: boolean; role?: string } = {},
+): string | null {
+  if (["OWNER", "STORE_OWNER", "PLATFORM_ADMIN"].includes(actor.role)) return null;
+  if (actor.role !== "MANAGER" && !actor.isHead) return "Only the owner, a manager or the head of a store can change the team";
+  if (change.isLocationHead) return "Only the owner chooses the head of a store";
+  if (change.role !== undefined && change.role !== "STAFF") return "Only the owner gives a role other than STAFF";
+  if (target && (target.role !== "STAFF" || target.isLocationHead)) return "Only the owner can change this login";
+  if (target && !(target.homeLocationId && canManageLocation(actor, target.homeLocationId))) return "This person works at another store";
+  if (change.homeLocationId !== undefined && !(change.homeLocationId && canManageLocation(actor, change.homeLocationId))) return actor.isHead && actor.role !== "MANAGER" ? "Choose your own store" : "Choose a store";
+  return null;
+}
+
 /** Who may see cost and profit of one store: the owner side, and the head of that store. Nobody else. */
 export const seesProfitAt = (actor: Actor, locationId: string | null | undefined): boolean => SEES_ALL_PROFIT.includes(actor.role) || isHeadOf(actor, locationId);
 

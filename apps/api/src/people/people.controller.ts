@@ -6,7 +6,8 @@ import { Body, Controller, Get, Headers, HttpException, HttpStatus, Param, Patch
 import type { ApiError } from "@sam-store/contracts";
 import { JwtAuthGuard, type AuthPrincipal } from "../auth/auth.guard.js";
 import { requireUser, resolveTenant, TENANT_ROLES } from "../auth/tenant-context.js";
-import { loadActor, PeopleService } from "./people.service.js";
+import { loadActor, PeopleService, teamRefusal, type Actor } from "./people.service.js";
+import { prisma } from "../persistence/prisma-repositories.js";
 import { badRequest, signaturesFrom } from "./signature-input.js";
 
 function statusFor(error: ApiError): HttpStatus {
@@ -45,6 +46,14 @@ export class PeopleController {
     return { storeId, actor: await loadActor(storeId, user.sub, role) };
   }
 
+  /** The owner changes anyone; a manager or a store head only counter logins of their stores (teamRefusal). */
+  private async teamCheck(storeId: string, actor: Actor, userId: string | null, change: { homeLocationId?: string | null; isLocationHead?: boolean; role?: string } = {}) {
+    const target = userId ? await prisma.userStore.findUnique({ where: { userId_storeId: { userId, storeId } }, select: { role: true, homeLocationId: true, isLocationHead: true } }) : null;
+    if (userId && !target) throw new HttpException({ type: "not_found", message: "Member not part of this store" }, HttpStatus.NOT_FOUND);
+    const why = teamRefusal(actor, target, change);
+    if (why) throw new HttpException({ type: "forbidden", message: why }, HttpStatus.FORBIDDEN);
+  }
+
   // ── me ──
 
   /** GET /admin/me/rice — the home screen's facts: role, home location, approvals waiting. */
@@ -73,7 +82,8 @@ export class PeopleController {
   /** PATCH /admin/people/:userId — owner sets home location, PIN, or unlocks a locked PIN. */
   @Patch("people/:userId")
   async updatePerson(@Req() req: Req_, @Param("userId") userId: string, @Body() body: Record<string, unknown>, @Headers("x-store-id") h?: string) {
-    const { storeId, actor } = await this.ctx(req, h, TENANT_ROLES.MANAGE);
+    const { storeId, actor } = await this.ctx(req, h, TENANT_ROLES.ADMIN);
+    await this.teamCheck(storeId, actor, userId, { homeLocationId: optNullStr(body?.homeLocationId), isLocationHead: typeof body?.isLocationHead === "boolean" ? body.isLocationHead : undefined });
     return unwrap(await this.people.updateMember(storeId, userId, {
       homeLocationId: optNullStr(body?.homeLocationId),
       pin: str(body?.pin),
@@ -85,28 +95,32 @@ export class PeopleController {
   /** PATCH /admin/people/:userId/details — owner corrects a login's name or mobile number. */
   @Patch("people/:userId/details")
   async editPerson(@Req() req: Req_, @Param("userId") userId: string, @Body() body: Record<string, unknown>, @Headers("x-store-id") h?: string) {
-    const { storeId, actor } = await this.ctx(req, h, TENANT_ROLES.MANAGE);
+    const { storeId, actor } = await this.ctx(req, h, TENANT_ROLES.ADMIN);
+    await this.teamCheck(storeId, actor, userId);
     return unwrap(await this.people.editPerson(storeId, userId, { name: str(body?.name), phone: optNullStr(body?.phone), email: optNullStr(body?.email) }, actor.userId));
   }
 
   /** POST /admin/people/:userId/password — owner chooses a login's password (works at once). */
   @Post("people/:userId/password")
   async setPassword(@Req() req: Req_, @Param("userId") userId: string, @Body() body: Record<string, unknown>, @Headers("x-store-id") h?: string) {
-    const { storeId, actor } = await this.ctx(req, h, TENANT_ROLES.MANAGE);
+    const { storeId, actor } = await this.ctx(req, h, TENANT_ROLES.ADMIN);
+    await this.teamCheck(storeId, actor, userId);
     return unwrap(await this.people.setPassword(storeId, userId, str(body?.password) ?? "", actor.userId));
   }
 
   /** POST /admin/people/ready — owner makes a login to hand over later (temporary password shown once). */
   @Post("people/ready")
   async createReady(@Req() req: Req_, @Body() body: Record<string, unknown>, @Headers("x-store-id") h?: string) {
-    const { storeId, actor } = await this.ctx(req, h, TENANT_ROLES.MANAGE);
+    const { storeId, actor } = await this.ctx(req, h, TENANT_ROLES.ADMIN);
+    await this.teamCheck(storeId, actor, null, { homeLocationId: optNullStr(body?.homeLocationId) ?? null, isLocationHead: body?.isLocationHead === true });
     return unwrap(await this.people.createReadyLogin(storeId, { label: str(body?.label), homeLocationId: optNullStr(body?.homeLocationId), isLocationHead: body?.isLocationHead === true }, actor.userId));
   }
 
   /** POST /admin/people/:userId/hand-over — a ready login goes to a real person (new temporary password shown once). */
   @Post("people/:userId/hand-over")
   async handOver(@Req() req: Req_, @Param("userId") userId: string, @Body() body: Record<string, unknown>, @Headers("x-store-id") h?: string) {
-    const { storeId, actor } = await this.ctx(req, h, TENANT_ROLES.MANAGE);
+    const { storeId, actor } = await this.ctx(req, h, TENANT_ROLES.ADMIN);
+    await this.teamCheck(storeId, actor, userId);
     return unwrap(await this.people.handOverLogin(storeId, userId, { name: str(body?.name), phone: optNullStr(body?.phone), email: optNullStr(body?.email), password: str(body?.password) }, actor.userId));
   }
 
