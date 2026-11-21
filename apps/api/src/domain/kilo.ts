@@ -9,6 +9,9 @@
 
 /** Smallest sack that may also sell per kilo: 10 kg (the 5 kg packs stay packs). */
 export const MIN_KILO_SACK_GRAMS = 10_000;
+/** The group every kilo item goes in (Products → Group), shown as "1 kg" on POS. */
+export const KILO_GROUP_NAME = "1 kg";
+export const KILO_GROUP_SLUG = "1-kg";
 /** Added to the kilo price for rice spilled while scooping: ₱2. */
 export const KILO_SPILL_MINOR = 200;
 
