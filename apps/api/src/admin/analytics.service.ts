@@ -1,7 +1,9 @@
 // Analytics service — tenant-scoped sales/order/product summaries.
 // All aggregation is pure SQL/Prisma; numbers come from the DB, never fabricated.
 
-import { orderWall } from "../auth/wall.js";
+import { currentWall, orderWall } from "../auth/wall.js";
+import { dayRange, manilaDate } from "../domain/reports.js";
+import { bookTotals, salesBook } from "../reports/sales-book.js";
 import { prisma } from "../persistence/prisma-repositories.js";
 
 export class AnalyticsService {
@@ -39,27 +41,29 @@ export class AnalyticsService {
     return rows.map((r) => ({ status: r.status, count: r._count._all, revenueMinor: r._sum.totalMinor ?? 0 }));
   }
 
-  /** Revenue + order count by day (last N days). */
+  /**
+   * Sales and their count by Manila day (last N days, today last): the "Today's sales" card and the
+   * 7-day chart. Read from the sales book like every other report (2026-11-21 bug hunt): only sales
+   * that were handed over, on the Manila day they were sold (a 6 AM sale is today, not yesterday in
+   * UTC), a refunded or voided sale taken off on the day it was taken back. A store login sees its store.
+   */
   async dailyRevenue(storeId: string, days = 14): Promise<{ days: { date: string; count: number; revenueMinor: number }[] }> {
-    const since = new Date(Date.now() - days * 86_400_000);
-    const orders = await prisma.order.findMany({
-      where: { storeId, createdAt: { gte: since }, AND: [orderWall()] },
-      select: { createdAt: true, totalMinor: true },
-    });
-    const byDay = new Map<string, { count: number; revenueMinor: number }>();
-    for (const o of orders) {
-      const date = o.createdAt.toISOString().slice(0, 10);
-      const cur = byDay.get(date) ?? { count: 0, revenueMinor: 0 };
-      cur.count += 1;
-      cur.revenueMinor += o.totalMinor;
-      byDay.set(date, cur);
+    const n = Math.max(1, Math.floor(days));
+    const dates = Array.from({ length: n }, (_, i) => manilaDate(new Date(Date.now() - (n - 1 - i) * 86_400_000)));
+    const range = { gte: dayRange(dates[0]!).from, lt: dayRange(dates[n - 1]!).to };
+    const wall = currentWall();
+    const book = await salesBook(prisma, storeId, range, wall ? { locationId: wall.locationId, mainId: wall.mainId } : {});
+    const byDay = new Map<string, typeof book.entries>();
+    for (const e of book.entries) {
+      const d = manilaDate(e.at);
+      byDay.set(d, [...(byDay.get(d) ?? []), e]);
     }
-    const out: { date: string; count: number; revenueMinor: number }[] = [];
-    for (let i = days - 1; i >= 0; i--) {
-      const d = new Date(Date.now() - i * 86_400_000).toISOString().slice(0, 10);
-      out.push({ date: d, ...(byDay.get(d) ?? { count: 0, revenueMinor: 0 }) });
-    }
-    return { days: out };
+    return {
+      days: dates.map((date) => {
+        const t = bookTotals(byDay.get(date) ?? [], book.splits);
+        return { date, count: t.count, revenueMinor: t.totalMinor };
+      }),
+    };
   }
 
   /** Top products by quantity sold. */
