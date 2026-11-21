@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { API_URL } from "../../config";
 import { adminHeaders, roleCan } from "../../lib/admin";
 import { kg, peso } from "../../lib/number-format";
+import { adjustUnits, isLooseItem } from "../../lib/stock-units";
 
 interface InvItem {
   photoKey?: string | null;
@@ -41,7 +42,7 @@ const SHOW_CONVERT = false;
 /** Plain words for the stock badge. */
 const STATUS_WORD: Record<InvItem["status"], string> = { in: "In stock", low: "Low", out: "Sold out" };
 /** Loose rice is kept in grams (1 g per unit): show it in kilos, like everywhere else in the app. */
-const qtyText = (r: Pick<InvItem, "stockBaseUnit" | "stockBaseQuantity">, q: number) => (r.stockBaseUnit === "g" && r.stockBaseQuantity === 1 ? kg(q) : String(q));
+const qtyText = (r: Pick<InvItem, "stockBaseUnit" | "stockBaseQuantity">, q: number) => (isLooseItem(r) ? kg(q) : String(q));
 
 export default function InventoryPanel({ role = "" }: { role?: string }) {
   // Changing a number by hand is for the owner and managers (the server refuses everyone else): staff use Stock in and Count.
@@ -96,6 +97,9 @@ export default function InventoryPanel({ role = "" }: { role?: string }) {
   const [adjustAllowNegative, setAdjustAllowNegative] = useState(false);
   const [adjustBusy, setAdjustBusy] = useState(false);
   const [adjustError, setAdjustError] = useState<string | null>(null);
+  // Which shelf Adjust changes: the location chosen in the filter, else the main store (asked in the dialog).
+  const [adjustWh, setAdjustWh] = useState("");
+  const shelfOf = (r: InvItem, wh: string) => r.stockLevels.find((l) => l.warehouseId === wh) ?? { quantityOnHand: 0, quantityReserved: 0 };
   const [historyProduct, setHistoryProduct] = useState("");
   const [history, setHistory] = useState<{
     id: string; productName: string; sku: string | null; variantName?: string | null; variantSku?: string | null; delta: number; type: string;
@@ -133,11 +137,13 @@ export default function InventoryPanel({ role = "" }: { role?: string }) {
     setAdjustBusy(true);
     setAdjustError(null);
     try {
-      const qty = Number.parseInt(adjustQty, 10);
-      if (!Number.isFinite(qty)) { setAdjustError("Enter a quantity"); return; }
+      const qty = adjustUnits(adjust, adjustQty);
+      if (!Number.isFinite(qty) || (adjustMode === "delta" && qty === 0) || (adjustMode === "setTo" && qty < 0)) { setAdjustError(isLooseItem(adjust) ? "Enter the kilos (e.g. 12.5)" : "Enter a whole number"); return; }
+      if (!adjustWh) { setAdjustError("Choose the store"); return; }
       if (adjustReason.trim().length < 3) { setAdjustError("A reason is required (3+ characters) — it is stored on the ledger row"); return; }
       const body: Record<string, unknown> = {
         productId: adjust.id,
+        warehouseId: adjustWh,
         reason: adjustReason.trim(),
         allowNegative: adjustAllowNegative,
       };
@@ -421,13 +427,13 @@ export default function InventoryPanel({ role = "" }: { role?: string }) {
                   <td className="text-end">{qtyText(r, r.quantityOnHand)}</td>
                   <td className="text-end text-muted col-wide">{qtyText(r, r.quantityReserved)}</td>
                   <td className="text-end fw-semibold">{qtyText(r, r.availableQuantity)}</td>
-                  {hasCost && <td className="text-end col-wide">{toPesos(r.costMinor)}</td>}
+                  {hasCost && <td className="text-end col-wide">{toPesos(r.costMinor)}{isLooseItem(r) ? "/kg" : ""}</td>}
                   {hasCost && <td className="text-end col-roomy">{toPesos(r.valueMinor)}</td>}
-                  <td><span className={`badge ${STATUS_BADGE[r.status]}`}>{STATUS_WORD[r.status]}{r.reorderThreshold > 0 ? ` (reorder at ${r.reorderThreshold})` : ""}</span></td>
+                  <td><span className={`badge ${STATUS_BADGE[r.status]}`}>{STATUS_WORD[r.status]}{r.reorderThreshold > 0 ? ` (reorder at ${qtyText(r, r.reorderThreshold)})` : ""}</span></td>
                   <td className="text-end">
                     {canChange && (
                       <button type="button" className="btn btn-sm btn-outline-primary text-nowrap" aria-label={`Adjust ${r.name}`}
-                        onClick={() => { setAdjust(r); setAdjustMode("delta"); setAdjustQty(""); setAdjustReason(""); setAdjustAllowNegative(false); setAdjustError(null); }}>
+                        onClick={() => { setAdjust(r); setAdjustWh(warehouseId || warehouses.find((w) => w.isDefault)?.id || warehouses[0]?.id || ""); setAdjustMode("delta"); setAdjustQty(""); setAdjustReason(""); setAdjustAllowNegative(false); setAdjustError(null); }}>
                         <i className="bi bi-sliders me-1"></i>Adjust
                       </button>
                     )}
@@ -450,8 +456,12 @@ export default function InventoryPanel({ role = "" }: { role?: string }) {
                   <button type="button" className="btn-close" aria-label="Close" onClick={() => setAdjust(null)}></button>
                 </div>
                 <div className="modal-body">
+                  <label className="form-label small mb-1" htmlFor="adjustWh">Store</label>
+                  <select id="adjustWh" className="form-select form-select-sm mb-2" value={adjustWh} onChange={(e) => setAdjustWh(e.target.value)}>
+                    {warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
+                  </select>
                   <p className="small mb-2">
-                    Current stock: <strong>{adjust.quantityOnHand}</strong> on hand · {adjust.quantityReserved} reserved · {adjust.availableQuantity} available
+                    Now at this store: <strong>{qtyText(adjust, shelfOf(adjust, adjustWh).quantityOnHand)}</strong> on hand · {qtyText(adjust, shelfOf(adjust, adjustWh).quantityReserved)} held for orders
                   </p>
                   <div className="btn-group btn-group-sm w-100 mb-2" role="group" aria-label="Adjustment mode">
                     <button type="button" className={`btn ${adjustMode === "delta" ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setAdjustMode("delta")}>
@@ -462,9 +472,9 @@ export default function InventoryPanel({ role = "" }: { role?: string }) {
                     </button>
                   </div>
                   <label className="form-label small mb-1" htmlFor="adjustQty">
-                    {adjustMode === "delta" ? "Change (+ to add, − to remove)" : "Counted quantity on the shelf"}
+                    {adjustMode === "delta" ? "Change (+ to add, − to remove)" : "Counted quantity on the shelf"}{isLooseItem(adjust) ? ", in kilos" : ""}
                   </label>
-                  <input id="adjustQty" className="form-control form-control-sm mb-2" type="number" step="1" value={adjustQty} onChange={(e) => setAdjustQty(e.target.value)} placeholder={adjustMode === "delta" ? "e.g. 5 or -2" : "e.g. 37"} />
+                  <input id="adjustQty" className="form-control form-control-sm mb-2" type="number" step={isLooseItem(adjust) ? "0.5" : "1"} inputMode="decimal" value={adjustQty} onChange={(e) => setAdjustQty(e.target.value)} placeholder={adjustMode === "delta" ? "e.g. 5 or -2" : "e.g. 37"} />
                   <label className="form-label small mb-1" htmlFor="adjustReason">Reason (stored on the ledger row)</label>
                   <input id="adjustReason" className="form-control form-control-sm mb-2" type="text" value={adjustReason} onChange={(e) => setAdjustReason(e.target.value)} placeholder="e.g. Delivery received / spillage / stock-take" />
                   <div className="form-check form-switch">
@@ -473,9 +483,9 @@ export default function InventoryPanel({ role = "" }: { role?: string }) {
                       Allow a negative balance (stock-take correction — recorded, never hidden)
                     </label>
                   </div>
-                  {adjustMode === "delta" && adjustQty !== "" && Number.isFinite(Number.parseInt(adjustQty, 10)) && (
+                  {adjustMode === "delta" && adjustQty !== "" && Number.isFinite(adjustUnits(adjust, adjustQty)) && (
                     <div className="small text-muted mt-2">
-                      New on hand: <strong>{adjust.quantityOnHand + Number.parseInt(adjustQty, 10)}</strong>
+                      New on hand: <strong>{qtyText(adjust, shelfOf(adjust, adjustWh).quantityOnHand + adjustUnits(adjust, adjustQty))}</strong>
                     </div>
                   )}
                   {adjustError && <div className="alert alert-danger py-1 px-2 small mt-2 mb-0">{adjustError}</div>}
