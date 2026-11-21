@@ -252,3 +252,21 @@ test("new categories are tenant-scoped and duplicate names are not silently rena
   assert.equal(duplicate.ok, false);
   if (!duplicate.ok) assert.equal(duplicate.error.type, "conflict");
 });
+
+// 2026-11-21: the rice import saved the family as "Bigas"; the edit form sends "bigas". A rice with
+// stock must still be renamed by the owner (it was refused as "changing the stock measure").
+test("rename a rice with stock whose family differs only in case", async () => {
+  const store = await makeStore();
+  const p = await prisma.product.create({
+    data: { storeId: store.id, name: `${run} Alsa`, sku: tag("ALS"), priceMinor: 120000, unit: "sako", stockBaseUnit: "g", stockBaseQuantity: 25000, stockConversionFamily: "Bigas" },
+  });
+  createdProductIds.push(p.id);
+  await prisma.stockLevel.create({ data: { storeId: store.id, productId: p.id, quantityOnHand: 5 } });
+  const r = await svc.update(store.id, p.id, { name: `${run} Alsa renamed`, stockBaseUnit: "g", stockBaseQuantity: 25000, stockConversionFamily: "bigas" });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  const after = await prisma.product.findUniqueOrThrow({ where: { id: p.id } });
+  assert.equal(after.name, `${run} Alsa renamed`);
+  assert.equal(after.stockConversionFamily, "Bigas", "the saved spelling stays");
+  const moved = await svc.update(store.id, p.id, { stockBaseUnit: "g", stockBaseQuantity: 5000, stockConversionFamily: "bigas" });
+  assert.equal(moved.ok, false, "a real size change with stock is still refused");
+});

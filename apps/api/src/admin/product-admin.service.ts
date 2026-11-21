@@ -243,7 +243,13 @@ export class ProductAdminService {
 
     const nextStockBaseUnit = input.stockBaseUnit !== undefined ? (input.stockBaseUnit?.trim() || null) : product.stockBaseUnit;
     const nextStockBaseQuantity = input.stockBaseQuantity !== undefined ? input.stockBaseQuantity : product.stockBaseQuantity;
-    const nextConversionFamily = input.stockConversionFamily !== undefined ? (input.stockConversionFamily?.trim().toLowerCase() || null) : product.stockConversionFamily;
+    // 2026-11-21: the rice import saved the family as "Bigas" while the form sends "bigas". Compare without
+    // case, and keep the saved spelling when only the case differs, or every edit of a rice with stock (even
+    // just its name) was refused as "changing the stock measure".
+    const familyKey = (f: string | null | undefined) => f?.trim().toLowerCase() || null;
+    const nextConversionFamily = input.stockConversionFamily !== undefined && familyKey(input.stockConversionFamily) !== familyKey(product.stockConversionFamily)
+      ? familyKey(input.stockConversionFamily)
+      : product.stockConversionFamily;
     if (product.stockBaseUnit && (nextStockBaseUnit !== product.stockBaseUnit || nextStockBaseQuantity !== product.stockBaseQuantity || nextConversionFamily !== product.stockConversionFamily)) {
       const [levels, variants] = await Promise.all([
         prisma.stockLevel.findMany({ where: { storeId, productId }, select: { quantityOnHand: true, quantityReserved: true } }),
@@ -302,7 +308,7 @@ export class ProductAdminService {
           soldByWeight: input.soldByWeight ?? product.soldByWeight,
           stockBaseUnit: input.stockBaseUnit !== undefined ? (input.stockBaseUnit?.trim() || null) : product.stockBaseUnit,
           stockBaseQuantity: input.stockBaseQuantity !== undefined ? input.stockBaseQuantity : product.stockBaseQuantity,
-          stockConversionFamily: input.stockConversionFamily !== undefined ? (input.stockConversionFamily?.trim().toLowerCase() || null) : product.stockConversionFamily,
+          stockConversionFamily: nextConversionFamily,
           priceMinor: input.priceMinor ?? product.priceMinor,
           costMinor: input.costMinor ?? product.costMinor,
           trackStock: nextTrack,
