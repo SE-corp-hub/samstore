@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { printSlip, type Slip } from "../../lib/slip-print";
+import { printSlip, type Slip, type SlipLine } from "../../lib/slip-print";
 import { cachedGet } from "../../lib/offlineCache";
-import { kg } from "../../lib/number-format";
+import { kg, peso } from "../../lib/number-format";
 import { isKiloLine } from "../../lib/order-lines";
 
 // Printable receipt view (browser print). VAT display-only label per decision #2.
@@ -69,11 +69,11 @@ function useReceipt(orderId: string) {
 
 /** The receipt as a clean one-page slip. Printed through a hidden frame, one copy only. */
 function receiptSlip(d: ReceiptData, header: string | null | undefined, footer: string | null | undefined, showVat: boolean): Slip {
-  const pesos = (m: number) => `₱${(m / 100).toFixed(2)}`;
-  const totals: { label: string; value: string }[] = [{ label: "Subtotal", value: pesos(d.subtotalMinor) }];
+  const pesos = peso;
+  const totals: SlipLine[] = [{ label: "Subtotal", value: pesos(d.subtotalMinor) }];
   if (d.deliveryFeeMinor > 0) totals.push({ label: "Delivery", value: pesos(d.deliveryFeeMinor) });
   if (d.discountMinor > 0) totals.push({ label: "Discount", value: `-${pesos(d.discountMinor)}` });
-  totals.push({ label: "TOTAL", value: pesos(d.totalMinor) });
+  totals.push({ label: "TOTAL", value: pesos(d.totalMinor), strong: true });
   if (showVat && d.vat?.showOnReceipt && d.vat.enabled) {
     totals.push({ label: "VATable Sales", value: pesos(d.vat.vatableMinor) }, { label: `VAT ${(d.vat.rateBp / 100).toFixed(d.vat.rateBp % 100 === 0 ? 0 : 2)}%`, value: pesos(d.vat.vatMinor) });
     if (d.vat.vatExemptMinor > 0) totals.push({ label: "VAT-Exempt Sales", value: pesos(d.vat.vatExemptMinor) });
@@ -87,10 +87,10 @@ function receiptSlip(d: ReceiptData, header: string | null | undefined, footer: 
   }
   if (d.tenders && d.tenders.outstandingMinor > 0) totals.push({ label: "Still due", value: pesos(d.tenders.outstandingMinor) });
   return {
-    storeName: d.storeName, locationId: d.locationId, contact: d.receiptContact || undefined, title: "RECEIPT", reference: d.orderNumber, when: new Date(d.createdAt).toLocaleString("en-PH"),
+    storeName: d.storeName, locationId: d.locationId, contact: d.receiptContact || undefined, title: "RECEIPT", reference: d.orderNumber, when: new Date(d.createdAt).toLocaleString("en-PH", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" }),
     header: header || (d.vat?.tin ? `TIN ${d.vat.tin}` : null),
     lines: [{ label: "Customer", value: d.customerName?.trim() || "Walk-in" }],
-    rows: d.items.map((i) => ({ name: i.productName, qty: isKiloLine(i) ? `${kg(i.quantity)} × ${pesos(i.unitPriceMinor)}/kg = ${pesos(i.lineTotalMinor)}` : `${i.quantity} × ${pesos(i.unitPriceMinor)} = ${pesos(i.lineTotalMinor)}` })),
+    rows: d.items.map((i) => ({ name: i.productName, qty: "", detail: isKiloLine(i) ? `${kg(i.quantity)} x ${pesos(i.unitPriceMinor)}/kg` : `${i.quantity} x ${pesos(i.unitPriceMinor)}`, amount: pesos(i.lineTotalMinor) })),
     totals,
     signatures: d.signatureData ? [{ role: "Customer", name: d.customerName || "Customer", imageData: d.signatureData }] : [],
     footer: footer || "Salamat po!",

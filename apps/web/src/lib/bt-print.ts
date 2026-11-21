@@ -5,7 +5,7 @@
 
 import type { Slip } from "./slip-print";
 
-const ASCII_FIX: Record<string, string> = { "₱": "P", "×": "x", "—": "-", "–": "-", "·": "-", "…": "...", "“": '"', "”": '"', "‘": "'", "’": "'" };
+const ASCII_FIX: Record<string, string> = { "₱": "P", "×": "x", "—": "-", "–": "-", "·": "-", "…": "...", "“": '"', "”": '"', "‘": "'", "’": "'", "\u00a0": " ", "\u202f": " ", "\u2009": " " };
 
 /** Printers only know plain characters: swap the few we use, drop accents, and show anything else as "?". */
 export function plain(s: string): string {
@@ -42,42 +42,83 @@ const pair = (left: string, right: string, w: number): string[] => {
   return [...wrap(l, w), " ".repeat(Math.max(0, w - r.length)) + r];
 };
 
-/** The slip as plain text lines for a roll of `w` characters (58 mm = 32, 80 mm = 48). */
-export function slipLines(s: Slip, w: number): string[] {
-  const out: string[] = [];
+/** How a line prints: plain, bold, tall (double height, bold) or big (double width and height, bold). */
+export type LineMode = "normal" | "bold" | "tall" | "big";
+export interface PrintLine { text: string; mode: LineMode }
+
+// ESC ! n print modes: 0x08 bold, 0x10 double height, 0x20 double width. Every cheap ESC/POS printer knows them.
+const MODE_BYTE: Record<LineMode, number> = { normal: 0x00, bold: 0x08, tall: 0x18, big: 0x38 };
+
+/**
+ * The slip laid out for a roll of `w` characters (58 mm = 32, 80 mm = 48), with how each line prints.
+ * Store name big at the top, the title in bold, one rule between parts, each item's name in bold with
+ * "qty x price" and the amount under it, and the TOTAL in tall letters so it is read at a glance.
+ */
+export function slipPrintLines(s: Slip, w: number): PrintLine[] {
+  const out: PrintLine[] = [];
+  const add = (mode: LineMode, ...texts: string[]) => { for (const text of texts) out.push({ text, mode }); };
   const rule = "-".repeat(w);
+  const half = Math.floor(w / 2);
   const copies = Math.min(2, Math.max(1, Math.floor(s.copies ?? 1)));
   for (let c = 0; c < copies; c++) {
-    if (c > 0) out.push("", "", "- - - - - - cut here - - - - - -", "", "");
-    out.push(...center(s.storeName, w));
-    if (s.header) out.push(...center(s.header, w));
-    if (s.contact) out.push(...center(s.contact, w));
-    out.push(...center(s.title, w));
-    if (s.reference) out.push(...center(s.reference, w));
-    if (s.when) out.push(...center(s.when, w));
-    out.push(rule);
-    for (const l of s.lines ?? []) out.push(...pair(`${l.label}:`, l.value, w));
-    if ((s.lines ?? []).length) out.push(rule);
-    for (const r of s.rows ?? []) {
-      out.push(...wrap(r.note ? `${r.name} ${r.note}` : r.name, w));
-      out.push(" ".repeat(Math.max(0, w - plain(r.qty).length)) + plain(r.qty).slice(-w));
+    if (c > 0) add("normal", "", "", ...center("- - - cut here - - -", w), "", "");
+    // Big letters are twice as wide, so only half as many fit: a long name prints bold at normal size instead.
+    if (wrap(s.storeName, half).length <= 2) add("big", ...center(s.storeName, half));
+    else add("bold", ...center(s.storeName, w));
+    if (s.header) add("normal", ...center(s.header, w));
+    if (s.contact) add("normal", ...center(s.contact, w));
+    add("normal", "");
+    add("bold", ...center(s.title, w));
+    add("normal", rule);
+    const info = [
+      ...(s.reference ? [{ label: "No.", value: s.reference }] : []),
+      ...(s.when ? [{ label: "Date", value: s.when }] : []),
+      ...(s.lines ?? []),
+    ];
+    for (const l of info) add("normal", ...pair(l.label, l.value, w));
+    if (info.length) add("normal", rule);
+    const rows = s.rows ?? [];
+    for (const r of rows) {
+      if (r.amount !== undefined || r.detail !== undefined) {
+        add("bold", ...wrap(r.note ? `${r.name} ${r.note}` : r.name, w));
+        add("normal", ...pair(`  ${r.detail ?? ""}`, r.amount ?? "", w));
+      } else {
+        add("normal", ...wrap(r.note ? `${r.name} ${r.note}` : r.name, w));
+        add("normal", " ".repeat(Math.max(0, w - plain(r.qty).length)) + plain(r.qty).slice(-w));
+      }
     }
-    if ((s.rows ?? []).length) out.push(rule);
-    for (const t of s.totals ?? []) out.push(...pair(t.label, t.value, w));
-    if ((s.totals ?? []).length) out.push(rule);
-    for (const g of s.signatures ?? []) out.push("", "", "_".repeat(Math.min(w, 24)), `${plain(g.name)}${g.name ? " - " : ""}${plain(g.role)}`.slice(0, w));
-    if (s.footer) out.push("", ...center(s.footer, w));
+    if (rows.length) {
+      if (rows.some((r) => r.amount !== undefined)) add("normal", `${rows.length} ${rows.length === 1 ? "item" : "items"}`);
+      add("normal", rule);
+    }
+    const totals = s.totals ?? [];
+    totals.forEach((t, i) => {
+      add(t.strong ? "tall" : "normal", ...pair(t.label, t.value, w));
+      if (t.strong && i < totals.length - 1) add("normal", "=".repeat(w));
+    });
+    if (totals.length) add("normal", rule);
+    for (const g of s.signatures ?? []) add("normal", "", "", "_".repeat(Math.min(w, 24)), `${plain(g.name)}${g.name ? " - " : ""}${plain(g.role)}`.slice(0, w));
+    if (s.footer) { add("normal", ""); add("bold", ...center(s.footer, w)); }
   }
   return out;
 }
 
-/** ESC/POS bytes: reset, the text, then a few blank lines so the paper clears the tear bar. */
+/** The slip as plain text lines (no bold or big letters). */
+export function slipLines(s: Slip, w: number): string[] {
+  return slipPrintLines(s, w).map((l) => l.text);
+}
+
+/** ESC/POS bytes: reset, each line in its print mode, then a few blank lines so the paper clears the tear bar. */
 export function slipToEscPos(s: Slip, w: number): Uint8Array {
   const bytes: number[] = [0x1b, 0x40]; // initialise
-  for (const line of slipLines(s, w)) {
-    for (const ch of line) bytes.push(ch.charCodeAt(0));
+  let mode = 0;
+  for (const line of slipPrintLines(s, w)) {
+    const want = line.text ? MODE_BYTE[line.mode] : 0;
+    if (want !== mode) { bytes.push(0x1b, 0x21, want); mode = want; }
+    for (const ch of line.text) bytes.push(ch.charCodeAt(0));
     bytes.push(0x0a);
   }
+  if (mode !== 0) bytes.push(0x1b, 0x21, 0x00);
   bytes.push(0x0a, 0x0a, 0x0a, 0x0a);
   return new Uint8Array(bytes);
 }
