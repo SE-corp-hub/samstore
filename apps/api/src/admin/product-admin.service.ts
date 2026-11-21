@@ -7,8 +7,19 @@ import { priceChanges } from "../domain/price-history.js";
 import { validateProductInput, slugify, type ProductInput } from "../domain/product-validation.js";
 import { newPhotoKey, parsePhoto, isPhotoKey } from "../domain/product-photo.js";
 import type { ApiError } from "@sam-store/contracts";
-import { isKiloItem, kiloCostFrom, kiloName, kiloPriceFrom, kiloRefusal } from "../domain/kilo.js";
+import type { Prisma } from "@prisma/client";
+import { isKiloItem, KILO_GROUP_NAME, KILO_GROUP_SLUG, kiloCostFrom, kiloName, kiloPriceFrom, kiloRefusal } from "../domain/kilo.js";
 import { varietyOf } from "../domain/resack.js";
+
+/** The store's "1 kg" group (Products → Group) for kilo rice: the owner's own "1kg" / "1 kg" if there is one, else made. */
+export async function kiloCategoryId(tx: Prisma.TransactionClient, storeId: string): Promise<string> {
+  const found = await tx.category.findFirst({ where: { storeId, slug: { in: [KILO_GROUP_SLUG, "1kg"] } }, orderBy: { createdAt: "asc" }, select: { id: true, isActive: true } });
+  if (found) {
+    if (!found.isActive) await tx.category.update({ where: { id: found.id }, data: { isActive: true } });
+    return found.id;
+  }
+  return (await tx.category.create({ data: { storeId, name: KILO_GROUP_NAME, slug: KILO_GROUP_SLUG }, select: { id: true } })).id;
+}
 
 export type AdminResult<T> = { ok: true; value: T } | { ok: false; error: ApiError };
 
@@ -416,12 +427,14 @@ export class ProductAdminService {
     for (let i = 2; taken.has(sku); i++) sku = `${sack.sku}-KILO-${i}`;
     const sackPrices = await prisma.locationPrice.findMany({ where: { storeId, productId: sack.id }, select: { warehouseId: true, priceMinor: true } });
     const item = await prisma.$transaction(async (tx) => {
+      // Every kilo item goes in the "1 kg" group, so they show together on POS (like the 5kg group).
+      const kiloGroup = await kiloCategoryId(tx, storeId);
       const p = await tx.product.create({
         data: {
           storeId, sku, name: kiloName(sack.name), variety: varietyOf(sack), unit: "kilo", soldByWeight: true,
           stockBaseUnit: "g", stockBaseQuantity: 1, stockConversionFamily: sack.stockConversionFamily,
           priceMinor: kiloPriceFrom(sack.priceMinor, grams), costMinor: kiloCostFrom(sack.costMinor, grams),
-          trackStock: true, isActive: true, categoryId: sack.categoryId, photoKey: sack.photoKey, kiloOfId: sack.id,
+          trackStock: true, isActive: true, categoryId: kiloGroup, photoKey: sack.photoKey, kiloOfId: sack.id,
         },
         select: { id: true, name: true, isActive: true, priceMinor: true },
       });

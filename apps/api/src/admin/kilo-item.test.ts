@@ -13,9 +13,11 @@ const storeIds: string[] = [];
 after(async () => {
   const where = { storeId: { in: storeIds } };
   await prisma.locationPrice.deleteMany({ where });
+  await prisma.product.updateMany({ where, data: { categoryId: null } });
   await prisma.rackSack.deleteMany({ where });
   await prisma.stockLevel.deleteMany({ where });
   await prisma.product.deleteMany({ where });
+  await prisma.category.deleteMany({ where });
   await prisma.warehouse.deleteMany({ where });
   await prisma.store.deleteMany({ where: { id: { in: storeIds } } });
   await prisma.$disconnect();
@@ -38,6 +40,8 @@ test("Also sell per kilo: makes the kilo item (price sack ÷ 25 rounded up + ₱
   assert.equal(item.sku, "SIN25-KILO");
   assert.deepEqual([item.priceMinor, item.costMinor], [5_600, 5_200], "₱1,350 ÷ 25 = ₱54 + ₱2; cost ₱1,300 ÷ 25 = ₱52");
   assert.deepEqual([item.stockBaseUnit, item.stockBaseQuantity, item.soldByWeight, item.kiloOfId, item.unit], ["g", 1, true, sack.id, "kilo"]);
+  const group = await prisma.category.findUniqueOrThrow({ where: { id: item.categoryId! } });
+  assert.deepEqual([group.name, group.slug], ["1 kg", "1-kg"], "kilo items go in the 1 kg group");
   const own = await prisma.locationPrice.findFirst({ where: { productId: item.id, warehouseId: s2.id } });
   assert.equal(own?.priceMinor, 5_800, "Store 2's sack ₱1,400 ÷ 25 = ₱56 + ₱2");
   assert.equal(await prisma.locationPrice.count({ where: { productId: item.id, warehouseId: s1.id } }), 0, "Store 1 has no own sack price: the main kilo price");
@@ -82,9 +86,11 @@ test("Display rack: a kilo item (also one made by hand) takes several sacks; pac
   assert.equal(await prisma.rackSack.count({ where: { storeId: store.id, kiloProductId: rack.id } }), 1, "unticked sack is taken off");
 
   // Off on a sack whose kilo item still has kilos: refused with the kilos, then "hide anyway".
+  const own1kg = await prisma.category.create({ data: { storeId: store.id, name: "1kg", slug: "1kg" } });
   const on = await svc.setKiloItem(store.id, sin.id, true);
   assert.equal(on.ok, true);
   if (!on.ok) return;
+  assert.equal((await prisma.product.findUniqueOrThrow({ where: { id: on.value.kiloItem!.id } })).categoryId, own1kg.id, "the owner's own 1kg group is used");
   await prisma.stockLevel.create({ data: { storeId: store.id, productId: on.value.kiloItem!.id, warehouseId: s1.id, quantityOnHand: 7_500 } });
   const off = await svc.setKiloItem(store.id, sin.id, false);
   assert.equal(off.ok, false, "kilos left: asks first");
