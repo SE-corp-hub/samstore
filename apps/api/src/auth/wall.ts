@@ -2,8 +2,11 @@
 // Per-store build, step 6.
 //
 // Who is behind the wall: a login that is not the owner or a manager AND has a home store
-// (`UserStore.homeLocationId`). The owner, a manager and a login with no home store see everything,
-// as before.
+// (`UserStore.homeLocationId`). The owner and a manager see everything.
+//
+// A counter login (not the owner or a manager) with NO home store is not tied to one store's orders,
+// but it is still refused every "owner-only" rule below (2026-11-21, review finding 20: before, a
+// staff login saved without a store had close to owner power).
 //
 // How it works: the wall interceptor (wall.interceptor.ts) works the wall out once per request and
 // runs the request inside it. Code that lists orders adds `orderWall()` to its filter; outside a
@@ -56,6 +59,13 @@ export async function wallFor(storeId: string, userId: string, role: string): Pr
   return wallAt(actor.homeLocationId, await mainOf(storeId));
 }
 
+/** A counter login: not the owner, a manager or the platform. These are refused the owner-only rules, home store or not. */
+export async function isCounterLogin(storeId: string, userId: string, role: string): Promise<boolean> {
+  if ((ALL_LOCATION_ROLES as readonly string[]).includes(role)) return false;
+  const actor = await loadActor(storeId, userId, role);
+  return !(ALL_LOCATION_ROLES as readonly string[]).includes(actor.role);
+}
+
 /** Is this order inside the wall? (No wall: yes.) */
 export async function orderInsideWall(storeId: string, orderId: string, wall: Wall | null = currentWall()): Promise<boolean> {
   if (!wall) return true;
@@ -81,21 +91,30 @@ export const WALL_RULES: readonly WallRule[] = [
   { kind: "owner-only", path: /^\/admin\/export$/, what: "Export data" },
   { kind: "owner-only", path: /^\/admin\/rice\/weekly$/, what: "The weekly summary" },
   { kind: "owner-only", methods: ["POST", "PATCH", "PUT", "DELETE"], path: /^\/admin\/products(\/|$)/, what: "Changing products and main prices" },
+  { kind: "owner-only", methods: ["POST", "PATCH", "PUT", "DELETE"], path: /^\/admin\/vouchers(\/|$)/, what: "Making and changing vouchers" },
+  { kind: "owner-only", methods: ["POST", "PATCH", "PUT", "DELETE"], path: /^\/admin\/payment-methods(\/|$)/, what: "Changing payment methods" },
+  { kind: "owner-only", methods: ["POST", "PATCH", "PUT", "DELETE"], path: /^\/admin\/delivery-zones(\/|$)/, what: "Changing delivery areas" },
+  { kind: "owner-only", methods: ["PATCH"], path: /^\/admin\/customers\/:id\/approval$/, what: "Approving customers" },
   { kind: "own-order", path: /^\/admin\/orders\/:id(\/|$)/ },
   { kind: "own-order", path: /^\/admin\/pos\/(holds|preorders|sells)\/:id(\/|$)/ },
 ];
 
 export type WallVerdict = { ok: true } | { ok: false; status: 403 | 404; message: string };
 
-/** What the wall says about one request. Pure but for the one order lookup, so it is easy to test. */
-export async function checkWall(wall: Wall | null, storeId: string, method: string, routePath: string, params: Record<string, string | undefined>): Promise<WallVerdict> {
-  if (!wall) return { ok: true };
+/**
+ * What the wall says about one request. Pure but for the one order lookup, so it is easy to test.
+ * `counter`: a counter login (see isCounterLogin). Every walled login is one; a counter login with no
+ * home store has no wall but is still refused the owner-only rules.
+ */
+export async function checkWall(wall: Wall | null, storeId: string, method: string, routePath: string, params: Record<string, string | undefined>, counter = wall !== null): Promise<WallVerdict> {
+  if (!wall && !counter) return { ok: true };
   for (const rule of WALL_RULES) {
     if (!rule.path.test(routePath)) continue;
     if (rule.kind === "owner-only") {
       if (rule.methods && !rule.methods.includes(method.toUpperCase())) continue;
       return { ok: false, status: 403, message: `${rule.what}: this is for the owner.` };
     }
+    if (!wall) continue;
     const id = params.id;
     if (id && !(await orderInsideWall(storeId, id, wall))) return { ok: false, status: 404, message: "Order not found" };
   }

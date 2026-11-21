@@ -1,13 +1,12 @@
 // Credit (utang) ledger — per-store customer open balances.
 // - approveCredit: owner/manager approves a customer for utang with a limit.
 // - sellOnCredit: POS/online credit sale → CreditEntry(purchase, +amount), balance up.
-// - recordPayment: cash settlement → CreditEntry(payment, -amount) + Payment row.
+// (recordPayment was removed 2026-11-21: credit is paid only via utang.service collect.)
 // - utangList: customers with outstanding balances.
 // Limits: per-customer creditLimitMinor, else store settings creditLimitMinor; 0 = disabled.
 
 import { prisma } from "../persistence/prisma-repositories.js";
 import { cacheGet, cacheSet, cacheBust, cacheKey } from "../persistence/ttl-cache.js";
-import { RegisterService } from "../registers/register.service.js";
 import type { ApiError } from "@sam-store/contracts";
 
 /** Both ledger lists (unpaid/paid) + customers are stale after any credit write. */
@@ -28,8 +27,6 @@ export const CREDIT_SERVICE = Symbol("CREDIT_SERVICE");
 
 export class CreditService {
   private readonly _prisma = prisma;
-  /** N1: drawer attribution for counter utang settlements. */
-  private readonly registers = new RegisterService();
   /** Approve a store customer for utang with a limit (minor units). */
   async approveCredit(storeId: string, storeCustomerId: string, limitMinor: number, actorId: string): Promise<CreditResult<{ id: string; creditApproved: boolean; creditLimitMinor: number }>> {
     if (!Number.isInteger(limitMinor) || limitMinor < 0) {
@@ -134,40 +131,6 @@ export class CreditService {
           data: { creditBalanceMinor: { increment: amountMinor } },
         });
       });
-    }
-
-    /** Record a cash payment against utang. v4: signature REQUIRED (data-URL PNG). */
-    async recordPayment(storeId: string, storeCustomerId: string, amountMinor: number, note: string | undefined, actorId: string, signatureData?: string): Promise<CreditResult<{ balanceMinor: number; paymentId: string }>> {
-      if (!Number.isInteger(amountMinor) || amountMinor <= 0) {
-        return { ok: false, error: { type: "validation", errors: ["amountMinor must be a positive integer"] } };
-      }
-      if (!signatureData || typeof signatureData !== "string" || !signatureData.trim().startsWith("data:image/") || signatureData.length > 2_000_000) {
-        return { ok: false, error: { type: "validation", errors: ["Signature is required (draw to confirm)"] } };
-      }
-      const sc = await prisma.storeCustomer.findFirst({ where: { storeId, id: storeCustomerId } });
-      if (!sc) return { ok: false, error: { type: "not_found", message: "Customer not found in this store" } };
-      if (sc.creditBalanceMinor <= 0) return { ok: false, error: { type: "conflict", message: "Customer has no outstanding balance" } };
-      const pay = Math.min(amountMinor, sc.creditBalanceMinor);
-
-      const payment = await prisma.$transaction(async (tx) => {
-        // N1: attribute the settlement to the open shift (if any) so it is visible in
-        // that shift's report. Its tender method is recorded as "credit" — the ledger
-        // side of utang; the drawer's cash math counts only cash tenders.
-        const registerSessionId = await this.registers.attachOpenSession(storeId);
-        const p = await tx.payment.create({
-          data: { storeId, method: "credit", amountMinor: pay, note: note?.trim() ?? "Credit payment", type: "payment", createdBy: actorId, signatureData, registerSessionId },
-        });
-        await tx.creditEntry.create({
-          data: { storeId, storeCustomerId, type: "payment", amountMinor: -pay, note: note?.trim() ?? "Credit payment", createdBy: actorId },
-        });
-        const updated = await tx.storeCustomer.update({
-          where: { id: sc.id },
-          data: { creditBalanceMinor: { decrement: pay } },
-        });
-        return { paymentId: p.id, balanceMinor: updated.creditBalanceMinor };
-      });
-      await bustLedger(storeId);
-      return { ok: true, value: payment };
     }
 
   /** Customers with outstanding balances (Utang list). V1: status = unpaid | paid.

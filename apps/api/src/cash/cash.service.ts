@@ -1,5 +1,6 @@
 // Cash handed over — a store gives cash from its drawer to the owner during the day.
-// Per-store build, step 4. A hand-over lowers that store's expected cash for the day (cash-book.ts).
+// Per-store build, step 4. A hand-over lowers that store's expected cash for the day (cash-book.ts)
+// only once the owner marks it Received; until then the cash still counts as in the drawer.
 // A wrong one is cancelled by the owner with a reason, never deleted.
 
 import type { ApiError } from "@sam-store/contracts";
@@ -99,7 +100,7 @@ export class CashService {
   /** A store's cash for one day, with its hand-overs. A login tied to a store reads its own store only. */
   async day(storeId: string, actor: Actor, input: { locationId?: string; date?: string }): Promise<R<{
     date: string; location: { id: string; name: string }; canCancel: boolean;
-    cash: { inMinor: number; creditPaidMinor: number; addedMinor: number; givenBackMinor: number; paidOutMinor: number; handedOverMinor: number; expectedMinor: number };
+    cash: { inMinor: number; creditPaidMinor: number; addedMinor: number; givenBackMinor: number; paidOutMinor: number; handedOverMinor: number; handoverWaitingMinor: number; expectedMinor: number };
     handovers: { id: string; amountMinor: number; note: string | null; at: Date; handedBy: string | null; received: boolean; receivedBy: string | null; cancelled: boolean; cancelReason: string | null }[];
     cashIns: { id: string; amountMinor: number; note: string | null; at: Date; by: string | null; cancelled: boolean; cancelReason: string | null }[];
   }>> {
@@ -139,7 +140,9 @@ export class CashService {
     const row = await prisma.cashHandover.findFirst({ where: { storeId, id }, select: { voidedAt: true } });
     if (!row) return { ok: false, error: { type: "not_found", message: "Hand-over not found" } };
     if (row.voidedAt) return { ok: false, error: { type: "conflict", message: "This hand-over was cancelled" } };
-    await prisma.cashHandover.updateMany({ where: { storeId, id, receivedById: null }, data: { receivedById: actor.userId } });
+    const done = await prisma.cashHandover.updateMany({ where: { storeId, id, receivedById: null }, data: { receivedById: actor.userId } });
+    // From now on this cash no longer counts as in the store's drawer (cash-book.ts), so keep a record of who said so.
+    if (done.count) await prisma.auditLog.create({ data: { storeId, actorType: "USER", actorId: actor.userId, action: "cash.handover_received", entityType: "CashHandover", entityId: id, after: {} } });
     return { ok: true, value: { id } };
   }
 

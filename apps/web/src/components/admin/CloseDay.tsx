@@ -17,7 +17,7 @@ import { useOffline } from "../../lib/offlineCache";
 import { kg, peso } from "../../lib/number-format";
 import { printSlip } from "../../lib/slip-print";
 import { toast } from "../../lib/toast";
-import { DENOMINATIONS, dayText, handedOnly, ownerKept, payWord, timeText, VARIANCE_REASONS, zLabel, zSlip, type DayFigures } from "../../lib/day";
+import { DENOMINATIONS, dayText, handedOnly, handoverWaiting, ownerKept, payWord, timeText, VARIANCE_REASONS, zLabel, zSlip, type DayFigures } from "../../lib/day";
 import SignaturePad from "./SignaturePad";
 import Steps from "./Steps";
 
@@ -75,6 +75,7 @@ export function ZView({ z, kind }: { z: DayFigures; kind: "X" | "Z" }) {
       {ownerKept(z) > 0 && row("Owner kept (own sales)", `−${peso(ownerKept(z))}`)}
       {handedOnly(z) > 0 && row("Handed to the owner", `−${peso(handedOnly(z))}`)}
       {row("Cash should be", peso(z.cash.shouldBeMinor), true)}
+      {handoverWaiting(z) > 0 && <p className="small mb-1"><i className="bi bi-hourglass-split me-1" aria-hidden="true"></i>Includes {peso(handoverWaiting(z))} handed to the owner that is not marked Received yet.</p>}
       {z.cash.countedMinor !== null && row("Cash counted", peso(z.cash.countedMinor), true)}
       {z.cash.differenceMinor !== null && <div className={`py-1 fw-bold ${diffClass(z.cash.differenceMinor)}`}>Cash: {diffWords(z.cash.differenceMinor)}</div>}
       <h3 className="h6 mt-3">GCash</h3>
@@ -397,6 +398,7 @@ export default function CloseDay({ locationId, storeName, placeName, heldCount, 
                 {ownerKept(fig) > 0 && sumRow("Owner kept (own sales)", `−${peso(ownerKept(fig))}`)}
                 {handedOnly(fig) > 0 && sumRow("To the owner", `−${peso(handedOnly(fig))}`)}
                 {sumRow("Cash should be", peso(fig.cash.shouldBeMinor), "fw-bold zc-rule")}
+                {handoverWaiting(fig) > 0 && <p className="small mb-1"><i className="bi bi-hourglass-split me-1" aria-hidden="true"></i>Includes {peso(handoverWaiting(fig))} handed to the owner, not marked Received yet. Ask the owner to tap Received on Cash drawer.</p>}
                 {sumRow("Cash counted", peso(countedMinor), "fw-bold")}
                 <div className={`zc-variance ${diffClass(cashDiff)}`} aria-live="polite"><span>Cash</span><strong>{diffWords(cashDiff)}</strong></div>
                 {!!fig.ownerSales?.length && <OwnerSales z={fig} />}

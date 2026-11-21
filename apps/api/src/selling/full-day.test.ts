@@ -134,7 +134,9 @@ test("one whole day at Bogs and Lucy, Bahay Tindahan and Lipa", async () => {
   must(await expenses.create(storeId, btCounter, { category: "transport", amountMinor: 20_000, note: "tricycle", paidFromDrawer: true })); // Bahay Tindahan ₱200, from the drawer
   must(await expenses.create(storeId, lipaHead, { category: "supplies", amountMinor: 15_000 })); //                       Lipa ₱150
   must(await expenses.create(storeId, owner, { category: "rent", amountMinor: 100_000, locationId: null })); //            whole business ₱1,000
-  must(await cash.handOver(storeId, btCounter, { amountMinor: 200_000, note: "to Lucy at noon" })); //                     Bahay Tindahan hands over ₱2,000
+  const handed = must(await cash.handOver(storeId, btCounter, { amountMinor: 200_000, note: "to Lucy at noon" })); //     Bahay Tindahan hands over ₱2,000
+  assert.equal(handed.expectedMinor, 385_000, "not received yet: still in the drawer");
+  must(await cash.receive(storeId, owner, handed.id)); //                                                                    the owner taps Received
   const drawer = await cashOfDay(prisma, storeId, bt.id, today);
   assert.deepEqual([drawer.inMinor, drawer.paidOutMinor, drawer.handedOverMinor, drawer.expectedMinor], [405_000, 20_000, 200_000, 185_000], "₱4,050 − ₱200 − ₱2,000 = ₱1,850 in Bahay Tindahan's drawer");
   assert.equal((await cashOfDay(prisma, storeId, lipa.id, today)).expectedMinor, 132_000, "Lipa's drawer is its own");

@@ -63,6 +63,8 @@ export interface CashCheck {
   walkInMinor: number;
   /** Step 4: credit paid in cash here, cash given back, expenses paid from the drawer, cash handed over to the owner. */
   creditPaidMinor: number; addedMinor?: number; givenBackMinor: number; paidOutMinor: number; handedOverMinor: number;
+  /** Handed to the owner but not marked Received yet: still counted in the drawer (not in handedOverMinor). */
+  handoverWaitingMinor?: number;
   /** In − given back − paid out − handed over. */
   expectedMinor: number;
   saved: { countedMinor: number; expectedMinor: number; diffMinor: number; note: string | null; at: Date } | null;
@@ -878,7 +880,7 @@ export class CountService {
     const a = (savedRow?.after ?? null) as { countedMinor?: number; expectedMinor?: number; diffMinor?: number; note?: string | null } | null;
     return {
       countId: c.id, docNumber: c.docNumber, location: c.location.name, locationId: c.locationId, day,
-      salesMinor, salesCount, walkInMinor, creditPaidMinor: cash.creditPaidMinor, addedMinor: cash.addedMinor, givenBackMinor: cash.givenBackMinor, paidOutMinor: cash.paidOutMinor, handedOverMinor: cash.handedOverMinor, expectedMinor: cash.expectedMinor,
+      salesMinor, salesCount, walkInMinor, creditPaidMinor: cash.creditPaidMinor, addedMinor: cash.addedMinor, givenBackMinor: cash.givenBackMinor, paidOutMinor: cash.paidOutMinor, handedOverMinor: cash.handedOverMinor, handoverWaitingMinor: cash.handoverWaitingMinor, expectedMinor: cash.expectedMinor,
       saved: a && typeof a.countedMinor === "number" ? { countedMinor: a.countedMinor, expectedMinor: a.expectedMinor ?? 0, diffMinor: a.diffMinor ?? 0, note: a.note ?? null, at: savedRow!.createdAt } : null,
       closed: close ? { countedMinor: close.cashCountedMinor, expectedMinor: close.cashExpectedMinor, diffMinor: close.cashVarianceMinor, at: close.closedAt, fromThisCount: close.closingCountId === c.id } : null,
     };

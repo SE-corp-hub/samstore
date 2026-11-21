@@ -52,6 +52,8 @@ export interface DayFigures {
   cash: { floatMinor: number; inMinor: number; givenBackMinor: number; paidOutMinor: number; handedOverMinor: number; shouldBeMinor: number; countedMinor: number | null; differenceMinor: number | null;
     /** Of the handed over: cash of the owner's own sales that the owner kept (never in the drawer). Missing on Z-reads made before 2026-11-20. */
     ownerKeptMinor?: number;
+    /** Handed to the owner but not marked Received yet: still counted in the drawer. */
+    handoverWaitingMinor?: number;
     /** Money put into the drawer that is not a sale ("Cash in" on POS). Missing on Z-reads made before it existed. */
     addedMinor?: number };
   /** Rice sold per kilo at this store this day (sell per kilo, 2026-11-20). Missing on older Z-reads. */
@@ -192,7 +194,7 @@ export class DayCloseService {
       prisma.order.findFirst({ where: { storeId, sellingLocationId: loc.id, occurredAt: range }, orderBy: { occurredAt: "asc" }, select: { orderNumber: true } }),
       prisma.order.findFirst({ where: { storeId, sellingLocationId: loc.id, occurredAt: range }, orderBy: { occurredAt: "desc" }, select: { orderNumber: true } }),
       prisma.expense.findMany({ where: { storeId, locationId: loc.id, paidFromDrawer: true, voidedAt: null, spentAt: range }, select: { category: true, note: true, amountMinor: true, spentAt: true }, orderBy: { spentAt: "asc" } }),
-      prisma.cashHandover.findMany({ where: { storeId, locationId: loc.id, businessDate: date, voidedAt: null }, select: { amountMinor: true, note: true, createdAt: true, orderId: true }, orderBy: { createdAt: "asc" } }),
+      prisma.cashHandover.findMany({ where: { storeId, locationId: loc.id, businessDate: date, voidedAt: null }, select: { amountMinor: true, note: true, createdAt: true, orderId: true, receivedById: true }, orderBy: { createdAt: "asc" } }),
       prisma.cashIn.findMany({ where: { storeId, locationId: loc.id, voidedAt: null, receivedAt: range }, select: { amountMinor: true, note: true, receivedAt: true }, orderBy: { receivedAt: "asc" } }),
     ]);
     // The owner's own sales here today: rung by the owner's login, or the owner kept the cash.
@@ -230,6 +232,7 @@ export class DayCloseService {
         shouldBeMinor: float + t.cash.expectedMinor, countedMinor: null, differenceMinor: null,
         ownerKeptMinor: [...keptBy.values()].reduce((a, b) => a + b, 0),
         addedMinor: t.cash.addedMinor,
+        handoverWaitingMinor: t.cash.handoverWaitingMinor,
       },
       ownerSales: ownerOrders.map((o) => ({
         orderNumber: o.orderNumber, at: (o.occurredAt ?? new Date()).toISOString(), totalMinor: o.totalMinor, method: o.paymentMethod ?? "",
@@ -238,7 +241,8 @@ export class DayCloseService {
       gcash: { inMinor: gcashIn, givenBackMinor: gcashBack, shouldBeMinor: gcashIn - gcashBack, countedMinor: null, differenceMinor: null },
       cashOut: [
         ...expenses.map((e) => ({ what: `Expense: ${e.note?.trim() || e.category}`, amountMinor: e.amountMinor, at: e.spentAt.toISOString() })),
-        ...handovers.map((h) => ({ what: h.orderId ? `${h.note ?? "Owner's sale"}: the owner kept the cash` : `Handed to the owner${h.note ? `: ${h.note}` : ""}`, amountMinor: h.amountMinor, at: h.createdAt.toISOString() })),
+        // Only hand-overs the owner marked Received left the drawer; a waiting one is shown in cash.handoverWaitingMinor.
+        ...handovers.filter((h) => h.receivedById).map((h) => ({ what: h.orderId ? `${h.note ?? "Owner's sale"}: the owner kept the cash` : `Handed to the owner${h.note ? `: ${h.note}` : ""}`, amountMinor: h.amountMinor, at: h.createdAt.toISOString() })),
       ],
       cashAdded: cashIns.map((c) => ({ what: c.note?.trim() || "Cash in", amountMinor: c.amountMinor, at: c.receivedAt.toISOString() })),
       cashCounts: null, keepFloatMinor: null, varianceReason: null, note: null, reopened: null,

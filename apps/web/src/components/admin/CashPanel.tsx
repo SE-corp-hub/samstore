@@ -15,7 +15,7 @@ import StoreBar, { type StoreOption } from "./StoreBar";
 interface Handover { id: string; amountMinor: number; note: string | null; at: string; handedBy: string | null; received: boolean; receivedBy: string | null; cancelled: boolean; cancelReason: string | null }
 interface CashDay {
   date: string; location: { id: string; name: string }; canCancel: boolean;
-  cash: { inMinor: number; creditPaidMinor: number; addedMinor?: number; givenBackMinor: number; paidOutMinor: number; handedOverMinor: number; expectedMinor: number };
+  cash: { inMinor: number; creditPaidMinor: number; addedMinor?: number; givenBackMinor: number; paidOutMinor: number; handedOverMinor: number; handoverWaitingMinor?: number; expectedMinor: number };
   handovers: Handover[];
 }
 const errOf = (d: unknown, fallback: string) => { const e = d as { errors?: string[]; message?: string } | null; return e?.errors?.[0] ?? e?.message ?? fallback; };
@@ -126,6 +126,9 @@ export default function CashPanel() {
                 <span className="fw-semibold">Cash that should be in the drawer</span>
                 <span className={`fs-3 fw-bold text-nowrap ${c.expectedMinor < 0 ? "text-danger" : ""}`}>{c.expectedMinor < 0 ? "−" : ""}{peso(Math.abs(c.expectedMinor))}</span>
               </div>
+              {(c.handoverWaitingMinor ?? 0) > 0 && (
+                <p className="mb-0 mt-2"><i className="bi bi-hourglass-split me-1" aria-hidden="true"></i>{peso(c.handoverWaitingMinor ?? 0)} handed over is waiting for the owner to tap Received. It still counts as in the drawer until then.</p>
+              )}
               {c.expectedMinor < 0 && <p className="text-danger mb-0 mt-1">More cash went out than came in today. Check the hand-overs and the expenses.</p>}
               <p className="small text-muted mb-0 mt-2">The change money the day started with is not counted here.</p>
             </div>
@@ -171,7 +174,7 @@ export default function CashPanel() {
                         ? <div className="small"><span className="badge text-bg-danger me-1">Cancelled</span>{h.cancelReason}</div>
                         : h.received
                           ? <div className="small"><i className="bi bi-check-circle-fill text-success me-1" aria-hidden="true"></i>Received{h.receivedBy ? ` by ${h.receivedBy}` : ""}</div>
-                          : <div className="small"><i className="bi bi-hourglass-split me-1" aria-hidden="true"></i>Waiting for the owner to say it was received</div>}
+                          : <div className="small"><i className="bi bi-hourglass-split me-1" aria-hidden="true"></i>Waiting for the owner to tap Received. Still counted in the drawer.</div>}
                     </div>
                     <div className={`fs-5 fw-bold text-end ${h.cancelled ? "text-decoration-line-through text-muted" : ""}`}>{peso(h.amountMinor)}</div>
                     {data.canCancel && !h.cancelled && (

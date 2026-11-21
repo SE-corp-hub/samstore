@@ -102,10 +102,18 @@ test("one day at a store: expected cash matches the drawer to the peso, and the 
   must(await exp.create(fx.storeId, fx.owner, { category: "wages", amountMinor: 20_000, locationId: fx.main, paidFromDrawer: true }));
 
   // 2,700 + 1,400 + 500 + 1,300 + 650 = 6,550 in; 1,300 + 650 given back; 350 paid out; 2,000 handed over.
-  const want = { inMinor: 655_000, creditPaidMinor: 50_000, addedMinor: 0, givenBackMinor: 195_000, paidOutMinor: 35_000, handedOverMinor: 200_000, expectedMinor: 225_000 };
-  assert.equal(handed.expectedMinor, 225_000, "the hand-over answers with what is left in the drawer");
+  // Finding 7: until the owner taps Received, the 2,000 is still the drawer's cash.
+  const pick = (b: Awaited<ReturnType<typeof cashOfDay>>) => ({ inMinor: b.inMinor, creditPaidMinor: b.creditPaidMinor, addedMinor: b.addedMinor, givenBackMinor: b.givenBackMinor, paidOutMinor: b.paidOutMinor, handedOverMinor: b.handedOverMinor, handoverWaitingMinor: b.handoverWaitingMinor, expectedMinor: b.expectedMinor });
+  const waiting = { inMinor: 655_000, creditPaidMinor: 50_000, addedMinor: 0, givenBackMinor: 195_000, paidOutMinor: 35_000, handedOverMinor: 0, handoverWaitingMinor: 200_000, expectedMinor: 425_000 };
+  assert.equal(handed.expectedMinor, 425_000, "not received yet: the hand-over does not lower the drawer");
+  assert.deepEqual(pick(await cashOfDay(prisma, fx.storeId, fx.bt, today)), waiting);
+  const early = must(await cashSvc.day(fx.storeId, fx.btStaff, {}));
+  assert.deepEqual([early.cash.expectedMinor, early.cash.handoverWaitingMinor, early.handovers[0]!.received], [425_000, 200_000, false]);
+
+  must(await cashSvc.receive(fx.storeId, fx.owner, handed.id));
+  const want = { ...waiting, handedOverMinor: 200_000, handoverWaitingMinor: 0, expectedMinor: 225_000 };
   const book = await cashOfDay(prisma, fx.storeId, fx.bt, today);
-  assert.deepEqual({ inMinor: book.inMinor, creditPaidMinor: book.creditPaidMinor, addedMinor: book.addedMinor, givenBackMinor: book.givenBackMinor, paidOutMinor: book.paidOutMinor, handedOverMinor: book.handedOverMinor, expectedMinor: book.expectedMinor }, want);
+  assert.deepEqual(pick(book), want, "received: now it has left the drawer");
 
   const daily = await new RiceReportsService().daily(fx.storeId, fx.owner, { date: today });
   assert.ok(daily.ok, JSON.stringify(daily));
@@ -119,7 +127,7 @@ test("one day at a store: expected cash matches the drawer to the peso, and the 
   assert.equal(screen.location.id, fx.bt, "a store login reads its own store's cash, whatever it asks for");
   assert.deepEqual(screen.cash, want);
   assert.equal(screen.handovers.length, 1);
-  assert.deepEqual([screen.handovers[0]!.amountMinor, screen.handovers[0]!.handedBy, screen.handovers[0]!.received, screen.canCancel], [200_000, "bt", false, false]);
+  assert.deepEqual([screen.handovers[0]!.amountMinor, screen.handovers[0]!.handedBy, screen.handovers[0]!.received, screen.canCancel], [200_000, "bt", true, false]);
 });
 
 test("hand-overs: staff at their own store today; the owner receives and cancels with a reason", async () => {
@@ -136,11 +144,13 @@ test("hand-overs: staff at their own store today; the owner receives and cancels
 
   const a = must(await cashSvc.handOver(fx.storeId, fx.btStaff, { amountMinor: 100_000 }));
   const b = must(await cashSvc.handOver(fx.storeId, fx.owner, { locationId: fx.bt, amountMinor: 50_000 }));
-  assert.equal(b.expectedMinor, 150_000);
+  assert.equal(b.expectedMinor, 250_000, "the staff's 1,000 is not received yet, so it still counts in the drawer");
   assert.ok((await prisma.cashHandover.findUniqueOrThrow({ where: { id: b.id } })).receivedById, "written by the owner: received");
 
   assert.equal((await cashSvc.receive(fx.storeId, fx.btStaff, a.id)).ok, false);
   must(await cashSvc.receive(fx.storeId, fx.owner, a.id));
+  assert.equal((await cashOfDay(prisma, fx.storeId, fx.bt, today)).expectedMinor, 150_000, "received: both hand-overs have left the drawer");
+  assert.equal(await prisma.auditLog.count({ where: { storeId: fx.storeId, action: "cash.handover_received", entityId: a.id } }), 1, "who said Received is on record");
   assert.equal((await cashSvc.cancel(fx.storeId, fx.btStaff, a.id, "no")).ok, false, "staff cannot cancel");
   assert.equal((await cashSvc.cancel(fx.storeId, fx.owner, a.id, "")).ok, false, "a reason is needed");
   must(await cashSvc.cancel(fx.storeId, fx.owner, a.id, "Counted twice"));

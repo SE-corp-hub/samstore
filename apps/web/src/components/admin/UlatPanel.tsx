@@ -370,7 +370,7 @@ interface DaySection {
   location: Loc; locked: boolean; closedAt: string | null; cashCountedMinor: number | null; cashVarianceMinor: number | null;
   sales: { count: number; totalMinor: number; cashMinor: number; gcashMinor: number; utangMinor: number; encodedLater: number; grossProfitMinor: number; profitShareMinor?: number; takenBack?: { count: number; totalMinor: number } };
   kilosByVariety: { variety: string; grams: number; salesMinor: number }[];
-  utang: { givenMinor: number; collectedMinor: number }; cash: { expectedMinor: number; inMinor?: number; addedMinor?: number; givenBackMinor?: number; paidOutMinor?: number; handedOverMinor?: number; heldForOthers?: { locationId: string; amountMinor: number }[]; heldByOthers?: { locationId: string; amountMinor: number }[] };
+  utang: { givenMinor: number; collectedMinor: number }; cash: { expectedMinor: number; inMinor?: number; addedMinor?: number; givenBackMinor?: number; paidOutMinor?: number; handedOverMinor?: number; handoverWaitingMinor?: number; heldForOthers?: { locationId: string; amountMinor: number }[]; heldByOthers?: { locationId: string; amountMinor: number }[] };
   stockIn: { documents: number }; trips: { releasedOut: number; receivedIn: number; returnedIn: number };
   resack: { jobs: number; lossGrams: number; lossValueMinor: number }; writeOffs: { count: number; valueMinor: number }; counts: { kulangMinor: number; sobraMinor: number };
   kargadors: { name: string; transactions: number }[];
@@ -428,6 +428,7 @@ function Daily({ owner, onNavigate }: { owner: boolean; onNavigate?: (tab: strin
               {s.cash.inMinor !== undefined && (s.cash.addedMinor || s.cash.givenBackMinor || s.cash.paidOutMinor || s.cash.handedOverMinor) ? (
                 <div className="small">Cash from customers {peso(s.cash.inMinor)}{s.cash.addedMinor ? ` + Cash in (added) ${peso(s.cash.addedMinor)}` : ""}{s.cash.givenBackMinor ? ` − given back ${peso(s.cash.givenBackMinor)}` : ""}{s.cash.paidOutMinor ? ` − expenses from the drawer ${peso(s.cash.paidOutMinor)}` : ""}{s.cash.handedOverMinor ? ` − handed over to the owner ${peso(s.cash.handedOverMinor)}` : ""}</div>
               ) : null}
+              {!!s.cash.handoverWaitingMinor && <div className="small"><i className="bi bi-hourglass-split me-1" aria-hidden="true"></i>{peso(s.cash.handoverWaitingMinor)} handed to the owner is not marked Received yet, so it still counts in the drawer.</div>}
               {(s.cash.heldForOthers ?? []).map((h) => <div key={`f${h.locationId}`} className="small">Of the cash here, {peso(h.amountMinor)} is credit paid for {placeName(h.locationId)}.</div>)}
               {(s.cash.heldByOthers ?? []).map((h) => <div key={`b${h.locationId}`} className="small">{placeName(h.locationId)} took {peso(h.amountMinor)} in cash for this store&apos;s credit.</div>)}
               <div className="small">Cash that should be in the drawer {peso(s.cash.expectedMinor)}{s.cashCountedMinor !== null && <> · counted {peso(s.cashCountedMinor)} <strong className={s.cashVarianceMinor && s.cashVarianceMinor < 0 ? "text-danger" : ""}>({s.cashVarianceMinor! >= 0 ? "+" : ""}{peso(s.cashVarianceMinor!)})</strong></>}</div>
