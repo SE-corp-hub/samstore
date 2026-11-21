@@ -203,9 +203,11 @@ interface ProductForm {
   upsell: string[];
   /** P3f: quantity-on-hand at/below which the item is flagged LOW stock. */
   reorderThreshold: string;
+  /** New sack rice only: make its kilo item right after saving ("Also sell per kilo"). */
+  alsoPerKilo: boolean;
 }
 
-const EMPTY_FORM: ProductForm = { name: "", sku: "", barcode: "", unit: "", soldByWeight: false, trackStock: true, priceMinor: "", costMinor: "", conversionEnabled: false, packageSize: "", packageUnit: "kg", stockConversionFamily: "", stock: "", categorySlug: "", categoryName: "", description: "", taxExempt: false, featured: false, tags: "", related: [], upsell: [], reorderThreshold: "" };
+const EMPTY_FORM: ProductForm = { name: "", sku: "", barcode: "", unit: "", soldByWeight: false, trackStock: true, priceMinor: "", costMinor: "", conversionEnabled: false, packageSize: "", packageUnit: "kg", stockConversionFamily: "", stock: "", categorySlug: "", categoryName: "", description: "", taxExempt: false, featured: false, tags: "", related: [], upsell: [], reorderThreshold: "", alsoPerKilo: false };
 const formatStockSize = (quantity: number, unit: string) => {
   if ((unit === "g" || unit === "ml") && quantity % 1000 === 0) {
     return `${quantity / 1000} ${unit === "g" ? "kg" : "L"}`;
@@ -370,12 +372,16 @@ export default function ProductsPanel() {
       related: p.related?.filter((r) => r.isActive).map((r) => r.id) ?? [],
       upsell: p.upsell?.filter((r) => r.isActive).map((r) => r.id) ?? [],
       reorderThreshold: (p.reorderThreshold || 0).toString(),
+      alsoPerKilo: false,
     });
     setCreatingCategory(false);
     setPhoto({ kind: "keep" });
     setModal({ open: true, editing: p });
   };
 
+  // A new sack of 10 kg or more can get its kilo item when it is first saved.
+  const newSackMeasure = form.conversionEnabled ? stockMeasureToBase(form.packageSize, form.packageUnit) : null;
+  const newSackCanKilo = !form.soldByWeight && newSackMeasure?.stockBaseUnit === "g" && (newSackMeasure.stockBaseQuantity ?? 0) >= 10_000;
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -443,6 +449,20 @@ export default function ProductsPanel() {
           setError(`The product was saved, but the picture was not: ${pd?.errors?.join(", ") ?? pd?.message ?? "try again"}`);
           return;
         }
+      }
+      // "Also sell per kilo" ticked on a new sack: make its kilo item now that the sack has an id.
+      if (!modal.editing && productId && form.alsoPerKilo && newSackCanKilo) {
+        const kr = await fetch(`${API_URL}/admin/products/${encodeURIComponent(productId)}/kilo-item`, {
+          method: "POST", headers: { "Content-Type": "application/json", ...adminHeaders() }, body: JSON.stringify({ on: true }),
+        });
+        if (!kr.ok) {
+          const kd = await kr.json().catch(() => null);
+          setModal({ open: false, editing: null });
+          await load();
+          setError(`The rice was saved, but its kilo item was not: ${kd?.errors?.join(", ") ?? kd?.message ?? "open the rice and turn on Also sell per kilo"}`);
+          return;
+        }
+        toast(`${form.name.trim()} saved, with its kilo item in the 1 kg group`, "success");
       }
       setModal({ open: false, editing: null });
       await load();
@@ -700,6 +720,20 @@ export default function ProductsPanel() {
                       )}
                     </div>
                     {modal.editing && canSellPerKilo(modal.editing) && <AlsoPerKilo sack={modal.editing} onChanged={() => void load()} />}
+                    {!modal.editing && !form.soldByWeight && (
+                      <div className="border rounded p-2 mb-2" style={{ background: "var(--bs-tertiary-bg, #f7f5f2)" }}>
+                        <div className="form-check form-switch mb-1">
+                          <input className="form-check-input" type="checkbox" role="switch" id="newAlsoPerKilo" checked={form.alsoPerKilo && newSackCanKilo} disabled={!newSackCanKilo}
+                            onChange={(e) => setForm({ ...form, alsoPerKilo: e.target.checked })} />
+                          <label className="form-check-label fw-semibold" htmlFor="newAlsoPerKilo">Also sell per kilo</label>
+                        </div>
+                        <div className="small text-muted">
+                          {newSackCanKilo
+                            ? "On: when you save, a kilo item for this rice is added in the 1 kg group, priced at the sack price ÷ kilos, rounded up, + ₱2."
+                            : "For sacks of 10 kg or more. To use it, turn on Enable stock conversion above and set the Package size, for example 25 kg."}
+                        </div>
+                      </div>
+                    )}
                     {modal.editing?.soldByWeight && <RackSacks kilo={modal.editing} onChanged={() => void load()} />}
                     {!modal.editing && form.soldByWeight && <div className="small text-muted mb-2">After saving, open this rice again to choose the sacks that go in its rack.</div>}
                     {modal.editing && <PriceHistoryList productId={modal.editing.id} />}
