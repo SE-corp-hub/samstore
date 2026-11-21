@@ -263,7 +263,7 @@ export class PosService {
   }
 
   /** `where`: the store, login and screen a NEW customer (typed name) is made at. */
-  private async resolveCustomer(storeId: string, input: { customerId?: string; customerName?: string; customerPhone?: string }, where?: AddedWhere): Promise<{ storeCustomerId: string | null; displayName: string }> {
+  private async resolveCustomer(storeId: string, input: { customerId?: string; customerName?: string; customerPhone?: string; customerAddress?: string }, where?: AddedWhere): Promise<{ storeCustomerId: string | null; displayName: string }> {
     if (input.customerId) {
       const sc = await prisma.storeCustomer.findFirst({ where: { storeId, id: input.customerId } });
       if (!sc) return { storeCustomerId: null, displayName: "Walk-in" };
@@ -271,15 +271,15 @@ export class PosService {
       return { storeCustomerId: sc.id, displayName: cust?.name ?? input.customerName ?? "Customer" };
     }
     if (input.customerName) {
-      const sc = await this.quickCustomer(storeId, input.customerName, input.customerPhone, where);
+      const sc = await this.quickCustomer(storeId, input.customerName, input.customerPhone, where, typeof input.customerAddress === "string" ? input.customerAddress : null);
       return { storeCustomerId: sc, displayName: input.customerName };
     }
     return { storeCustomerId: null, displayName: "Walk-in" };
   }
 
   /** A store customer without a login account: the same name (or mobile) is reused, never made twice. */
-  async quickCustomer(storeId: string, name: string, phone?: string, where?: AddedWhere | null): Promise<string | null> {
-    return findOrMakeQuickCustomer(storeId, name, phone, where);
+  async quickCustomer(storeId: string, name: string, phone?: string, where?: AddedWhere | null, address?: string | null): Promise<string | null> {
+    return findOrMakeQuickCustomer(storeId, name, phone, where, address);
   }
 
   private async makeOrder(tx: any, storeId: string, actorId: string, data: {

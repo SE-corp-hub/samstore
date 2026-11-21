@@ -15,7 +15,7 @@ export interface AreaInfo {
 }
 
 const TOWN = /lipa|bauan/gi;
-const lastTown = (s: string | null | undefined): Area | null => {
+export const lastTown = (s: string | null | undefined): Area | null => {
   const m = (s ?? "").match(TOWN);
   const last = m?.[m.length - 1];
   return last ? (last.toLowerCase() as Area) : null;
@@ -26,10 +26,31 @@ export function customerArea(c: AreaInfo): Area | null {
   return lastTown(c.name) ?? lastTown(c.address) ?? lastTown(c.addedAt?.name);
 }
 
-/** The list for one area ("" = everyone). The customer already chosen always stays, so the box never goes blank. */
+const az = (s: string | null | undefined) => (s ?? "").trim().toLowerCase();
+/** A to Z by name, capitals and spaces ignored (2026-11-21). */
+export function alphabetical<T extends AreaInfo>(list: T[]): T[] {
+  return [...list].sort((a, b) => az(a.name).localeCompare(az(b.name)));
+}
+
+/**
+ * The list for one area ("" = everyone), A to Z. The customer already chosen always stays, so the box never goes
+ * blank.
+ */
 export function byArea<T extends AreaInfo & { id: string }>(list: T[], area: string, keepId?: string): T[] {
-  if (!area) return list;
-  return list.filter((c) => c.id === keepId || customerArea(c) === area);
+  return alphabetical(area ? list.filter((c) => c.id === keepId || customerArea(c) === area) : list);
+}
+
+/** "Lipa" / "Bauan" for the town buttons and tags. */
+export const areaLabel = (a: Area | null | undefined) => AREAS.find((x) => x.id === a)?.label ?? "";
+
+/**
+ * The name as the customer list shows it, with the town after it when the name does not already say it:
+ * "Aling Rosa · Lipa", but "Acel-bauan" stays "Acel-bauan".
+ */
+export function nameWithTown(c: AreaInfo, fallback = "—"): string {
+  const name = c.name?.trim() || fallback;
+  const a = customerArea(c);
+  return a && !lastTown(c.name) ? `${name} · ${areaLabel(a)}` : name;
 }
 
 /** How many customers each area has (for the button labels). */

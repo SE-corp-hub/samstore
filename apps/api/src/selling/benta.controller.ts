@@ -117,7 +117,7 @@ export class BentaController {
         tenders: Array.isArray(pay.tenders) ? (pay.tenders as unknown[]).map((t) => { const o = obj(t) ?? {}; return { method: str(o.method), amountMinor: o.amountMinor, tenderedMinor: o.tenderedMinor, reference: str(o.reference) }; }) : undefined,
       },
       customerId: str(body?.customerId), customerName: str(body?.customerName),
-      newCustomerName: str(body?.newCustomerName), newCustomerPhone: str(body?.newCustomerPhone), signatures: signaturesFrom(body?.signatures),
+      newCustomerName: str(body?.newCustomerName), newCustomerPhone: str(body?.newCustomerPhone), newCustomerAddress: str(body?.newCustomerAddress), signatures: signaturesFrom(body?.signatures),
       paperSlip: paper ? { slipNo: paper.slipNo, occurredAt: paper.occurredAt } : undefined,
       soldAt: body?.soldAt, cashToOwner: body?.cashToOwner === true,
     }));

@@ -8,7 +8,7 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { StoreOption } from "./StoreBar";
-import { AREAS, areaCounts, type AreaInfo } from "../../lib/customer-area";
+import { AREAS, areaCounts, areaLabel, type Area, type AreaInfo } from "../../lib/customer-area";
 
 const Num = ({ n, done }: { n: number; done: boolean }) => (
   <span className={`start-num${done ? " done" : ""}`} aria-hidden="true">{done ? <i className="bi bi-check-lg"></i> : n}</span>
@@ -93,15 +93,18 @@ export const sameName = (a: string | null | undefined, b: string) => (a ?? "").t
  * (mobile optional) right there; "Add and choose" puts the name on the sale. The screen decides how the name is
  * saved (at once when online, or with the sale when there is no internet), so this only asks.
  */
-export function NewCustomerChoice({ chosenName, onAdd }: {
+export function NewCustomerChoice({ chosenName, onAdd, defaultTown = "" }: {
   /** The new customer already chosen for this sale (the button then shows their name with a tick). */
   chosenName?: string;
-  /** Saves the name; returns an error to show under the box, or null when done. */
-  onAdd: (name: string, phone: string) => Promise<string | null>;
+  /** Saves the name; returns an error to show under the box, or null when done. `town` = "Lipa", "Bauan" or "". */
+  onAdd: (name: string, phone: string, town: string) => Promise<string | null>;
+  /** The town button already on in the list's filter ("lipa" / "bauan"): the new customer's town starts there. */
+  defaultTown?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
+  const [town, setTown] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const nameRef = useRef<HTMLInputElement>(null);
@@ -116,7 +119,7 @@ export function NewCustomerChoice({ chosenName, onAdd }: {
   const add = async () => {
     if (tooShort || busy) return;
     setBusy(true); setError(null);
-    const err = await onAdd(name.trim().replace(/\s+/g, " "), phone.trim()).catch(() => "Could not add. Try again.");
+    const err = await onAdd(name.trim().replace(/\s+/g, " "), phone.trim(), areaLabel(town as Area)).catch(() => "Could not add. Try again.");
     setBusy(false);
     if (err) { setError(err); return; }
     setOpen(false); setName(""); setPhone("");
@@ -126,7 +129,7 @@ export function NewCustomerChoice({ chosenName, onAdd }: {
     const on = !!chosenName;
     return (
       <button type="button" className={`btn btn-lg start-choice new-cust ${on ? "btn-dark" : "btn-outline-success"}`} aria-pressed={on}
-        onClick={() => { setName(chosenName ?? ""); setOpen(true); }}>
+        onClick={() => { setName(chosenName ?? ""); setTown(defaultTown); setOpen(true); }}>
         <i className={`bi ${on ? "bi-check-circle-fill" : "bi-person-plus-fill"} me-2`} aria-hidden="true"></i>
         {on ? <span>{chosenName}<small>New customer · tap to change the name</small></span>
           : <span>New customer<small>Not on the list? Type the name</small></span>}
@@ -145,6 +148,18 @@ export function NewCustomerChoice({ chosenName, onAdd }: {
       <input id="new-cust-phone" className="form-control form-control-lg" inputMode="tel" autoComplete="off" enterKeyHint="done"
         placeholder="09xx xxx xxxx" value={phone} maxLength={16}
         onChange={(e) => setPhone(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void add(); } }} />
+      {/* Where they are from: the tag the Lipa / Bauan buttons find them by (kept as their address). */}
+      <div className="form-label fw-semibold mb-1 mt-2" id="new-cust-town">Where are they from?</div>
+      <div className="town-choice" role="group" aria-labelledby="new-cust-town">
+        {[...AREAS.map((a) => ({ id: a.id as string, label: a.label })), { id: "", label: "Other place" }].map((t) => {
+          const on = t.id === town;
+          return (
+            <button key={t.id || "other"} type="button" className={`btn btn-lg ${on ? "btn-dark" : "btn-outline-dark"}`} aria-pressed={on} onClick={() => setTown(t.id)}>
+              {on && <i className="bi bi-check-lg me-1" aria-hidden="true"></i>}{t.label}
+            </button>
+          );
+        })}
+      </div>
       {error && <div id="new-cust-error" className="text-danger fw-semibold mt-2" role="alert">{error}</div>}
       <div className="new-cust-actions">
         <button type="button" className="btn btn-outline-dark btn-lg" disabled={busy} onClick={() => { setOpen(false); setError(null); }}>Cancel</button>

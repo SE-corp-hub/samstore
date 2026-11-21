@@ -28,7 +28,7 @@ import ProductFinder from "./ProductFinder";
 import PickTile from "./PickTile";
 import StoreBar, { type StoreOption } from "./StoreBar";
 import StartChoices, { ChosenRow, CustomerAreaFilter, CustomerListPick, NewCustomerChoice, sameName, useCustomerArea } from "./StartChoices";
-import { byArea } from "../../lib/customer-area";
+import { areaLabel, byArea, nameWithTown, type Area } from "../../lib/customer-area";
 import { noteUse } from "../../lib/product-find";
 import { printSlip, type Slip } from "../../lib/slip-print";
 import { cachedGet, offlineRef, savedCopy, savedThenFresh, useOffline } from "../../lib/offlineCache";
@@ -251,6 +251,8 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
   const [buildCustomerId, setBuildCustomerId] = useState("");
   const [buildNewName, setBuildNewName] = useState("");
   const [buildNewPhone, setBuildNewPhone] = useState("");
+  /** The town chosen for the new name on the start card ("Lipa"/"Bauan"/""), only for the name it was chosen with. */
+  const [buildNewTown, setBuildNewTown] = useState<{ name: string; town: string } | null>(null);
   const [buildBusy, setBuildBusy] = useState(false);
   // Hide item prices: each store's own switch ("This store" in Settings), else the business's.
   const [hideRule, setHideRule] = useState<{ business: boolean; byStore: Record<string, { hidePricePreOrder?: boolean }> }>({ business: false, byStore: {} });
@@ -614,7 +616,9 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
         const name = buildNewName.trim();
         if (!buildCustomerId && !name) { setError("Choose a customer or type a new name."); return; }
         const key = newSaleKey();
-        const who = buildCustomerId ? { customerId: buildCustomerId } : { customerName: name, customerPhone: buildNewPhone.trim() || undefined };
+        // A new name's town: the one chosen on the start card, else the Lipa / Bauan button that is on (staff typing a name).
+        const town = buildNewTown && buildNewTown.name === name ? buildNewTown.town : areaLabel(area as Area);
+        const who = buildCustomerId ? { customerId: buildCustomerId } : { customerName: name, customerPhone: buildNewPhone.trim() || undefined, customerAddress: town || undefined };
         const body = { items: pricedCart.map((l) => ({ productId: l.product.id, quantity: l.quantity, ...overridePart(l) })), ...who, idempotencyKey: key, ...(locationId ? { locationId } : {}) };
         const customerName = buildCustomerId ? (buildCustomers.find((c) => c.id === buildCustomerId)?.name ?? "") : name;
         const view: Preorder = {
@@ -860,7 +864,7 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
           {!buildCustomerId && <CustomerAreaFilter compact customers={buildCustomers} area={area} onArea={setArea} />}
           <select aria-label="Customer" className="form-select" style={whoOneRow ? { flex: "2 1 12rem" } : { flex: "1 1 14rem", maxWidth: "26rem" }} value={buildCustomerId} onChange={(e) => { setBuildCustomerId(e.target.value); if (e.target.value) { setBuildNewName(""); setBuildNewPhone(""); } }}>
             <option value="">{whoOneRow ? "Who is it for? Choose…" : "Choose a customer…"}</option>
-            {byArea(buildCustomers, area, buildCustomerId).map((c) => <option key={c.id} value={c.id}>{c.name ?? c.email ?? c.phone ?? "Customer"}</option>)}
+            {byArea(buildCustomers, area, buildCustomerId).map((c) => <option key={c.id} value={c.id}>{nameWithTown(c, c.email ?? c.phone ?? "Customer")}</option>)}
           </select>
         </>)}
         {whoOneRow && !editingPre && !buildCustomerId && newCustomerInputs}
@@ -1023,15 +1027,15 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
             <select aria-label="Customer" className={`form-select form-select-lg start-cust${buildCustomerId ? " chosen" : ""}`} value={buildCustomerId}
               onChange={(e) => { setBuildCustomerId(e.target.value); if (e.target.value) { setBuildNewName(""); setBuildNewPhone(""); if (storeKnown) setStartOpen(false); } }}>
               <option value="">Choose a customer…</option>
-              {byArea(buildCustomers, area, buildCustomerId).map((c) => <option key={c.id} value={c.id}>{c.name ?? c.email ?? c.phone ?? "Customer"}</option>)}
+              {byArea(buildCustomers, area, buildCustomerId).map((c) => <option key={c.id} value={c.id}>{nameWithTown(c, c.email ?? c.phone ?? "Customer")}</option>)}
             </select>
           </CustomerListPick>
         )}
         {/* Not on the list: the name (and mobile, if any) goes with the pre-order, and the server adds the customer — with no internet too. */}
-        <NewCustomerChoice chosenName={!buildCustomerId && buildNewName.trim() ? buildNewName.trim() : undefined} onAdd={async (name, phone) => {
+        <NewCustomerChoice defaultTown={area} chosenName={!buildCustomerId && buildNewName.trim() ? buildNewName.trim() : undefined} onAdd={async (name, phone, town) => {
           const known = buildCustomers.find((c) => sameName(c.name, name));
           if (known) { setBuildCustomerId(known.id); setBuildNewName(""); setBuildNewPhone(""); toast(`${known.name ?? name} is already on the list — chosen`); }
-          else { setBuildCustomerId(""); setBuildNewName(name); setBuildNewPhone(phone); }
+          else { setBuildCustomerId(""); setBuildNewName(name); setBuildNewPhone(phone); setBuildNewTown({ name, town }); }
           if (storeKnown) setStartOpen(false);
           return null;
         }} />

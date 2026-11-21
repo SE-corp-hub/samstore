@@ -1,6 +1,13 @@
 "use client";
 
 import { AddedAtFilter, AddedLine } from "./AddedTag";
+import { areaLabel, customerArea, lastTown, type AreaInfo } from "../../lib/customer-area";
+
+/** Lipa / Bauan after the name when the name does not already say it (from the address or the store they were added at). */
+const townTag = (c: AreaInfo) => {
+  const a = customerArea(c);
+  return a && !lastTown(c.name) ? <span className="town-tag"><i className="bi bi-geo-alt-fill" aria-hidden="true"></i>{areaLabel(a)}</span> : null;
+};
 import { addedStores, matchesAddedAt } from "../../lib/added-where";
 import { useCallback, useEffect, useState } from "react";
 import { API_URL } from "../../config";
@@ -330,7 +337,7 @@ export default function CustomersPanel() {
               <tr key={c.id} style={{ cursor: "pointer" }} onClick={() => openProfile(c.id)}>
                 <td>
                   <div className="d-flex align-items-center flex-wrap gap-1">
-                    <span className="fw-semibold">{c.name ?? c.email ?? c.phone ?? "Guest"}<span className="d-block small text-muted fw-normal d-lg-none">{c.phone ?? c.email ?? ""}</span><span className="added-row"><AddedLine tag={c} /></span></span>
+                    <span className="fw-semibold">{c.name ?? c.email ?? c.phone ?? "Guest"}{townTag(c)}<span className="d-block small text-muted fw-normal d-lg-none">{c.phone ?? c.email ?? ""}</span><span className="added-row"><AddedLine tag={c} /></span></span>
                     <button
                                           className="btn btn-sm btn-outline-secondary ms-1"
                                           title="Edit customer"
