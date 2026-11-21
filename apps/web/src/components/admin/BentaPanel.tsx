@@ -1084,6 +1084,10 @@ export default function BentaPanel() {
     <DayBar locationId={locationId} storeName={storeName} heldCount={holds.length} onState={setDayState} compact={!wide} />
   );
   const pickArea = startCard || (dayBlocked ? null : finder);
+  // "Cash in" / "Expense". Sideways they share the line with the store and the customer (not a row of their own),
+  // so the sale below keeps that height for its lines.
+  const drawerBtns = step === "pick" && !newItem && !editing && !checking && !opening && !!locationId && (!mustChoose || storeKnown) && !dayBlocked
+    && <DrawerMoneyButtons onOpen={setDrawer} />;
   // Sideways, the steps sit above the sale; they step aside while the number pad needs the whole column.
   const stepsRow = !(sideBySide && (editing || checking || opening)) && (
     <div className="d-flex flex-wrap align-items-center gap-2 mb-2">
@@ -1094,7 +1098,7 @@ export default function BentaPanel() {
           <i className="bi bi-box-arrow-up me-1" aria-hidden="true"></i>Open sacks
         </button>
       )}
-      {step === "pick" && !newItem && !editing && !checking && !opening && !!locationId && (!mustChoose || storeKnown) && !dayBlocked && <DrawerMoneyButtons onOpen={setDrawer} />}
+      {!sideBySide && drawerBtns}
       {!sideBySide && step === "pick" && !newItem && !editing && !checking && !opening && (mustChoose ? chosenRow : customerSelect)}
     </div>
   );
@@ -1113,7 +1117,11 @@ export default function BentaPanel() {
           </div>
           <div className="fit-col fit-side">
             {stepsRow}
-            {!editing && !checking && !opening && (mustChoose ? chosenRow && <div className="mb-2">{chosenRow}</div> : customerSelect)}
+            {!editing && !checking && !opening && (mustChoose
+              ? (chosenRow || drawerBtns) && <div className="side-who-row mb-2">{chosenRow && drawerBtns && locationId
+                ? <ChosenRow store={locations.find((l) => l.id === locationId)} who={whoName} compact onChange={cart.length === 0 && step === "pick" ? () => setStartOpen(true) : undefined} />
+                : chosenRow}{drawerBtns && <span className="side-drawer-btns">{drawerBtns}</span>}</div>
+              : <>{customerSelect}{drawerBtns && <div className="side-who-row mb-2"><span className="side-drawer-btns">{drawerBtns}</span></div>}</>)}
             {/* Sideways the store buttons sit here, on the empty side, so the price list on the left has the whole
                 height. They only work before a sale starts anyway; during a sale its title names the store. */}
             {openCard || quickCount || editCard || cartCard || (

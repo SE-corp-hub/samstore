@@ -343,7 +343,7 @@ export default function SettingsPanel({ role = "" }: { role?: string }) {
               <i className={`bi ${g.icon} settings-row-icon`} aria-hidden="true"></i>
               <span className="flex-grow-1 min-w-0">
                 <span className="d-block fw-semibold">{g.title}{dirty(g.id) && <span className="badge text-bg-warning ms-2">Not saved</span>}</span>
-                <span className="d-block small text-muted text-truncate">{summary(g.id)}</span>
+                <span className="d-block small text-muted settings-row-sum">{summary(g.id)}</span>
               </span>
               {offline && g.server && <i className="bi bi-wifi-off fs-5 text-muted" role="img" aria-label="Needs internet" title="Needs internet"></i>}
               <i className="bi bi-chevron-right text-muted" aria-hidden="true"></i>

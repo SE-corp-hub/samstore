@@ -466,8 +466,8 @@ export default function ProductsPanel() {
 
   return (
     <div>
-      <div className="d-flex justify-content-between align-items-center mb-3">
-        <h1 className="h4 mb-0">Products</h1>
+      <div className="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+        <h1 className="h4 mb-0 text-nowrap">Products</h1>
                 <div className="d-flex gap-2">
                   {selected.length > 0 && (
                     <button className="btn btn-outline-primary btn-sm" onClick={() => setLabelOpen(true)}>
@@ -532,7 +532,7 @@ export default function ProductsPanel() {
           <table className="table table-hover align-middle">
             <thead>
               <tr>
-                <th style={{ width: 32 }}>
+                <th className="col-roomy" style={{ width: 32 }}>
                   <input
                     type="checkbox"
                     className="form-check-input"
@@ -545,16 +545,16 @@ export default function ProductsPanel() {
                 <th className="col-wide">SKU</th>
                 <th className="text-end">Selling price</th>
                 {hasCost && <th className="text-end col-wide">Unit cost</th>}
-                <th className="text-end">Stock</th>
+                <th className="text-end col-roomy">Stock</th>
                 <th className="col-wide">Category</th>
-                <th>Status</th>
+                <th className="col-roomy">Status</th>
                 <th className="text-end">Actions</th>
               </tr>
             </thead>
             <tbody>
               {(onlyBelow && belowCount > 0 ? products.filter((p) => isBelowCost(p.priceMinor, p.costMinor)) : products).map((p) => (
                 <tr key={p.id} className={p.isActive ? "" : "table-secondary"}>
-                  <td>
+                  <td className="col-roomy">
                     <input
                       type="checkbox"
                       className="form-check-input"
@@ -578,6 +578,7 @@ export default function ProductsPanel() {
                       {p.soldByWeight && (p.rackSackIds?.length ?? 0) + (p.kiloOfId ? 1 : 0) > 1 && <span className="badge text-bg-success ms-1">Rack · {(p.rackSackIds?.length ?? 0) + (p.kiloOfId ? 1 : 0)} rice</span>}
                       {p.trackStock === false && <span className="badge text-bg-warning ms-1" title="Sells at any time — stock is not counted">Not tracked</span>}
                       {isBelowCost(p.priceMinor, p.costMinor) && <span className="badge text-bg-danger ms-1">Below cost</span>}
+                      {!p.isActive && <span className="badge text-bg-secondary ms-1 d-sm-none">Hidden</span>}
                       <div className="small text-muted fw-normal d-lg-none">{p.sku}</div>
                     </div>
                     </div>
@@ -588,19 +589,19 @@ export default function ProductsPanel() {
                   </td>
                   <td className="text-end">{toPesos(p.priceMinor)}</td>
                   {hasCost && <td className="text-end text-muted col-wide">{toPesos(p.costMinor)}</td>}
-                  <td className={`text-end ${p.trackStock !== false && p.reorderThreshold > 0 && p.availableQuantity <= p.reorderThreshold ? "text-danger fw-semibold" : ""}`}>
+                  <td className={`text-end col-roomy ${p.trackStock !== false && p.reorderThreshold > 0 && p.availableQuantity <= p.reorderThreshold ? "text-danger fw-semibold" : ""}`}>
                     {p.trackStock === false ? <span className="text-muted">—</span> : p.soldByWeight ? kg(p.availableQuantity) : p.availableQuantity}
                     {p.trackStock !== false && p.reorderThreshold > 0 && <small className="text-muted"> ≤{p.reorderThreshold}</small>}
                     {p.quantityReserved > 0 && <small className="text-muted"> ({p.soldByWeight ? kg(p.quantityReserved) : p.quantityReserved} held for orders)</small>}
                   </td>
                   <td className="small col-wide">{p.category?.name ?? "—"}</td>
-                  <td>
+                  <td className="col-roomy">
                     <span className={`badge ${p.isActive ? "text-bg-success" : "text-bg-secondary"}`}>
                       {p.isActive ? "Active" : "Hidden"}
                     </span>
                     {p.taxExempt && <span className="badge text-bg-info ms-1" title="VAT-exempt">VAT-exempt</span>}
                   </td>
-                  <td className="text-end text-nowrap">
+                  <td className="text-end text-nowrap product-actions">
                     <button className="btn btn-sm btn-outline-secondary me-1" title="Variants & add-ons" aria-label={`Variants and add-ons for ${p.name}`} onClick={() => setOptionsFor(p)}>
                       <i className="bi bi-sliders"></i>
                     </button>

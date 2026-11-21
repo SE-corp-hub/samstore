@@ -62,3 +62,102 @@
   .admin-shell .sale-card .btn-outline-dark.btn-lg:has(> .bi-pause-circle) { padding-left: 0.6rem; padding-right: 0.6rem; }
   .admin-shell .sale-card .sale-pay { padding-left: 0.5rem; padding-right: 0.5rem; font-size: 1.15rem; }
 }
+
+/* ───────── Whole-app check, 2026-11-21 (user: "analyze every screen make sure its responsive and no overlapping").
+   Same rules as above: placement, spacing and wrapping only. Each rule says what it fixes. */
+
+/* 11. Phone, POS / Pre-order "Start a sale": the green "Go" button stuck to the bottom of the screen, which is
+   where the bottom bar is, so it sat hidden under the bar until the page was scrolled to its very end.
+   It now sticks just above the bar. (From 600 px up the choices scroll in their own box: rule 6 still holds.) */
+@media (max-width: 599.98px) {
+  .sell-fit .fit-scroll > .start-card .start-go { bottom: var(--staff-bar-h, 0px); }
+  /* Pre-order on a phone already keeps its order bar (₱ total · Save) above the bottom bar: there the button
+     stays at the end of the card instead of sliding under that bar. */
+  .sell-fit:has(.sticky-above-bar) .fit-scroll > .start-card .start-go { position: static; box-shadow: none; }
+}
+
+/* 12. Phone: the steps (Pick items · Check · Pay · Done) broke onto two lines, "Done" alone. On a phone the
+   circles stay on one line and only the step you are on keeps its word (screen readers still hear them all). */
+@media (max-width: 575.98px) {
+  .admin-shell .steps { flex-wrap: nowrap; gap: 0.5rem !important; }
+  .admin-shell .steps > li { gap: 0.35rem !important; white-space: nowrap; }
+  .admin-shell .steps > li:not([aria-current]) > span:last-child {
+    position: absolute !important; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
+  }
+}
+
+/* 13. On/off switches with a long sentence (Settings → Printer on a phone; New product / Edit product
+   "Track stock — …", "VAT-exempt product …") ran past the edge of the card or pop-up, and the phone page
+   could be pushed sideways. The words now wrap beside the switch. */
+.rice-ui .form-switch .form-check-label { white-space: normal; min-width: 0; }
+
+/* 14. POS / Pre-order rice groups (All · Imported · Local · … · Other): the row slides sideways when it does not
+   fit, but the last group was simply cut ("Ot"). The right edge now fades out, so it reads as "more this way". */
+.sell-fit .finder-bar .finder-groups {
+  padding-right: 1.5rem;
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 1.5rem), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 1.5rem), transparent);
+}
+
+/* 15. POS sideways: each line of the sale took two rows (name + Price, then − 1 + and the amount), so only
+   one line and a half showed. When the sale card has the room, a line is one row again: name, Price, − 1 +,
+   amount. (At Extra large text the card is too narrow for that, and the lines keep their two rows.) */
+.sale-lines { container-type: inline-size; container-name: salelines; }
+@container salelines (min-width: 24rem) {
+  .sale-line { flex-wrap: nowrap; }
+  .sale-line .name { flex: 1 1 0; min-width: 0; overflow-wrap: break-word; }
+  .sale-line .line-edit { margin-left: 0; padding-inline: 0.55rem; }
+  .sale-line .qty-amount { margin-left: 0; }
+  .sale-line .amount { min-width: 4.75rem; }
+}
+/* … and Cash in / Expense share the store + customer line (they had a row of their own). */
+.side-who-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; }
+.side-who-row .side-drawer-btns { display: inline-flex; gap: 0.4rem; margin-left: auto; }
+
+/* 16. Reports switch (Today · Profit · Closing & stock · Store report · Money · Z-reads): upright and on a phone
+   it broke as five and one, "Z-reads" alone on a second line. Now even rows of three, same size each. */
+@media (max-width: 991.98px) {
+  .admin-shell .report-sections { display: grid !important; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .admin-shell .report-sections .btn { white-space: normal; line-height: 1.15; padding-inline: 0.4rem; }
+}
+
+/* 17. Menu button upright: the word "Menu" still touched the left and right of its outline. A little wider. */
+@media (min-width: 700px) and (max-width: 991.98px) {
+  .admin-topbar .menu-open { min-width: 3.75rem; padding: 0 8px; }
+}
+
+/* 18. Team: upright, and on a PC narrower than 1200 px, the table was wider than the screen, so Change PIN,
+   Edit login and Reset password were cut off at the right edge (only a sideways swipe of the table showed them).
+   There each person is now one card: name, then Role · Location · PIN side by side, then the buttons. */
+@media (max-width: 1199.98px) {
+  .admin-shell .team-table thead { display: none; }
+  .admin-shell .team-table, .admin-shell .team-table tbody { display: block; }
+  .admin-shell .team-table tr {
+    display: flex; flex-wrap: wrap; align-items: flex-start; gap: 0.75rem 1.5rem;
+    padding: 0.9rem 1rem; margin-bottom: 0.75rem; border: 1px solid #e1d6c6; border-radius: 0.75rem; background: #fff;
+  }
+  .admin-shell .team-table td { display: block; padding: 0; border: 0; box-shadow: none !important; background: transparent; }
+  .admin-shell .team-table td.tm-person, .admin-shell .team-table td.tm-contact, .admin-shell .team-table td.tm-actions { flex: 1 1 100%; }
+  .admin-shell .team-table td[data-label]::before {
+    content: attr(data-label); display: block; margin-bottom: 0.25rem; font-size: 0.85em; font-weight: 600; color: var(--sam-muted, #6b5d50);
+  }
+  .admin-shell .team-table td.tm-actions { text-align: left !important; }
+  .admin-shell .team-table td.tm-actions:empty { display: none; }
+  .admin-shell .team-table td.tm-actions > div { justify-content: flex-start !important; gap: 0.5rem !important; }
+}
+
+/* 19. Settings list: the short line under each group ("Each store's Open day and Z-read, dra…") was cut with
+   three dots. It wraps now, so it can be read in full. */
+.settings-row-sum { overflow-wrap: anywhere; }
+
+/* 20. Phones: tables kept columns that do not fit (Products: tick box, Stock, Status; Inventory: Value), so
+   the price and the buttons were cut at the right. Those columns step aside on a phone (they show from 576 px:
+   tablet and PC unchanged); a hidden product says "Hidden" beside its name. Wider tables (Closing & stock,
+   Store report) still slide sideways inside their own box, as before. */
+@media (max-width: 575.98px) {
+  .admin-shell .col-roomy { display: none !important; }
+  /* The three buttons stand one under the other, and the small picture steps aside (Edit still opens it). */
+  .admin-shell td.product-actions { white-space: normal !important; width: 1%; }
+  .admin-shell td.product-actions .btn { display: block; margin: 0 0 0.35rem auto !important; }
+  .admin-shell td .product-thumb-btn, .admin-shell td .product-thumb-thumb { display: none !important; }
+}
