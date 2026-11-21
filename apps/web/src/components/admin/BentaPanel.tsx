@@ -5,7 +5,7 @@
 //      "how many?" step. The sale card has − / + on every line; "Price" opens a card with only the
 //      new price (big pad, no keyboard) and the reason — never "how many" — plus "Take from another
 //      store" for a tracked product.
-//   2. Each tile shows stock at every location; "Take from …" serves a line from another one.
+//   2. Each tile shows the stock of the store in "Selling at" only; "Take from …" serves a line from another one.
 //   3. Payment: Cash (pad → change), GCash (reference) or Credit (customer + their signature).
 //   4. From a paper slip: encode a paper slip — its number, the real time, a photo, staff signs.
 //   New item: a rice that isn't in the system yet, with what is on hand now.
@@ -15,10 +15,10 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { API_URL } from "../../config";
 import { adminHeaders, getAdminStoreId } from "../../lib/admin";
 import { toast } from "../../lib/toast";
-import { sendStep } from "../../lib/offlineQueue";
+import { heldSteps, queuedSteps, sendStep } from "../../lib/offlineQueue";
 import { PROMO_OFF, PROMO_REASON, promoFrom, promoPrices, promoSacks, type QuotaPromo } from "../../lib/quota-promo";
 import { cachedGet, offlineRef, savedCopy, savedThenFresh, useOffline } from "../../lib/offlineCache";
-import { takeOffShelf } from "../../lib/offline-stock";
+import { takeOffShelf, waitingShelf } from "../../lib/offline-stock";
 
 /** Shown on a button that needs the internet while the tablet is offline. */
 export const NEEDS_NET = "Needs internet";
@@ -222,7 +222,9 @@ export default function BentaPanel() {
       if (ask !== catalogAsk.current || !d?.products) return;
       setLocations((d.locations as Loc[]).filter((l) => (l as { type?: string }).type !== "BUFFER"));
       setTakeFrom(Array.isArray(d.takeFrom) ? (d.takeFrom as string[]) : null);
-      setItems(d.products as Item[]);
+      // Sales and opened sacks still waiting on this tablet are not in the server's (or the saved) numbers yet.
+      const list = d.products as Item[];
+      setItems(takeOffShelf(list, waitingShelf([...queuedSteps(), ...heldSteps()], list)));
       setSeesCost(d.seesCost === true);
       setPromo(promoFrom(d.quotaPromo as Parameters<typeof promoFrom>[0]));
       shown = (d.location as Loc).id;
@@ -620,11 +622,13 @@ export default function BentaPanel() {
       renderTile={(i, view) => {
         const n = inSale(i.id);
         const inText = i.loose ? kg(n) : `${n}`;
-        const left = i.stock[locationId] ?? 0; // only this store's count: other stores show when a line is taken from them
+        // Only the count of the store in "Selling at" (other stores show only when a line is taken from them).
+        // An item whose stock is not counted ("sell any time") has no count to show.
+        const left = i.stock[locationId] ?? 0;
         return (
           <PickTile layout={view === "list" ? "row" : "tile"} name={i.name} photoKey={i.photoKey} price={peso(i.priceMinor)} priceNote={i.loose ? "/kg" : undefined}
             countText={n > 0 ? `${inText} in sale` : undefined}
-            stock={left <= 0 ? (view === "list" ? "None left" : "None left here") : `${i.loose ? kg(left) : left} left`} stockOut={left <= 0}
+            stock={!i.tracked ? undefined : left <= 0 ? (view === "list" ? "None left" : "None left here") : `${i.loose ? kg(left) : left} left`} stockOut={i.tracked && left <= 0}
             extra={i.forReview ? <span className="badge text-bg-warning">To review</span> : undefined}
             ariaLabel={`Add ${i.loose ? "one kilo of " : ""}${i.name}${n > 0 ? `, ${inText} in this sale` : ""}`}
             onClick={() => void addOne(i)} />

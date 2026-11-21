@@ -32,7 +32,8 @@ import { areaLabel, byArea, nameWithTown, type Area } from "../../lib/customer-a
 import { noteUse } from "../../lib/product-find";
 import { printSlip, type Slip } from "../../lib/slip-print";
 import { cachedGet, offlineRef, savedCopy, savedThenFresh, useOffline } from "../../lib/offlineCache";
-import { QUEUE_EVENT, queuedSteps, sendStep } from "../../lib/offlineQueue";
+import { heldSteps, QUEUE_EVENT, queuedSteps, sendStep } from "../../lib/offlineQueue";
+import { takeOffShelf, waitingShelf } from "../../lib/offline-stock";
 import { PROMO_OFF, PROMO_REASON, promoFrom, promoPrices, promoSacks, type QuotaPromo } from "../../lib/quota-promo";
 import { newSaleKey } from "../../lib/saleKey";
 import OrderCheck, { type CheckLine } from "./OrderCheck";
@@ -236,7 +237,7 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
   /** The products at this store's price, with this store's count. */
   const buildProducts = useMemo(
     // Kilo rice is sold at the counter (POS) only for now: a pre-order counts whole sacks and packs.
-    () => rawProducts.filter((p) => p.isActive !== false && !p.soldByWeight).map((p) => ({ ...p, group: p.category?.name ?? null, priceMinor: atStore.price.get(p.id) ?? p.priceMinor, availableQuantity: atStore.stock.get(p.id) ?? p.availableQuantity })),
+    () => rawProducts.filter((p) => p.isActive !== false && !p.soldByWeight).map((p) => ({ ...p, group: p.category?.name ?? null, priceMinor: atStore.price.get(p.id) ?? p.priceMinor, shelf: atStore.stock.has(p.id) ? atStore.stock.get(p.id)! : null })),
     [rawProducts, atStore],
   );
   // Unit cost per product (from the counter list, saved for offline) and whether this login may see it.
@@ -331,7 +332,9 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
       setLocationId(at);
       setLocations((cat.locations ?? []).filter((l) => l.type === "STORE" || l.id === at));
       prices = new Map(cat.products.filter((x) => typeof x.priceMinor === "number").map((x) => [x.id, x.priceMinor!]));
-      setAtStore({ price: prices, stock: new Map(cat.products.filter((x) => x.tracked && x.stock).map((x) => [x.id, x.stock![at] ?? 0])) });
+      // Only the chosen store's free stock (never the total of all stores), less what waits on this tablet.
+      const shelf = takeOffShelf(cat.products.filter((x) => x.tracked).map((x) => ({ ...x, stock: x.stock ?? {} })), waitingShelf([...queuedSteps(), ...heldSteps()], cat.products));
+      setAtStore({ price: prices, stock: new Map(shelf.map((x) => [x.id, Math.max(0, x.stock[at] ?? 0)])) });
       setPromo(promoFrom(cat.quotaPromo));
       setPromoInfo(new Map(cat.products.map((x) => [x.id, { categoryId: x.categoryId ?? null, isSack: !x.loose && !!x.gramsPerUnit }])));
       setFloors(new Map(cat.products.map((x) => [x.id, { floorMinor: x.floorMinor ?? 0, lowestMinor: x.lowestMinor, ownShelfCost: !!x.ownShelfCost, unit: x.loose ? "kilo" : x.gramsPerUnit ? "sack" : "piece" }])));
@@ -898,7 +901,7 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
           const n = inOrder(p.id);
           return (
             <PickTile layout={view === "list" ? "row" : "tile"} name={p.name} photoKey={p.photoKey} price={maybePrice(p.priceMinor)} countText={n > 0 ? `${n} in order` : undefined}
-              stock={p.availableQuantity <= 0 ? (view === "list" ? "No stock yet" : "None in stock yet") : `${p.availableQuantity} in stock`}
+              stock={p.shelf === null ? undefined : p.shelf <= 0 ? (view === "list" ? "No stock yet" : "None in stock yet") : `${p.shelf} in stock`}
               ariaLabel={`Add ${p.name}${n > 0 ? `, ${n} in this order` : ""}`} onClick={() => { noteUse("preorder", p.id); addProduct(p); }} />
           );
         }} />
