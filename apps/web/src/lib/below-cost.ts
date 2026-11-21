@@ -28,3 +28,8 @@ export const okKey = (productId: string, priceMinor: number, costMinor: number) 
 
 /** Owner and manager see costs (the same rule as the server's seesCost). */
 export const seesCostRole = (role: string | undefined): boolean => role === "OWNER" || role === "MANAGER" || role === "PLATFORM_ADMIN" || role === "STORE_OWNER";
+
+/** 2026-11-21: only the owner changes a product's unit cost (a manager sees it but cannot change it). */
+export const ownsCostRole = (role: string | undefined): boolean => role === "OWNER" || role === "PLATFORM_ADMIN" || role === "STORE_OWNER";
+/** The reason shown on the greyed "Change unit cost" button for a manager. */
+export const OWNER_COST_NOTE = "Only the owner can change the unit cost";

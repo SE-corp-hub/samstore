@@ -11,7 +11,7 @@ import { API_URL } from "../../config";
 import { adminHeaders, getAdminRole } from "../../lib/admin";
 import { savedThenFresh } from "../../lib/offlineCache";
 import { cleanTyping, kg, kilosToGrams, peso } from "../../lib/number-format";
-import { isBelowCost, okKey, seesCostRole } from "../../lib/below-cost";
+import { isBelowCost, okKey, OWNER_COST_NOTE, ownsCostRole, seesCostRole } from "../../lib/below-cost";
 import { PesoInput } from "../NumberBoxes";
 import PriceReason, { reasonOk } from "./PriceReason";
 import { askBelowCost, saveUnitCost } from "./BelowCostDialog";
@@ -166,7 +166,7 @@ export default function OrderEditor({ orderId, orderNumber, customerName, onClos
         const f = floors.get(l.productId);
         const pick = await askBelowCost({
           name: l.name, priceMinor: unit, costMinor: floor, unit: f?.unit, showCost: seesCost, proceed: "Save anyway",
-          canChangeCost: !seesCost ? false : f?.ownShelfCost ? "This location has its own cost. Change it in Inventory." : true,
+          canChangeCost: !seesCost ? false : !ownsCostRole(role) ? OWNER_COST_NOTE : f?.ownShelfCost ? "This location has its own cost. Change it in Inventory." : true,
         });
         if (!pick) return false;
         if (pick.kind === "proceed") { keptBelow.current.add(okKey(l.productId, unit, floor)); break; }

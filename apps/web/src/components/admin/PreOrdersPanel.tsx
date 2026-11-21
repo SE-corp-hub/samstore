@@ -17,7 +17,7 @@ import { PesoInput } from "../NumberBoxes";
 import { NewItemForm } from "./BentaPanel";
 import { lastReason, reasonOk, ReasonButtons } from "./PriceReason";
 import { askBelowCost, saveUnitCost } from "./BelowCostDialog";
-import { isBelowCost, okKey } from "../../lib/below-cost";
+import { isBelowCost, okKey, OWNER_COST_NOTE, ownsCostRole } from "../../lib/below-cost";
 import { buildText, openTextApp } from "../../lib/text-message";
 import { FIT, useMediaQuery, WIDE } from "../../lib/use-media-query";
 import { useLinesCap } from "../../lib/use-lines-cap";
@@ -562,7 +562,7 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
       while (tooLow || (isBelowCost(unit, floor) && !keptBelow.current.has(okKey(l.product.id, unit, floor)))) {
         const pick = await askBelowCost({
           name: l.product.name, priceMinor: unit, costMinor: tooLow ? low : floor, noProceed: tooLow, unit: floors.get(l.product.id)?.unit, showCost: seesCost, proceed: "Save anyway",
-          canChangeCost: !seesCost ? false : offline ? "Needs internet" : floors.get(l.product.id)?.ownShelfCost ? "This location has its own cost. Change it in Inventory." : true,
+          canChangeCost: !seesCost ? false : !ownsCostRole(savedCopy<{ role?: string }>("/admin/me/rice")?.role) ? OWNER_COST_NOTE : offline ? "Needs internet" : floors.get(l.product.id)?.ownShelfCost ? "This location has its own cost. Change it in Inventory." : true,
         });
         if (!pick) return false;
         if (pick.kind === "proceed") { keptBelow.current.add(okKey(l.product.id, unit, floor)); break; }

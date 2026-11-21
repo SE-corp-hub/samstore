@@ -13,7 +13,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { API_URL } from "../../config";
-import { adminHeaders, isOwnerRole } from "../../lib/admin";
+import { adminHeaders, getAdminRole, isOwnerRole } from "../../lib/admin";
 import { toast } from "../../lib/toast";
 import { sendStep } from "../../lib/offlineQueue";
 import NumPad from "./NumPad";
@@ -23,7 +23,7 @@ import { buildText, openTextApp, type TextKind } from "../../lib/text-message";
 import { creditStatusWords, limitPhrase } from "../../lib/credit-status";
 import { printSlip } from "../../lib/slip-print";
 import { peso } from "../../lib/number-format";
-import { isBelowCost } from "../../lib/below-cost";
+import { isBelowCost, OWNER_COST_NOTE, ownsCostRole } from "../../lib/below-cost";
 import { askBelowCost, saveUnitCost } from "./BelowCostDialog";
 import { useMediaQuery, WIDE } from "../../lib/use-media-query";
 
@@ -629,7 +629,7 @@ function SpecialPrices({ customerId }: { customerId: string }) {
   const saveSpecial = async () => {
     let priceMinor = Math.round(Number(price) * 100);
     if (chosen && isBelowCost(priceMinor, chosen.costMinor)) {
-      const pick = await askBelowCost({ name: chosen.name, priceMinor, costMinor: chosen.costMinor, unit: chosen.loose ? "kilo" : "piece", showCost: true, canChangeCost: true, proceed: "Save anyway" });
+      const pick = await askBelowCost({ name: chosen.name, priceMinor, costMinor: chosen.costMinor, unit: chosen.loose ? "kilo" : "piece", showCost: true, canChangeCost: ownsCostRole(getAdminRole()) || OWNER_COST_NOTE, proceed: "Save anyway" });
       if (!pick) return;
       if (pick.kind === "price") priceMinor = pick.priceMinor;
       if (pick.kind === "cost") {
