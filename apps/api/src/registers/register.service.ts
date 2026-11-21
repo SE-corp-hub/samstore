@@ -170,6 +170,17 @@ export class RegisterService {
     return this.toSummary(session, storeId);
   }
 
+  /**
+   * The open drawer a cash sale at `locationId` would use: that store's own, else a drawer with no
+   * store (the same pick as a sale makes). Another store's open day is NOT this store's drawer.
+   */
+  async currentSessionAt(storeId: string, locationId: string): Promise<SessionSummary | null> {
+    const id = await this.sessionAt(storeId, locationId);
+    if (!id) return null;
+    const session = await prisma.registerSession.findFirst({ where: { id, storeId }, include: { register: { select: { name: true } } } });
+    return session ? this.toSummary(session, storeId) : null;
+  }
+
   /** Open a shift. Fails with a conflict when one is already open (DB-enforced). */
   async openSession(storeId: string, actorId: string, input: { openingFloatMinor?: number; notes?: string } = {}): Promise<RegisterResult<SessionSummary>> {
     const openingFloatMinor = input.openingFloatMinor ?? 0;

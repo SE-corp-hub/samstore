@@ -433,7 +433,10 @@ export class BentaService {
         const here = await prisma.warehouse.findFirst({ where: { id: loc.id, storeId }, select: { sellPerKilo: true } });
         if (!here?.sellPerKilo) throw new SellingError(`${loc.name} sells by the sack only. To sell per kilo here, turn on "Sell per kilo here" in Settings → This store.`);
       }
-      const registerSessionId = method === "utang" ? null : gate.on ? gate.sessionId : await this.drawerFor(storeId, loc.id, !!fromCount);
+      // The drawer rule ("open the drawer before taking cash") is about CASH: a GCash, Maya or bank sale
+      // is tied to an open drawer when there is one, but never refused for want of one.
+      const takesCash = method === "cash" || (method === "split" && (input.payment?.tenders ?? []).some((t) => (t.method ?? "").toLowerCase() === "cash"));
+      const registerSessionId = method === "utang" ? null : gate.on ? gate.sessionId : await this.drawerFor(storeId, loc.id, !!fromCount || !takesCash);
 
       const store = await prisma.store.findUnique({ where: { id: storeId }, include: { settings: true } });
       if (!store) throw new StepError(notFound("Store not found"));
