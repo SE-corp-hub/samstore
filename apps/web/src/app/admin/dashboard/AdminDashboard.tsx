@@ -456,7 +456,7 @@ export default function AdminDashboard() {
       case "reports": return <ReportsPanel />;
       case "export": return <ExportPanel />;
       case "orders": return BAR_ROLES.includes(role) ? <OrdersWithAgents /> : <OrdersPanel />;
-      case "products": return <ProductsPanel />;
+      case "products": return <ProductsPanel role={role} />;
       case "settings": return <SettingsPanel role={role} />;
       case "countersettings": return <CounterSettingsPanel />;
       case "vouchers": return <VouchersPanel />;

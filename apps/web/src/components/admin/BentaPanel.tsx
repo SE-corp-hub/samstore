@@ -31,7 +31,7 @@ import StoreBar from "./StoreBar";
 import StartChoices, { ChosenRow, NewCustomerChoice, sameName } from "./StartChoices";
 import { lastReason, reasonOk, ReasonButtons } from "./PriceReason";
 import { askBelowCost, saveUnitCost } from "./BelowCostDialog";
-import { isBelowCost, okKey } from "../../lib/below-cost";
+import { isBelowCost, okKey, OWNER_COST_NOTE } from "../../lib/below-cost";
 import LocationPicker from "../LocationPicker";
 import { PesoInput } from "../NumberBoxes";
 import { buildText, openTextApp } from "../../lib/text-message";
@@ -611,7 +611,7 @@ export default function BentaPanel() {
       if (!tooLow && (!isBelowCost(unit, floor) || keptBelow.current.has(okKey(it.id, unit, floor)))) return true;
       const pick = await askBelowCost({
         name: it.name, priceMinor: unit, costMinor: tooLow ? low : floor, noProceed: tooLow, unit: it.loose ? "kilo" : it.gramsPerUnit ? "sack" : "piece", showCost: seesCost, proceed: "Sell anyway",
-        canChangeCost: !seesCost ? false : offline ? NEEDS_NET : it.ownShelfCost ? "This location has its own cost. Change it in Inventory." : true,
+        canChangeCost: !seesCost ? false : !ownerLogin ? OWNER_COST_NOTE : offline ? NEEDS_NET : it.ownShelfCost ? "This location has its own cost. Change it in Inventory." : true,
       });
       if (!pick) return false;
       if (pick.kind === "proceed") { keptBelow.current.add(okKey(it.id, unit, floor)); return true; }

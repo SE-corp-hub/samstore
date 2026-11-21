@@ -6,7 +6,7 @@ import { isBelowCost } from "../../lib/below-cost";
 import { useCallback, useEffect, useState } from "react";
 import AddSeveralProducts from "./AddSeveralProducts";
 import { API_URL } from "../../config";
-import { adminHeaders } from "../../lib/admin";
+import { adminHeaders, roleCan } from "../../lib/admin";
 import LabelSheet from "./LabelSheet";
 import VariantEditor from "./VariantEditor";
 import PhotoPicker, { type PhotoChange } from "./PhotoPicker";
@@ -278,8 +278,13 @@ function PriceHistoryList({ productId }: { productId: string }) {
   );
 }
 
-export default function ProductsPanel() {
+export default function ProductsPanel({ role = "" }: { role?: string }) {
   const [products, setProducts] = useState<AdminProduct[]>([]);
+  // Owner: everything. Manager: selling price, reorder level and picture only. Staff: look only.
+  const canSetUp = roleCan(role, "setUpProducts");
+  const canPrice = roleCan(role, "changePrices");
+  const locked = !canSetUp;
+  const viewOnly = !canPrice;
   // Staff get no cost from the server, so the cost column and field are hidden for them.
   const hasCost = products.length === 0 || typeof products[0]!.costMinor === "number";
   const [categories, setCategories] = useState<{ id: string; slug: string; name: string }[]>([]);
@@ -391,13 +396,14 @@ export default function ProductsPanel() {
       // Selling price under the unit cost: fix the price, change the cost, or save anyway.
       const costNow = costMinor ?? modal.editing?.costMinor;
       if (isBelowCost(priceMinor, costNow)) {
-        const pick = await askBelowCost({ name: form.name.trim() || "This product", priceMinor, costMinor: costNow!, unit: form.soldByWeight ? "kilo" : form.conversionEnabled && form.packageUnit === "kg" ? "sack" : "piece", showCost: true, canChangeCost: hasCost, proceed: "Save anyway" });
+        const pick = await askBelowCost({ name: form.name.trim() || "This product", priceMinor, costMinor: costNow!, unit: form.soldByWeight ? "kilo" : form.conversionEnabled && form.packageUnit === "kg" ? "sack" : "piece", showCost: true, canChangeCost: hasCost && canSetUp, proceed: "Save anyway" });
         if (!pick) return;
         if (pick.kind === "price") priceMinor = pick.priceMinor;
         if (pick.kind === "cost") costMinor = pick.costMinor;
         setForm((f) => ({ ...f, priceMinor: (priceMinor / 100).toFixed(2), costMinor: costMinor === undefined ? f.costMinor : (costMinor / 100).toFixed(2) }));
       }
       setSaving(true);
+      const fullPayload = (() => {
       const measure = form.conversionEnabled ? stockMeasureToBase(form.packageSize, form.packageUnit) : { stockBaseUnit: null, stockBaseQuantity: null };
       const payload = {
         name: form.name,
@@ -423,6 +429,10 @@ export default function ProductsPanel() {
           ? { relatedProductIds: form.related, upsellProductIds: form.upsell }
           : {}),
       };
+      return payload;
+      })();
+      // A manager sends only what a manager may change (the server refuses the rest).
+      const payload = canSetUp ? fullPayload : { priceMinor, reorderThreshold: fullPayload.reorderThreshold };
       const res = await fetch(
         `${API_URL}/admin/products${modal.editing ? `/${modal.editing.id}` : ""}`,
         {
@@ -488,18 +498,22 @@ export default function ProductsPanel() {
     <div>
       <div className="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
         <h1 className="h4 mb-0 text-nowrap">Products</h1>
-                <div className="d-flex gap-2">
+                <div className="d-flex flex-wrap gap-2">
                   {selected.length > 0 && (
                     <button className="btn btn-outline-primary btn-sm" onClick={() => setLabelOpen(true)}>
                       <i className="bi bi-tags me-1"></i>Print labels ({selected.length})
                     </button>
                   )}
+                  {canSetUp && (
+                    <>
                   <button className="btn btn-outline-success btn-sm" onClick={() => setSeveral(true)}>
                     <i className="bi bi-table me-1"></i>Add several
                   </button>
                   <button className="btn btn-primary btn-sm" onClick={openCreate}>
           <i className="bi bi-plus-lg me-1"></i>New product
                   </button>
+                    </>
+                  )}
                   </div>
                 </div>
       {error && <div className="alert alert-danger py-2 small">{error}</div>}
@@ -622,15 +636,29 @@ export default function ProductsPanel() {
                     {p.taxExempt && <span className="badge text-bg-info ms-1" title="VAT-exempt">VAT-exempt</span>}
                   </td>
                   <td className="text-end text-nowrap product-actions">
-                    <button className="btn btn-sm btn-outline-secondary me-1" title="Variants & add-ons" aria-label={`Variants and add-ons for ${p.name}`} onClick={() => setOptionsFor(p)}>
-                      <i className="bi bi-sliders"></i>
-                    </button>
-                    <button className="btn btn-sm btn-outline-secondary me-1" title="Edit" aria-label={`Edit ${p.name}`} onClick={() => openEdit(p)}>
-                      <i className="bi bi-pencil"></i>
-                    </button>
-                    <button className="btn btn-sm btn-outline-secondary" title={p.isActive ? "Hide from sale" : "Show for sale"} aria-label={`${p.isActive ? "Hide" : "Show"} ${p.name}`} onClick={() => toggleActive(p)}>
-                      <i className={`bi ${p.isActive ? "bi-eye-slash" : "bi-eye"}`}></i>
-                    </button>
+                    {canSetUp && (
+                      <button className="btn btn-sm btn-outline-secondary me-1" title="Variants & add-ons" aria-label={`Variants and add-ons for ${p.name}`} onClick={() => setOptionsFor(p)}>
+                        <i className="bi bi-sliders"></i>
+                      </button>
+                    )}
+                    {canSetUp ? (
+                      <button className="btn btn-sm btn-outline-secondary me-1" title="Edit" aria-label={`Edit ${p.name}`} onClick={() => openEdit(p)}>
+                        <i className="bi bi-pencil"></i>
+                      </button>
+                    ) : canPrice ? (
+                      <button className="btn btn-sm btn-outline-secondary" aria-label={`Change price of ${p.name}`} onClick={() => openEdit(p)}>
+                        <i className="bi bi-tag me-1" aria-hidden="true"></i>Price
+                      </button>
+                    ) : (
+                      <button className="btn btn-sm btn-outline-secondary" aria-label={`See details of ${p.name}`} onClick={() => openEdit(p)}>
+                        <i className="bi bi-info-circle me-1" aria-hidden="true"></i>See
+                      </button>
+                    )}
+                    {canSetUp && (
+                      <button className="btn btn-sm btn-outline-secondary" title={p.isActive ? "Hide from sale" : "Show for sale"} aria-label={`${p.isActive ? "Hide" : "Show"} ${p.name}`} onClick={() => toggleActive(p)}>
+                        <i className={`bi ${p.isActive ? "bi-eye-slash" : "bi-eye"}`}></i>
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -647,11 +675,20 @@ export default function ProductsPanel() {
               <div className="modal-content">
                 <form onSubmit={save}>
                   <div className="modal-header">
-                    <h5 className="modal-title">{modal.editing ? "Edit product" : "New product"}</h5>
+                    <h5 className="modal-title">{!modal.editing ? "New product" : canSetUp ? "Edit product" : canPrice ? "Change price" : "Product details"}</h5>
                     <button type="button" className="btn-close" onClick={() => setModal({ open: false, editing: null })}></button>
                   </div>
                   <div className="modal-body">
-                    <PhotoPicker photoKey={modal.editing?.photoKey} value={photo} onChange={setPhoto} disabled={saving} />
+                    {locked && (
+                      <div className="alert alert-secondary d-flex gap-2 align-items-start py-2 mb-3" role="note">
+                        <i className="bi bi-lock-fill mt-1" aria-hidden="true"></i>
+                        <div>{viewOnly
+                          ? "View only. Only the owner or a manager can change products."
+                          : "You can change the selling price, reorder level and picture. Only the owner can change the name and the other details (shown in grey)."}</div>
+                      </div>
+                    )}
+                    <PhotoPicker photoKey={modal.editing?.photoKey} value={photo} onChange={setPhoto} disabled={saving || viewOnly} />
+                    <fieldset disabled={locked}>
                     <div className="mb-2">
                       <label htmlFor="products-name" className="form-label small">Name *</label>
                       <input id="products-name" className="form-control" required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
@@ -706,19 +743,21 @@ export default function ProductsPanel() {
                       <input className="form-check-input" type="checkbox" id="soldByWeight" checked={form.soldByWeight} onChange={(e) => setForm({ ...form, soldByWeight: e.target.checked })} />
                       <label className="form-check-label small" htmlFor="soldByWeight">Sold per kilo <span className="text-muted">— loose rice; its price is per kilo</span></label>
                     </div>
+                    </fieldset>
                     <div className="row">
-                      <div className="col-6 mb-2">
+                      <fieldset className="col-6 mb-2" disabled={viewOnly}>
                         <label className="form-label small" htmlFor="productSellingPrice">Selling price (₱) {form.soldByWeight ? "per kilo" : "per unit"} *</label>
                         <PesoInput id="productSellingPrice" required value={form.priceMinor} onChange={(v) => setForm({ ...form, priceMinor: v })} placeholder="0.00" />
-                      </div>
+                      </fieldset>
                       {hasCost && (
-                        <div className="col-6 mb-2">
+                        <fieldset className="col-6 mb-2" disabled={locked}>
                           <label className="form-label small" htmlFor="productUnitCost">Unit acquisition cost (₱)</label>
                           <PesoInput id="productUnitCost" value={form.costMinor} onChange={(v) => setForm({ ...form, costMinor: v })} placeholder="0.00" />
                           <small className="text-muted">Purchases update this to the latest received cost.</small>
-                        </div>
+                        </fieldset>
                       )}
                     </div>
+                    <fieldset disabled={locked}>
                     {modal.editing && canSellPerKilo(modal.editing) && <AlsoPerKilo sack={modal.editing} onChanged={() => void load()} />}
                     {!modal.editing && !form.soldByWeight && (
                       <div className="border rounded p-2 mb-2" style={{ background: "var(--bs-tertiary-bg, #f7f5f2)" }}>
@@ -736,17 +775,19 @@ export default function ProductsPanel() {
                     )}
                     {modal.editing?.soldByWeight && <RackSacks kilo={modal.editing} onChanged={() => void load()} />}
                     {!modal.editing && form.soldByWeight && <div className="small text-muted mb-2">After saving, open this rice again to choose the sacks that go in its rack.</div>}
+                    </fieldset>
                     {modal.editing && <PriceHistoryList productId={modal.editing.id} />}
                     <div className="row">
-                      <div className="col-6 mb-2">
+                      <fieldset className="col-6 mb-2" disabled={locked}>
                         <label className="form-label small">Opening stock</label>
                         <WholeInput value={form.stock} onChange={(v) => setForm({ ...form, stock: v })} placeholder="0" />
-                      </div>
-                      <div className="col-6 mb-2">
+                      </fieldset>
+                      <fieldset className="col-6 mb-2" disabled={viewOnly}>
                         <label className="form-label small">Reorder at</label>
                         <WholeInput placeholder="0" title="Flag LOW stock at or below this on-hand qty" value={form.reorderThreshold} onChange={(v) => setForm({ ...form, reorderThreshold: v })} />
-                      </div>
+                      </fieldset>
                     </div>
+                    <fieldset disabled={locked}>
                     <div className="mb-2">
                       <label className="form-label small">Category</label>
                       {creatingCategory && !modal.editing ? (
@@ -802,12 +843,15 @@ export default function ProductsPanel() {
                         <small className="text-muted d-block">Left = "You may also like", right = "Upgrade". Ctrl/Cmd-click to select multiple.</small>
                       </div>
                     )}
+                    </fieldset>
                   </div>
                   <div className="modal-footer">
-                    <button type="button" className="btn btn-outline-secondary" onClick={() => setModal({ open: false, editing: null })}>Cancel</button>
-                    <button className="btn btn-primary" type="submit" disabled={saving}>
-                      {saving ? "Saving…" : "Save"}
-                    </button>
+                    <button type="button" className="btn btn-outline-secondary" onClick={() => setModal({ open: false, editing: null })}>{viewOnly ? "Close" : "Cancel"}</button>
+                    {!viewOnly && (
+                      <button className="btn btn-primary" type="submit" disabled={saving}>
+                        {saving ? "Saving…" : "Save"}
+                      </button>
+                    )}
                   </div>
                 </form>
               </div>
