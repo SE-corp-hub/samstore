@@ -236,3 +236,24 @@ test("opening float validation and the FLOAT movement audit trail", async () => 
   assert.equal(summary?.live.expectedMinor, 20_000);
   assert.equal(summary?.live.cashInMinor, 0, "FLOAT is not counted as CASH_IN");
 });
+
+test("drawer check per store: another store's open day is not this store's drawer", async () => {
+  const svc = new RegisterService();
+  const storeId = await storeFixture(true);
+  const bogs = await prisma.warehouse.create({ data: { storeId, name: "S1", code: "S1", type: "STORE" } });
+  const lipa = await prisma.warehouse.create({ data: { storeId, name: "S3", code: "S3", type: "STORE" } });
+  // Bogs and Lucy opened its day (a drawer of its own).
+  const reg = await prisma.register.create({ data: { storeId, locationId: bogs.id, name: "S1 drawer" } });
+  const day = await prisma.registerSession.create({ data: { storeId, registerId: reg.id, locationId: bogs.id, openedBy: "owner", openingFloatMinor: 0 } });
+  assert.equal((await svc.currentSessionAt(storeId, bogs.id))?.sessionId, day.id);
+  assert.equal(await svc.currentSessionAt(storeId, lipa.id), null, "Lipa still has to open its drawer (POS must show Open the cash drawer)");
+  assert.equal(await svc.sessionAt(storeId, lipa.id), null, "the same answer a Lipa cash sale gets");
+  // The old one drawer for the whole store serves Lipa once it is open.
+  const opened = await svc.openSession(storeId, "owner", { openingFloatMinor: 0 });
+  assert.ok(opened.ok);
+  assert.equal((await svc.currentSessionAt(storeId, lipa.id))?.sessionId, opened.ok ? opened.value.sessionId : "");
+  await prisma.cashMovement.deleteMany({ where: { storeId } });
+  await prisma.registerSession.deleteMany({ where: { storeId } });
+  await prisma.register.deleteMany({ where: { storeId } });
+  await prisma.warehouse.deleteMany({ where: { storeId } });
+});

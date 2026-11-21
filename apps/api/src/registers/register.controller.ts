@@ -46,8 +46,9 @@ export class RegisterController {
   async current(@Req() req: Request & { user?: AuthPrincipal }, @Headers("x-store-id") headerStoreId?: string, @Query("locationId") locationId?: string) {
     const storeId = await this.guardStore(req, headerStoreId, TENANT_ROLES.VIEW);
     // ?locationId=: that store's own drawer rule ("This store" in Settings); none: the business's.
+    // With a store: only a drawer that store's cash sale can use (not another store's open day).
     const [session, sw] = await Promise.all([
-      this.registers.currentSession(storeId),
+      locationId ? this.registers.currentSessionAt(storeId, locationId) : this.registers.currentSession(storeId),
       switchesAt(prisma, storeId, locationId || null),
     ]);
     return { storeId, session, required: sw.requireOpenShift };
