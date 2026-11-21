@@ -27,7 +27,7 @@ import { peso } from "../../lib/number-format";
 import ProductFinder from "./ProductFinder";
 import PickTile from "./PickTile";
 import StoreBar, { type StoreOption } from "./StoreBar";
-import StartChoices, { ChosenRow, CustomerAreaFilter, NewCustomerChoice, sameName, useCustomerArea } from "./StartChoices";
+import StartChoices, { ChosenRow, CustomerAreaFilter, CustomerListPick, NewCustomerChoice, sameName, useCustomerArea } from "./StartChoices";
 import { byArea } from "../../lib/customer-area";
 import { noteUse } from "../../lib/product-find";
 import { printSlip, type Slip } from "../../lib/slip-print";
@@ -1018,13 +1018,14 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
     <StartChoices title="Start a pre-order" storeQuestion="Pre-order at which store?" locations={locations} storeId={storeKnown ? locationId : ""} onStore={startStore}
       whoQuestion="Who is it for?" whoDone={whoKnown} ready={storeKnown && whoKnown} goLabel="Tap the rice" onGo={() => { setStorePicked(true); setStartOpen(false); }}>
       <div className="start-choices">
-        {buildCustomers.length > 0 && <CustomerAreaFilter customers={buildCustomers} area={area} onArea={setArea} />}
         {buildCustomers.length > 0 && (
-          <select aria-label="Customer" className={`form-select form-select-lg start-cust${buildCustomerId ? " chosen" : ""}`} value={buildCustomerId}
-            onChange={(e) => { setBuildCustomerId(e.target.value); if (e.target.value) { setBuildNewName(""); setBuildNewPhone(""); if (storeKnown) setStartOpen(false); } }}>
-            <option value="">Choose a customer…</option>
-            {byArea(buildCustomers, area, buildCustomerId).map((c) => <option key={c.id} value={c.id}>{c.name ?? c.email ?? c.phone ?? "Customer"}</option>)}
-          </select>
+          <CustomerListPick customers={buildCustomers} area={area} onArea={setArea}>
+            <select aria-label="Customer" className={`form-select form-select-lg start-cust${buildCustomerId ? " chosen" : ""}`} value={buildCustomerId}
+              onChange={(e) => { setBuildCustomerId(e.target.value); if (e.target.value) { setBuildNewName(""); setBuildNewPhone(""); if (storeKnown) setStartOpen(false); } }}>
+              <option value="">Choose a customer…</option>
+              {byArea(buildCustomers, area, buildCustomerId).map((c) => <option key={c.id} value={c.id}>{c.name ?? c.email ?? c.phone ?? "Customer"}</option>)}
+            </select>
+          </CustomerListPick>
         )}
         {/* Not on the list: the name (and mobile, if any) goes with the pre-order, and the server adds the customer — with no internet too. */}
         <NewCustomerChoice chosenName={!buildCustomerId && buildNewName.trim() ? buildNewName.trim() : undefined} onAdd={async (name, phone) => {

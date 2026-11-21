@@ -28,7 +28,7 @@ import NumPad from "./NumPad";
 import SignaturePad from "./SignaturePad";
 import QuickCount from "./QuickCount";
 import StoreBar from "./StoreBar";
-import StartChoices, { ChosenRow, CustomerAreaFilter, NewCustomerChoice, sameName, useCustomerArea } from "./StartChoices";
+import StartChoices, { ChosenRow, CustomerAreaFilter, CustomerListPick, NewCustomerChoice, sameName, useCustomerArea } from "./StartChoices";
 import { byArea } from "../../lib/customer-area";
 import { lastReason, reasonOk, ReasonButtons } from "./PriceReason";
 import { askBelowCost, saveUnitCost } from "./BelowCostDialog";
@@ -520,9 +520,13 @@ export default function BentaPanel() {
   if (step === "done" && last) {
     return (
       <PosKeysContext.Provider value={keysCfg}>
-      <div ref={keysRoot} className={`sell-screen tone-sell mx-auto${keysCfg.on ? " pos-keys-on" : ""}`} style={{ maxWidth: 520 }}>
+      <div ref={keysRoot} className={`sell-screen tone-sell sell-done${keysCfg.on ? " pos-keys-on" : ""}`}>
         {keysHelpModal}
-        <Steps items={STEPS} current={3} />
+        {/* Left, like the steps on Pick items / Check / Pay, so the row does not jump to the middle at the end. */}
+        <Steps className="mb-3 steps-start" items={STEPS} current={3} />
+        {/* Sideways and on a PC: what was sold on the left, what to do next on the right, so "New sale" is on
+            screen without scrolling. Upright and on a phone: one column, same order. */}
+        <div className="done-grid"><div className="done-left">
         {last.status === "WAITING_OWNER" ? (
           <div className="alert alert-warning">
             <div className="h4 mb-1">Waiting for the owner</div>
@@ -547,6 +551,7 @@ export default function BentaPanel() {
           <li className="list-group-item d-flex justify-content-between fw-bold" style={{ fontSize: "1.75rem" }}><span>Total</span><span>{peso(last.totalMinor)}</span></li>
           {last.changeMinor > 0 && <li className="list-group-item d-flex justify-content-between change-due text-success"><span>Change to give</span><span>{peso(last.changeMinor)}</span></li>}
         </ul>
+        </div><div className="done-right">
         <div className="d-flex flex-wrap gap-2 mb-3">
           <button type="button" className="btn btn-outline-primary btn-lg flex-fill" data-pos-key="print" onClick={() => printSlip(receiptSlip(last))}><i className="bi bi-printer me-1"></i>Print receipt<KeyHint action="print" /></button>
         </div>
@@ -585,6 +590,7 @@ export default function BentaPanel() {
           </div>
         )}
         <button className="btn btn-success btn-lg w-100 py-3" data-pos-key="newSale" data-pos-enter onClick={reset}><i className="bi bi-plus-lg me-1"></i>New sale<KeyHint action="newSale" /></button>
+        </div></div>
       </div>
       </PosKeysContext.Provider>
     );
@@ -1051,14 +1057,15 @@ export default function BentaPanel() {
           {walkIn && <i className="bi bi-check-circle-fill me-2" aria-hidden="true"></i>}
           <span>Walk-in<small>No name needed · store prices</small></span>
         </button>
-        {customers.length > 0 && <CustomerAreaFilter customers={customers} area={area} onArea={setArea} />}
-        {customers.length > 0 && (
-          <select className={`form-select form-select-lg start-cust${priceCustomer ? " chosen" : ""}`} aria-label="A customer from the list" value={priceCustomer} onChange={(e) => startWho(e.target.value)}>
-            <option value="">Choose a customer…</option>
-            {byArea(customers, area, priceCustomer).map((c) => <option key={c.id} value={c.id}>{c.name ?? c.phone ?? "—"}{isNewId(c.id) ? " (new)" : ""}</option>)}
-          </select>
-        )}
         <NewCustomerChoice onAdd={addNewCustomer} />
+        {customers.length > 0 && (
+          <CustomerListPick customers={customers} area={area} onArea={setArea}>
+            <select className={`form-select form-select-lg start-cust${priceCustomer ? " chosen" : ""}`} aria-label="A customer from the list" value={priceCustomer} onChange={(e) => startWho(e.target.value)}>
+              <option value="">Choose a customer…</option>
+              {byArea(customers, area, priceCustomer).map((c) => <option key={c.id} value={c.id}>{c.name ?? c.phone ?? "—"}{isNewId(c.id) ? " (new)" : ""}</option>)}
+            </select>
+          </CustomerListPick>
+        )}
       </div>
       {priceCustomer && isNewId(priceCustomer) && <div className="text-muted mt-2">New customer: saved on this tablet, added to the list when the sale is sent.</div>}
       {priceCustomer && !isNewId(priceCustomer) && <div className="text-muted mt-2">{specialCount > 0 ? `${specialCount} special ${specialCount === 1 ? "price" : "prices"} for ${whoName}.` : `No special prices for ${whoName}: store prices apply.`}</div>}
@@ -1220,14 +1227,14 @@ export default function BentaPanel() {
               </div>
               <div className="d-grid gap-2 mb-3" style={{ gridTemplateColumns: "repeat(3, 1fr)" }} role="group" aria-label="How are they paying?">
                 {(["cash", "gcash", "utang", ...(allPay ? ["maya", "bank", "split"] : [])] as Pay[]).map((p) => (
-                  <button key={p} type="button" className={`btn btn-lg px-2 ${pay === p ? "btn-dark" : "btn-outline-dark"}`} aria-pressed={pay === p} data-pos-key={PAY_KEY[p]} onClick={() => setPay(p)}>
-                    <i className={`bi ${PAY_ICON[p]} me-1`} aria-hidden="true"></i>{PAY_LABEL[p]}{PAY_KEY[p] && <KeyHint action={PAY_KEY[p]} below />}
+                  <button key={p} type="button" className={`btn btn-lg px-2 pay-way ${pay === p ? "btn-dark" : "btn-outline-dark"}`} aria-pressed={pay === p} data-pos-key={PAY_KEY[p]} onClick={() => setPay(p)}>
+                    <i className={`bi ${PAY_ICON[p]}`} aria-hidden="true"></i>{PAY_LABEL[p]}{PAY_KEY[p] && <KeyHint action={PAY_KEY[p]} below />}
                   </button>
                 ))}
               </div>
 
               {pay === "cash" && !(drawerOpen === false && shiftRequired) && (
-                <div className="d-flex flex-wrap justify-content-center gap-2 mb-2" role="group" aria-label="Quick cash amounts">
+                <div className="quick-cash mb-2" role="group" aria-label="Quick cash amounts">
                   {quickCash(total).map((m) => (
                     <button key={m} type="button" className={`btn btn-lg ${tendered && toMinor(tendered) === m ? "btn-dark" : "btn-outline-dark"}`} data-pos-key={m === total ? "exact" : undefined} onClick={() => setTendered(String(m / 100))}>
                       {m === total ? <>Exact<KeyHint action="exact" /></> : peso(m)}

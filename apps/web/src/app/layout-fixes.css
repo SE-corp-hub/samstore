@@ -197,3 +197,8 @@ section + section > .settings-scope-head { margin-top: 22px; }
 .wicd-list > li > .scope-tag { margin-bottom: 6px; }
 .wicd-list ul li { padding: 8px 0; border-bottom: 1px solid #eee9e1; font-size: 1.05rem; overflow-wrap: anywhere; }
 .wicd-list ul li:last-child { border-bottom: 0; }
+
+/* 2026-11-21: on a narrow side column (PC 1024 at Extra large, key hints on) Cash in / Expense ran 23 px off the
+   screen; now they share the row and wrap instead of pushing past the edge. */
+.side-who-row .side-drawer-btns { flex-wrap: wrap; min-width: 0; max-width: 100%; }
+.side-who-row .side-drawer-btns > .btn { flex: 1 1 auto; }

@@ -194,3 +194,23 @@ export function CustomerAreaFilter({ customers, area, onArea, compact = false }:
     </div>
   );
 }
+
+/**
+ * The customer list block in "Who is buying?": its own full-width box with the town buttons right above the list,
+ * so it is clear the buttons narrow THIS list (2026-11-21 alignment pass).
+ */
+export function CustomerListPick({ customers, area, onArea, children }: {
+  customers: AreaInfo[];
+  area: string;
+  onArea: (a: string) => void;
+  /** The customer drop-down. */
+  children: ReactNode;
+}) {
+  return (
+    <div className="start-list" role="group" aria-labelledby="start-list-title">
+      <div id="start-list-title" className="start-list-title"><i className="bi bi-people-fill me-2" aria-hidden="true"></i>From the customer list</div>
+      <CustomerAreaFilter customers={customers} area={area} onArea={onArea} />
+      {children}
+    </div>
+  );
+}

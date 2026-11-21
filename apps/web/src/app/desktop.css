@@ -66,7 +66,7 @@
 
   /* ── POS / Pre-order on a small PC screen: the sale panel never narrower than 300 px, so the
      line prices and the Pay button are not cut. (Tablets keep their own sizes.) */
-  .admin-shell .sell-screen .fit-side { min-width: 300px; }
+  .admin-shell .sell-screen .fit-side { min-width: max(300px, 21rem); } /* 2026-11-21: 300 px still cut Pay at 1,024 px with Large text */
 
   /* ── Mouse feedback. */
   .admin-shell main .table > tbody > tr { transition: background-color 120ms ease-out; }
