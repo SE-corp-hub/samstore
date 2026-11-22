@@ -14,7 +14,7 @@ const Num = ({ n, done }: { n: number; done: boolean }) => (
   <span className={`start-num${done ? " done" : ""}`} aria-hidden="true">{done ? <i className="bi bi-check-lg"></i> : n}</span>
 );
 
-export default function StartChoices({ title, storeQuestion, locations, storeId, onStore, whoQuestion, whoDone, children, ready, goLabel, onGo }: {
+export default function StartChoices({ title, storeQuestion, locations, storeId, onStore, whoQuestion, whoDone, children, ready, goLabel, onGo, foldStore = false }: {
   title: string;
   storeQuestion: string;
   locations: StoreOption[];
@@ -29,12 +29,19 @@ export default function StartChoices({ title, storeQuestion, locations, storeId,
   ready: boolean;
   goLabel: string;
   onGo: () => void;
+  /** The store is already known (the owner's store from last time, 2026-11-22): it shows as one "Selling at … Change"
+   *  line and the customer is the only question. Change opens the store buttons again. */
+  foldStore?: boolean;
 }) {
+  const [storesOpen, setStoresOpen] = useState(false);
+  const folded = foldStore && !!storeId && !storesOpen;
+  const here = locations.find((l) => l.id === storeId);
   // 2026-11-22: after the store is tapped, part 2 slides fully into view. On most tablet sizes the customer list sat
   // under the sticky green button, so the owner did not see it without scrolling the card.
   const whoRef = useRef<HTMLDivElement>(null);
   const pickStore = (id: string) => {
     onStore(id);
+    setStoresOpen(false);
     if (whoDone) return;
     requestAnimationFrame(() => {
       const reduce = typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -45,9 +52,17 @@ export default function StartChoices({ title, storeQuestion, locations, storeId,
     <div className="fit-scroll">
       <section className="start-card" aria-labelledby="start-title">
         <h2 id="start-title" className="h4 fw-bold mb-1">{title}</h2>
-        <p className="text-muted mb-3 start-sub">Answer both, then tap the rice.</p>
+        {folded ? (
+          <div className="start-store-line">
+            <span className="start-store-at"><i className="bi bi-shop me-1" aria-hidden="true"></i>Selling at</span>
+            <strong className="start-store-name">{here?.code && <span className="start-code">{here.code}</span>}{here?.name ?? ""}</strong>
+            <button type="button" className="btn btn-outline-dark start-store-change" onClick={() => setStoresOpen(true)}>
+              <i className="bi bi-pencil me-1" aria-hidden="true"></i>Change<span className="visually-hidden"> store</span>
+            </button>
+          </div>
+        ) : <p className="text-muted mb-3 start-sub">Answer both, then tap the rice.</p>}
 
-        <div className="start-q" role="group" aria-labelledby="start-where">
+        {!folded && <div className="start-q" role="group" aria-labelledby="start-where">
           <h3 id="start-where" className="h5 start-q-title"><Num n={1} done={!!storeId} />{storeQuestion}</h3>
           <div className="start-choices">
             {locations.map((l) => {
@@ -60,17 +75,17 @@ export default function StartChoices({ title, storeQuestion, locations, storeId,
               );
             })}
           </div>
-        </div>
+        </div>}
 
         <div ref={whoRef} className="start-q start-who-q" role="group" aria-labelledby="start-who">
-          <h3 id="start-who" className="h5 start-q-title"><Num n={2} done={whoDone} />{whoQuestion}</h3>
+          <h3 id="start-who" className="h5 start-q-title">{!folded && <Num n={2} done={whoDone} />}{whoQuestion}</h3>
           {children}
         </div>
 
         <button type="button" className="btn btn-success btn-lg w-100 fw-bold start-go" disabled={!ready} onClick={onGo}>
           {ready
             ? <>{goLabel}<i className="bi bi-arrow-right ms-2" aria-hidden="true"></i></>
-            : !storeId && !whoDone ? "Choose the store and the customer" : !storeId ? "Choose the store (1)" : "Choose who is buying (2)"}
+            : !storeId && !whoDone ? "Choose the store and the customer" : !storeId ? "Choose the store (1)" : folded ? "Choose who is buying" : "Choose who is buying (2)"}
         </button>
       </section>
     </div>

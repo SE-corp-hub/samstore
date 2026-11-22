@@ -36,7 +36,8 @@ import { heldSteps, QUEUE_EVENT, queuedSteps, sendStep } from "../../lib/offline
 import { takeOffShelf, waitingShelf } from "../../lib/offline-stock";
 import { PROMO_OFF, PROMO_REASON, promoFrom, promoPrices, promoSacks, type QuotaPromo } from "../../lib/quota-promo";
 import { newSaleKey } from "../../lib/saleKey";
-import OrderCheck, { type CheckLine } from "./OrderCheck";
+import OrderCheck, { FromButtons, type CheckLine } from "./OrderCheck";
+import { rememberedStore, rememberStore } from "../../lib/owner-store";
 
 const PREORDER_PATH = "/admin/pos/preorder";
 /** Pre-orders saved on this tablet with no internet, not on the server yet (shown with Print only). */
@@ -226,6 +227,9 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
   const [isOwner, setIsOwner] = useState(() => ["OWNER", "MANAGER", "PLATFORM_ADMIN"].includes(savedCopy<{ role?: string }>("/admin/me/rice")?.role ?? ""));
   // Owner: "Start a pre-order" asks the store and the customer first; both start empty for every new pre-order.
   const [storePicked, setStorePicked] = useState(false);
+  /** Every store's count of each tracked rice (owner's Check: which store has this order). */
+  const [stockAll, setStockAll] = useState<Map<string, Record<string, number>>>(new Map());
+  const [movingStore, setMovingStore] = useState(false);
   const [startOpen, setStartOpen] = useState(true);
   const [atStore, setAtStore] = useState<{ price: Map<string, number>; stock: Map<string, number> }>({ price: new Map(), stock: new Map() });
   const locRef = useRef<string | undefined>(undefined);
@@ -337,6 +341,7 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
       // Only the chosen store's free stock (never the total of all stores), less what waits on this tablet.
       const shelf = takeOffShelf(cat.products.filter((x) => x.tracked).map((x) => ({ ...x, stock: x.stock ?? {} })), waitingShelf([...queuedSteps(), ...heldSteps()], cat.products));
       setAtStore({ price: prices, stock: new Map(shelf.map((x) => [x.id, Math.max(0, x.stock[at] ?? 0)])) });
+      setStockAll(new Map(shelf.map((x) => [x.id, x.stock])));
       setPromo(promoFrom(cat.quotaPromo));
       setPromoInfo(new Map(cat.products.map((x) => [x.id, { categoryId: x.categoryId ?? null, isSack: !x.loose && !!x.gramsPerUnit }])));
       setFloors(new Map(cat.products.map((x) => [x.id, { floorMinor: x.floorMinor ?? 0, lowestMinor: x.lowestMinor, ownShelfCost: !!x.ownShelfCost, unit: x.loose ? "kilo" : x.gramsPerUnit ? "sack" : "piece" }])));
@@ -361,15 +366,20 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
   useEffect(() => {
     (async () => {
       // Ask for the price list right away, for the home store this tablet saved last time; correct it if that changed.
-      const guess = savedCopy<{ homeLocationId?: string | null }>("/admin/me/rice")?.homeLocationId ?? undefined;
+      const savedMe = savedCopy<{ homeLocationId?: string | null; role?: string }>("/admin/me/rice");
+      const ownerLike = (role?: string) => ["OWNER", "MANAGER", "PLATFORM_ADMIN"].includes(role ?? "");
+      // The owner (no home store): the store they last sold at on this tablet (2026-11-22).
+      const guess = savedMe?.homeLocationId ?? (ownerLike(savedMe?.role) ? rememberedStore() ?? undefined : undefined);
       const first = loadBuilder(guess);
       const firstAsk = catalogAsk.current;
       const me = await cachedGet<{ homeLocationId?: string | null; role?: string }>("/admin/me/rice");
       setHomeLocationId(me?.homeLocationId ?? null);
       setIsOwner(["OWNER", "MANAGER", "PLATFORM_ADMIN"].includes(me?.role ?? ""));
       await first;
-      const want = me?.homeLocationId ?? undefined;
+      const ownerWant = me && !me.homeLocationId && ownerLike(me.role) ? rememberedStore() ?? undefined : undefined;
+      const want = me?.homeLocationId ?? ownerWant;
       if (catalogAsk.current === firstAsk && want && want !== guess) await loadBuilder(want);
+      if (ownerWant && locRef.current === ownerWant) setStorePicked(true);
     })().catch(() => setError("Could not load"));
   }, [loadBuilder]);
   const storeHere = locations.find((l) => l.id === locationId);
@@ -385,7 +395,8 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
   const clearBuild = () => {
     setBuildCart([]); setBuildCustomerId(""); setBuildNewName(""); setBuildNewPhone("");
     setNewItemOpen(false); setEditingPre(null); setCheckOpen(false);
-    setStorePicked(false); setStartOpen(true);
+    // The next pre-order starts at the customer; the store from last time stays (Change on the start card).
+    setStorePicked(!!locRef.current && rememberedStore() === locRef.current); setStartOpen(true);
   };
   // A new pre-order starts with nothing chosen (an order already started is kept as it was).
   const newPreorder = () => { if (editingPre || buildCart.length === 0) clearBuild(); setError(null); setSubTab("build"); };
@@ -916,7 +927,8 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
     <section className={`sale-card fit-card${upright ? " fit-bottom" : ""}${orderBig ? " order-big" : ""} mb-2`} aria-labelledby="po-check">
       <div className="card-body">
         <div className="d-flex align-items-center gap-2 mb-2">
-          <h2 id="po-check" className="h5 mb-0 d-flex align-items-center"><Num n={3} />Check the order</h2>
+          {/* The owner's steps are Customer · Items · Check · Save (2026-11-22): this card is the order so far, the check comes on Save. */}
+          <h2 id="po-check" className="h5 mb-0 d-flex align-items-center">{isOwner && !homeLocationId && !editingPre ? <><i className="bi bi-basket me-2" aria-hidden="true"></i>This order</> : <><Num n={3} />Check the order</>}</h2>
           {upright && (orderBig || buildCart.length > 3) && (
             <button type="button" className="btn btn-outline-dark order-big-toggle ms-auto" onClick={() => setOrderBig(!orderBig)}>
               {orderBig
@@ -1018,14 +1030,14 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
   const whoKnown = !!buildCustomerId || !!buildNewName.trim();
   const asking = mustChoose && subTab === "build" && !newItemOpen && buildCart.length === 0 && (startOpen || !storeKnown || !whoKnown);
   const startStore = (id: string) => {
-    setStorePicked(true); setError(null);
+    setStorePicked(true); setError(null); rememberStore(id);
     if (buildCustomerId || buildNewName.trim()) setStartOpen(false);
     if (id !== locationId) void loadBuilder(id);
   };
   const whoName = buildCustomerId ? (buildCustomers.find((c) => c.id === buildCustomerId)?.name ?? "Customer") : buildNewName.trim() || "—";
   const startCard = asking && (
     <StartChoices title="Start a pre-order" storeQuestion="Pre-order at which store?" locations={locations} storeId={storeKnown ? locationId : ""} onStore={startStore}
-      whoQuestion="Who is it for?" whoDone={whoKnown} ready={storeKnown && whoKnown} goLabel="Tap the rice" onGo={() => { setStorePicked(true); setStartOpen(false); }}>
+      whoQuestion="Who is it for?" whoDone={whoKnown} ready={storeKnown && whoKnown} goLabel="Tap the rice" onGo={() => { setStorePicked(true); setStartOpen(false); }} foldStore={storeKnown && locations.length > 1}>
       <div className="start-choices">
         {buildCustomers.length > 0 && (
           <CustomerListPick customers={buildCustomers} area={area} onArea={setArea}>
@@ -1053,11 +1065,38 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
   );
   const whoSection = mustChoose ? chosenSection : customerSection;
 
+  // Owner's Check (2026-11-22): where the rice is set aside, with how much of this order each store has. Another store
+  // brings its own prices for the lines without a price typed in.
+  const moveOrderStore = async (id: string) => {
+    if (id === locationId || movingStore) return;
+    setMovingStore(true);
+    try {
+      const prices = await loadBuilder(id);
+      rememberStore(id);
+      if (prices) setBuildCart((c) => c.map((l) => (l.price !== undefined ? l : { ...l, product: { ...l.product, priceMinor: prices.get(l.product.id) ?? l.product.priceMinor } })));
+    } finally { setMovingStore(false); }
+  };
+  const tracked = buildCart.filter((l) => stockAll.has(l.product.id));
+  const storeSlot = mustChoose && locations.length > 1 && (
+    <div className="check-order-store">
+      <div className="check-from-title"><i className="bi bi-shop me-1" aria-hidden="true"></i>Rice set aside at:</div>
+      <FromButtons anyStore label="Store that sets the rice aside" choice={{
+        value: locationId,
+        options: locations.map((st) => {
+          const have = tracked.filter((l) => (stockAll.get(l.product.id)?.[st.id] ?? 0) >= l.quantity).length;
+          const all = have === tracked.length;
+          return { id: st.id, code: st.code ?? st.name, name: st.name, count: tracked.length === 0 ? "" : all ? "has all" : `${have} of ${tracked.length}`, enough: all };
+        }),
+        onPick: (id) => void moveOrderStore(id),
+      }} />
+      {locations.length > 1 && <div className="check-store-note">Another store uses its own prices.</div>}
+    </div>
+  );
   // Sideways: the products on the left; who it is for and the order on the right. Upright: the order under the products. A phone keeps a sticky Save bar.
   const checkCard = (
-    <OrderCheck wide={wide} money={maybePrice} storeName={(editingPre ? editingPre.locationName : storeHere ? `${storeHere.code ? `${storeHere.code} · ` : ""}${storeHere.name}` : null) || null}
+    <OrderCheck wide={wide} money={maybePrice} storeSlot={storeSlot || undefined} busy={buildBusy || movingStore} storeName={(editingPre ? editingPre.locationName : storeHere ? `${storeHere.code ? `${storeHere.code} · ` : ""}${storeHere.name}` : null) || null}
       who={editingPre ? (editingPre.customerName || "—") : whoName} totalMinor={buildSubtotal} itemsText={`${itemsInOrder} item${itemsInOrder === 1 ? "" : "s"}`}
-      goLabel={editingPre ? "Correct — Save changes" : "Correct — Save pre-order"} busy={buildBusy}
+      goLabel={editingPre ? "Correct — Save changes" : "Correct — Save pre-order"}
       onBack={() => { setCheckOpen(false); setError(null); }} onGo={() => void savePreorder()}
       note={offline && !editingPre ? "No internet: saved on this tablet and sent later." : null}
       lines={pricedCart.map((l, idx) => {

@@ -212,7 +212,9 @@ section + section > .settings-scope-head { margin-top: 22px; }
    into view (StartChoices) with room left for the green button. */
 .start-list { flex-direction: row; flex-wrap: wrap; align-items: center; }
 .start-list > .start-list-title { flex: 1 0 auto; }
-.start-list > .area-filter { flex: 1 1 17rem; }
+.start-list > .area-filter { flex: 1 1 17rem; min-width: 0; }
+/* A chosen town button (with its tick) never shrinks under its words: the buttons wrap to a new line instead of being cut. */
+.start-list .area-filter:not(.compact) .area-btn { flex: 1 0 auto; }
 .start-list > select, .start-list > :not(.start-list-title):not(.area-filter) { flex: 1 1 100%; }
 .sell-fit .start-who-q { scroll-margin-bottom: 5rem; }
 @media (max-width: 599.98px) { .sell-fit .start-who-q { scroll-margin-bottom: calc(5rem + var(--staff-bar-h, 0px)); } }
@@ -281,3 +283,46 @@ main.has-staff-bar .modal { padding-bottom: var(--staff-bar-h, 0px); }
   .order-check.wide .sale-total .amount { font-size: 1.8rem; }
 }
 .sell-fit .order-check.wide .check-right { min-height: 0; overflow-y: auto; }
+
+/* ───────── Owner's 4-step sale (2026-11-22): Customer · Items · Check · Pay. */
+/* Start card: the store from last time on one line with Change; the customer is the only question. */
+.start-store-line { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin: 0.25rem 0 1rem; padding: 0.5rem 0.75rem;
+  border-radius: 0.6rem; background: #f4efe7; }
+.start-store-at { color: var(--sam-muted); font-weight: 600; }
+.start-store-name { font-size: 1.15rem; flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.start-store-change { min-height: 44px; flex: 0 0 auto; }
+/* Check: "From S1 · 12 left" on each sack line, and the stores with their counts when tapped. */
+.order-check .check-from-btn { min-height: 44px; white-space: nowrap; font-weight: 600; }
+.order-check .check-from-btn.btn-warning { background: #FFF3D6; border-color: #8A5A00; color: #6F4800; }
+.check-from-count { margin-left: 0.35rem; font-weight: 400; font-size: 0.9em; }
+.check-from-count.short { color: #A3201B; font-weight: 600; }
+.btn-dark .check-from-count.short, .btn-dark .check-from-count { color: #fff; }
+.check-from-title { font-weight: 700; margin-bottom: 0.35rem; }
+.check-from-stores { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.check-from-store { min-height: 48px; min-width: 6.5rem; display: inline-flex; align-items: center; justify-content: center; }
+.check-from-store:disabled { background: #E6E1D9; color: #5c5148; opacity: 1; border-color: #c9c1b4; }
+.order-check .check-from { padding: 0.5rem 0 0.25rem 2.4rem; }
+.order-check .check-all-from { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; }
+.order-check .check-all-from .check-from-title { margin: 0; }
+.order-check .check-all-from .check-from-store { min-height: 44px; min-width: 5rem; }
+.order-check .check-store-slot { flex: 1 1 100% !important; }
+/* Wide Check stacks Store and Customer in a column: there the slot keeps its own height (100% would fill the column and push Customer aside). */
+.order-check.wide .check-who > .check-store-slot { flex: 0 0 auto !important; }
+@media (min-width: 600px) and (max-height: 680px) {
+  .order-check.wide .check-who:has(> .check-store-slot) { flex-direction: column; }
+}
+.order-check .check-order-store { background: #f4efe7; border-radius: 0.5rem; padding: 0.5rem 0.75rem; }
+.order-check .check-order-store .check-from-store { min-height: 44px; min-width: 5.5rem; }
+.order-check .check-store-note { color: var(--sam-muted); font-size: max(16px, 0.9rem); margin-top: 0.35rem; }
+/* Short screen (bigger Display size, Extra large text): Pre-order's "Rice set aside at" stays one row of store buttons
+   and the price note hides, so "Correct — Save pre-order" stays on screen. If the right column still has to scroll,
+   the two buttons stay stuck at its bottom. */
+@media (min-width: 600px) and (max-height: 680px) {
+  .order-check .check-order-store { padding: 0.35rem 0.5rem; }
+  .order-check .check-order-store .check-from-title { margin-bottom: 0.25rem; }
+  .order-check .check-order-store .check-from-stores { flex-wrap: nowrap; gap: 0.35rem; }
+  .order-check .check-order-store .check-from-store { flex: 1 1 0; min-width: 0; padding-inline: 0.35rem; white-space: nowrap; }
+  .order-check .check-order-store .check-store-note { display: none; }
+  html[data-text-size="xl"] .order-check .check-order-store .check-from-count { margin-left: 0.2rem; font-size: 0.8em; }
+  .sell-fit .order-check.wide .check-right .check-actions { position: sticky; bottom: 0; background: #fff; padding-top: 0.25rem; }
+}

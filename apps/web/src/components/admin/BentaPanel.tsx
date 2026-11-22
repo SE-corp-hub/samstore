@@ -42,20 +42,21 @@ import { getPrinterSettings } from "../../lib/printer-settings";
 import { creditStatusWords } from "../../lib/credit-status";
 import { peso, kg } from "../../lib/number-format";
 import { FIT, SELL_WIDE, useMediaQuery } from "../../lib/use-media-query";
+import { rememberedStore, rememberStore } from "../../lib/owner-store";
 import { useLinesCap } from "../../lib/use-lines-cap";
 import { useFitHeight } from "../../lib/use-fit-height";
 import { quickCash } from "../../lib/quick-cash";
 import Steps from "./Steps";
 import DayBar, { type DayState } from "./DayBar";
 import DrawerMoney, { DrawerMoneyButtons, type DrawerKind } from "./DrawerMoney";
-import OrderCheck, { type CheckLine } from "./OrderCheck";
+import OrderCheck, { type CheckLine, type FromChoice } from "./OrderCheck";
 import ProductFinder from "./ProductFinder";
 import PickTile from "./PickTile";
 import { noteUse } from "../../lib/product-find";
 import { usePosKeys } from "../../lib/pos-keys";
 import { KeyHint, PosKeysContext, PosKeysHelp, usePosKeyboard } from "./PosKeys";
 
-interface Loc { id: string; name: string; code: string | null; type: string }
+interface Loc { id: string; name: string; code: string | null; type: string; isMain?: boolean; consignment?: boolean }
 interface Item {
   id: string; name: string; photoKey?: string | null; loose: boolean; gramsPerUnit: number | null; /** A kilo item: its sack rice. */ kiloOfId?: string | null; /** A kilo item (display rack): every sack that can fill it. */ sackIds?: string[]; priceMinor: number; forReview: boolean;
   /** Products → group; the quota promo is for some groups only. */
@@ -76,6 +77,8 @@ interface Held { id: string; label: string; at: number; locationId: string; cart
 type Pay = "cash" | "gcash" | "maya" | "bank" | "split" | "utang";
 const PAY_LABEL: Record<Pay, string> = { cash: "Cash", gcash: "GCash", maya: "Maya", bank: "Bank transfer", split: "Split", utang: "Credit" };
 const STEPS = ["Pick items", "Check", "Pay", "Done"];
+/** The owner's sale (2026-11-22): the customer is its own first step. */
+const OWNER_STEPS = ["Customer", "Items", "Check", "Pay", "Done"];
 /** The keys for the ways to pay (Settings → Keyboard shortcuts); the others are under "Other ways". */
 const PAY_KEY: Partial<Record<Pay, "cash" | "gcash" | "credit">> = { cash: "cash", gcash: "gcash", utang: "credit" };
 const PAY_ICON: Record<Pay, string> = { cash: "bi-cash", gcash: "bi-phone", maya: "bi-phone", bank: "bi-bank", split: "bi-pie-chart", utang: "bi-journal-text" };
@@ -258,6 +261,7 @@ export default function BentaPanel() {
   // "Start a sale": both answers given, the price list shows by itself (no extra tap).
   const startStore = async (id: string) => {
     setStorePicked(true);
+    rememberStore(id);
     if (walkIn || priceCustomer) setStartOpen(false);
     if (id === locationId) return;
     await loadCatalog(id);
@@ -308,7 +312,10 @@ export default function BentaPanel() {
       const where = (home: string | null | undefined) => home ?? (kept?.cart.length ? kept.locationId : undefined);
       // Ask for the price list right away, for the home location this tablet saved last time,
       // instead of waiting for "who am I" first (one server answer less before prices show).
-      const guess = where(savedCopy<{ homeLocationId?: string | null }>("/admin/me/rice")?.homeLocationId);
+      const savedMe = savedCopy<{ homeLocationId?: string | null; role?: string }>("/admin/me/rice");
+      // The owner (no home store): the store they last sold at on this tablet.
+      const ownerStore = !savedMe?.homeLocationId && choosesEachSale(savedMe?.role) ? rememberedStore() ?? undefined : undefined;
+      const guess = where(savedMe?.homeLocationId) ?? ownerStore;
       const catalog = loadCatalog(guess);
       const firstAsk = catalogAsk.current;
       void savedThenFresh<{ name?: string }>("/admin/settings", (d) => setStoreName(d?.name ?? ""));
@@ -316,12 +323,16 @@ export default function BentaPanel() {
       const me = await cachedGet<{ homeLocationId?: string | null; role?: string }>("/admin/me/rice");
       setHomeLocationId(me?.homeLocationId ?? null);
       if (me) { setMustChoose(choosesEachSale(me.role) && !me.homeLocationId); setOwnerLogin(me.role === "OWNER"); }
-      const want = where(me?.homeLocationId);
+      const ownerWant = me && !me.homeLocationId && choosesEachSale(me.role) ? rememberedStore() ?? undefined : undefined;
+      const want = where(me?.homeLocationId) ?? ownerWant;
       const shown = await catalog;
       // A sale kept on this tablet for a customer: their special prices back on the buttons.
       const keptWho = kept?.cart.length && kept.who && kept.who !== WALK_IN ? kept.who : "";
       // The saved guess was wrong (home location changed): show the right one, unless staff already picked a location.
-      if (catalogAsk.current === firstAsk && want !== guess && want !== shown) await loadCatalog(want);
+      let showing = shown;
+      if (catalogAsk.current === firstAsk && want !== guess && want !== shown) showing = await loadCatalog(want);
+      // The owner's store from last time is on screen: it counts as chosen (Change is on the start card).
+      if (ownerWant && showing === ownerWant) setStorePicked(true);
       if (keptWho) await putSpecialPrices(keptWho);
     })().catch(() => setError("Could not load"));
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once, when the screen opens
@@ -411,8 +422,8 @@ export default function BentaPanel() {
     setPriceCustomer(""); setSpecialCount(0);
     setCart([]); setStep("pick"); setPay(null); setCashTo(""); setTendered(""); setReference(""); setParts([{ method: "cash", amount: "", reference: "" }, { method: "gcash", amount: "", reference: "" }]); setCustomerId(""); setCustomerSig(null);
     setPaper(false); setMorePay(false); setSlipNo(""); setSlipTime(""); setSlipPhoto(null); setStaffSig(null); setError(null);
-    // The next sale starts with nothing chosen again: the owner answers "which store" and "who" each time.
-    setStorePicked(false); setWalkIn(false); setStartOpen(true);
+    // The next sale starts at the customer again; the store stays (shown with Change on the start card, 2026-11-22).
+    setStorePicked(!!locationId && rememberedStore() === locationId); setWalkIn(false); setStartOpen(true);
   };
 
   const allPay = morePay || pay === "maya" || pay === "bank" || pay === "split";
@@ -524,7 +535,7 @@ export default function BentaPanel() {
       <div ref={keysRoot} className={`sell-screen tone-sell sell-done${keysCfg.on ? " pos-keys-on" : ""}`}>
         {keysHelpModal}
         {/* Left, like the steps on Pick items / Check / Pay, so the row does not jump to the middle at the end. */}
-        <Steps className="mb-3 steps-start" items={STEPS} current={3} />
+        <Steps className="mb-3 steps-start" items={mustChoose ? OWNER_STEPS : STEPS} current={mustChoose ? 4 : 3} />
         {/* Sideways and on a PC: what was sold on the left, what to do next on the right, so "New sale" is on
             screen without scrolling. Upright and on a phone: one column, same order. */}
         <div className="done-grid"><div className="done-left">
@@ -1054,7 +1065,7 @@ export default function BentaPanel() {
   const whoName = priceCustomer ? (customers.find((c) => c.id === priceCustomer)?.name ?? customers.find((c) => c.id === priceCustomer)?.phone ?? (isNewId(priceCustomer) ? priceCustomer.slice(NEW_ID.length) : "Customer")) : "Walk-in";
   const startCard = asking && (
     <StartChoices title="Start a sale" storeQuestion="Selling at which store?" locations={locations} storeId={storeKnown ? locationId : ""} onStore={(id) => void startStore(id)}
-      whoQuestion="Who is buying?" whoDone={whoKnown} ready={storeKnown && whoKnown} goLabel="Tap the rice" onGo={() => { setStorePicked(true); setStartOpen(false); }}>
+      whoQuestion="Who is buying?" whoDone={whoKnown} ready={storeKnown && whoKnown} goLabel="Tap the rice" onGo={() => { setStorePicked(true); setStartOpen(false); }} foldStore={storeKnown && locations.length > 1}>
       <div className="start-choices">
         <button type="button" className={`btn btn-lg start-choice walkin ${walkIn ? "btn-dark" : "btn-outline-dark"}`} aria-pressed={walkIn} onClick={() => startWho(WALK_IN)}>
           {walkIn && <i className="bi bi-check-circle-fill me-2" aria-hidden="true"></i>}
@@ -1102,8 +1113,39 @@ export default function BentaPanel() {
     </div></div>
   );
   // "Check the order": every line, the store and who is buying, before the pay step.
+  // Owner (2026-11-22): on Check each sack line says where its stock comes from, with the stores' counts.
+  const fromStores = (() => {
+    const sell = locations.find((l) => l.id === locationId);
+    const rest = fromChoices.filter((l) => l.id !== locationId);
+    return sell ? [sell, ...rest] : rest;
+  })();
+  const movable = (i: number) => { const it = byId.get(cart[i]?.productId ?? ""); return !!it && it.tracked && !it.loose && cart[i]!.mode !== "PESO"; };
+  const showFrom = mustChoose && fromStores.length > 1;
+  const fromFor = (idx: number): FromChoice | undefined => {
+    if (!showFrom || !movable(idx)) return undefined;
+    const it = byId.get(cart[idx]!.productId)!;
+    const need = computed[idx]!.units;
+    return {
+      value: cart[idx]!.sourceLocationId ?? locationId,
+      options: fromStores.map((l) => { const n = it.stock[l.id] ?? 0; return { id: l.id, code: l.code ?? l.name, name: l.name, count: `${n} left`, enough: n >= need }; }),
+      onPick: (id) => setCart(cart.map((x, j) => (j === idx ? { ...x, sourceLocationId: id === locationId ? null : id } : x))),
+    };
+  };
+  const allFrom: FromChoice | null = (() => {
+    const idxs = cart.map((_, i) => i).filter(movable);
+    if (!showFrom || idxs.length < 2) return null;
+    const vals = new Set(idxs.map((i) => cart[i]!.sourceLocationId ?? locationId));
+    return {
+      value: vals.size === 1 ? [...vals][0]! : "",
+      options: fromStores.map((l) => {
+        const ok = idxs.every((i) => (byId.get(cart[i]!.productId)?.stock[l.id] ?? 0) >= computed[i]!.units);
+        return { id: l.id, code: l.code ?? l.name, name: l.name, count: ok ? "has all" : "short", enough: ok };
+      }),
+      onPick: (id) => setCart(cart.map((x, i) => (idxs.includes(i) ? { ...x, sourceLocationId: id === locationId ? null : id } : x))),
+    };
+  })();
   const checkCard = step === "check" && (
-    <OrderCheck wide={wide} storeName={saleStore ? `${saleStore.code ? `${saleStore.code} · ` : ""}${saleStore.name}` : null} who={whoName}
+    <OrderCheck wide={wide} allFrom={allFrom} sellingId={locationId} storeName={saleStore ? `${saleStore.code ? `${saleStore.code} · ` : ""}${saleStore.name}` : null} who={whoName}
       totalMinor={total} itemsText={`${cartCount} ${cartCount === 1 ? "item" : "items"}`} goLabel={`Correct — Pay ${peso(total)}`}
       onBack={() => setStep("pick")} onGo={() => { if (!pay) setPay("cash"); setStep("pay"); }}
       note={offline ? "No internet: the sale is saved on this tablet and sent later." : null}
@@ -1117,11 +1159,14 @@ export default function BentaPanel() {
         if (promoAt[idx] != null) notes.push({ text: "Promo price", tone: "success" });
         else if (l.price !== undefined && it && l.price !== it.priceMinor) notes.push({ text: `New price · usual ${peso(it.priceMinor)}`, tone: "warning" });
         if (it && isBelowCost(unit, it.floorMinor)) notes.push({ text: "Below cost", tone: "danger" });
-        if (l.sourceLocationId) notes.push({ text: `From ${code(l.sourceLocationId)}`, tone: "info" });
+        if (l.sourceLocationId && !fromFor(idx)) notes.push({ text: `From ${code(l.sourceLocationId)}`, tone: "info" });
+        // Main store selling a consignment store's rice: that store's profit comes off what it owes (booked when the sale is saved).
+        const src = l.sourceLocationId ? locations.find((x) => x.id === l.sourceLocationId) : undefined;
+        if (src?.consignment && saleStore?.isMain) notes.push({ text: `${src.name}'s profit comes off what it owes`, tone: "info" });
         const orig = cart[idx]!;
         const edit = orig.mode !== "PESO";
         return {
-          key: `${idx}-${l.productId}`, name: it?.name ?? "Item", totalMinor: c.totalMinor, notes,
+          key: `${idx}-${l.productId}`, name: it?.name ?? "Item", totalMinor: c.totalMinor, notes, from: fromFor(idx),
           // Change it right here: − / + (one sack or one kilo), the trash can, and Price (the same price card as while picking).
           qty: l.mode === "PIECE" ? l.value : kg(c.grams ?? 0), unitWord: l.mode === "KILO" ? "half kilo" : sackish ? "sack" : "piece",
           canMinus: edit && (l.mode === "PIECE" ? n > 1 : (c.grams ?? 0) > 500),
@@ -1156,7 +1201,7 @@ export default function BentaPanel() {
   // Sideways, the steps sit above the sale; they step aside while the number pad needs the whole column.
   const stepsRow = !(sideBySide && (editing || checking || opening)) && (
     <div className="d-flex flex-wrap align-items-center gap-2 mb-2">
-      <Steps className="mb-0 me-auto" items={STEPS} current={step === "pay" ? 2 : step === "check" ? 1 : 0} />
+      <Steps className="mb-0 me-auto" items={mustChoose ? OWNER_STEPS : STEPS} current={(step === "pay" ? 2 : step === "check" ? 1 : 0) + (mustChoose ? (asking ? 0 : 1) : 0)} />
       {heldBtn}
       {!sideBySide && keysBtn}
       {step === "pick" && !newItem && !editing && !checking && !opening && kiloItems.length > 0 && (
