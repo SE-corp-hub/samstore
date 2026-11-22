@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { alphabetical, areaCounts, byArea, customerArea, nameWithTown } from "./customer-area";
+import { alphabetical, areaCounts, byArea, customerArea, nameWithTown, storeArea } from "./customer-area";
 
 test("the area comes from the name, then the address, then the store", () => {
   assert.equal(customerArea({ name: "Acel-bauan" }), "bauan");
@@ -10,7 +10,8 @@ test("the area comes from the name, then the address, then the store", () => {
   assert.equal(customerArea({ name: "Rosa", address: "Brgy. 4, Lipa City" }), "lipa");
   assert.equal(customerArea({ name: "Rosa", address: null, addedAt: { name: "Lipa" } }), "lipa");
   assert.equal(customerArea({ name: "Rosa-bauan", addedAt: { name: "Lipa" } }), "bauan"); // name beats store
-  assert.equal(customerArea({ name: "Sample", addedAt: { name: "Bogs and Lucy" } }), null);
+  assert.equal(customerArea({ name: "Sample", addedAt: { name: "Bogs and Lucy" } }), "bauan"); // 2026-11-22: not Lipa = Bauan
+  assert.equal(customerArea({ name: "Sample" }), null);
   assert.equal(customerArea({ name: null }), null);
 });
 
@@ -32,4 +33,14 @@ test("A to Z, and the town after the name when the name does not say it", () => 
   assert.equal(nameWithTown({ name: "Ben", addedAt: { name: "Lipa" } }), "Ben · Lipa");
   assert.equal(nameWithTown({ name: "Sample" }), "Sample");
   assert.equal(nameWithTown({ name: null }), "—");
+});
+
+test("each store's town: Lipa store = Lipa, every other place = Bauan (2026-11-22)", () => {
+  assert.equal(storeArea("Lipa"), "lipa");
+  assert.equal(storeArea("Samrice Lipa"), "lipa");
+  assert.equal(storeArea("Bogs and Lucy"), "bauan");
+  assert.equal(storeArea("Bahay Tindahan"), "bauan");
+  assert.equal(storeArea("Bodega"), "bauan");
+  assert.equal(storeArea(""), null);
+  assert.equal(storeArea(undefined), null);
 });

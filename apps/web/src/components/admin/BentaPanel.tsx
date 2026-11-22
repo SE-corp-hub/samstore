@@ -29,7 +29,7 @@ import SignaturePad from "./SignaturePad";
 import QuickCount from "./QuickCount";
 import StoreBar from "./StoreBar";
 import StartChoices, { ChosenRow, CustomerAreaFilter, CustomerListPick, NewCustomerChoice, sameName, useCustomerArea } from "./StartChoices";
-import { alphabetical, byArea, nameWithTown } from "../../lib/customer-area";
+import { alphabetical, byArea, nameWithTown, storeArea } from "../../lib/customer-area";
 import { lastReason, reasonOk, ReasonButtons } from "./PriceReason";
 import { askBelowCost, saveUnitCost } from "./BelowCostDialog";
 import { isBelowCost, okKey, OWNER_COST_NOTE } from "../../lib/below-cost";
@@ -139,8 +139,6 @@ export default function BentaPanel() {
   const [homeLocationId, setHomeLocationId] = useState<string | null>(null);
   const [items, setItems] = useState<Item[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
-  // "All · Lipa · Bauan" above the customer list (remembered on this tablet).
-  const [area, setArea] = useCustomerArea();
   const [cleared, setCleared] = useState(0); // bumps to empty the search after an item goes in
   const [cart, setCart] = useState<CartLine[]>(() => savedCart()?.cart ?? []);
   const [editing, setEditing] = useState<CartLine | null>(null);
@@ -203,6 +201,10 @@ export default function BentaPanel() {
   const [storePicked, setStorePicked] = useState(() => !!savedCart()?.cart.length);
   const [walkIn, setWalkIn] = useState(() => (savedCart()?.cart.length ? (savedCart()?.who ?? WALK_IN) === WALK_IN : false));
   const [startOpen, setStartOpen] = useState(() => !savedCart()?.cart.length);
+  // "All · Lipa · Bauan" above the customer list: starts on the town of the store this sale is at (2026-11-22), for
+  // every new sale; the owner's own choice of store first ("Selling at which store?").
+  const sellTown = mustChoose && !storePicked && locations.length > 1 ? null : storeArea(locations.find((l) => l.id === locationId)?.name);
+  const [area, setArea] = useCustomerArea(sellTown, cart.length === 0 && !priceCustomer);
   // Open day + Close day (Z-read): while the store's day is not open, the price list steps aside.
   const [dayState, setDayState] = useState<DayState>("off");
   // "Cash in" / "Expense": drawer money that is not a sale (on the Z-read).
