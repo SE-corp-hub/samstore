@@ -208,6 +208,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { id: "moves", label: "Move stock", icon: "bi-arrow-left-right", hint: "Send rice from one store to another" },
       { id: "returns", label: "Customer returns", icon: "bi-arrow-return-left", hint: "Rice a customer brought back" },
       { id: "pasok", label: "Stock in", icon: "bi-box-arrow-in-down", hint: "Rice that arrived: check and stock it" },
+      { id: "truck", label: "Truck arrived", icon: "bi-truck", hint: "A truck came: give pre-orders from it, put the rest on shelves" },
       { id: "bilangin", label: "Count", icon: "bi-clipboard-check", hint: "Count the shelf and fix the numbers" },
       { id: "inventory", label: "Inventory", icon: "bi-boxes", hint: "How much rice is in each store" },
       { id: "products", label: "Products", icon: "bi-box-seam", hint: "Kinds of rice, prices and costs" },
@@ -307,7 +308,7 @@ export function toneFor(id: string): NavTone {
 
 // 2026-11-12 (one screen per job): Agent orders opens from Orders (a switch at the top), and Analytics
 // (platform-wide trends) is for the platform admin only; Purchases and Store Link are hidden (see NAV_GROUPS).
-const OWNER_TABS = ["overview", "pos", "preorders", "orders", "utang", "products", "inventory", "cash", "expenses", "team", "customers", "reports", "settings", "warehouses", "approvals", "moves", "returns", "resack", "drafts", "kargadors", "pasok", "purchaseorders", "utangrice", "bilangin", "storereport", "profit", "payable", "ulat", "export", "storeprices", "zreads", "whatican"];
+const OWNER_TABS = ["overview", "pos", "preorders", "orders", "utang", "products", "inventory", "cash", "expenses", "team", "customers", "reports", "settings", "warehouses", "approvals", "moves", "returns", "resack", "drafts", "kargadors", "pasok", "truck", "purchaseorders", "utangrice", "bilangin", "storereport", "profit", "payable", "ulat", "export", "storeprices", "zreads", "whatican"];
 
 /** Tab visibility per staff role (GET-level permissions from live API probes). */
 export const TABS_BY_ROLE: Record<string, string[]> = {

@@ -148,11 +148,11 @@ async function soldLast30Days(storeId: string): Promise<Record<string, number>> 
   return counts;
 }
 
-const productSelect = {
+export const productSelect = {
   id: true, name: true, sku: true, priceMinor: true, costMinor: true, floorPriceMinor: true, isActive: true, reviewStatus: true,
   stockBaseUnit: true, stockBaseQuantity: true, stockConversionFamily: true, soldByWeight: true, trackStock: true, photoKey: true, categoryId: true, kiloOfId: true,
 } as const;
-type P = Prisma.ProductGetPayload<{ select: typeof productSelect }>;
+export type P = Prisma.ProductGetPayload<{ select: typeof productSelect }>;
 
 // Owner/manager confirms a Bagong item from Para sa iyo: it becomes a normal product.
 registerApprovalHandler("MANUAL_ITEM", async (tx, a) => {
@@ -657,14 +657,14 @@ export class BentaService {
 
   // ─────────────────────────── Manual na pasok ───────────────────────────
 
-  /** Inside a transaction: an IN- document with its lines, signed by the receiver, stock added. */
-  private async writeStockIn(
+  /** Inside a transaction: an IN- document with its lines, signed by the receiver, stock added. (Also used by a truck delivery.) */
+  async writeStockIn(
     tx: Tx, storeId: string, actor: Actor, locationId: string,
-    data: { supplierName: string | null; note: string | null; purchaseOrderId?: string | null; lines: { product: P; quantity: number; unitCostMinor: number | null; poLineId?: string | null }[] },
+    data: { supplierName: string | null; note: string | null; purchaseOrderId?: string | null; truckId?: string | null; lines: { product: P; quantity: number; unitCostMinor: number | null; poLineId?: string | null }[] },
     signatures: SignatureInput[] | undefined,
   ) {
     const docNumber = await nextDocNumber(tx, storeId, "IN");
-    const doc = await tx.stockIn.create({ data: { storeId, docNumber, locationId, supplierName: data.supplierName, note: data.note, purchaseOrderId: data.purchaseOrderId ?? null, createdById: actor.userId }, select: { id: true, docNumber: true } });
+    const doc = await tx.stockIn.create({ data: { storeId, docNumber, locationId, supplierName: data.supplierName, note: data.note, purchaseOrderId: data.purchaseOrderId ?? null, truckId: data.truckId ?? null, createdById: actor.userId }, select: { id: true, docNumber: true } });
     await captureSignatures(tx, storeId, actor, { documentType: "STOCK_IN", documentId: doc.id, step: "RECEIVE", locationId }, signatures);
     await requireSignatures(tx, storeId, { documentType: "STOCK_IN", documentId: doc.id, step: "RECEIVE" });
     const costMode = await costModeOf(tx, storeId);

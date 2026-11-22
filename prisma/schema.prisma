@@ -2161,12 +2161,31 @@ model StockIn {
   supplierName String?
   note         String?
   purchaseOrderId String? // the purchase order this delivery was received against
+  truckId      String? // the truck delivery it was part of (TruckDelivery.id)
   createdById  String
   createdAt    DateTime      @default(now())
   lines        StockInLine[]
 
   @@unique([storeId, docNumber])
   @@index([storeId, locationId, createdAt])
+}
+
+/// One truck that arrived (2026-11-22): what came, the pre-orders handed out straight from the truck and
+/// what went to each shelf. Its Stock ins carry truckId. `summary` is the truck sheet as saved.
+model TruckDelivery {
+  id              String   @id @default(cuid())
+  storeId         String
+  docNumber       String // TRK-000001
+  locationId      String // the store doing the truck: hand-outs are its sales
+  purchaseOrderId String?
+  supplierName    String?
+  note            String?
+  summary         Json
+  createdById     String
+  createdAt       DateTime @default(now())
+
+  @@unique([storeId, docNumber])
+  @@index([storeId, createdAt])
 }
 
 model StockInLine {

@@ -18,7 +18,7 @@ export const CLEAR_TABLES = [
   "PurchaseOrder", "PurchaseOrderLine", "RegisterSession", "ResackJob", "ResackOutput", "Signature",
   "StockConversion", "StockCount", "StockCountLine", "StockIn", "StockInLine", "StockLevel",
   "StockMovement", "StockReturn", "StockTransfer", "StockWriteOff", "StorePayableEntry",
-  "StoreSalesReport", "SupplierPayment", "VoucherRedemption",
+  "StoreSalesReport", "SupplierPayment", "TruckDelivery", "VoucherRedemption",
 ] as const;
 
 /**
