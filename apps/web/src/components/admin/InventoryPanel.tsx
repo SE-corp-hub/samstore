@@ -7,6 +7,7 @@ import { adminHeaders, isStoreLogin, roleCan } from "../../lib/admin";
 import { cachedGet } from "../../lib/offlineCache";
 import { kg, peso } from "../../lib/number-format";
 import { adjustUnits, isLooseItem, unitsText } from "../../lib/stock-units";
+import { sizeButtons, sizeOf, sortGroups } from "../../lib/product-find";
 
 interface InvItem {
   photoKey?: string | null;
@@ -22,7 +23,6 @@ interface InvItem {
   variants: { id: string; name: string; sku: string; costMinor: number; stockBaseQuantity: number | null; quantityOnHand: number; quantityReserved: number; availableQuantity: number; isActive: boolean }[];
 }
 interface Warehouse { id: string; name: string; isDefault: boolean; code?: string | null; type?: string; isActive?: boolean }
-interface Category { id: string; name: string }
 interface ConversionOption {
   key: string;
   productId: string;
@@ -40,13 +40,23 @@ const formatBaseQty = (qty: number, unit: string) => {
   if ((unit === "g" || unit === "ml") && qty % 1000 === 0) return `${qty / 1000} ${unit === "g" ? "kg" : "L"}`;
   return `${qty} ${unit}`;
 };
-const STATUS_BADGE: Record<string, string> = { in: "text-bg-success", low: "text-bg-warning", out: "text-bg-danger" };
 
 const SHOW_CONVERT = false;
 /** Plain words for the stock badge. */
 const STATUS_WORD: Record<InvItem["status"], string> = { in: "In stock", low: "Low", out: "Sold out" };
 /** Loose rice is kept in grams (1 g per unit): show it in kilos, like everywhere else in the app. */
 const qtyText = (r: Pick<InvItem, "stockBaseUnit" | "stockBaseQuantity">, q: number) => (isLooseItem(r) ? kg(q) : String(q));
+/** The number alone, for the big digits on the stock board (kilos for loose rice, the word sits in the row). */
+const bigNum = (r: Pick<InvItem, "stockBaseUnit" | "stockBaseQuantity">, q: number) => (isLooseItem(r) ? kg(q).replace(/ kg$/, "") : String(q));
+/** What the numbers count: kilos for loose rice, sacks for 10 kg and up, packs for smaller bags. */
+const unitWord = (r: Pick<InvItem, "name" | "stockBaseUnit" | "stockBaseQuantity">) => {
+  if (isLooseItem(r)) return "kilos";
+  const s = sizeOf(r.name);
+  if (!s) return "";
+  return parseFloat(s) >= 10 ? "sacks" : "packs";
+};
+/** The same store colours as Orders (easy-read.css §21), so a store looks the same everywhere. */
+const STORE_TONES = ["store-tone-1", "store-tone-2", "store-tone-3", "store-tone-4", "store-tone-5"];
 
 export default function InventoryPanel({ role = "" }: { role?: string }) {
   const walled = isStoreLogin(role);
@@ -54,13 +64,11 @@ export default function InventoryPanel({ role = "" }: { role?: string }) {
   const canChange = roleCan(role, "profit");
   const [items, setItems] = useState<InvItem[]>([]);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
-  const [categories, setCategories] = useState<Category[]>([]);
   const [totalValue, setTotalValue] = useState(0);
   const hasCost = items.length === 0 || typeof items[0]!.costMinor === "number";
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
-  const [categoryId, setCategoryId] = useState("");
   const [warehouseId, setWarehouseId] = useState("");
   // A login tied to one store opens on its own store (it can still look at the others' sack counts).
   const [homeId, setHomeId] = useState<string | null>(null);
@@ -70,34 +78,30 @@ export default function InventoryPanel({ role = "" }: { role?: string }) {
       if (me?.homeLocationId) { setHomeId(me.homeLocationId); setWarehouseId(me.homeLocationId); }
     }).finally(() => setReady(true));
   }, []);
-  const [status, setStatus] = useState("");
-  const [sort, setSort] = useState<"name" | "qty" | "value">("name");
+  // Filters on the board are done here (counts for every tile come from one list).
+  const [statusPick, setStatusPick] = useState<"" | "out" | "low" | "in">("");
+  const [sizePick, setSizePick] = useState("");
+  const [sort, setSort] = useState<"group" | "name" | "fewest">("group");
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const q = new URLSearchParams();
       if (search) q.set("search", search);
-      if (categoryId) q.set("categoryId", categoryId);
       if (warehouseId) q.set("warehouseId", warehouseId);
-      if (status) q.set("status", status);
       const res = await fetch(`${API_URL}/admin/inventory?${q.toString()}`, { headers: adminHeaders() });
       if (!res.ok) throw new Error("Failed to load inventory");
       const data = await res.json();
-      let rows: InvItem[] = data.items ?? [];
-      if (sort === "qty") rows = [...rows].sort((a, b) => a.quantityOnHand - b.quantityOnHand);
-      else if (sort === "value") rows = [...rows].sort((a, b) => b.valueMinor - a.valueMinor);
-      else rows = [...rows].sort((a, b) => a.name.localeCompare(b.name));
-      setItems(rows);
+      setItems(data.items ?? []);
+      setError(null);
       setWarehouses(data.warehouses ?? []);
-      setCategories(data.categories ?? []);
       setTotalValue(data.totalValueMinor ?? 0);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Load failed");
     } finally {
       setLoading(false);
     }
-  }, [search, categoryId, warehouseId, status, sort]);
+  }, [search, warehouseId]);
 
   useEffect(() => { if (!ready) return; const t = setTimeout(load, 250); return () => clearTimeout(t); }, [load, ready]);
 
@@ -343,88 +347,87 @@ export default function InventoryPanel({ role = "" }: { role?: string }) {
     }
   };
 
+  // ── The stock board (2026-11-22): see every rice's stock at a glance ──
+  const shown = places.filter((w) => !walled || w.id === homeId);
+  const allStores = !warehouseId && shown.length > 1;
+  const sizes = sizeButtons(items.map((r) => (isLooseItem(r) ? null : sizeOf(r.name))));
+  const hasLoose = items.some(isLooseItem);
+  const sized = items.filter((r) => !sizePick || (sizePick === "loose" ? isLooseItem(r) : !isLooseItem(r) && sizeOf(r.name) === sizePick));
+  const counts = { all: sized.length, out: 0, low: 0, in: 0 };
+  for (const r of sized) if (r.status === "out" || r.status === "low" || r.status === "in") counts[r.status] += 1;
+  const picked = sized.filter((r) => !statusPick || r.status === statusPick);
+  const fewest = (a: InvItem, b: InvItem) => a.availableQuantity - b.availableQuantity || a.name.localeCompare(b.name);
+  const rows = [...picked].sort(sort === "fewest" ? fewest : (a, b) => a.name.localeCompare(b.name));
+  const groups = sort === "group" ? sortGroups(rows.map((r) => r.category || "Other")) : [""];
+  const colCount = 1 + (allStores ? shown.length + 1 : 1 + (hasCost ? 1 : 0)) + (canChange ? 1 : 0);
+  const openAdjust = (r: InvItem) => {
+    const wh = warehouseId || places.find((w) => w.isDefault)?.id || places[0]?.id || "";
+    setAdjust(r); setAdjustWh(wh); setReorderAt(unitsText(r, shelfOf(r, wh).reorderThreshold ?? 0)); setReorderMsg(null);
+    setAdjustMode("delta"); setAdjustQty(""); setAdjustReason(""); setAdjustAllowNegative(false); setAdjustError(null);
+  };
+  /** One number on the board: big digits, and the word "None" / "Low" beside it, so colour is never the only cue. */
+  const numCell = (r: InvItem, free: number, low: boolean, label: string, key?: string, extra = "") => {
+    if (r.trackStock === false) return <td key={key} className={`inv-num ${extra}`} data-label={label}><span className="inv-big">—</span></td>;
+    const state = free <= 0 ? "is-none" : low ? "is-low" : "";
+    return (
+      <td key={key} className={`inv-num ${extra} ${state}`} data-label={label}>
+        <span className="inv-big">{bigNum(r, free)}</span>
+        {free <= 0 ? <span className="inv-flag">None</span> : low ? <span className="inv-flag">Low</span> : null}
+      </td>
+    );
+  };
+  const STATUS_TILES: { id: "" | "out" | "low" | "in"; word: string; icon: string; tone: string }[] = [
+    { id: "", word: "All rice", icon: "bi-boxes", tone: "inv-tile-all" },
+    { id: "out", word: "Sold out", icon: "bi-x-octagon", tone: "inv-tile-out" },
+    { id: "low", word: "Low", icon: "bi-exclamation-triangle", tone: "inv-tile-low" },
+    { id: "in", word: "Enough", icon: "bi-check-circle", tone: "inv-tile-in" },
+  ];
+
   return (
-    <div>
-      <h1 className="h4 mb-3"><i className="bi bi-boxes me-2"></i>Inventory</h1>
-      {error && <div className="alert alert-danger py-2 small">{error}</div>}
-
-      {/* Which store's stock is on screen: one store, or every store side by side. */}
-      <div className="d-flex flex-wrap align-items-center gap-2 mb-2">
-        <span className="fw-semibold me-1" id="invStoreLabel">Showing</span>
-        <span className="d-flex flex-wrap gap-2" role="group" aria-labelledby="invStoreLabel">
-          {!walled && <button type="button" aria-pressed={warehouseId === ""} className={`btn ${warehouseId === "" ? "btn-dark" : "btn-outline-dark"}`} style={{ minHeight: 44 }} onClick={() => setWarehouseId("")}>All stores</button>}
-          {/* 2026-11-22: a store login sees its own store only (the server sends nothing else). */}
-          {places.filter((w) => !walled || w.id === homeId).map((w) => (
-            <button key={w.id} type="button" aria-pressed={warehouseId === w.id} className={`btn ${warehouseId === w.id ? "btn-dark" : "btn-outline-dark"}`} style={{ minHeight: 44 }} onClick={() => setWarehouseId(w.id)}>
-              {w.code ? `${w.code} · ` : ""}{w.name}{w.id === homeId ? " (yours)" : ""}
-            </button>
-          ))}
-        </span>
-      </div>
-
-      <div className="row g-2 mb-2">
-        <div className="col-12 col-lg-3">
-          <input className="form-control form-control-sm" aria-label="Search products" placeholder="Search rice name or code…" value={search} onChange={(e) => setSearch(e.target.value)} />
-        </div>
-        <div className="col-6 col-lg-2">
-          <select className="form-select form-select-sm" aria-label="Category" value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
-            <option value="">All categories</option>
-            {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
-        </div>
-        <div className="col-6 col-lg-2">
-          <select className="form-select form-select-sm" aria-label="Stock level" value={status} onChange={(e) => setStatus(e.target.value)}>
-            <option value="">All stock</option>
-            <option value="in">In stock</option>
-            <option value="low">Low</option>
-            <option value="out">Out</option>
-          </select>
-        </div>
-        <div className="col-6 col-lg-2">
-          <select className="form-select form-select-sm" aria-label="Sort" value={sort} onChange={(e) => setSort(e.target.value as "name" | "qty" | "value")}>
-            <option value="name">Sort: name</option>
-            <option value="qty">Sort: quantity</option>
-            <option value="value">Sort: value</option>
-          </select>
-        </div>
-      </div>
-
-      {/* Staff get no cost from the server; the cost columns are hidden for them. */}
-      <div className="alert alert-primary py-2 small d-flex justify-content-between align-items-center flex-wrap gap-2">
-        <span><strong>{items.length}</strong> products</span>
-        {hasCost && <span>Inventory value (cost): <strong>{toPesos(totalValue)}</strong></span>}
-        <div className="d-flex gap-2">
-          {/* Opening a sack into packs is done on Resack (2026-11-12, one screen per job); Convert stock stays for a
-              non-rice item only if SHOW_CONVERT is turned on again. */}
-          {canChange && SHOW_CONVERT && (
-            <button type="button" className="btn btn-sm btn-outline-success" onClick={() => void openConversion()}>
-              <i className="bi bi-arrow-left-right me-1"></i>Convert stock
+    <div className="inv-board">
+      {/* The top bar already says "Inventory": the heading stays for screen readers, and the store buttons and the
+          Stock now / Stock flow switch share one row so more rice fit on the tablet sideways. */}
+      <h1 className="visually-hidden">Inventory</h1>
+      {error && <div className="alert alert-danger py-2">{error}</div>}
+      <div className="inv-top mb-2">
+        {/* Which store's stock is on screen: one store, or every store side by side. */}
+        <div className="inv-stores" role="group" aria-label="Which store">
+          {!walled && (
+            <button type="button" aria-pressed={warehouseId === ""} className={`btn store-chip store-chip-all ${warehouseId === "" ? "is-on" : ""}`} onClick={() => setWarehouseId("")}>
+              All stores
             </button>
           )}
-          <div className="btn-group btn-group-sm" role="group" aria-label="Inventory view">
-            <button type="button" className={`btn ${view === "stock" ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setView("stock")}>
-              <i className="bi bi-boxes me-1"></i>Stock
+          {/* 2026-11-22: a store login sees its own store only (the server sends nothing else). */}
+          {shown.map((w, i) => (
+            <button key={w.id} type="button" aria-pressed={warehouseId === w.id} className={`btn store-chip ${STORE_TONES[i % STORE_TONES.length]} ${warehouseId === w.id ? "is-on" : ""}`} onClick={() => setWarehouseId(w.id)}>
+              {w.name}{w.id === homeId ? " (yours)" : ""}
             </button>
-            <button type="button" className={`btn ${view === "history" ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setView("history")}>
-              <i className="bi bi-clock-history me-1"></i>Stock flow
-            </button>
-          </div>
+          ))}
+        </div>
+        <div className="btn-group inv-view" role="group" aria-label="Inventory view">
+          <button type="button" aria-pressed={view === "stock"} className={`btn ${view === "stock" ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setView("stock")}>
+            <i className="bi bi-boxes me-1" aria-hidden="true"></i>Stock now
+          </button>
+          <button type="button" aria-pressed={view === "history"} className={`btn ${view === "history" ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setView("history")}>
+            <i className="bi bi-clock-history me-1" aria-hidden="true"></i>Stock flow
+          </button>
         </div>
       </div>
-      {conversionMessage && <div className="alert alert-success py-2 small">{conversionMessage}</div>}
+
+      {conversionMessage && <div className="alert alert-success py-2">{conversionMessage}</div>}
 
       {view === "history" ? (
         <div>
           <div className="row g-2 mb-2">
-            <div className="col-md-4">
-              <select className="form-select form-select-sm" aria-label="Product" value={historyProduct} onChange={(e) => setHistoryProduct(e.target.value)}>
-                <option value="">All products</option>
+            <div className="col-md-5">
+              <select className="form-select" aria-label="Product" value={historyProduct} onChange={(e) => setHistoryProduct(e.target.value)}>
+                <option value="">All rice</option>
                 {items.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
               </select>
             </div>
             <div className="col-md-3">
-              <button type="button" className="btn btn-sm btn-outline-secondary" onClick={() => void loadHistory()}>
-                <i className="bi bi-arrow-clockwise me-1"></i>Refresh
+              <button type="button" className="btn btn-outline-primary" onClick={() => void loadHistory()}>
+                <i className="bi bi-arrow-clockwise me-1" aria-hidden="true"></i>Refresh
               </button>
             </div>
           </div>
@@ -460,60 +463,142 @@ export default function InventoryPanel({ role = "" }: { role?: string }) {
             </div>
           )}
         </div>
-      ) : loading ? (
-        <p className="text-muted">Loading…</p>
-      ) : items.length === 0 ? (
-        <p className="text-muted">No products match.</p>
       ) : (
-        <div className="table-responsive">
-          <table className="table table-hover align-middle">
-            <thead>
-              <tr>
-                <th>Product</th><th className="col-wide">SKU</th><th className="col-wide">Category</th>
-                <th className="text-end">On the shelf</th><th className="text-end col-wide">Held for orders</th>
-                <th className="text-end">Free to sell</th>{hasCost && <th className="text-end col-wide">Unit cost</th>}
-                {hasCost && <th className="text-end col-roomy">Value</th>}<th>Status</th><th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((r) => (
-                <tr key={r.id}>
-                  <td className="fw-semibold"><div className="d-flex align-items-center gap-2"><ProductPhoto photoKey={r.photoKey} size="thumb" /><div>{r.name}<div className="small text-muted fw-normal d-lg-none">{r.sku}{r.quantityReserved > 0 ? ` · ${r.quantityReserved} reserved` : ""}</div>
-                    {!warehouseId && r.trackStock !== false && places.length > 1 && (
-                      <div className="small fw-normal mt-1" aria-label={`${r.name}, free to sell at each store`}>
-                        {places.map((w) => {
-                          const sh = shelfOf(r, w.id);
-                          const low = (r.lowAt ?? []).includes(w.id);
-                          return (
-                            <span key={w.id} className={`d-inline-block text-nowrap me-2 ${low ? "px-1 rounded bg-warning-subtle text-warning-emphasis fw-semibold" : "text-muted"}`} title={low ? `Low at ${w.name}` : w.name}>
-                              {w.code || w.name} <span className="text-body fw-semibold">{qtyText(r, sh.quantityOnHand - sh.quantityReserved)}</span>{low ? " Low" : ""}
-                            </span>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div></div></td>
-                  <td className="small text-muted col-wide">{r.sku}</td>
-                  <td className="small text-muted col-wide">{r.category ?? "—"}</td>
-                  <td className="text-end">{qtyText(r, r.quantityOnHand)}</td>
-                  <td className="text-end text-muted col-wide">{qtyText(r, r.quantityReserved)}</td>
-                  <td className="text-end fw-semibold">{qtyText(r, r.availableQuantity)}</td>
-                  {hasCost && <td className="text-end col-wide">{toPesos(r.costMinor)}{isLooseItem(r) ? "/kg" : ""}</td>}
-                  {hasCost && <td className="text-end col-roomy">{toPesos(r.valueMinor)}</td>}
-                  <td><span className={`badge ${STATUS_BADGE[r.status]}`}>{statusText(r)}</span></td>
-                  <td className="text-end">
-                    {canChange && (
-                      <button type="button" className="btn btn-sm btn-outline-primary text-nowrap" aria-label={`Adjust ${r.name}`}
-                        onClick={() => { const wh = warehouseId || places.find((w) => w.isDefault)?.id || places[0]?.id || ""; setAdjust(r); setAdjustWh(wh); setReorderAt(unitsText(r, shelfOf(r, wh).reorderThreshold ?? 0)); setReorderMsg(null); setAdjustMode("delta"); setAdjustQty(""); setAdjustReason(""); setAdjustAllowNegative(false); setAdjustError(null); }}>
-                        <i className="bi bi-sliders me-1"></i>Adjust
-                      </button>
-                    )}
-                  </td>
-                </tr>
+        <>
+          {/* At a glance: how many rice are sold out, low, or have enough. Tap one to see only those. */}
+          <div className="inv-tiles mb-2" role="group" aria-label="Show rice by stock">
+            {STATUS_TILES.map((t) => {
+              const n = t.id === "" ? counts.all : counts[t.id];
+              return (
+                <button key={t.id || "all"} type="button" aria-pressed={statusPick === t.id} className={`inv-tile ${t.tone} ${statusPick === t.id ? "is-on" : ""}`} onClick={() => setStatusPick(t.id)}>
+                  <span className="inv-tile-num">{loading && items.length === 0 ? "…" : n}</span>
+                  <span className="inv-tile-word"><i className={`bi ${t.icon}`} aria-hidden="true"></i>{t.word}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="inv-tools mb-2">
+            <input className="form-control inv-search" type="search" aria-label="Search rice" placeholder="Search rice…" value={search} onChange={(e) => setSearch(e.target.value)} />
+            {(sizes.length > 0 || hasLoose) && (
+              <div className="inv-seg" role="group" aria-label="Size">
+                {["", ...sizes, ...(hasLoose ? ["loose"] : [])].map((s) => (
+                  <button key={s || "all"} type="button" aria-pressed={sizePick === s} className={`btn ${sizePick === s ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setSizePick(s)}>
+                    {s === "" ? "All sizes" : s === "loose" ? "Per kilo" : s.replace("kg", " kg")}
+                  </button>
+                ))}
+              </div>
+            )}
+            <div className="inv-seg" role="group" aria-label="Order">
+              {([["group", "By group"], ["name", "A to Z"], ["fewest", "Fewest first"]] as const).map(([id, word]) => (
+                <button key={id} type="button" aria-pressed={sort === id} className={`btn ${sort === id ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setSort(id)}>{word}</button>
               ))}
-            </tbody>
-          </table>
-        </div>
+            </div>
+          </div>
+
+          {canChange && SHOW_CONVERT && (
+            <button type="button" className="btn btn-outline-success mb-2" onClick={() => void openConversion()}>
+              <i className="bi bi-arrow-left-right me-1" aria-hidden="true"></i>Convert stock
+            </button>
+          )}
+
+          {loading && items.length === 0 ? (
+            <p className="text-muted" role="status">Loading stock…</p>
+          ) : rows.length === 0 ? (
+            <div className="inv-empty" role="status">
+              <p className="mb-2">No rice here.</p>
+              {(statusPick || sizePick || search) && (
+                <button type="button" className="btn btn-outline-primary" onClick={() => { setStatusPick(""); setSizePick(""); setSearch(""); }}>Show all rice</button>
+              )}
+            </div>
+          ) : (
+            <table className={`inv-table ${allStores ? "inv-all" : "inv-one"}`}>
+              <caption className="visually-hidden">
+                {allStores ? "Free to sell at each store" : `Free to sell at ${placeName(warehouseId || shown[0]?.id || null)}`}
+              </caption>
+              <thead>
+                <tr>
+                  <th scope="col">Rice</th>
+                  {allStores ? (
+                    <>
+                      {shown.map((w) => <th key={w.id} scope="col" className="inv-num">{w.name}</th>)}
+                      <th scope="col" className="inv-num inv-total">Total</th>
+                    </>
+                  ) : (
+                    <>
+                      <th scope="col" className="inv-num">Free to sell</th>
+                      {hasCost && <th scope="col" className="inv-num inv-money">Value at cost</th>}
+                    </>
+                  )}
+                  {canChange && <th scope="col"><span className="visually-hidden">Change</span></th>}
+                </tr>
+              </thead>
+              {groups.map((g) => {
+                const inGroup = sort === "group" ? rows.filter((r) => (r.category || "Other") === g) : rows;
+                return (
+                  <tbody key={g || "all"}>
+                    {g && (
+                      <tr className="inv-group">
+                        <th scope="colgroup" colSpan={colCount}>{g} <span className="inv-group-n">{inGroup.length}</span></th>
+                      </tr>
+                    )}
+                    {inGroup.map((r) => {
+                      const loose = isLooseItem(r);
+                      const size = loose ? "Per kilo" : sizeOf(r.name);
+                      return (
+                        <tr key={r.id} className={`inv-row inv-${r.status}`}>
+                          <th scope="row" className="inv-name">
+                            <span className="inv-name-in">
+                              <ProductPhoto photoKey={r.photoKey} size="thumb" />
+                              <span>
+                                <span className="inv-rice">{r.name}</span>
+                                <span className="inv-sub">
+                                  {unitWord(r) && <span>in {unitWord(r)}</span>}
+                                  {r.status === "out" && <span className="inv-badge inv-badge-out"><i className="bi bi-x-octagon" aria-hidden="true"></i>Sold out</span>}
+                                  {r.status === "low" && !allStores && <span className="inv-badge inv-badge-low"><i className="bi bi-exclamation-triangle" aria-hidden="true"></i>{statusText(r)}</span>}
+                                  {r.quantityReserved > 0 && <span>{qtyText(r, r.quantityReserved)} held for orders</span>}
+                                  {!allStores && size && !unitWord(r) && <span>{size}</span>}
+                                </span>
+                              </span>
+                            </span>
+                          </th>
+                          {allStores ? (
+                            <>
+                              {shown.map((w) => {
+                                const sh = shelfOf(r, w.id);
+                                return numCell(r, sh.quantityOnHand - sh.quantityReserved, (r.lowAt ?? []).includes(w.id), w.name, w.id);
+                              })}
+                              {numCell(r, r.availableQuantity, false, "Total", "total", "inv-sum")}
+                            </>
+                          ) : (
+                            <>
+                              {numCell(r, r.availableQuantity, r.status === "low", "Free to sell")}
+                              {hasCost && <td className="inv-num inv-money" data-label="Value at cost">{r.trackStock === false ? "—" : toPesos(r.valueMinor)}</td>}
+                            </>
+                          )}
+                          {canChange && (
+                            <td className="inv-act">
+                              <button type="button" className="btn btn-outline-primary" aria-label={`Adjust ${r.name}`} onClick={() => openAdjust(r)}>
+                                <i className="bi bi-sliders" aria-hidden="true"></i><span className="inv-act-word">Adjust</span>
+                              </button>
+                            </td>
+                          )}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                );
+              })}
+            </table>
+          )}
+          {/* Staff get no cost from the server; the value line is for the owner and managers. */}
+          {hasCost && items.length > 0 && (
+            <p className="inv-value mt-2 mb-1">Stock value at cost{warehouseId ? ` at ${placeName(warehouseId)}` : ", all stores"}: <strong>{toPesos(totalValue)}</strong></p>
+          )}
+          {allStores && rows.length > 0 && (
+            <p className="inv-note mt-2">Numbers are what each store can still sell ({items.some((r) => r.quantityReserved > 0) ? "held for orders not counted" : "nothing is held for orders now"}). Red = none left, amber = low.</p>
+          )}
+        </>
       )}
 
       {/* M2: the 5-step adjustment — product → current stock → delta/count + reason → confirm */}
