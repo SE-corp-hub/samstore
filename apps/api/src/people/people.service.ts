@@ -633,7 +633,7 @@ export class PeopleService {
       where: { storeId, ...(status === "ALL" ? {} : { status: status as "PENDING" }) },
       orderBy: { createdAt: status === "PENDING" ? "asc" : "desc" },
       take: 200,
-      include: { location: { select: { code: true, name: true } } },
+      include: { location: { select: { id: true, code: true, name: true } } },
     });
     return rows.map((r) => ({
       id: r.id, kind: r.kind, documentType: r.documentType, documentId: r.documentId, summary: r.summary, detail: r.detail,
