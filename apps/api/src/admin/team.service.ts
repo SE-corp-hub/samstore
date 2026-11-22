@@ -10,7 +10,11 @@ import type { ApiError } from "@sam-store/contracts";
 import { bustMemberships } from "../auth/membership-cache.js";
 import { bustTokenVersion } from "../auth/token-version.js";
 import { toE164 } from "../domain/phone.js";
+import { STORE_BOUND_ROLES } from "../domain/people.js";
 import { accountBelongsToStore, alignGlobalRole } from "../auth/account-scope.js";
+
+/** Does this business have any store or warehouse set up? (Only then must a manager or counter login have one.) */
+const hasPlaces = async (storeId: string) => (await prisma.warehouse.count({ where: { storeId, isActive: true } })) > 0;
 
 export type TeamResult<T> = { ok: true; value: T } | { ok: false; error: ApiError };
 
@@ -23,9 +27,10 @@ export class TeamService {
    * reset their PIN or password (from the audit log and the reset history; older members
    * added before this was recorded show only when they joined).
    */
-  async list(storeId: string) {
+  async list(storeId: string, only?: { locationId: string; selfId: string }) {
     const rows = await prisma.userStore.findMany({
-      where: { storeId, status: "ACTIVE" },
+      // 2026-11-22: everyone but the owner sees only their own store's people (and themselves).
+      where: { storeId, status: "ACTIVE", ...(only ? { OR: [{ homeLocationId: only.locationId }, { userId: only.selfId }] } : {}) },
       include: { user: { select: { id: true, email: true, name: true } } },
       orderBy: { createdAt: "asc" },
     });
@@ -111,6 +116,11 @@ export class TeamService {
       const loc = await prisma.warehouse.findFirst({ where: { id: homeLocationId, storeId, isActive: true }, select: { id: true } });
       if (!loc) return { ok: false, error: { type: "validation", errors: ["Unknown location"] } };
     }
+    // 2026-11-22: a manager or counter login works at one store, so it needs one.
+    // (A business with no stores set up at all has nothing to choose, so it is not asked.)
+    if ((STORE_BOUND_ROLES as readonly string[]).includes(role) && !homeLocationId && (await hasPlaces(storeId))) {
+      return { ok: false, error: { type: "validation", errors: ["Choose the store this person works at"] } };
+    }
 
     // Existing user? (by phone first, then email)
     let user = cleanPhone ? await prisma.user.findUnique({ where: { phone: cleanPhone } }) : null;
@@ -158,6 +168,9 @@ export class TeamService {
     const membership = await prisma.userStore.findUnique({ where: { userId_storeId: { userId, storeId } } });
     if (!membership) return { ok: false, error: { type: "not_found", message: "Member not part of this store" } };
     if (membership.role === "OWNER") return { ok: false, error: { type: "conflict", message: "Cannot change the owner's role" } };
+    if ((STORE_BOUND_ROLES as readonly string[]).includes(role) && !membership.homeLocationId && (await hasPlaces(storeId))) {
+      return { ok: false, error: { type: "validation", errors: ["Choose this person's store first, then change the role"] } };
+    }
 
     const updated = await prisma.userStore.update({
       where: { userId_storeId: { userId, storeId } },

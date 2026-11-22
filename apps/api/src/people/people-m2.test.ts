@@ -61,14 +61,14 @@ async function fixture() {
     return u;
   };
   const owner = await mk("Aling Nena", "OWNER", null);
-  const manager = await mk("Kuya Jun", "MANAGER", null);
+  const manager = await mk("Kuya Jun", "MANAGER", s1.id); // 2026-11-22: a manager runs one store
   const staff2 = await mk("Ate Lorna", "STAFF", s2.id);
   const product = await prisma.product.create({ data: { storeId: store.id, sku: `${run}-${seq}`, name: "Sinandomeng 25 kg", priceMinor: 130_000, costMinor: 110_000 } });
   await prisma.stockLevel.create({ data: { storeId: store.id, productId: product.id, warehouseId: wh.id, quantityOnHand: 20 } });
   const actor = (u: { id: string }, role: string, home: string | null = null): Actor => ({ userId: u.id, role, homeLocationId: home });
   return {
     storeId: store.id, s1: s1.id, s2: s2.id, wh: wh.id, productId: product.id, owner, manager, staff2,
-    ownerA: actor(owner, "OWNER"), managerA: actor(manager, "MANAGER"), staff2A: actor(staff2, "STAFF", s2.id),
+    ownerA: actor(owner, "OWNER"), managerA: actor(manager, "MANAGER", s1.id), staff2A: actor(staff2, "STAFF", s2.id),
   };
 }
 
@@ -172,8 +172,9 @@ test("M2: owner sets a home location; a location from another store is refused",
   assert.equal(ok.ok && ok.value.homeLocationId, a.s1);
   const cross = await people.updateMember(a.storeId, a.staff2.id, { homeLocationId: b.s1 }, a.owner.id);
   assert.equal(cross.ok, false);
+  // 2026-11-22: a staff or manager login must keep a store (it works only there); clearing it is refused.
   const clear = await people.updateMember(a.storeId, a.staff2.id, { homeLocationId: null }, a.owner.id);
-  assert.equal(clear.ok && clear.value.homeLocationId, null);
+  assert.equal(clear.ok, false, "a counter login cannot be left with no store");
   const notMember = await people.updateMember(a.storeId, b.staff2.id, { homeLocationId: a.s1 }, a.owner.id);
   assert.equal(!notMember.ok && notMember.error.type, "not_found", "store A cannot edit store B's people");
 });
@@ -326,7 +327,7 @@ test("M2: a manager cannot approve their own request", async () => {
   const people = new PeopleService();
   await people.updateMember(fx.storeId, fx.manager.id, { pin: "9753" }, fx.owner.id);
   const req = await prisma.$transaction((tx) => requestApproval(tx, {
-    storeId: fx.storeId, kind: "VOID", documentType: "ORDER", documentId: "o-1", summary: "Void", requestedById: fx.manager.id,
+    storeId: fx.storeId, kind: "VOID", documentType: "ORDER", documentId: "o-1", locationId: fx.s1, summary: "Void", requestedById: fx.manager.id,
   }));
   const r = await people.decideApproval(fx.storeId, req.id, fx.managerA, { decision: "APPROVE", pin: "9753" });
   assert.equal(!r.ok && r.error.type, "forbidden");

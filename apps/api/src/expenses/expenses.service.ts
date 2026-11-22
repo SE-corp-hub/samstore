@@ -19,7 +19,7 @@ import { mainLocationId } from "../domain/main-store.js";
 import { prisma } from "../persistence/prisma-repositories.js";
 import { randomId } from "../persistence/repositories.js";
 import type { ApiError } from "@sam-store/contracts";
-import { ALL_LOCATION_ROLES } from "../domain/people.js";
+import { ALL_LOCATION_ROLES, hasNoStoreYet, NO_STORE_YET } from "../domain/people.js";
 import { dayRange, manilaDate } from "../domain/reports.js";
 import { cashTimeFor, closedTodayRefusal } from "../day/day-gate.js";
 import { registerApprovalHandler, requestApproval } from "../people/people.service.js";
@@ -72,7 +72,10 @@ export interface ExpenseInput {
 /** An expense that counts: not cancelled. Every report adds this to its filter. */
 export const COUNTED = { voidedAt: null } as const;
 
+/** Every store (and the whole-business expenses): the owner only. 2026-11-22: a manager runs one store. */
 const seesAll = (a: ExpenseActor) => (ALL_LOCATION_ROLES as readonly string[]).includes(a.role);
+/** The owner or a manager: any day's expense, no drawer limit, may cancel (a manager: at their own store). */
+const boss = (a: ExpenseActor) => seesAll(a) || a.role === "MANAGER";
 const invalid = (msg: string): { ok: false; error: ApiError } => ({ ok: false, error: { type: "validation", errors: [msg] } });
 const refused = (msg: string): { ok: false; error: ApiError } => ({ ok: false, error: { type: "forbidden", message: msg } });
 
@@ -83,7 +86,7 @@ export class ExpensesService {
     let spentAt = input.spentAt ? new Date(input.spentAt) : new Date();
     if (Number.isNaN(spentAt.getTime())) return invalid("The date is not a date");
     if (spentAt.getTime() > Date.now() + 86_400_000) return invalid("The date cannot be in the future");
-    const staff = !seesAll(actor);
+    const staff = !boss(actor);
     // "Expense" on POS: a step that waited on the tablet with no signal arrives late with its own
     // time. It is never refused (the money already left the drawer); it counts on its own day, or
     // now when that day is already closed at the store, so a closed day never changes.
@@ -92,6 +95,8 @@ export class ExpensesService {
 
     // Which store? A login tied to a store: that store, always. The owner: the one chosen, or the whole business.
     let locationId: string | null;
+    // A login with no store yet may not pick a store; an old app or an offline save (no store sent) still saves, as before.
+    if (hasNoStoreYet(actor.role, actor.homeLocationId) && input.locationId !== undefined) return refused(NO_STORE_YET);
     if (!seesAll(actor) && actor.homeLocationId) {
       if (input.locationId && input.locationId !== actor.homeLocationId) return refused("You can add expenses for your own store only.");
       locationId = actor.homeLocationId;
@@ -156,7 +161,7 @@ export class ExpensesService {
   async list(storeId: string, actor: ExpenseActor, opts: { from?: string; to?: string; locationId?: string } = {}) {
     const day = (v?: string) => { const d = v ? new Date(v) : null; return d && !Number.isNaN(d.getTime()) ? d : null; };
     const from = day(opts.from), to = day(opts.to);
-    const own = !seesAll(actor) && actor.homeLocationId ? actor.homeLocationId : null;
+    const own = !seesAll(actor) ? actor.homeLocationId ?? "__no_store__" : null;
     const which = own ?? opts.locationId;
     const rows = await prisma.expense.findMany({
       where: {
@@ -180,16 +185,17 @@ export class ExpensesService {
       /** Money of the expenses shown that still count. */
       totalMinor: expenses.filter((e) => !e.cancelled).reduce((s, e) => s + e.amountMinor, 0),
       /** May this login cancel an expense, and choose the store? */
-      canCancel: seesAll(actor), ownLocationId: own,
+      canCancel: boss(actor), ownLocationId: own,
     };
   }
 
   /** Cancel a wrong expense. It stays on the list, crossed out, and counts in no report. */
   async cancel(storeId: string, actor: ExpenseActor, id: string, reason?: string): Promise<ExpenseResult<{ id: string }>> {
-    if (!seesAll(actor)) return refused("Only the owner can cancel an expense.");
+    if (!boss(actor)) return refused("Only the owner or the store's manager can cancel an expense.");
     const why = (reason ?? "").trim().slice(0, 200);
     if (why.length < 3) return invalid("Write why this expense is cancelled");
-    const existing = await prisma.expense.findFirst({ where: { storeId, id }, select: { voidedAt: true } });
+    // A manager: their own store's expenses only (never the whole business's).
+    const existing = await prisma.expense.findFirst({ where: { storeId, id, ...(seesAll(actor) ? {} : { locationId: actor.homeLocationId ?? "__no_store__" }) }, select: { voidedAt: true } });
     if (!existing) return { ok: false, error: { type: "not_found", message: "Expense not found" } };
     if (existing.voidedAt) return { ok: true, value: { id } }; // pressed twice: already cancelled
     await prisma.expense.updateMany({ where: { storeId, id, voidedAt: null }, data: { voidedAt: new Date(), voidedById: actor.userId, voidReason: why } });

@@ -95,12 +95,12 @@ export function writeFeatureLock(owner: FeatureLock | null, locations: Record<st
 
 export interface LockActor { role: string; homeLocationId: string | null; isHead?: boolean }
 
-/** May this login set the PIN lock of this store? Owner and manager: any store. Store head: its own store. */
+/** May this login set the PIN lock of this store? Owner: any store. Its manager or head: their own store (2026-11-22). */
 export function canSetLocationLock(actor: LockActor, locationId: string): boolean {
-  if (["OWNER", "STORE_OWNER", "PLATFORM_ADMIN", "MANAGER"].includes(actor.role)) return true;
-  return !!actor.isHead && !!actor.homeLocationId && actor.homeLocationId === locationId;
+  if (["OWNER", "STORE_OWNER", "PLATFORM_ADMIN"].includes(actor.role)) return true;
+  return (actor.role === "MANAGER" || !!actor.isHead) && !!actor.homeLocationId && actor.homeLocationId === locationId;
 }
 
-/** Does this login sit behind one store (so it only needs that store's lock)? */
+/** Does this login sit behind one store (so it only needs that store's lock)? Every login but the owner (2026-11-22). */
 export const isOneStoreLogin = (actor: LockActor): boolean =>
-  !["OWNER", "STORE_OWNER", "PLATFORM_ADMIN", "MANAGER"].includes(actor.role) && !!actor.homeLocationId;
+  !["OWNER", "STORE_OWNER", "PLATFORM_ADMIN"].includes(actor.role) && !!actor.homeLocationId;

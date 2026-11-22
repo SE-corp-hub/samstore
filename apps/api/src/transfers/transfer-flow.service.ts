@@ -24,9 +24,10 @@ import {
   checkArrival, checkRelease, checkReturnBack, deliveryOutcome, readBack, receiveOutcome, returnOutcome,
 } from "../domain/transfer-flow.js";
 import {
-  captureSignatures, locationRefusal, nextDocNumber, requestApproval, requireSignatures, signatureErrorResult,
+  captureSignatures, locationRefusal, nextDocNumber, onlyStoreOf, requestApproval, requireSignatures, seesAllStores, signatureErrorResult,
   type Actor, type SignatureInput,
 } from "../people/people.service.js";
+import { hasNoStoreYet } from "../domain/people.js";
 import { txOptions } from "../persistence/tx-options.js";
 import { seesCost } from "../domain/cost-redact.js";
 
@@ -105,6 +106,7 @@ export class TransferFlowService {
 
   async list(storeId: string, actor: Actor, view: TripView, locationId?: string) {
     const loc = locationId || actor.homeLocationId || undefined;
+    if (!loc && !seesAllStores(actor)) return []; // a store login with no store sees no trips
     if (loc) {
       const refusal = locationRefusal(actor, loc);
       if (refusal) return [];
@@ -452,8 +454,10 @@ export class TransferFlowService {
     const from = places.find((w) => w.id === input.fromLocationId);
     const to = places.find((w) => w.id === input.toLocationId);
     if (!from || !to) return invalid("Unknown place");
-    // Staff may move rice out of, or into, their own store — not between two other places.
-    if (locationRefusal(actor, from.id) && locationRefusal(actor, to.id)) return forbidden(locationRefusal(actor, from.id) ?? "Not your store");
+    // 2026-11-22: everyone but the owner SENDS rice from their own store only. They never take another
+    // store's rice: that store sends it (owner's ask: every feature filtered by the login's store).
+    const notMine = locationRefusal(actor, from.id);
+    if (notMine) return forbidden(hasNoStoreYet(actor.role, actor.homeLocationId) ? notMine : `You can send rice from your own store only. Ask ${placeName(from)} to send it.`);
     const product = input.productId ? await prisma.product.findFirst({ where: { id: input.productId, storeId }, select: { id: true, name: true, stockBaseUnit: true, stockBaseQuantity: true } }) : null;
     if (!product) return invalid("Unknown product");
     // Kilo rice is kept in grams and stays at its store (owner's choice, sell per kilo plan): "1" here
@@ -493,6 +497,8 @@ export class TransferFlowService {
     const t = await this.load(storeId, id);
     if (!t || t.kind !== "RESTOCK") return notFound();
     if (t.status !== "COMPLETED" || !undoable(t)) return conflict("Only a move made today with Move stock can be undone");
+    const notMine = locationRefusal(actor, t.fromWarehouseId);
+    if (notMine) return forbidden(notMine);
     return this.step(async () => {
       await prisma.$transaction(async (tx) => {
         await this.claim(tx, storeId, id, ["COMPLETED"], { status: "CANCELLED" });
@@ -513,6 +519,7 @@ export class TransferFlowService {
 
   /** Recent one-step moves (newest first): the last 30, or up to 500 between two times. */
   async recentMoves(storeId: string, actor: Actor, locationId?: string, range: { from?: string; to?: string } = {}) {
+    if (!seesAllStores(actor)) locationId = onlyStoreOf(actor); // a store login: its own store's moves only
     const day = (v?: string) => { const d = v ? new Date(v) : null; return d && !Number.isNaN(d.getTime()) ? d : undefined; };
     const from = day(range.from);
     const to = day(range.to);
@@ -529,11 +536,12 @@ export class TransferFlowService {
       const entries = await prisma.storePayableEntry.findMany({ where: { storeId, transferId: { in: rows.map((t) => t.id) }, kind: { in: ["PROFIT_SHARE", "SHARE_BACK"] } }, select: { transferId: true, amountMinor: true } });
       for (const e of entries) if (e.transferId) shares.set(e.transferId, (shares.get(e.transferId) ?? 0) - e.amountMinor);
     }
-    return rows.map((t) => ({ id: t.id, docNumber: t.docNumber, productName: t.product.name, quantity: t.quantity, from: t.fromWarehouse.name, to: t.toWarehouse.name, note: t.reason, at: t.completedAt ?? t.createdAt, profitShareMinor: shares.get(t.id) ?? null, undone: t.status === "CANCELLED", canUndo: t.status === "COMPLETED" && undoable(t) && OWNER_MANAGER.has(actor.role) }));
+    return rows.map((t) => ({ id: t.id, docNumber: t.docNumber, productName: t.product.name, quantity: t.quantity, from: t.fromWarehouse.name, to: t.toWarehouse.name, note: t.reason, at: t.completedAt ?? t.createdAt, profitShareMinor: shares.get(t.id) ?? null, undone: t.status === "CANCELLED", canUndo: t.status === "COMPLETED" && undoable(t) && OWNER_MANAGER.has(actor.role) && !locationRefusal(actor, t.fromWarehouseId) }));
   }
 
   /** Recent customer returns (newest first). */
   async recentReturns(storeId: string, actor: Actor, locationId?: string) {
+    if (!seesAllStores(actor)) locationId = onlyStoreOf(actor);
     const rows = await prisma.stockReturn.findMany({
       where: { storeId, ...(locationId ? { locationId } : {}) }, orderBy: { createdAt: "desc" }, take: 30,
       include: { product: { select: { name: true, stockBaseUnit: true, stockBaseQuantity: true } }, location: { select: { name: true } }, order: { select: { orderNumber: true } } },

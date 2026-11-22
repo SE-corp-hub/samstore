@@ -539,16 +539,17 @@ export class InventoryService {
   }
 
   /** M2: adjustment history — every ADJUST movement, newest first. */
-  async adjustments(storeId: string, filters: { productId?: string; from?: string; to?: string; limit?: number } = {}) {
+  async adjustments(storeId: string, filters: { productId?: string; from?: string; to?: string; limit?: number; warehouseId?: string } = {}) {
     return this.movements(storeId, { ...filters, type: "ADJUST" });
   }
 
   /** M2: the stock flow — the raw ledger (any type), newest first, with actor + balance. */
   async movements(
     storeId: string,
-    filters: { productId?: string; type?: string; from?: string; to?: string; limit?: number; actorId?: string } = {},
+    filters: { productId?: string; type?: string; from?: string; to?: string; limit?: number; actorId?: string; warehouseId?: string } = {},
   ) {
     const where: Record<string, unknown> = { storeId };
+    if (filters.warehouseId) where.warehouseId = filters.warehouseId; // a store login: its own store's moves only
     if (filters.productId) where.productId = filters.productId;
     if (filters.type) where.type = filters.type;
     if (filters.actorId) where.createdBy = filters.actorId;

@@ -25,7 +25,7 @@ import { costValue, isLooseP } from "../domain/counting.js";
 import { checkChain, periodTotals, type ChainCheck, type LedgerRow } from "../domain/stock-book.js";
 import { buildSummary, type KiloTotals, type SummaryRow } from "../domain/movement-summary.js";
 import { isDraftStale } from "../domain/people.js";
-import { captureSignatures, locationRefusal, requireSignatures, seesProfitAt, signatureErrorResult, type Actor, type SignatureInput } from "../people/people.service.js";
+import { captureSignatures, locationRefusal, requireSignatures, seesAllStores, seesProfitAt, signatureErrorResult, type Actor, type SignatureInput } from "../people/people.service.js";
 
 export type ReportResult<T> = { ok: true; value: T } | { ok: false; error: ApiError };
 
@@ -103,8 +103,21 @@ export class RiceReportsService {
     }
   }
 
+  /** The whole business's report: the owner only (2026-11-22: a manager runs one store). */
   private owner(actor: Actor) {
+    if (!seesAllStores(actor)) throw new StepError(forbidden("This report is for the owner only"));
+  }
+
+  /**
+   * One store's report: the owner (any store, or all), or a manager for their own store only. Changes
+   * `input.locationId` to the manager's store so the report can never show another store.
+   */
+  private storeOwner(actor: Actor, input: { locationId?: string }) {
+    if (seesAllStores(actor)) return;
     if (!OWNERS.includes(actor.role)) throw new StepError(forbidden("This report is for the owner only"));
+    const refusal = locationRefusal(actor, input.locationId || actor.homeLocationId);
+    if (refusal) throw new StepError(forbidden(refusal));
+    input.locationId = actor.homeLocationId!;
   }
 
   private async locations(storeId: string) {
@@ -113,15 +126,18 @@ export class RiceReportsService {
 
   // ─────────────────────────── Stock Live ───────────────────────────
 
-  async stockLive(storeId: string) {
-    const [locations, products, levels, transit, resacks, version] = await Promise.all([
+  /** `onlyLocationId` (2026-11-22): a store login sees its own store's column only (and its own trips and resacks). */
+  async stockLive(storeId: string, onlyLocationId?: string) {
+    const own = onlyLocationId;
+    const [allLocations, products, levels, transit, resacks, version] = await Promise.all([
       this.locations(storeId),
       prisma.product.findMany({ where: { storeId, isActive: true }, select: productSelect, orderBy: { name: "asc" } }),
-      prisma.stockLevel.findMany({ where: { storeId, warehouseId: { not: null } }, select: { productId: true, warehouseId: true, quantityOnHand: true, quantityReserved: true } }),
-      prisma.stockTransfer.findMany({ where: { storeId, status: { in: ["IN_TRANSIT", "RETURNING"] } }, select: { productId: true, status: true, releasedQty: true, deliveredQty: true, receivedQty: true, returnedQty: true } }),
-      prisma.resackJob.findMany({ where: { storeId, status: "STARTED" }, select: { inputProductId: true, inputQty: true } }),
+      prisma.stockLevel.findMany({ where: { storeId, warehouseId: own ?? { not: null } }, select: { productId: true, warehouseId: true, quantityOnHand: true, quantityReserved: true } }),
+      prisma.stockTransfer.findMany({ where: { storeId, status: { in: ["IN_TRANSIT", "RETURNING"] }, ...(own ? { OR: [{ fromWarehouseId: own }, { toWarehouseId: own }] } : {}) }, select: { productId: true, status: true, releasedQty: true, deliveredQty: true, receivedQty: true, returnedQty: true } }),
+      prisma.resackJob.findMany({ where: { storeId, status: "STARTED", ...(own ? { locationId: own } : {}) }, select: { inputProductId: true, inputQty: true } }),
       stockVersion(storeId),
     ]);
+    const locations = own ? allLocations.filter((l) => l.id === own) : allLocations;
     const rows = products.map((p) => {
       const loose = isLooseP(p);
       const cells: Record<string, { onHand: number; reserved: number; available: number; flag: string }> = {};
@@ -270,7 +286,7 @@ export class RiceReportsService {
       const date = input.date || manilaDate(new Date());
       dayRange(date);
       const all = await this.locations(storeId);
-      const locs = input.locationId ? all.filter((l) => l.id === input.locationId) : OWNERS.includes(actor.role) ? all : all.filter((l) => l.id === actor.homeLocationId);
+      const locs = input.locationId ? all.filter((l) => l.id === input.locationId) : seesAllStores(actor) ? all : all.filter((l) => l.id === actor.homeLocationId);
       if (locs.length === 0) throw new StepError(invalid("Choose a location"));
       for (const l of locs) {
         const refusal = locationRefusal(actor, l.id);
@@ -295,7 +311,7 @@ export class RiceReportsService {
         });
       }
       const sum = (f: (s: Section) => number) => sections.reduce((a, s) => a + f(s), 0);
-      const ownerSide = OWNERS.includes(actor.role);
+      const ownerSide = seesAllStores(actor);
       // The head of a store sees that store's own profit, and nothing of the others.
       const isOwnerRole = ownerSide || locs.every((l) => seesProfitAt(actor, l.id));
       const expenseAt = ownerSide ? input.locationId : actor.homeLocationId ?? undefined;
@@ -502,7 +518,7 @@ export class RiceReportsService {
   /** Kulang found by counts in a period, ranked by pesos, each with who touched the item since its previous count. */
   async balanceReport(storeId: string, actor: Actor, input: { from?: string; to?: string; locationId?: string }) {
     return this.run(async () => {
-      this.owner(actor);
+      this.storeOwner(actor, input);
       const to = input.to ? dayRange(input.to).to : new Date();
       const from = input.from ? dayRange(input.from).from : new Date(to.getTime() - 31 * 86_400_000);
       const lines = await prisma.stockCountLine.findMany({
@@ -566,7 +582,7 @@ export class RiceReportsService {
 
   async stockBookCheck(storeId: string, actor: Actor, input: { locationId?: string }) {
     return this.run(async () => {
-      this.owner(actor);
+      this.storeOwner(actor, input);
       const locFilter = input.locationId ? { warehouseId: input.locationId } : { warehouseId: { not: null } };
       const [locations, products, levels, moves] = await Promise.all([
         this.locations(storeId),
@@ -624,7 +640,7 @@ export class RiceReportsService {
    */
   async stockBookPage(storeId: string, actor: Actor, input: { productId?: string; locationId?: string; from?: string; to?: string }) {
     return this.run(async () => {
-      this.owner(actor);
+      this.storeOwner(actor, input);
       if (!input.productId) throw new StepError(invalid("Pick a product"));
       const product = await prisma.product.findFirst({ where: { id: input.productId, storeId }, select: productSelect });
       if (!product) throw new StepError(invalid("Product not found"));
@@ -718,7 +734,7 @@ export class RiceReportsService {
     location: { id: string | null; name: string }; from: string; to: string; rows: SummaryRow[]; kilos: KiloTotals;
   }>> {
     return this.run(async () => {
-      this.owner(actor);
+      this.storeOwner(actor, input);
       const locations = await this.locations(storeId);
       const one = input.locationId ? locations.find((l) => l.id === input.locationId) : undefined;
       if (input.locationId && !one) throw new StepError(invalid("Choose a store"));

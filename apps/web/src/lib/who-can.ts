@@ -36,16 +36,23 @@ export const RULES: Rule[] = [
   { id: "onlineShop", what: "Online shop, Messenger and points", where: "Settings → Online shop, Messenger", scope: "business", rights: { owner: "yes", manager: "look", head: "no", staff: "no" } },
   { id: "businessLock", what: "PIN lock for the whole business", where: "Settings → PIN lock", scope: "business", rights: { owner: "yes", manager: "no", head: "no", staff: "no" } },
   { id: "locations", what: "Add a store, rename it, where it takes rice from", where: "Menu → Locations", scope: "business", rights: { owner: "yes", manager: "look", head: "no", staff: "no" } },
-  { id: "productAdd", what: "Add a new rice (counter logins: \"+ New item\" on POS, the owner checks it)", where: "Products → New product", scope: "business", rights: { owner: "yes", manager: "yes", head: "look", staff: "look" } },
+  { id: "productAdd", what: "Add a new rice (a manager's opening stock goes to their own store; counter logins: \"+ New item\" on POS, the owner checks it)", where: "Products → New product", scope: "business", rights: { owner: "yes", manager: "yes", head: "look", staff: "look" } },
   { id: "productSetup", what: "Rice name, SKU, cost, group, sack size, per kilo, hide", where: "Products", scope: "business", rights: { owner: "yes", manager: "look", head: "look", staff: "look" } },
-  { id: "productPrice", what: "Price for all stores, reorder level, picture", where: "Products", scope: "business", rights: { owner: "yes", manager: "yes", head: "look", staff: "look" } },
+  { id: "productPrice", what: "Price for all stores and the main store's reorder level", where: "Products", scope: "business", rights: { owner: "yes", manager: "look", head: "look", staff: "look" } },
+  { id: "productPhoto", what: "A rice's picture", where: "Products → Picture", scope: "business", rights: { owner: "yes", manager: "yes", head: "look", staff: "look" } },
   { id: "lowestPrice", what: "Lowest price a store may sell at", where: "Store prices", scope: "business", rights: { owner: "yes", manager: "look", head: "look", staff: "no" } },
-  { id: "teamBig", what: "Managers, store heads, roles, remove a login, reset a password", where: "Team", scope: "business", rights: { owner: "yes", manager: "no", head: "no", staff: "no" } },
+  { id: "teamBig", what: "Managers, store heads, roles, which store a login works at, remove a login, reset a password", where: "Team", scope: "business", rights: { owner: "yes", manager: "no", head: "no", staff: "no" } },
+  { id: "storeMoney", what: "Money between stores (store payable), supplier orders and payments, the whole business's reports", where: "Reports, Supplier orders, Store payable", scope: "business", rights: { owner: "yes", manager: "no", head: "no", staff: "no" } },
   // ── One store ──
-  { id: "thisStore", what: "Open day and Z-read, drawer, per kilo, target, receipt details", where: "Settings → This store", scope: "store", rights: { owner: "yes", manager: "yes", head: "own", staff: "no" } },
-  { id: "storeLock", what: "The store's own PIN lock", where: "Settings → PIN lock (heads: Store PIN lock)", scope: "store", rights: { owner: "yes", manager: "yes", head: "own", staff: "no" } },
-  { id: "storePrice", what: "A store's own selling price", where: "Store prices", scope: "store", rights: { owner: "yes", manager: "yes", head: "own", staff: "no" } },
-  { id: "teamCounter", what: "Counter logins: add, name, PIN, password, unlock", where: "Team", scope: "store", rights: { owner: "yes", manager: "yes", head: "own", staff: "no" } },
+  { id: "thisStore", what: "Open day and Z-read, drawer, per kilo, target, receipt details", where: "Settings → This store", scope: "store", rights: { owner: "yes", manager: "own", head: "own", staff: "no" } },
+  { id: "storeLock", what: "The store's own PIN lock", where: "Settings → PIN lock (heads: Store PIN lock)", scope: "store", rights: { owner: "yes", manager: "own", head: "own", staff: "no" } },
+  { id: "storePrice", what: "A store's own selling price", where: "Store prices", scope: "store", rights: { owner: "yes", manager: "own", head: "own", staff: "no" } },
+  { id: "teamCounter", what: "Counter logins: add, name, PIN, password, unlock", where: "Team", scope: "store", rights: { owner: "yes", manager: "own", head: "own", staff: "no" } },
+  // ── Work at a store (2026-11-22: everyone but the owner works at their OWN store only) ──
+  { id: "storeWork", what: "Sell, pre-orders, orders, credit payments, Stock in, Count, Resack, Truck arrived, expenses and cash in", where: "POS, Pre-order, Orders, Credit, Stock in, Count, Resack", scope: "store", rights: { owner: "yes", manager: "own", head: "own", staff: "own" } },
+  { id: "storeSee", what: "See a store's stock, sales, cash, Z-reads, approvals and records", where: "Inventory, Reports, For your approval", scope: "store", rights: { owner: "yes", manager: "own", head: "own", staff: "own" } },
+  { id: "storeMove", what: "Move stock: send rice out of a store (the other store sends you theirs)", where: "Move stock", scope: "store", rights: { owner: "yes", manager: "own", head: "own", staff: "own" } },
+  { id: "storeReorder", what: "A store's own reorder level, stock fix (Adjust)", where: "Inventory → Adjust", scope: "store", rights: { owner: "yes", manager: "own", head: "no", staff: "no" } },
   // ── This tablet / me ──
   { id: "printer", what: "Printer and receipt width", where: "Settings → Printer (or Counter & printer)", scope: "tablet", rights: { owner: "yes", manager: "yes", head: "yes", staff: "yes" } },
   { id: "account", what: "My name, email, password and PIN", where: "Settings → My account", scope: "me", rights: { owner: "yes", manager: "yes", head: "yes", staff: "yes" } },
@@ -56,7 +63,7 @@ export const WHO_LABEL: Record<Who, string> = { owner: "Owner", manager: "Manage
 /** One line on each kind of login, for the guide. */
 export const WHO_SAYS: Record<Who, string> = {
   owner: "You run the whole business. You can change everything, at every store.",
-  manager: "You help the owner at every store. You run the stores day to day. Settings for the whole business are the owner's.",
+  manager: "You run your own store: its sales, stock, team, prices and reports. You cannot see or change the other stores. Settings for the whole business are the owner's.",
   head: "You are in charge of your own store. You change your store's settings, prices and counter logins.",
   staff: "You sell and look after the rice at your store. Ask your store head or the owner to change a setting or a price.",
 };
@@ -71,7 +78,7 @@ export const SCOPE_LABEL: Record<Scope, string> = {
 /** One line under each scope heading. */
 export const SCOPE_SAYS: Record<Scope, string> = {
   business: "Changes every store at once.",
-  store: "Changes one store. You choose which.",
+  store: "Changes one store. The owner chooses which; everyone else works at their own store only.",
   tablet: "Changes only the tablet or PC you are using now. Others keep their own.",
   me: "Changes only your own login.",
 };

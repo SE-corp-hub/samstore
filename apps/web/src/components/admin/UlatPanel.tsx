@@ -83,9 +83,12 @@ type Tab = "live" | "daily" | "monthly" | "kulang" | "trace" | "alerts" | "check
 
 export default function UlatPanel({ role, onNavigate }: { role?: string; onNavigate?: (tab: string) => void }) {
   const owner = !!role && (isOwnerRole(role) || role === "MANAGER");
+  // 2026-11-22: a manager runs one store, so the whole-business reports (month, trace, alerts, week) are the owner's.
+  const wholeBusiness = !!role && isOwnerRole(role);
   const [tab, setTab] = useState<Tab>(owner ? "live" : "daily");
-  const tabs: [Tab, string][] = owner
+  const tabs: [Tab, string][] = wholeBusiness
     ? [["live", "Stock Live"], ["daily", "Today"], ["monthly", "This month"], ["kulang", "Short"], ["trace", "Trace"], ["alerts", "Alerts"], ["check", "Stock check"], ["book", "Stock book"], ["moves", "Movement"], ["week", "Week"]]
+    : owner ? [["live", "Stock Live"], ["daily", "Today"], ["kulang", "Short"], ["check", "Stock check"], ["book", "Stock book"], ["moves", "Movement"]]
     : [["live", "Stock Live"], ["daily", "Closing"]];
   return (
     <div style={{ fontSize: 17 }}>

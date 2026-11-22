@@ -46,12 +46,15 @@ export default function TeamPanel() {
   const [pinValue, setPinValue] = useState("");
   const role = getAdminRole();
   const owner = roleCan(role, "manageTeam");
-  // 2026-11-20: a manager (every store) and a store head (its own store) look after counter logins:
-  // add them, fix name, PIN and password, unlock. Only the owner gives roles, chooses heads and removes.
+  // 2026-11-20: a store's manager and head look after its counter logins: add them, fix name, PIN and
+  // password, unlock. Only the owner gives roles, chooses heads and removes.
+  // 2026-11-22: a manager runs their own store only, like the head (the server keeps it so).
   const home = getHomeLocation();
-  const head = role === "STAFF" && isStoreHead() && !!home;
-  const canManage = owner || role === "MANAGER" || head;
-  const mayEdit = (m: Member) => owner || (m.role === "STAFF" && !m.isLocationHead && !!m.homeLocationId && (role === "MANAGER" || m.homeLocationId === home));
+  const head = (role === "MANAGER" || (role === "STAFF" && isStoreHead())) && !!home;
+  const canManage = owner || head;
+  const mayEdit = (m: Member) => owner || (m.role === "STAFF" && !m.isLocationHead && !!m.homeLocationId && m.homeLocationId === home);
+  /** A manager or counter login must have a store (2026-11-22). */
+  const needsStore = (r: string) => r === "MANAGER" || r === "STAFF";
   // Step 8: logins made ahead and handed over later.
   const [ready, setReady] = useState({ label: "", homeLocationId: "", head: false });
   const [readyError, setReadyError] = useState<string | null>(null);
@@ -269,19 +272,19 @@ export default function TeamPanel() {
                 <label className="form-label small mb-1" htmlFor="tm-home">{owner ? "Location" : "Store"}</label>
                 {head ? <div id="tm-home" className="form-control bg-light">{locLabel(home)}</div> : (
                   <select id="tm-home" className="form-select" value={form.homeLocationId} onChange={(e) => setForm({ ...form, homeLocationId: e.target.value })}>
-                    <option value="">{owner ? "All" : "Choose…"}</option>
+                    <option value="">{owner && !needsStore(form.role) ? "All" : "Choose…"}</option>
                     {locations.map((l) => <option key={l.id} value={l.id}>{locLabel(l.id)}</option>)}
                   </select>
                 )}
               </div>
             </div>
-            <button className="btn btn-success mt-3" type="submit" disabled={inviting || (!form.phone.trim() && !form.email.trim())}>
+            <button className="btn btn-success mt-3" type="submit" disabled={inviting || (!form.phone.trim() && !form.email.trim()) || (needsStore(form.role) && !form.homeLocationId && !head)}>
               {inviting ? "Adding…" : "Add"}
             </button>
             {!owner && <p className="text-muted small mt-2 mb-0">You add counter (STAFF) logins{head ? " for your store" : ""}. Only the owner gives other roles or makes someone the head of a store.</p>}
             {owner && <p className="text-muted small mt-2 mb-0">
               <strong>MANAGER</strong> runs the store · <strong>STAFF</strong> sells, releases and receives at their location · <strong>SALES_AGENT</strong> takes orders · <strong>DELIVERY</strong> courier app only.
-              Owners and managers work at every location.
+              Only the owner works at every store. A manager or staff login works at the one store you choose.
             </p>}
           </div>
         </form>
@@ -449,14 +452,14 @@ export default function TeamPanel() {
                     </select>
                   </td>
                   <td className="tm-loc" data-label="Location">
-                    {owner && m.role !== "OWNER" && m.role !== "MANAGER" ? (
+                    {owner && m.role !== "OWNER" ? (
                       <>
                         <select
                           className="form-select form-select-sm" style={{ width: 170 }} aria-label={`Home location of ${m.name ?? m.userId}`}
                           value={m.homeLocationId ?? ""}
                           onChange={(e) => patchPerson(m.userId, { homeLocationId: e.target.value || null }, "Location saved.")}
                         >
-                          <option value="">All locations</option>
+                          <option value="" disabled={needsStore(m.role)}>{needsStore(m.role) ? "No store yet: choose one" : "All locations"}</option>
                           {locations.map((l) => <option key={l.id} value={l.id}>{locLabel(l.id)}</option>)}
                         </select>
                         {/* Step 7: the head may change this store's own prices (never under the owner's lowest price) and sees its profit. */}
@@ -470,16 +473,8 @@ export default function TeamPanel() {
                           </label>
                         )}
                       </>
-                    ) : role === "MANAGER" && mayEdit(m) ? (
-                      <select
-                        className="form-select form-select-sm" style={{ width: 170 }} aria-label={`Store of ${m.name ?? m.userId}`}
-                        value={m.homeLocationId ?? ""}
-                        onChange={(e) => e.target.value && patchPerson(m.userId, { homeLocationId: e.target.value }, "Store saved.")}
-                      >
-                        {locations.map((l) => <option key={l.id} value={l.id}>{locLabel(l.id)}</option>)}
-                      </select>
                     ) : (
-                      <span className="small">{m.role === "OWNER" || m.role === "MANAGER" ? "All locations" : locLabel(m.homeLocationId)}{m.isLocationHead ? " · Head" : ""}</span>
+                      <span className="small">{m.role === "OWNER" ? "All locations" : needsStore(m.role) && !m.homeLocationId ? <span className="badge text-bg-warning">No store yet</span> : locLabel(m.homeLocationId)}{m.isLocationHead ? " · Head" : ""}</span>
                     )}
                   </td>
                   <td className="tm-pin" data-label="PIN">

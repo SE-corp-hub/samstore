@@ -15,7 +15,7 @@ import { Prisma } from "@prisma/client";
 import type { ApiError } from "@sam-store/contracts";
 import { prisma } from "../persistence/prisma-repositories.js";
 import { dayRange, manilaDate, ReportError } from "../domain/reports.js";
-import { captureSignatures, locationRefusal, requireSignatures, signatureErrorResult, type Actor, type SignatureInput } from "../people/people.service.js";
+import { captureSignatures, locationRefusal, seesAllStores, requireSignatures, signatureErrorResult, type Actor, type SignatureInput } from "../people/people.service.js";
 import { closedDay, dayModeOn, openDayAt } from "../day/day-gate.js";
 import { switchesOfAll } from "../day/store-switches.js";
 import { mainLocationId, paymentsOfStore } from "./sales-book.js";
@@ -357,6 +357,9 @@ export class DayCloseService {
       if (!reason) throw new StepError(invalid("Why reopen the day? Type a reason"));
       const z = await prisma.registerSession.findFirst({ where: { id: input.id ?? "", storeId, status: "CLOSED", zNumber: { not: null } }, select: { id: true, zNumber: true, locationId: true, businessDate: true, registerId: true, openingFloatMinor: true, reopenedAt: true, closedAt: true } });
       if (!z || !z.locationId || !z.businessDate) throw new StepError(notFound("Z-read not found"));
+      // 2026-11-22: a manager reopens their own store's day only.
+      const notHere = locationRefusal(actor, z.locationId);
+      if (notHere) throw new StepError(forbidden(notHere));
       if (z.reopenedAt) throw new StepError(conflict("This day was already reopened"));
       const newer = await prisma.registerSession.findFirst({ where: { storeId, locationId: z.locationId, openedAt: { gt: z.closedAt ?? new Date(0) } }, select: { id: true } });
       if (newer) throw new StepError(conflict("A newer day was opened at this store after this one. Only the last day can be reopened."));
@@ -386,7 +389,7 @@ export class DayCloseService {
 
   async list(storeId: string, actor: Actor, input: { locationId?: string; from?: string; to?: string }) {
     return this.run(async () => {
-      const owner = OWNERS.includes(actor.role);
+      const owner = seesAllStores(actor);
       const locationId = input.locationId || (owner ? undefined : actor.homeLocationId ?? undefined);
       if (!owner && !locationId) throw new StepError(invalid("Choose the store"));
       if (locationId) { const r = locationRefusal(actor, locationId); if (r) throw new StepError(forbidden(r)); }

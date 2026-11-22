@@ -16,10 +16,10 @@ import { prisma } from "../persistence/prisma-repositories.js";
 import { cacheBust, cacheKey } from "../persistence/ttl-cache.js";
 import { txOptions } from "../persistence/tx-options.js";
 import { deductStock, restoreStock } from "../domain/movements.js";
-import { ALL_LOCATION_ROLES } from "../domain/people.js";
+import { NO_STORE_YET } from "../domain/people.js";
 import { isLoose, SellingError } from "../domain/selling.js";
 import { formatKilos } from "../domain/weight.js";
-import { nextDocNumber, signatureErrorResult, type Actor, type SignatureInput } from "../people/people.service.js";
+import { locationRefusal, nextDocNumber, seesAllStores, signatureErrorResult, type Actor, type SignatureInput } from "../people/people.service.js";
 import { freezeLineCosts } from "./settle-sale.js";
 import { BentaService, productSelect } from "./benta.service.js";
 import type { ApiError } from "@sam-store/contracts";
@@ -65,9 +65,11 @@ const count = (v: unknown, what: string, max = 100_000_000): number => {
 export class TruckService {
   private readonly benta = new BentaService();
 
-  /** Owner and managers only (the owner's answer, 2026-11-22). */
+  /** Owner and managers only (the owner's answer, 2026-11-22). A manager: their own store's trucks only. */
   private refusal(actor: Actor): string | null {
-    return (ALL_LOCATION_ROLES as readonly string[]).includes(actor.role) || actor.role === "STORE_OWNER" ? null : "Only the owner or a manager can do a truck delivery";
+    if (seesAllStores(actor)) return null;
+    if (actor.role !== "MANAGER") return "Only the owner or a manager can do a truck delivery";
+    return actor.homeLocationId ? null : NO_STORE_YET;
   }
 
   async finish(storeId: string, actor: Actor, input: TruckInput): Promise<Result<{ id: string; docNumber: string; summary: TruckSummary }>> {
@@ -90,6 +92,9 @@ export class TruckService {
     if (!selling) throw new SellingError("Choose the store doing the truck");
     if (selling.type !== "STORE") throw new SellingError(`${selling.name} cannot sell. Choose a store for the customers' orders.`);
     const unload = place(input.unloadLocationId) ?? selling;
+    // 2026-11-22: a manager's truck is their own store's: its supplier order, pre-orders and shelves.
+    const mine = (id: string | null | undefined) => !locationRefusal(actor, id);
+    if (!mine(selling.id) || !mine(unload.id)) throw new SellingError("You can only take a truck at your own store");
 
     // What came.
     const rawLines = Array.isArray(input.lines) ? input.lines : [];
@@ -98,9 +103,10 @@ export class TruckService {
     if (new Set(ids).size !== ids.length) throw new SellingError("Each rice only once");
     const products = new Map((await prisma.product.findMany({ where: { storeId, id: { in: ids }, isActive: true }, select: productSelect })).map((p) => [p.id, p]));
     const po = input.purchaseOrderId
-      ? await prisma.purchaseOrder.findFirst({ where: { id: input.purchaseOrderId, storeId }, select: { id: true, docNumber: true, supplierName: true, status: true, lines: { select: { id: true, productId: true, quantity: true, receivedQty: true, unitCostMinor: true } } } })
+      ? await prisma.purchaseOrder.findFirst({ where: { id: input.purchaseOrderId, storeId }, select: { id: true, docNumber: true, supplierName: true, status: true, locationId: true, lines: { select: { id: true, productId: true, quantity: true, receivedQty: true, unitCostMinor: true } } } })
       : null;
     if (input.purchaseOrderId && !po) throw new SellingError("Supplier order not found");
+    if (po && !mine(po.locationId)) throw new SellingError(`${po.docNumber} is for another store`);
     if (po && (po.status === "CANCELLED" || po.status === "RECEIVED")) throw new SellingError(`${po.docNumber} is ${po.status === "CANCELLED" ? "cancelled" : "already complete"}`);
     const lines = rawLines.map((l) => {
       const p = products.get(l.productId ?? "");
@@ -123,6 +129,7 @@ export class TruckService {
       ? await prisma.order.findMany({ where: { storeId, id: { in: preIds }, source: "PRE_ORDER", status: "ON_HOLD" }, include: { items: { select: { productId: true, productName: true, variantId: true, quantity: true } }, sellingLocation: { select: { name: true } } } })
       : [];
     if (preorders.length !== preIds.length) throw new SellingError("A pre-order was already completed or cancelled. Open the truck again.");
+    for (const o of preorders) if (!mine(o.sellingLocationId)) throw new SellingError(`${o.orderNumber} is another store's pre-order`);
     const toCustomers = new Map<string, number>();
     for (const o of preorders) {
       const fromTruck = o.items.filter((i) => i.productId && lineOf.has(i.productId));
@@ -135,6 +142,7 @@ export class TruckService {
     for (const s of Array.isArray(input.shelves) ? input.shelves : []) {
       const loc = place(s.locationId);
       if (!loc) throw new SellingError("Choose a store for each shelf");
+      if (!mine(loc.id)) throw new SellingError(`${loc.name} is not your store. Use Move stock to send rice there later.`);
       const p = lineOf.get(s.productId ?? "");
       if (!p) throw new SellingError("That rice is not on this truck");
       const q = count(s.quantity, p.product.name);
@@ -217,7 +225,7 @@ export class TruckService {
   async list(storeId: string, actor: Actor): Promise<Result<{ trucks: { id: string; docNumber: string; createdAt: Date; summary: TruckSummary }[] }>> {
     const no = this.refusal(actor);
     if (no) return forbidden(no);
-    const rows = await prisma.truckDelivery.findMany({ where: { storeId, createdAt: { gte: new Date(Date.now() - 60 * 86_400_000) } }, orderBy: { createdAt: "desc" }, take: 50, select: { id: true, docNumber: true, createdAt: true, summary: true } });
+    const rows = await prisma.truckDelivery.findMany({ where: { storeId, ...(seesAllStores(actor) ? {} : { locationId: actor.homeLocationId ?? "" }), createdAt: { gte: new Date(Date.now() - 60 * 86_400_000) } }, orderBy: { createdAt: "desc" }, take: 50, select: { id: true, docNumber: true, createdAt: true, summary: true } });
     return { ok: true, value: { trucks: rows.map((r) => ({ id: r.id, docNumber: r.docNumber, createdAt: r.createdAt, summary: r.summary as unknown as TruckSummary })) } };
   }
 }

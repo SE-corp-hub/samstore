@@ -290,12 +290,14 @@ function PriceHistoryList({ productId }: { productId: string }) {
 
 export default function ProductsPanel({ role = "" }: { role?: string }) {
   const [products, setProducts] = useState<AdminProduct[]>([]);
-  // Owner: everything. Manager: add a new product, and on an existing one the selling price, reorder
-  // level and picture only. Staff: look only (they add at POS with "+ New item").
+  // Owner: everything. Manager: add a new product (its opening stock goes to their own store), and on an
+  // existing one the picture only (2026-11-22: the main price and reorder level change every store; a
+  // manager sets their store's price on Store prices). Staff: look only (they add at POS with "+ New item").
   const canSetUp = roleCan(role, "setUpProducts");
   const canPrice = roleCan(role, "changePrices");
   const canAdd = roleCan(role, "addProducts");
-  const viewOnly = !canPrice;
+  const canPhoto = canAdd; // the owner and a manager change the picture
+
   // Staff get no cost from the server, so the cost column and field are hidden for them.
   const hasCost = products.length === 0 || typeof products[0]!.costMinor === "number";
   const [categories, setCategories] = useState<{ id: string; slug: string; name: string }[]>([]);
@@ -304,6 +306,9 @@ export default function ProductsPanel({ role = "" }: { role?: string }) {
   const [modal, setModal] = useState<{ open: boolean; editing: AdminProduct | null }>({ open: false, editing: null });
   // A new product is filled in whole by whoever may add one; an existing one's details are the owner's.
   const locked = modal.editing ? !canSetUp : !canAdd;
+  const viewOnly = modal.editing ? !canPhoto : !canAdd;
+  /** Price fields: the owner always; a manager only on a new product they are adding. */
+  const priceLocked = modal.editing ? !canPrice : !canAdd;
   const [form, setForm] = useState<ProductForm>(EMPTY_FORM);
   const [creatingCategory, setCreatingCategory] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -474,9 +479,9 @@ export default function ProductsPanel({ role = "" }: { role?: string }) {
       };
       return payload;
       })();
-      // A manager sends only what a manager may change (the server refuses the rest).
-      const payload = !locked ? fullPayload : { priceMinor, reorderThreshold: fullPayload.reorderThreshold };
-      const res = await fetch(
+      // A manager changes only the picture of an existing product (sent below): nothing else to save.
+      const payload = !locked ? fullPayload : null;
+      const res = !payload ? null : await fetch(
         `${API_URL}/admin/products${modal.editing ? `/${modal.editing.id}` : ""}`,
         {
           method: modal.editing ? "PATCH" : "POST",
@@ -484,8 +489,8 @@ export default function ProductsPanel({ role = "" }: { role?: string }) {
                     body: JSON.stringify(payload),
         },
       );
-      const data = await res.json();
-      if (!res.ok) {
+      const data = res ? await res.json() : null;
+      if (res && !res.ok) {
         setError(data?.errors?.join(", ") ?? data?.message ?? "Save failed");
         return;
       }
@@ -631,7 +636,7 @@ export default function ProductsPanel({ role = "" }: { role?: string }) {
                 <th className="col-wide">SKU</th>
                 <th className="text-end">Selling price</th>
                 {hasCost && <th className="text-end col-wide">Unit cost</th>}
-                <th className="text-end col-roomy">Stock, all stores</th>
+                <th className="text-end col-roomy">{homeId && !canSetUp ? "Stock here" : "Stock, all stores"}</th>
                 <th className="col-wide">Category</th>
                 <th className="col-roomy">Status</th>
                 <th className="text-end">Actions</th>
@@ -705,9 +710,9 @@ export default function ProductsPanel({ role = "" }: { role?: string }) {
                       <button className="btn btn-sm btn-outline-secondary me-1" title="Edit" aria-label={`Edit ${p.name}`} onClick={() => openEdit(p)}>
                         <i className="bi bi-pencil"></i>
                       </button>
-                    ) : canPrice ? (
-                      <button className="btn btn-sm btn-outline-secondary" aria-label={`Change price of ${p.name}`} onClick={() => openEdit(p)}>
-                        <i className="bi bi-tag me-1" aria-hidden="true"></i>Price
+                    ) : canPhoto ? (
+                      <button className="btn btn-sm btn-outline-secondary" aria-label={`Picture and details of ${p.name}`} onClick={() => openEdit(p)}>
+                        <i className="bi bi-image me-1" aria-hidden="true"></i>Picture
                       </button>
                     ) : (
                       <button className="btn btn-sm btn-outline-secondary" aria-label={`See details of ${p.name}`} onClick={() => openEdit(p)}>
@@ -735,7 +740,7 @@ export default function ProductsPanel({ role = "" }: { role?: string }) {
               <div className="modal-content">
                 <form onSubmit={save}>
                   <div className="modal-header">
-                    <h5 className="modal-title">{!modal.editing ? "New product" : canSetUp ? "Edit product" : canPrice ? "Change price" : "Product details"}</h5>
+                    <h5 className="modal-title">{!modal.editing ? "New product" : canSetUp ? "Edit product" : canPhoto ? "Picture" : "Product details"}</h5>
                     <button type="button" className="btn-close" onClick={() => setModal({ open: false, editing: null })}></button>
                   </div>
                   <div className="modal-body">
@@ -746,7 +751,7 @@ export default function ProductsPanel({ role = "" }: { role?: string }) {
                         <i className="bi bi-lock-fill mt-1" aria-hidden="true"></i>
                         <div>{viewOnly
                           ? "View only. Only the owner or a manager can change products."
-                          : "You can change the selling price, reorder level and picture. Only the owner can change the name and the other details (shown in grey)."}</div>
+                          : "You can change the picture. Only the owner can change the name, price and other details, because they change every store. Set your store's own price on Store prices."}</div>
                       </div>
                     )}
                     <PhotoPicker photoKey={modal.editing?.photoKey} value={photo} onChange={setPhoto} disabled={saving || viewOnly} />
@@ -807,7 +812,7 @@ export default function ProductsPanel({ role = "" }: { role?: string }) {
                     </div>
                     </fieldset>
                     <div className="row">
-                      <fieldset className="col-6 mb-2" disabled={viewOnly}>
+                      <fieldset className="col-6 mb-2" disabled={priceLocked}>
                         <label className="form-label small" htmlFor="productSellingPrice">Price for all stores (₱) {form.soldByWeight ? "per kilo" : "per unit"} *</label>
                         <PesoInput id="productSellingPrice" required value={form.priceMinor} onChange={(v) => setForm({ ...form, priceMinor: v })} placeholder="0.00" aria-describedby="productSellingPrice-help" />
                         <small id="productSellingPrice-help" className="text-muted d-block">A store with its own price on Store prices sells at that price instead.</small>
@@ -850,7 +855,9 @@ export default function ProductsPanel({ role = "" }: { role?: string }) {
                         <fieldset className="col-6 mb-2" disabled={locked}>
                           <label className="form-label small">Opening stock</label>
                           <WholeInput value={form.stock} onChange={(v) => setForm({ ...form, stock: v })} placeholder="0" />
-                          {places.length > 1 && (
+                          {places.length > 1 && !canSetUp && homeId ? (
+                            <div className="small text-muted mt-2">Goes to your store: {places.find((w) => w.id === homeId)?.name ?? "your store"}</div>
+                          ) : places.length > 1 && (
                             <>
                               <label className="form-label small mt-2 mb-1" htmlFor="openingStockAt">Goes to which store</label>
                               <select id="openingStockAt" className="form-select" value={stockAt || mainPlace?.id || ""} onChange={(e) => setStockAt(e.target.value)}>
@@ -860,7 +867,7 @@ export default function ProductsPanel({ role = "" }: { role?: string }) {
                           )}
                         </fieldset>
                       )}
-                      <fieldset className="col-6 mb-2" disabled={viewOnly}>
+                      <fieldset className="col-6 mb-2" disabled={priceLocked}>
                         <label className="form-label small" htmlFor="reorderAtMain">Reorder at{mainPlace ? ` (${mainPlace.name})` : " (main store)"}</label>
                         <WholeInput id="reorderAtMain" placeholder="0" title="Flag LOW stock at or below this on-hand qty" value={form.reorderThreshold} onChange={(v) => setForm({ ...form, reorderThreshold: v })} />
                         <div className="small text-muted mt-1">Other stores: Inventory → Adjust.</div>

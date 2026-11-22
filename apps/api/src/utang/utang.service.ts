@@ -318,7 +318,8 @@ export class UtangService {
   }
 
   async updateSettings(storeId: string, actor: Actor, input: Record<string, unknown>) {
-    if (!LIMIT_ROLES.includes(actor.role)) return forbidden("Only the owner can change this");
+    // The credit texts and reminders are the whole business's: the owner's (2026-11-22).
+    if (!["OWNER", "STORE_OWNER"].includes(actor.role)) return forbidden("Only the owner can change this");
     const patch: { utangSmsEnabled?: boolean; utangMonthlyReminder?: boolean; utangOverdueReminder?: boolean; utangOverdueDays?: number; smsSenderName?: string | null } = {};
     for (const k of ["utangSmsEnabled", "utangMonthlyReminder", "utangOverdueReminder"] as const) {
       const v = input[k];

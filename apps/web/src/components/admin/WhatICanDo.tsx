@@ -6,7 +6,9 @@
 // use and the server check (scripts/who-can-check.ts) tests, so the guide never says something the app
 // does not do.
 
-import { isStoreHead } from "../../lib/admin";
+import { useEffect, useState } from "react";
+import { getHomeLocation, isStoreHead } from "../../lib/admin";
+import { cachedGet } from "../../lib/offlineCache";
 import { RULES, SCOPE_LABEL, WHO_LABEL, WHO_SAYS, whoIs, type Right, type Rule, type Scope, type Who } from "../../lib/who-can";
 
 const SCOPES: Scope[] = ["business", "store", "tablet", "me"];
@@ -40,6 +42,13 @@ function List({ rules, right, who }: { rules: Rule[]; right: Right[]; who: Who }
 
 export default function WhatICanDo({ role = "" }: { role?: string }) {
   const who = whoIs(role, isStoreHead());
+  // 2026-11-22: everyone but the owner works at one store; say which.
+  const [storeName, setStoreName] = useState<string | null>(null);
+  useEffect(() => {
+    const home = getHomeLocation();
+    if (!home || who === "owner") return;
+    void cachedGet<{ warehouses?: { id: string; name: string }[] }>("/admin/warehouses").then((d) => setStoreName(d?.warehouses?.find((w) => w.id === home)?.name ?? null)).catch(() => undefined);
+  }, [who]);
   if (!who) {
     return (
       <div className="wicd-screen">
@@ -54,6 +63,12 @@ export default function WhatICanDo({ role = "" }: { role?: string }) {
       <h1 className="h4 mb-1">What I can do</h1>
       <p className="wicd-who"><i className="bi bi-person-badge" aria-hidden="true"></i>You are logged in as <strong>{WHO_LABEL[who]}</strong></p>
       <p className="fs-5">{WHO_SAYS[who]}</p>
+      {who !== "owner" && (
+        <p className="fs-5 wicd-store">
+          <i className="bi bi-shop me-1" aria-hidden="true"></i>
+          {storeName ? <>Your store: <strong>{storeName}</strong>. Everything you see and change is this store's only.</> : getHomeLocation() ? "You see and change your own store only." : "Your login has no store yet, so you cannot sell or change stock. Ask the owner to choose your store in Team."}
+        </p>
+      )}
 
       <section className="wicd-card wicd-yes" aria-labelledby="wicd-yes">
         <h2 id="wicd-yes"><i className="bi bi-pencil-square" aria-hidden="true"></i>You can change</h2>

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   getAdminToken, getAdminStoreId, setAdminStoreId, getAdminRole, clearAdminSession,
-  NAV_GROUPS, MENU_HIDDEN, REPORT_SECTIONS, isReportSection, allowedTabs, setHomeLocation, adminHeaders, defaultTabFor, isOwnerRole, handleUnauthorized, STORES_CHANGED_EVENT, navItemFor, navGroupFor, toneFor, getHomeLocation, isStoreLogin, isStoreHead,
+  NAV_GROUPS, MENU_HIDDEN, REPORT_SECTIONS, isReportSection, allowedTabs, hasNoStoreYet, setHomeLocation, adminHeaders, defaultTabFor, isOwnerRole, handleUnauthorized, STORES_CHANGED_EVENT, navItemFor, navGroupFor, toneFor, getHomeLocation, isStoreLogin, isStoreHead,
 } from "../../../lib/admin";
 import dynamic from "next/dynamic";
 import { API_URL } from "../../../config";
@@ -131,7 +131,7 @@ export default function AdminDashboard() {
   const [activeStore, setActiveStore] = useState<string | null>(null);
   const [role, setRole] = useState("");
   // Step 6 (the wall): the login's home store decides which screens the menu offers.
-  const [, setHomeSeen] = useState<string | null>(null);
+  const [homeSeen, setHomeSeen] = useState<string | null>(null);
   useEffect(() => {
     if (!authed || !activeStore) return;
     let off = false;
@@ -679,6 +679,12 @@ export default function AdminDashboard() {
         )}
 
         <main className={`container-fluid py-4 flex-grow-1${BAR_ROLES.includes(role) ? " has-staff-bar" : ""}`} style={{ background: "var(--sam-bg)" }}>
+          {/* 2026-11-22: a manager or counter login works at its own store only; without one the server lets it do nothing. */}
+          {homeSeen !== null && hasNoStoreYet(role) && (
+            <div className="alert alert-warning py-2" role="alert">
+              <i className="bi bi-shop me-1" aria-hidden="true"></i>Your login has no store yet, so you cannot sell or change stock. Ask the owner to choose your store in Team.
+            </div>
+          )}
           {showPinPad && pinLock.lock ? (
             <LockScreen
               lock={pinLock.lock}
