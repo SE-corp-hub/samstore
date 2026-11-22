@@ -9,7 +9,7 @@
 //     balance is reduced (a cash sale gets a refund row to pay out from the drawer).
 //   * Reminders: a monthly balance text and an overdue text, once per period.
 
-import { addedAtStore, customerAdded } from "../domain/added-where.js";
+import { addedAtStore, addedTagReader, customerAdded } from "../domain/added-where.js";
 import { cashTimeFor, dayGate } from "../day/day-gate.js";
 import { offlineSoldAt } from "../domain/selling.js";
 import { storeOwedFirst } from "../cash/cash-book.js";
@@ -134,7 +134,7 @@ export class UtangService {
       prisma.storeCustomer.findMany({
         where: { storeId, ...(q ? { customer: { OR: [{ name: { contains: q, mode: "insensitive" } }, { phone: { contains: q.replace(/\D/g, "").slice(-7) || q } }] } } : {}) },
         include: {
-          customer: { select: { name: true, phone: true } },
+          customer: { select: { name: true, phone: true, address: true } },
           credit: { where: { type: "purchase" }, orderBy: { createdAt: "asc" }, take: 1, select: { createdAt: true } },
           smsMessages: { orderBy: { createdAt: "desc" }, take: 1, select: { status: true, createdAt: true } },
         },
@@ -143,6 +143,8 @@ export class UtangService {
       }),
       prisma.storeSettings.findUnique({ where: { storeId }, select: { creditLimitMinor: true } }),
     ]);
+    // 2026-11-22: address + "Made at" store go along so the Credit list can split customers by town (Lipa / Bauan).
+    const tagOf = await addedTagReader(storeId, rows);
     return rows.map((r) => {
       const limitMinor = r.creditUnlimited ? null : r.creditLimitMinor > 0 ? r.creditLimitMinor : settings?.creditLimitMinor ?? 0;
       const st = creditStatus({ approved: r.creditApproved, unlimited: r.creditUnlimited, limitMinor, balanceMinor: r.creditBalanceMinor });
@@ -151,6 +153,7 @@ export class UtangService {
         limitMinor, unlimited: r.creditUnlimited, ownLimit: r.creditLimitMinor > 0, status: st.status, availableMinor: st.availableMinor,
         oldestUtangAt: r.creditBalanceMinor > 0 ? r.credit[0]?.createdAt ?? null : null,
         lastText: r.smsMessages[0] ?? null,
+        address: r.customer.address ?? null, addedAt: tagOf(r).addedAt,
       };
     });
   }

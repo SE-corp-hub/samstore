@@ -9,6 +9,7 @@ import { loadActor } from "../people/people.service.js";
 import { signaturesFrom } from "../people/signature-input.js";
 import { listSms, logOpenedText, resendSms } from "../sms/sms.service.js";
 import { UtangService } from "./utang.service.js";
+import { prisma } from "../persistence/prisma-repositories.js";
 
 function statusFor(error: ApiError): HttpStatus {
   switch (error.type) {
@@ -45,8 +46,10 @@ export class UtangController {
   /** GET /admin/utang/customers?search= — the customer list with balances, limits and the last text. */
   @Get("utang/customers")
   async customers(@Req() req: Req_, @Query("search") search?: string, @Headers("x-store-id") h?: string) {
-    const { storeId } = await this.ctx(req, h);
-    return { storeId, customers: await this.utang.customers(storeId, { search }) };
+    const { storeId, actor } = await this.ctx(req, h);
+    // The login's own store, so the Credit list can start on that store's town (Lipa store = Lipa, the rest = Bauan).
+    const home = actor.homeLocationId ? await prisma.warehouse.findFirst({ where: { storeId, id: actor.homeLocationId }, select: { id: true, name: true } }) : null;
+    return { storeId, home, customers: await this.utang.customers(storeId, { search }) };
   }
 
   /** POST /admin/utang/customers — { name, phone, limitMinor? (owner/manager only) } */
