@@ -26,10 +26,14 @@ import { peso } from "../../lib/number-format";
 import { isBelowCost, OWNER_COST_NOTE, ownsCostRole } from "../../lib/below-cost";
 import { askBelowCost, saveUnitCost } from "./BelowCostDialog";
 import { useMediaQuery, WIDE } from "../../lib/use-media-query";
+import { AREAS, customerArea, nameWithTown, storeArea, type Area } from "../../lib/customer-area";
+import { useCustomerArea } from "./StartChoices";
 
 interface Cust {
   id: string; name: string; phone: string | null; balanceMinor: number; creditApproved: boolean; limitMinor: number | null; unlimited: boolean; ownLimit: boolean; status: string; availableMinor: number | null;
   oldestUtangAt: string | null; lastText: { status: string; createdAt: string } | null;
+  /** For the town (Lipa / Bauan): the name, else the address, else the store they were added at. */
+  address?: string | null; addedAt?: { name: string } | null;
 }
 interface Sms { id: string; template: string; text: string; status: "QUEUED" | "SENT" | "FAILED" | "SKIPPED" | "OPENED"; provider: string | null; lastError: string | null; createdAt: string; storeCustomer: { customer: { name: string | null } } | null }
 interface Settings { utangSmsEnabled: boolean; utangMonthlyReminder: boolean; utangOverdueReminder: boolean; utangOverdueDays: number; smsSenderName: string | null }
@@ -82,6 +86,39 @@ function Chips<T extends string>({ value, onChange, items, label }: { value: T; 
   );
 }
 
+/**
+ * "All · Lipa · Bauan" over the Credit list (2026-11-22, the same towns as the POS customer filter): each button shows
+ * how much that town owes, so the owner sees the split at a glance; one tap narrows the list. Hidden when no customer
+ * has a town yet.
+ */
+function TownFilter({ customers, area, onArea }: { customers: Cust[]; area: string; onArea: (a: string) => void }) {
+  const owed: Record<"" | Area, number> = { "": 0, lipa: 0, bauan: 0 };
+  const people: Record<"" | Area, number> = { "": customers.length, lipa: 0, bauan: 0 };
+  for (const c of customers) {
+    const a = customerArea(c);
+    if (c.balanceMinor > 0) owed[""] += c.balanceMinor;
+    if (!a) continue;
+    people[a]++;
+    if (c.balanceMinor > 0) owed[a] += c.balanceMinor;
+  }
+  if (people.lipa + people.bauan === 0) return null;
+  const opts = [{ id: "" as const, label: "All" }, ...AREAS.map((a) => ({ id: a.id, label: a.label }))];
+  return (
+    <div className="area-filter credit-towns mb-3" role="group" aria-label="Show customers from">
+      {opts.map((o) => {
+        const on = o.id === area;
+        return (
+          <button key={o.id || "all"} type="button" className={`btn area-btn ${on ? "btn-dark" : "btn-outline-dark"}`} aria-pressed={on}
+            disabled={people[o.id] === 0 && !on} onClick={() => onArea(o.id)}>
+            <span className="town-name">{on && <i className="bi bi-check-lg me-1" aria-hidden="true"></i>}{o.label}</span>
+            <span className="town-owed" style={NUM}>{peso(owed[o.id])}<span className="visually-hidden"> owed</span></span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function UtangRicePanel({ role }: { role?: string; onNavigate?: (tab: string) => void }) {
   const owner = !!role && (isOwnerRole(role) || role === "MANAGER");
   const wide = useMediaQuery(WIDE);
@@ -102,6 +139,9 @@ export default function UtangRicePanel({ role }: { role?: string; onNavigate?: (
   const [showAllHistory, setShowAllHistory] = useState(false);
   // Entries ticked for the statement; null = not choosing, the statement prints everything.
   const [pick, setPick] = useState<Set<string> | null>(null);
+  // 2026-11-22: All / Lipa / Bauan, starting on the login's store town (Lipa store = Lipa; the other stores = Bauan).
+  const [homeName, setHomeName] = useState<string | null>(null);
+  const [area, setArea] = useCustomerArea(storeArea(homeName));
 
   const load = useCallback(async () => {
     const q = search.trim() ? `?search=${encodeURIComponent(search.trim())}` : "";
@@ -109,6 +149,7 @@ export default function UtangRicePanel({ role }: { role?: string; onNavigate?: (
     const d = await res.json().catch(() => null);
     if (!res.ok) { setError(errText(d, "Could not load")); return; }
     const list = d.customers as Cust[];
+    setHomeName((d.home as { name?: string } | null)?.name ?? null);
     setError(null);
     setCustomers(list);
     // Keep the open customer's numbers fresh (a payment, a new limit).
@@ -189,7 +230,9 @@ export default function UtangRicePanel({ role }: { role?: string; onNavigate?: (
     toast("Saved");
   };
 
-  const all = customers ?? [];
+  const everyone = customers ?? [];
+  const inTown = (c: Cust) => !area || customerArea(c) === area;
+  const all = everyone.filter(inTown);
   const overAfter = settings?.utangOverdueDays ?? 30;
   const owing = all.filter((c) => c.balanceMinor > 0);
   const overdue = owing.filter((c) => days(c.oldestUtangAt) > overAfter).sort((a, b) => days(b.oldestUtangAt) - days(a.oldestUtangAt));
@@ -200,8 +243,10 @@ export default function UtangRicePanel({ role }: { role?: string; onNavigate?: (
     owing: "Nobody owes right now.", overdue: `Nobody has owed for more than ${overAfter} days.`, limit: "Nobody is near or at their limit.", all: "No customers yet.",
   };
 
+  const townLabel = AREAS.find((a) => a.id === area)?.label ?? "";
   const list = (
     <>
+      <TownFilter customers={everyone} area={area} onArea={setArea} />
       <div className="d-flex gap-2 mb-3">
         <input type="search" className="form-control form-control-lg" placeholder="Search name or number" aria-label="Search customers" value={search} onChange={(e) => setSearch(e.target.value)} />
         <button type="button" className="btn btn-success btn-lg text-nowrap flex-shrink-0" onClick={() => { setSelected(null); setAdding(true); }}><i className="bi bi-person-plus me-1" aria-hidden="true"></i>New</button>
@@ -214,7 +259,10 @@ export default function UtangRicePanel({ role }: { role?: string; onNavigate?: (
       ]} />
       {customers === null ? <p className="text-muted">Loading…</p> : shown.length === 0 ? (
         <div className="text-center text-muted border rounded-3 py-4 px-3">
-          <i className="bi bi-emoji-smile fs-2 d-block mb-1" aria-hidden="true"></i>{search.trim() ? `No customer matches “${search.trim()}”.` : emptyWords[filter]}
+          <i className="bi bi-emoji-smile fs-2 d-block mb-1" aria-hidden="true"></i>{search.trim() ? `No customer matches “${search.trim()}”${townLabel ? ` in ${townLabel}` : ""}.` : emptyWords[filter]}
+          {townLabel && everyone.length > all.length && (
+            <button type="button" className="btn btn-outline-dark d-block mx-auto mt-2" style={{ minHeight: 44 }} onClick={() => setArea("")}>Show all towns</button>
+          )}
         </div>
       ) : (
         <div className="list-group">
@@ -228,7 +276,7 @@ export default function UtangRicePanel({ role }: { role?: string; onNavigate?: (
                 className={`list-group-item list-group-item-action d-flex align-items-center gap-3 py-2 ${isOpen ? "bg-light" : ""}`}
                 style={{ minHeight: 64, borderLeft: isOpen ? "6px solid #1f1d1a" : undefined }}>
                 <span className="flex-grow-1" style={{ minWidth: 0 }}>
-                  <span className="fw-semibold d-block text-break">{c.name}</span>
+                  <span className="fw-semibold d-block text-break">{nameWithTown(c)}</span>
                   <span className="small text-muted d-block">
                     {c.phone ?? "No number"}{c.balanceMinor > 0 && c.oldestUtangAt ? ` · owing ${d} day${d === 1 ? "" : "s"}` : ""}
                   </span>
@@ -387,7 +435,7 @@ export default function UtangRicePanel({ role }: { role?: string; onNavigate?: (
     <div style={{ fontSize: 18 }}>
       <div className="d-flex flex-wrap align-items-baseline justify-content-between gap-2 mb-2">
         <h1 className="h4 mb-0">Credit</h1>
-        <span style={NUM}><span className="fs-4 fw-bold">{peso(totalOwed)}</span> <span className="text-muted">owed by {owing.length} customer{owing.length === 1 ? "" : "s"}</span></span>
+        <span style={NUM}><span className="fs-4 fw-bold">{peso(totalOwed)}</span> <span className="text-muted">owed by {owing.length} customer{owing.length === 1 ? "" : "s"}{tab === "list" && townLabel ? ` in ${townLabel}` : ""}</span></span>
       </div>
       <ul className="nav nav-tabs mb-3">
         <li className="nav-item"><button className={`nav-link ${tab === "list" ? "active" : ""}`} onClick={() => { setTab("list"); open(null); }}>Customers</button></li>
