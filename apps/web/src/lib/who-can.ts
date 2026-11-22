@@ -37,7 +37,8 @@ export const RULES: Rule[] = [
   { id: "businessLock", what: "PIN lock for the whole business", where: "Settings → PIN lock", scope: "business", rights: { owner: "yes", manager: "no", head: "no", staff: "no" } },
   { id: "locations", what: "Add a store, rename it, where it takes rice from", where: "Menu → Locations", scope: "business", rights: { owner: "yes", manager: "look", head: "no", staff: "no" } },
   { id: "productAdd", what: "Add a new rice (a manager's opening stock goes to their own store; counter logins: \"+ New item\" on POS, the owner checks it)", where: "Products → New product", scope: "business", rights: { owner: "yes", manager: "yes", head: "look", staff: "look" } },
-  { id: "productSetup", what: "Rice name, SKU, cost, group, sack size, per kilo, hide", where: "Products", scope: "business", rights: { owner: "yes", manager: "look", head: "look", staff: "look" } },
+  { id: "productName", what: "A rice's name (the new name shows at every store and on receipts)", where: "Products → Manage", scope: "business", rights: { owner: "yes", manager: "yes", head: "look", staff: "look" } },
+  { id: "productSetup", what: "SKU, cost, group, sack size, per kilo, hide", where: "Products", scope: "business", rights: { owner: "yes", manager: "look", head: "look", staff: "look" } },
   { id: "productPrice", what: "Price for all stores and the main store's reorder level", where: "Products", scope: "business", rights: { owner: "yes", manager: "look", head: "look", staff: "look" } },
   { id: "productPhoto", what: "A rice's picture", where: "Products → Picture", scope: "business", rights: { owner: "yes", manager: "yes", head: "look", staff: "look" } },
   { id: "lowestPrice", what: "Lowest price a store may sell at", where: "Store prices", scope: "business", rights: { owner: "yes", manager: "look", head: "look", staff: "no" } },
@@ -46,13 +47,13 @@ export const RULES: Rule[] = [
   // ── One store ──
   { id: "thisStore", what: "Open day and Z-read, drawer, per kilo, target, receipt details", where: "Settings → This store", scope: "store", rights: { owner: "yes", manager: "own", head: "own", staff: "no" } },
   { id: "storeLock", what: "The store's own PIN lock", where: "Settings → PIN lock (heads: Store PIN lock)", scope: "store", rights: { owner: "yes", manager: "own", head: "own", staff: "no" } },
-  { id: "storePrice", what: "A store's own selling price", where: "Store prices", scope: "store", rights: { owner: "yes", manager: "own", head: "own", staff: "no" } },
+  { id: "storePrice", what: "A store's own selling price", where: "Store prices, or Products → Manage (managers)", scope: "store", rights: { owner: "yes", manager: "own", head: "own", staff: "no" } },
   { id: "teamCounter", what: "Counter logins: add, name, PIN, password, unlock", where: "Team", scope: "store", rights: { owner: "yes", manager: "own", head: "own", staff: "no" } },
   // ── Work at a store (2026-11-22: everyone but the owner works at their OWN store only) ──
   { id: "storeWork", what: "Sell, pre-orders, orders, credit payments, Stock in, Count, Resack, Truck arrived, expenses and cash in", where: "POS, Pre-order, Orders, Credit, Stock in, Count, Resack", scope: "store", rights: { owner: "yes", manager: "own", head: "own", staff: "own" } },
   { id: "storeSee", what: "See a store's stock, sales, cash, Z-reads, approvals and records", where: "Inventory, Reports, For your approval", scope: "store", rights: { owner: "yes", manager: "own", head: "own", staff: "own" } },
   { id: "storeMove", what: "Move stock: send rice out of a store (the other store sends you theirs)", where: "Move stock", scope: "store", rights: { owner: "yes", manager: "own", head: "own", staff: "own" } },
-  { id: "storeReorder", what: "A store's own reorder level, stock fix (Adjust)", where: "Inventory → Adjust", scope: "store", rights: { owner: "yes", manager: "own", head: "no", staff: "no" } },
+  { id: "storeReorder", what: "A store's own reorder level, stock fix (Adjust)", where: "Inventory → Adjust, or Products → Manage (managers)", scope: "store", rights: { owner: "yes", manager: "own", head: "no", staff: "no" } },
   // ── This tablet / me ──
   { id: "printer", what: "Printer and receipt width", where: "Settings → Printer (or Counter & printer)", scope: "tablet", rights: { owner: "yes", manager: "yes", head: "yes", staff: "yes" } },
   { id: "account", what: "My name, email, password and PIN", where: "Settings → My account", scope: "me", rights: { owner: "yes", manager: "yes", head: "yes", staff: "yes" } },

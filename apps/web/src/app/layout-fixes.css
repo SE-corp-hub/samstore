@@ -308,3 +308,16 @@ main.has-staff-bar .modal { padding-bottom: var(--staff-bar-h, 0px); }
   .order-check.wide .sale-total .amount { font-size: 1.8rem; }
 }
 .sell-fit .order-check.wide .check-right { min-height: 0; overflow-y: auto; }
+
+/* Products → Manage (2026-11-22): a manager's own store's side of a rice (price, reorder, stock, picture).
+   Stock blue edge = one store; the shared details fold away under "More details". */
+.here-card { border: 1px solid #c9c4bc; border-left: 6px solid #0B4F8A; border-radius: 12px; padding: 14px 16px; margin: 0 0 16px; background: #fff; }
+.here-title { font-size: 1.15rem; font-weight: 700; margin: 0 0 10px; color: #0B4F8A; overflow-wrap: anywhere; }
+.here-stock { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 8px 12px; border-radius: 10px; background: #E3F0FB; }
+.here-stock strong { font-size: 1.25rem; }
+.here-card .photo-picker, .here-card > :last-child { margin-top: 12px; }
+.shared-details { border: 1px solid #c9c4bc; border-radius: 12px; padding: 0 12px; margin: 0 0 8px; }
+.shared-details > summary { min-height: 48px; display: flex; align-items: center; font-weight: 700; cursor: pointer; color: #1f1d1a; }
+.shared-details > summary:focus-visible { outline: 3px solid #0B4F8A; outline-offset: 2px; border-radius: 8px; }
+.shared-details[open] { padding-bottom: 12px; }
+.admin-shell .btn-manage { min-height: 44px; min-width: 44px; }

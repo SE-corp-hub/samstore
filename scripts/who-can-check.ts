@@ -52,7 +52,7 @@ async function main() {
 
   // ── what to try: the value it already has goes back in ──
   const settings = await prisma.store.findUniqueOrThrow({ where: { id: storeId }, select: { name: true, settings: { select: { seniorPwdDiscountEnabled: true, creditTermDays: true, quotaPromoEnabled: true, allowGuestOrders: true } } } });
-  const product = await prisma.product.findFirstOrThrow({ where: { storeId, isActive: true }, select: { id: true, name: true, priceMinor: true, floorPriceMinor: true } });
+  const product = await prisma.product.findFirstOrThrow({ where: { storeId, isActive: true }, select: { id: true, name: true, sku: true, priceMinor: true, floorPriceMinor: true } });
   const sells = places.filter((p) => p.type !== "WAREHOUSE");
   const probes: Probe[] = [
     { rule: "businessName", method: "PATCH", path: "/admin/store-name", body: { name: settings.name } },
@@ -63,7 +63,8 @@ async function main() {
     ...places.map((p) => ({ rule: "locations", at: p.id, method: "PATCH", path: `/admin/warehouses/${p.id}`, body: { name: p.name } })),
     // An empty new product: allowed logins get 422 (name needed), refused ones 403. Nothing is saved.
     { rule: "productAdd", method: "POST", path: "/admin/products", body: {} },
-    { rule: "productSetup", method: "PATCH", path: `/admin/products/${product.id}`, body: { name: product.name } },
+    { rule: "productName", method: "PATCH", path: `/admin/products/${product.id}`, body: { name: product.name } },
+    { rule: "productSetup", method: "PATCH", path: `/admin/products/${product.id}`, body: { sku: product.sku } },
     { rule: "productPrice", method: "PATCH", path: `/admin/products/${product.id}`, body: { priceMinor: product.priceMinor } },
     { rule: "lowestPrice", method: "PUT", path: `/admin/products/${product.id}/lowest-price`, body: { floorPriceMinor: product.floorPriceMinor } },
     ...places.map((p) => ({ rule: "thisStore", at: p.id, method: "PATCH", path: `/admin/store-settings/${p.id}`, body: {} })),

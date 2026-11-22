@@ -2,7 +2,7 @@
 
 import { AddedAtFilter, AddedLine } from "./AddedTag";
 import { addedStores, matchesAddedAt } from "../../lib/added-where";
-import { ScopeTag } from "./WhoCan";
+import { LockNote, ScopeTag } from "./WhoCan";
 import { PesoInput, WholeInput } from "../NumberBoxes";
 import { askBelowCost } from "./BelowCostDialog";
 import { isBelowCost } from "../../lib/below-cost";
@@ -15,7 +15,7 @@ import LabelSheet from "./LabelSheet";
 import VariantEditor from "./VariantEditor";
 import PhotoPicker, { type PhotoChange } from "./PhotoPicker";
 import ProductPhoto from "./ProductPhoto";
-import { kg, peso } from "../../lib/number-format";
+import { kg, peso, pesosToMinor } from "../../lib/number-format";
 import { toast } from "../../lib/toast";
 
 /** A sack big enough to also sell per kilo (10 kg or more; the 5 kg packs stay packs). */
@@ -238,6 +238,11 @@ const stockMeasureToBase = (packageSize: string, packageUnit: string) => {
   return { stockBaseUnit, stockBaseQuantity: Math.round(size * factor) };
 };
 
+/** One rice's price at the manager's own store (GET /admin/warehouses/:id/prices). */
+interface HerePrice { mainPriceMinor: number; locationPriceMinor: number | null; effectivePriceMinor: number; lowestPriceMinor?: number }
+/** The manager's own-store boxes in the Manage window. */
+interface HereForm { name: string; price: string; reorder: string; useMain: boolean }
+
 type PriceHistoryRow = { id: string; field: string; oldMinor: number; newMinor: number; source: string; reason: string | null; who: string | null; at: string };
 const HISTORY_SOURCE: Record<string, string> = { MANUAL: "Edited by hand", PURCHASE: "New stock received", CONVERSION: "Resack", LOCATION: "Location price" };
 
@@ -297,6 +302,14 @@ export default function ProductsPanel({ role = "" }: { role?: string }) {
   const canPrice = roleCan(role, "changePrices");
   const canAdd = roleCan(role, "addProducts");
   const canPhoto = canAdd; // the owner and a manager change the picture
+  // 2026-11-22 ("make manager role can manage own location products"): a manager with a home store runs
+  // that store's side of every rice right here: its own selling price, its reorder level, the picture.
+  // The rice's NAME too (owner's choice: "Yes, any rice"; every store shows the new name). Cost, setup and
+  // the price for all stores stay the owner's: every store shares them.
+  const [homeId, setHomeId] = useState<string | null>(null);
+  const storeMode = !canSetUp && canAdd && !!homeId;
+  const [herePrices, setHerePrices] = useState<Record<string, HerePrice>>({});
+  const [here, setHere] = useState<HereForm>({ name: "", price: "", reorder: "", useMain: false });
 
   // Staff get no cost from the server, so the cost column and field are hidden for them.
   const hasCost = products.length === 0 || typeof products[0]!.costMinor === "number";
@@ -382,13 +395,28 @@ export default function ProductsPanel({ role = "" }: { role?: string }) {
   const [stockAt, setStockAt] = useState("");
   const mainPlace = places.find((w) => w.isDefault) ?? null;
   // A login tied to one store (e.g. the Lipa manager): a new rice's opening stock goes there unless they pick another.
-  const [homeId, setHomeId] = useState<string | null>(null);
   useEffect(() => { void cachedGet<{ homeLocationId?: string | null }>("/admin/me/rice").then((me) => setHomeId(me?.homeLocationId ?? null)); }, []);
   useEffect(() => {
     void fetch(`${API_URL}/admin/warehouses`, { headers: adminHeaders() }).then((r) => (r.ok ? r.json() : null)).then((d) => {
       setPlaces(((d?.warehouses ?? []) as { id: string; name: string; isDefault: boolean; isActive?: boolean; type?: string }[]).filter((w) => w.isActive !== false && w.type !== "BUFFER"));
     }).catch(() => undefined);
   }, []);
+  const homeName = places.find((w) => w.id === homeId)?.name ?? "your store";
+  const loadHere = useCallback(async () => {
+    if (!storeMode || !homeId) return;
+    try {
+      const res = await fetch(`${API_URL}/admin/warehouses/${encodeURIComponent(homeId)}/prices`, { headers: adminHeaders() });
+      const d = await res.json().catch(() => null);
+      if (!res.ok) return;
+      const next: Record<string, HerePrice> = {};
+      for (const r of (d?.prices ?? []) as (HerePrice & { productId: string })[]) next[r.productId] = r;
+      setHerePrices(next);
+    } catch { /* the list still shows; the price box falls back to the main price */ }
+  }, [storeMode, homeId]);
+  useEffect(() => { void loadHere(); }, [loadHere]);
+  /** The price this rice sells at, at the manager's store (its own price, else the main price). */
+  const priceHere = (p: AdminProduct) => herePrices[p.id]?.effectivePriceMinor ?? p.priceMinor;
+
   const openCreate = () => {
     setForm(EMPTY_FORM);
     setStockAt(homeId && places.some((w) => w.id === homeId) ? homeId : "");
@@ -424,6 +452,9 @@ export default function ProductsPanel({ role = "" }: { role?: string }) {
       reorderThreshold: (p.reorderThreshold || 0).toString(),
       alsoPerKilo: false,
     });
+    setError(null);
+    const hp = herePrices[p.id];
+    setHere({ name: p.name, price: ((hp?.locationPriceMinor ?? hp?.effectivePriceMinor ?? p.priceMinor) / 100).toFixed(2), reorder: (p.reorderThreshold || 0).toString(), useMain: false });
     setCreatingCategory(false);
     setPhoto({ kind: "keep" });
     setModal({ open: true, editing: p });
@@ -432,9 +463,68 @@ export default function ProductsPanel({ role = "" }: { role?: string }) {
   // A new sack of 10 kg or more can get its kilo item when it is first saved.
   const newSackMeasure = form.conversionEnabled ? stockMeasureToBase(form.packageSize, form.packageUnit) : null;
   const newSackCanKilo = !form.soldByWeight && newSackMeasure?.stockBaseUnit === "g" && (newSackMeasure.stockBaseQuantity ?? 0) >= 10_000;
+  /** Manager, existing rice: save this store's price, its reorder level and the picture. */
+  const saveHere = async (p: AdminProduct) => {
+    const hp = herePrices[p.id];
+    const ownNow = hp?.locationPriceMinor ?? null;
+    const sellsNow = hp?.effectivePriceMinor ?? p.priceMinor;
+    const typed = pesosToMinor(here.price);
+    if (!here.useMain && (!typed || typed <= 0)) { setError("Type the price at your store, above ₱0."); return; }
+    const wouldSellAt = here.useMain ? (hp?.mainPriceMinor ?? p.priceMinor) : typed!;
+    if (typeof hp?.lowestPriceMinor === "number" && wouldSellAt < hp.lowestPriceMinor) {
+      setError(`${peso(wouldSellAt)} is under the lowest price for ${p.name} (${peso(hp.lowestPriceMinor)}). Ask the owner to go lower.`);
+      return;
+    }
+    const name = here.name.trim();
+    if (!name) { setError("Type the rice name."); return; }
+    const reorder = here.reorder.trim() === "" ? 0 : parseInt(here.reorder, 10);
+    if (!Number.isInteger(reorder) || reorder < 0) { setError("Reorder level: type a whole number, 0 or more."); return; }
+    const send = async (path: string, method: string, body?: unknown) => {
+      const res = await fetch(`${API_URL}${path}`, { method, headers: { "Content-Type": "application/json", ...adminHeaders() }, body: body === undefined ? undefined : JSON.stringify(body) });
+      if (res.ok) return null;
+      const d = await res.json().catch(() => null);
+      return (d?.errors?.join(", ") ?? d?.message ?? "Not saved. Try again.") as string;
+    };
+    setSaving(true);
+    try {
+      const done: string[] = [];
+      if (name !== p.name) {
+        const why = await send(`/admin/products/${encodeURIComponent(p.id)}`, "PATCH", { name });
+        if (why) { setError(`Name not saved: ${why}`); return; }
+        done.push(`now called ${name}`);
+      }
+      // Price: only when it changed. Back to the main price = remove this store's own price.
+      const priceBody = here.useMain ? (ownNow === null ? undefined : null) : typed === sellsNow && ownNow === null ? undefined : typed === ownNow ? undefined : typed;
+      if (priceBody !== undefined) {
+        const why = await send(`/admin/warehouses/${encodeURIComponent(homeId!)}/prices/${encodeURIComponent(p.id)}`, "PUT", { priceMinor: priceBody });
+        if (why) { setError(`Price not saved: ${why}`); return; }
+        done.push(priceBody === null ? "back to the main price" : `${peso(priceBody)} at ${homeName}`);
+      }
+      if (reorder !== (p.reorderThreshold || 0)) {
+        const why = await send("/admin/stock/reorder", "POST", { productId: p.id, warehouseId: homeId, reorderThreshold: reorder });
+        if (why) { setError(`Reorder level not saved: ${why}`); return; }
+        done.push(`reorder at ${reorder}`);
+      }
+      if (photo.kind !== "keep") {
+        const why = await send(`/admin/products/${encodeURIComponent(p.id)}/photo`, photo.kind === "new" ? "PUT" : "DELETE", photo.kind === "new" ? { dataUrl: photo.dataUrl } : undefined);
+        if (why) { setError(`Picture not saved: ${why}`); return; }
+        done.push(photo.kind === "new" ? "new picture" : "picture removed");
+      }
+      setModal({ open: false, editing: null });
+      if (done.length) toast(`${p.name}: ${done.join(", ")}`, "success");
+      else toast("Nothing changed.");
+      await Promise.all([load(), loadHere()]);
+    } catch {
+      setError("No connection. Not saved. Try again.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    if (storeMode && modal.editing) { await saveHere(modal.editing); return; }
     try {
       let priceMinor = Math.round(parseFloat(form.priceMinor) * 100);
       let costMinor = form.costMinor.trim() === "" ? undefined : Math.round(parseFloat(form.costMinor) * 100);
@@ -541,220 +631,10 @@ export default function ProductsPanel({ role = "" }: { role?: string }) {
   };
 
   const toPesos = (minor: number) => peso(minor);
-
-  return (
-    <div>
-      <div className="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
-        <h1 className="h4 mb-0 text-nowrap">Products</h1>
-                <div className="d-flex flex-wrap gap-2">
-                  {selected.length > 0 && (
-                    <button className="btn btn-outline-primary btn-sm" onClick={() => setLabelOpen(true)}>
-                      <i className="bi bi-tags me-1"></i>Print labels ({selected.length})
-                    </button>
-                  )}
-                  {canSetUp && (
-                  <button className="btn btn-outline-success btn-sm" onClick={() => setSeveral(true)}>
-                    <i className="bi bi-table me-1"></i>Add several
-                  </button>
-                  )}
-                  {canAdd && (
-                  <button className="btn btn-primary btn-sm" onClick={openCreate}>
-          <i className="bi bi-plus-lg me-1"></i>New product
-                  </button>
-                  )}
-                  </div>
-                </div>
-      {error && <div className="alert alert-danger py-2 small">{error}</div>}
-      {belowCount > 0 && (
-        <div className="alert alert-danger d-flex flex-wrap align-items-center gap-2 py-2" role="status">
-          <span className="me-auto"><strong>{belowCount}</strong> {belowCount === 1 ? "product sells" : "products sell"} below the unit cost. Tap one to fix its price or cost.</span>
-          <button type="button" className="btn btn-outline-danger" aria-pressed={onlyBelow} onClick={() => setOnlyBelow((v) => !v)}>{onlyBelow ? "Show all" : "Show them"}</button>
-        </div>
-      )}
-      {checkCount > 0 && canSetUp && (
-        <div className="alert alert-warning d-flex flex-wrap align-items-center gap-2 py-2" role="status">
-          <span className="me-auto"><strong>{checkCount}</strong> new {checkCount === 1 ? "item was" : "items were"} added by staff at the counter. Check the cost and price, then tap <strong>Looks right</strong>.</span>
-          <button type="button" className="btn btn-outline-dark" aria-pressed={onlyCheck} onClick={() => setOnlyCheck((v) => !v)}>{onlyCheck ? "Show all" : "Show them"}</button>
-        </div>
-      )}
-      {several && <AddSeveralProducts onClose={() => setSeveral(false)} onDone={load} />}
-
-            {/* P7 filter bar */}
-            <div className="row g-2 mb-3">
-              <div className="col-12 col-lg-3">
-                <input className="form-control form-control-sm" aria-label="Search products" placeholder="Search rice name or code…" value={search} onChange={(e) => setSearch(e.target.value)} />
-              </div>
-              <div className="col-6 col-lg-2">
-                <select className="form-select form-select-sm" aria-label="Category" value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
-                  <option value="">All categories</option>
-                  {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
-              </div>
-              <div className="col-6 col-lg-2 d-flex gap-1">
-                <input className="form-control form-control-sm" type="number" min="0" step="0.01" aria-label="Lowest price" placeholder="Min ₱" value={minPrice} onChange={(e) => setMinPrice(e.target.value)} />
-                <input className="form-control form-control-sm" type="number" min="0" step="0.01" aria-label="Highest price" placeholder="Max ₱" value={maxPrice} onChange={(e) => setMaxPrice(e.target.value)} />
-              </div>
-              <div className="col-6 col-lg-2">
-                <select className="form-select form-select-sm" aria-label="Status" value={active} onChange={(e) => setActive(e.target.value)}>
-                  <option value="">All status</option>
-                  <option value="true">Active</option>
-                  <option value="false">Inactive</option>
-                </select>
-              </div>
-              <div className="col-6 col-lg-3">
-                <AddedAtFilter id="products-made-at" value={madeAt} onChange={setMadeAt} stores={addedStores(products)} />
-              </div>
-              <div className="col-6 col-lg-3">
-                <select className="form-select form-select-sm" aria-label="Sort" value={sort} onChange={(e) => setSort(e.target.value as "created" | "name" | "price" | "stock")}>
-                  <option value="created">Sort: newest</option>
-                  <option value="name">Sort: name</option>
-                  <option value="price">Sort: price</option>
-                  <option value="stock">Sort: stock</option>
-                </select>
-              </div>
-            </div>
-
-            {loading ? (
-        <p className="text-muted">Loading…</p>
-      ) : products.length === 0 ? (
-        <p className="text-muted">No products yet. Create your first one!</p>
-      ) : (
-        <div className="table-responsive">
-          <table className="table table-hover align-middle">
-            <thead>
-              <tr>
-                <th className="col-roomy" style={{ width: 32 }}>
-                  <input
-                    type="checkbox"
-                    className="form-check-input"
-                    aria-label="Select all products"
-                    checked={products.length > 0 && selected.length === products.length}
-                    onChange={(e) => setSelected(e.target.checked ? products.map((p) => p.id) : [])}
-                  />
-                </th>
-                <th>Product</th>
-                <th className="col-wide">SKU</th>
-                <th className="text-end">Selling price</th>
-                {hasCost && <th className="text-end col-wide">Unit cost</th>}
-                <th className="text-end col-roomy">{homeId && !canSetUp ? "Stock here" : "Stock, all stores"}</th>
-                <th className="col-wide">Category</th>
-                <th className="col-roomy">Status</th>
-                <th className="text-end">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(onlyBelow && belowCount > 0 ? products.filter((p) => isBelowCost(p.priceMinor, p.costMinor)) : products)
-                .filter((p) => matchesAddedAt(p, madeAt) && (!onlyCheck || checkCount === 0 || p.toCheck)).map((p) => (
-                <tr key={p.id} className={p.isActive ? "" : "table-secondary"}>
-                  <td className="col-roomy">
-                    <input
-                      type="checkbox"
-                      className="form-check-input"
-                      aria-label={`Select ${p.name}`}
-                      checked={selected.includes(p.id)}
-                      onChange={(e) =>
-                        setSelected((s) => (e.target.checked ? [...s, p.id] : s.filter((id) => id !== p.id)))
-                      }
-                    />
-                  </td>
-                  <td className="fw-semibold">
-                    <div className="d-flex align-items-start gap-2">
-                    <button type="button" className="product-thumb-btn" aria-label={`Picture of ${p.name}: tap to change`} onClick={() => openEdit(p)}><ProductPhoto photoKey={p.photoKey} size="thumb" /></button>
-                    <div className="min-w-0">
-                      {p.name}
-                      {p.unit && <span className="badge text-bg-light border ms-1">{p.unit}</span>}
-                      {p.stockBaseUnit && p.stockBaseQuantity && !p.soldByWeight && <span className="badge text-bg-light border ms-1">{formatStockSize(p.stockBaseQuantity, p.stockBaseUnit)}</span>}
-                      {p.stockConversionFamily && <span className="badge text-bg-info ms-1">{p.stockConversionFamily}</span>}
-                      {p.soldByWeight && <span className="badge text-bg-secondary ms-1" title="Sold by weight">per kilo</span>}
-                      {p.kiloItem?.isActive && <span className="badge text-bg-success ms-1" title={`Also sold per kilo: ${p.kiloItem.name}`}>+ per kilo</span>}
-                      {p.soldByWeight && (p.rackSackIds?.length ?? 0) + (p.kiloOfId ? 1 : 0) > 1 && <span className="badge text-bg-success ms-1">Rack · {(p.rackSackIds?.length ?? 0) + (p.kiloOfId ? 1 : 0)} rice</span>}
-                      {p.trackStock === false && <span className="badge text-bg-warning ms-1" title="Sells at any time — stock is not counted">Not tracked</span>}
-                      {isBelowCost(p.priceMinor, p.costMinor) && <span className="badge text-bg-danger ms-1">Below cost</span>}
-                      {!p.isActive && <span className="badge text-bg-secondary ms-1 d-sm-none">Hidden</span>}
-                      {p.toCheck && <span className="badge check-badge ms-1" title="Added by staff at the counter: check its cost and price">Check</span>}
-                      <div className="small text-muted fw-normal d-lg-none">{p.sku}</div>
-                      <span className="added-row"><AddedLine tag={p} /></span>
-                      {p.toCheck && canSetUp && (
-                        <button type="button" className="btn btn-outline-dark btn-sm btn-looks-right mt-1" disabled={checking === p.id} aria-label={`${p.name}: cost and price look right`} onClick={() => void looksRight(p)}>
-                          <i className="bi bi-check2 me-1" aria-hidden="true"></i>{checking === p.id ? "Saving…" : "Looks right"}
-                        </button>
-                      )}
-                    </div>
-                    </div>
-                    </td>
-                  <td className="text-muted small col-wide">
-                    {p.sku}
-                    {p.barcode && <div className="text-muted text-opacity-75" style={{ fontSize: "0.9em" }} title="Barcode">{p.barcode}</div>}
-                  </td>
-                  <td className="text-end">{toPesos(p.priceMinor)}</td>
-                  {hasCost && <td className="text-end text-muted col-wide">{toPesos(p.costMinor)}</td>}
-                  {/* The total of every store. Low stock is per store: see Inventory (each store against its own level). */}
-                  <td className="text-end col-roomy">
-                    {p.trackStock === false ? <span className="text-muted">—</span> : p.soldByWeight ? kg(p.availableQuantity) : p.availableQuantity}
-                    {p.quantityReserved > 0 && <small className="text-muted"> ({p.soldByWeight ? kg(p.quantityReserved) : p.quantityReserved} held for orders)</small>}
-                  </td>
-                  <td className="small col-wide">{p.category?.name ?? "—"}</td>
-                  <td className="col-roomy">
-                    <span className={`badge ${p.isActive ? "text-bg-success" : "text-bg-secondary"}`}>
-                      {p.isActive ? "Active" : "Hidden"}
-                    </span>
-                    {p.taxExempt && <span className="badge text-bg-info ms-1" title="VAT-exempt">VAT-exempt</span>}
-                  </td>
-                  <td className="text-end text-nowrap product-actions">
-                    {canSetUp && (
-                      <button className="btn btn-sm btn-outline-secondary me-1" title="Variants & add-ons" aria-label={`Variants and add-ons for ${p.name}`} onClick={() => setOptionsFor(p)}>
-                        <i className="bi bi-sliders"></i>
-                      </button>
-                    )}
-                    {canSetUp ? (
-                      <button className="btn btn-sm btn-outline-secondary me-1" title="Edit" aria-label={`Edit ${p.name}`} onClick={() => openEdit(p)}>
-                        <i className="bi bi-pencil"></i>
-                      </button>
-                    ) : canPhoto ? (
-                      <button className="btn btn-sm btn-outline-secondary" aria-label={`Picture and details of ${p.name}`} onClick={() => openEdit(p)}>
-                        <i className="bi bi-image me-1" aria-hidden="true"></i>Picture
-                      </button>
-                    ) : (
-                      <button className="btn btn-sm btn-outline-secondary" aria-label={`See details of ${p.name}`} onClick={() => openEdit(p)}>
-                        <i className="bi bi-info-circle me-1" aria-hidden="true"></i>See
-                      </button>
-                    )}
-                    {canSetUp && (
-                      <button className="btn btn-sm btn-outline-secondary" title={p.isActive ? "Hide from sale" : "Show for sale"} aria-label={`${p.isActive ? "Hide" : "Show"} ${p.name}`} onClick={() => toggleActive(p)}>
-                        <i className={`bi ${p.isActive ? "bi-eye-slash" : "bi-eye"}`}></i>
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {/* Create/Edit modal */}
-      {modal.open && (
-        <>
-          <div className="modal fade show d-block" tabIndex={-1}>
-            <div className="modal-dialog">
-              <div className="modal-content">
-                <form onSubmit={save}>
-                  <div className="modal-header">
-                    <h5 className="modal-title">{!modal.editing ? "New product" : canSetUp ? "Edit product" : canPhoto ? "Picture" : "Product details"}</h5>
-                    <button type="button" className="btn-close" onClick={() => setModal({ open: false, editing: null })}></button>
-                  </div>
-                  <div className="modal-body">
-                    {/* A product is the same rice at every store (2026-11-21: say so, so nobody thinks it changes one store only). */}
-                    <ScopeTag scope="business" />
-                    {locked && (
-                      <div className="alert alert-secondary d-flex gap-2 align-items-start py-2 mb-3" role="note">
-                        <i className="bi bi-lock-fill mt-1" aria-hidden="true"></i>
-                        <div>{viewOnly
-                          ? "View only. Only the owner or a manager can change products."
-                          : "You can change the picture. Only the owner can change the name, price and other details, because they change every store. Set your store's own price on Store prices."}</div>
-                      </div>
-                    )}
-                    <PhotoPicker photoKey={modal.editing?.photoKey} value={photo} onChange={setPhoto} disabled={saving || viewOnly} />
+  /** A manager opening a rice: the "Manage at <store>" window. */
+  const storeEdit = storeMode && !!modal.editing;
+  const sharedFields = (
+    <>
                     <fieldset disabled={locked}>
                     <div className="mb-2">
                       <label htmlFor="products-name" className="form-label small">Name *</label>
@@ -930,6 +810,281 @@ export default function ProductsPanel({ role = "" }: { role?: string }) {
                       </div>
                     )}
                     </fieldset>
+    </>
+  );
+
+  return (
+    <div>
+      <div className="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+        <h1 className="h4 mb-0 text-nowrap">Products</h1>
+                <div className="d-flex flex-wrap gap-2">
+                  {selected.length > 0 && (
+                    <button className="btn btn-outline-primary btn-sm" onClick={() => setLabelOpen(true)}>
+                      <i className="bi bi-tags me-1"></i>Print labels ({selected.length})
+                    </button>
+                  )}
+                  {canSetUp && (
+                  <button className="btn btn-outline-success btn-sm" onClick={() => setSeveral(true)}>
+                    <i className="bi bi-table me-1"></i>Add several
+                  </button>
+                  )}
+                  {canAdd && (
+                  <button className="btn btn-primary btn-sm" onClick={openCreate}>
+          <i className="bi bi-plus-lg me-1"></i>New product
+                  </button>
+                  )}
+                  </div>
+                </div>
+      {error && <div className="alert alert-danger py-2 small">{error}</div>}
+      {belowCount > 0 && (
+        <div className="alert alert-danger d-flex flex-wrap align-items-center gap-2 py-2" role="status">
+          <span className="me-auto"><strong>{belowCount}</strong> {belowCount === 1 ? "product sells" : "products sell"} below the unit cost. Tap one to fix its price or cost.</span>
+          <button type="button" className="btn btn-outline-danger" aria-pressed={onlyBelow} onClick={() => setOnlyBelow((v) => !v)}>{onlyBelow ? "Show all" : "Show them"}</button>
+        </div>
+      )}
+      {checkCount > 0 && canSetUp && (
+        <div className="alert alert-warning d-flex flex-wrap align-items-center gap-2 py-2" role="status">
+          <span className="me-auto"><strong>{checkCount}</strong> new {checkCount === 1 ? "item was" : "items were"} added by staff at the counter. Check the cost and price, then tap <strong>Looks right</strong>.</span>
+          <button type="button" className="btn btn-outline-dark" aria-pressed={onlyCheck} onClick={() => setOnlyCheck((v) => !v)}>{onlyCheck ? "Show all" : "Show them"}</button>
+        </div>
+      )}
+      {several && <AddSeveralProducts onClose={() => setSeveral(false)} onDone={load} />}
+
+            {/* P7 filter bar */}
+            <div className="row g-2 mb-3">
+              <div className="col-12 col-lg-3">
+                <input className="form-control form-control-sm" aria-label="Search products" placeholder="Search rice name or code…" value={search} onChange={(e) => setSearch(e.target.value)} />
+              </div>
+              <div className="col-6 col-lg-2">
+                <select className="form-select form-select-sm" aria-label="Category" value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
+                  <option value="">All categories</option>
+                  {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </div>
+              <div className="col-6 col-lg-2 d-flex gap-1">
+                <input className="form-control form-control-sm" type="number" min="0" step="0.01" aria-label="Lowest price" placeholder="Min ₱" value={minPrice} onChange={(e) => setMinPrice(e.target.value)} />
+                <input className="form-control form-control-sm" type="number" min="0" step="0.01" aria-label="Highest price" placeholder="Max ₱" value={maxPrice} onChange={(e) => setMaxPrice(e.target.value)} />
+              </div>
+              <div className="col-6 col-lg-2">
+                <select className="form-select form-select-sm" aria-label="Status" value={active} onChange={(e) => setActive(e.target.value)}>
+                  <option value="">All status</option>
+                  <option value="true">Active</option>
+                  <option value="false">Inactive</option>
+                </select>
+              </div>
+              <div className="col-6 col-lg-3">
+                <AddedAtFilter id="products-made-at" value={madeAt} onChange={setMadeAt} stores={addedStores(products)} />
+              </div>
+              <div className="col-6 col-lg-3">
+                <select className="form-select form-select-sm" aria-label="Sort" value={sort} onChange={(e) => setSort(e.target.value as "created" | "name" | "price" | "stock")}>
+                  <option value="created">Sort: newest</option>
+                  <option value="name">Sort: name</option>
+                  <option value="price">Sort: price</option>
+                  <option value="stock">Sort: stock</option>
+                </select>
+              </div>
+            </div>
+
+            {loading ? (
+        <p className="text-muted">Loading…</p>
+      ) : products.length === 0 ? (
+        <p className="text-muted">No products yet. Create your first one!</p>
+      ) : (
+        <div className="table-responsive">
+          <table className="table table-hover align-middle">
+            <thead>
+              <tr>
+                <th className="col-roomy" style={{ width: 32 }}>
+                  <input
+                    type="checkbox"
+                    className="form-check-input"
+                    aria-label="Select all products"
+                    checked={products.length > 0 && selected.length === products.length}
+                    onChange={(e) => setSelected(e.target.checked ? products.map((p) => p.id) : [])}
+                  />
+                </th>
+                <th>Product</th>
+                <th className="col-wide">SKU</th>
+                <th className="text-end">{storeMode ? `Price at ${homeName}` : "Selling price"}</th>
+                {hasCost && <th className="text-end col-wide">Unit cost</th>}
+                <th className="text-end col-roomy">{homeId && !canSetUp ? "Stock here" : "Stock, all stores"}</th>
+                <th className="col-wide">Category</th>
+                <th className="col-roomy">Status</th>
+                <th className="text-end">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(onlyBelow && belowCount > 0 ? products.filter((p) => isBelowCost(p.priceMinor, p.costMinor)) : products)
+                .filter((p) => matchesAddedAt(p, madeAt) && (!onlyCheck || checkCount === 0 || p.toCheck)).map((p) => (
+                <tr key={p.id} className={p.isActive ? "" : "table-secondary"}>
+                  <td className="col-roomy">
+                    <input
+                      type="checkbox"
+                      className="form-check-input"
+                      aria-label={`Select ${p.name}`}
+                      checked={selected.includes(p.id)}
+                      onChange={(e) =>
+                        setSelected((s) => (e.target.checked ? [...s, p.id] : s.filter((id) => id !== p.id)))
+                      }
+                    />
+                  </td>
+                  <td className="fw-semibold">
+                    <div className="d-flex align-items-start gap-2">
+                    <button type="button" className="product-thumb-btn" aria-label={`Picture of ${p.name}: tap to change`} onClick={() => openEdit(p)}><ProductPhoto photoKey={p.photoKey} size="thumb" /></button>
+                    <div className="min-w-0">
+                      {p.name}
+                      {p.unit && <span className="badge text-bg-light border ms-1">{p.unit}</span>}
+                      {p.stockBaseUnit && p.stockBaseQuantity && !p.soldByWeight && <span className="badge text-bg-light border ms-1">{formatStockSize(p.stockBaseQuantity, p.stockBaseUnit)}</span>}
+                      {p.stockConversionFamily && <span className="badge text-bg-info ms-1">{p.stockConversionFamily}</span>}
+                      {p.soldByWeight && <span className="badge text-bg-secondary ms-1" title="Sold by weight">per kilo</span>}
+                      {p.kiloItem?.isActive && <span className="badge text-bg-success ms-1" title={`Also sold per kilo: ${p.kiloItem.name}`}>+ per kilo</span>}
+                      {p.soldByWeight && (p.rackSackIds?.length ?? 0) + (p.kiloOfId ? 1 : 0) > 1 && <span className="badge text-bg-success ms-1">Rack · {(p.rackSackIds?.length ?? 0) + (p.kiloOfId ? 1 : 0)} rice</span>}
+                      {p.trackStock === false && <span className="badge text-bg-warning ms-1" title="Sells at any time — stock is not counted">Not tracked</span>}
+                      {isBelowCost(storeMode ? priceHere(p) : p.priceMinor, p.costMinor) && <span className="badge text-bg-danger ms-1">Below cost</span>}
+                      {!p.isActive && <span className="badge text-bg-secondary ms-1 d-sm-none">Hidden</span>}
+                      {p.toCheck && <span className="badge check-badge ms-1" title="Added by staff at the counter: check its cost and price">Check</span>}
+                      <div className="small text-muted fw-normal d-lg-none">{p.sku}</div>
+                      <span className="added-row"><AddedLine tag={p} /></span>
+                      {p.toCheck && canSetUp && (
+                        <button type="button" className="btn btn-outline-dark btn-sm btn-looks-right mt-1" disabled={checking === p.id} aria-label={`${p.name}: cost and price look right`} onClick={() => void looksRight(p)}>
+                          <i className="bi bi-check2 me-1" aria-hidden="true"></i>{checking === p.id ? "Saving…" : "Looks right"}
+                        </button>
+                      )}
+                    </div>
+                    </div>
+                    </td>
+                  <td className="text-muted small col-wide">
+                    {p.sku}
+                    {p.barcode && <div className="text-muted text-opacity-75" style={{ fontSize: "0.9em" }} title="Barcode">{p.barcode}</div>}
+                  </td>
+                  <td className="text-end">
+                    {toPesos(storeMode ? priceHere(p) : p.priceMinor)}
+                    {storeMode && herePrices[p.id]?.locationPriceMinor != null && <div className="small text-muted fw-normal">Your own price</div>}
+                  </td>
+                  {hasCost && <td className="text-end text-muted col-wide">{toPesos(p.costMinor)}</td>}
+                  {/* The total of every store. Low stock is per store: see Inventory (each store against its own level). */}
+                  <td className="text-end col-roomy">
+                    {p.trackStock === false ? <span className="text-muted">—</span> : p.soldByWeight ? kg(p.availableQuantity) : p.availableQuantity}
+                    {storeMode && p.trackStock !== false && p.reorderThreshold > 0 && p.availableQuantity <= p.reorderThreshold && <span className="badge text-bg-warning ms-1">Low</span>}
+                    {p.quantityReserved > 0 && <small className="text-muted"> ({p.soldByWeight ? kg(p.quantityReserved) : p.quantityReserved} held for orders)</small>}
+                  </td>
+                  <td className="small col-wide">{p.category?.name ?? "—"}</td>
+                  <td className="col-roomy">
+                    <span className={`badge ${p.isActive ? "text-bg-success" : "text-bg-secondary"}`}>
+                      {p.isActive ? "Active" : "Hidden"}
+                    </span>
+                    {p.taxExempt && <span className="badge text-bg-info ms-1" title="VAT-exempt">VAT-exempt</span>}
+                  </td>
+                  <td className="text-end text-nowrap product-actions">
+                    {canSetUp && (
+                      <button className="btn btn-sm btn-outline-secondary me-1" title="Variants & add-ons" aria-label={`Variants and add-ons for ${p.name}`} onClick={() => setOptionsFor(p)}>
+                        <i className="bi bi-sliders"></i>
+                      </button>
+                    )}
+                    {canSetUp ? (
+                      <button className="btn btn-sm btn-outline-secondary me-1" title="Edit" aria-label={`Edit ${p.name}`} onClick={() => openEdit(p)}>
+                        <i className="bi bi-pencil"></i>
+                      </button>
+                    ) : storeMode ? (
+                      <button className="btn btn-sm btn-outline-primary btn-manage" aria-label={`Manage ${p.name} at ${homeName}`} onClick={() => openEdit(p)}>
+                        <i className="bi bi-pencil-square me-1" aria-hidden="true"></i>Manage
+                      </button>
+                    ) : canPhoto ? (
+                      <button className="btn btn-sm btn-outline-secondary" aria-label={`Picture and details of ${p.name}`} onClick={() => openEdit(p)}>
+                        <i className="bi bi-image me-1" aria-hidden="true"></i>Picture
+                      </button>
+                    ) : (
+                      <button className="btn btn-sm btn-outline-secondary" aria-label={`See details of ${p.name}`} onClick={() => openEdit(p)}>
+                        <i className="bi bi-info-circle me-1" aria-hidden="true"></i>See
+                      </button>
+                    )}
+                    {canSetUp && (
+                      <button className="btn btn-sm btn-outline-secondary" title={p.isActive ? "Hide from sale" : "Show for sale"} aria-label={`${p.isActive ? "Hide" : "Show"} ${p.name}`} onClick={() => toggleActive(p)}>
+                        <i className={`bi ${p.isActive ? "bi-eye-slash" : "bi-eye"}`}></i>
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Create/Edit modal */}
+      {modal.open && (
+        <>
+          <div className="modal fade show d-block" tabIndex={-1}>
+            <div className="modal-dialog">
+              <div className="modal-content">
+                <form onSubmit={save}>
+                  <div className="modal-header">
+                    <h5 className="modal-title">{!modal.editing ? "New product" : canSetUp ? "Edit product" : storeMode ? modal.editing.name : canPhoto ? "Picture" : "Product details"}</h5>
+                    <button type="button" className="btn-close" onClick={() => setModal({ open: false, editing: null })}></button>
+                  </div>
+                  <div className="modal-body">
+                    {storeEdit ? (
+                      <>
+                        {/* 2026-11-22: a manager runs their own store's side of this rice here. */}
+                        <ScopeTag scope="store" storeName={homeName} />
+                        {error && <div className="alert alert-danger py-2" role="alert">{error}</div>}
+                        <section className="here-card" aria-labelledby="here-title">
+                          <h6 id="here-title" className="here-title">At {homeName}</h6>
+                          <div className="row g-3">
+                            <div className="col-sm-6">
+                              <label className="form-label" htmlFor="herePrice">Price at {homeName} (₱) {modal.editing!.soldByWeight ? "per kilo" : ""}</label>
+                              <PesoInput id="herePrice" value={here.useMain ? ((herePrices[modal.editing!.id]?.mainPriceMinor ?? modal.editing!.priceMinor) / 100).toFixed(2) : here.price}
+                                onChange={(v) => setHere({ ...here, price: v, useMain: false })} placeholder="0.00" aria-describedby="herePrice-help" />
+                              <div id="herePrice-help" className="small text-muted mt-1">
+                                Main price for all stores: {peso(herePrices[modal.editing!.id]?.mainPriceMinor ?? modal.editing!.priceMinor)}
+                                {typeof herePrices[modal.editing!.id]?.lowestPriceMinor === "number" && <> · Lowest you can sell at: {peso(herePrices[modal.editing!.id]!.lowestPriceMinor!)}</>}
+                              </div>
+                              {herePrices[modal.editing!.id]?.locationPriceMinor != null && !here.useMain && (
+                                <button type="button" className="btn btn-outline-primary btn-sm mt-2" onClick={() => setHere({ ...here, useMain: true })}>Use the main price</button>
+                              )}
+                              {here.useMain && <div className="small mt-2" role="status">On Save, {homeName} goes back to the main price.</div>}
+                            </div>
+                            <div className="col-sm-6">
+                              <label className="form-label" htmlFor="hereReorder">Reorder at {homeName}</label>
+                              <WholeInput id="hereReorder" placeholder="0" value={here.reorder} onChange={(v) => setHere({ ...here, reorder: v })} aria-describedby="hereReorder-help" />
+                              <div id="hereReorder-help" className="small text-muted mt-1">Shows Low when {homeName} has this many or fewer. 0 = never.</div>
+                              <div className="here-stock mt-2">
+                                <span className="small text-muted">Stock at {homeName}</span>
+                                <strong>{modal.editing!.trackStock === false ? "Not counted" : modal.editing!.soldByWeight ? kg(modal.editing!.availableQuantity) : modal.editing!.availableQuantity}</strong>
+                              </div>
+                              <div className="small text-muted">Change stock with Stock in, Count or Inventory → Adjust.</div>
+                            </div>
+                          </div>
+                          <PhotoPicker photoKey={modal.editing?.photoKey} value={photo} onChange={setPhoto} disabled={saving} />
+                        </section>
+                        <ScopeTag scope="business" />
+                        <div className="mb-3">
+                          <label htmlFor="hereName" className="form-label">Rice name</label>
+                          <input id="hereName" className="form-control" required maxLength={120} value={here.name} onChange={(e) => setHere({ ...here, name: e.target.value })} aria-describedby="hereName-help" />
+                          <div id="hereName-help" className="small text-muted mt-1">The new name shows at every store and on receipts.</div>
+                        </div>
+                        <details className="shared-details">
+                          <summary>More details (the owner changes these)</summary>
+                          <LockNote text="Cost, price for all stores and setup are the same at every store. Only the owner changes them." />
+                          {sharedFields}
+                        </details>
+                      </>
+                    ) : (
+                      <>
+                    {/* A product is the same rice at every store (2026-11-21: say so, so nobody thinks it changes one store only). */}
+                    <ScopeTag scope="business" />
+                    {locked && (
+                      <div className="alert alert-secondary d-flex gap-2 align-items-start py-2 mb-3" role="note">
+                        <i className="bi bi-lock-fill mt-1" aria-hidden="true"></i>
+                        <div>{viewOnly
+                          ? "View only. Only the owner or a manager can change products."
+                          : "You can change the picture. Only the owner can change the name, price and other details, because they change every store. Set your store's own price on Store prices."}</div>
+                      </div>
+                    )}
+                    <PhotoPicker photoKey={modal.editing?.photoKey} value={photo} onChange={setPhoto} disabled={saving || viewOnly} />
+                        {sharedFields}
+                      </>
+                    )}
                   </div>
                   <div className="modal-footer">
                     <button type="button" className="btn btn-outline-secondary" onClick={() => setModal({ open: false, editing: null })}>{viewOnly ? "Close" : "Cancel"}</button>

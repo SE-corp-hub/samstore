@@ -118,7 +118,8 @@ export class ProductAdminService {
       availableQuantity: onHand - reserved,
       // The main store's row: the one update() writes (any row used to be read, so a save copied it over).
       // The main store's row: the one update() writes. (Each store's own level is on Inventory.)
-      reorderThreshold: p.stockLevels.find((l) => l.warehouse?.isDefault)?.reorderThreshold ?? 0,
+      // A store login (e.g. the Lipa manager) gets its OWN store's level; everyone else the main store's.
+      reorderThreshold: (f.onlyLocationId ? p.stockLevels[0] : p.stockLevels.find((l) => l.warehouse?.isDefault))?.reorderThreshold ?? 0,
       variants: p.variants.map((v) => ({
         id: v.id,
         name: v.name,

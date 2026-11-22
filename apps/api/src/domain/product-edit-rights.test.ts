@@ -9,11 +9,13 @@ test("the owner may change anything on a product", () => {
   }
 });
 
-test("a manager may change only the picture (2026-11-22: the main price and reorder level change every store)", () => {
+test("a manager may change the picture and the name only (2026-11-22: the main price and reorder level change every store)", () => {
   assert.equal(productEditRefusal("MANAGER", "edit", { priceMinor: 150000 }), OWNER_ONLY_PRODUCT_MESSAGE);
   assert.equal(productEditRefusal("MANAGER", "edit", { reorderThreshold: 3, name: undefined }), OWNER_ONLY_PRODUCT_MESSAGE);
   assert.equal(productEditRefusal("MANAGER", "price-or-photo"), null);
-  assert.equal(productEditRefusal("MANAGER", "edit", { name: "Renamed" }), OWNER_ONLY_PRODUCT_MESSAGE);
+  // 2026-11-22, owner's choice "Yes, any rice": a manager may rename, nothing else on the same save.
+  assert.equal(productEditRefusal("MANAGER", "edit", { name: "Renamed" }), null);
+  assert.equal(productEditRefusal("MANAGER", "edit", { name: "Renamed", sku: "X" }), OWNER_ONLY_PRODUCT_MESSAGE);
   assert.equal(productEditRefusal("MANAGER", "edit", { priceMinor: 1, costMinor: 1 }), OWNER_ONLY_PRODUCT_MESSAGE);
   assert.equal(productEditRefusal("MANAGER", "edit", { isActive: false }), OWNER_ONLY_PRODUCT_MESSAGE);
   assert.equal(productEditRefusal("MANAGER", "owner-only"), OWNER_ONLY_PRODUCT_MESSAGE);
