@@ -1021,18 +1021,23 @@ export class AdminController {
     requireUser(user);
     const { storeId, role } = await resolveTenant(user, headerStoreId, TENANT_ROLES.VIEW);
     const actor = await loadActor(storeId, user.sub, role);
-    const [business, rows] = await Promise.all([
-      prisma.storeSettings.findUnique({ where: { storeId }, select: { dayOpenClose: true, requireOpenShift: true, hidePricePreOrder: true } }),
+    const [business, rows, store] = await Promise.all([
+      prisma.storeSettings.findUnique({ where: { storeId }, select: { dayOpenClose: true, requireOpenShift: true, hidePricePreOrder: true, orderNumberPrefix: true } }),
       prisma.warehouse.findMany({
         where: { storeId, isActive: true },
         orderBy: [{ code: "asc" }, { name: "asc" }],
         select: {
           id: true, name: true, code: true, type: true, address: true, facebookPageUrl: true,
           receiptName: true, receiptHeader: true, receiptFooter: true, receiptContact: true, dailySalesTargetMinor: true,
-          dayOpenClose: true, requireOpenShift: true, hidePricePreOrder: true, sellPerKilo: true,
+          dayOpenClose: true, requireOpenShift: true, hidePricePreOrder: true, sellPerKilo: true, orderPrefix: true,
         },
       }),
+      prisma.store.findUnique({ where: { id: storeId }, select: { slug: true } }),
     ]);
+    // What a sale's number starts with when the store has no own start: the business's, else the
+    // first 6 letters of the hidden business code (slug), e.g. "test-bigasan" → TESTBI-000123.
+    const businessPrefix = business?.orderNumberPrefix ?? null;
+    const slugPrefix = (store?.slug ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6);
     // Kilo rice still on each shelf: the screen warns before "Sell per kilo here" is turned off.
     const kiloLeft = await prisma.stockLevel.groupBy({
       by: ["warehouseId"],
@@ -1046,9 +1051,10 @@ export class AdminController {
       sellPerKilo: r.type !== "WAREHOUSE" && r.sellPerKilo, kiloGramsLeft: gramsLeft.get(r.id) ?? 0,
       address: r.address, facebookPageUrl: r.facebookPageUrl, receiptName: r.receiptName, receiptHeader: r.receiptHeader,
       receiptFooter: r.receiptFooter, receiptContact: r.receiptContact, dailySalesTargetMinor: r.dailySalesTargetMinor,
+      orderPrefix: r.orderPrefix,
     }));
     if (!places.length) throw new HttpException({ type: "forbidden", message: "Only the owner, a manager or the head of a store can change a store's settings" }, HttpStatus.FORBIDDEN);
-    return { storeId, places };
+    return { storeId, places, businessPrefix, slugPrefix };
   }
 
   /** PATCH /admin/store-settings/:locationId — save one store's own switches and details. */
@@ -1083,7 +1089,7 @@ export class AdminController {
     if (errors.length) throw new HttpException({ type: "validation", errors }, HttpStatus.BAD_REQUEST);
     // The details go through the same checks as Menu → Locations.
     const details = {
-      ...text("address"), ...text("receiptName"), ...text("receiptHeader"), ...text("receiptFooter"), ...text("receiptContact"),
+      ...text("address"), ...text("receiptName"), ...text("receiptHeader"), ...text("receiptFooter"), ...text("receiptContact"), ...text("orderPrefix"),
       ...(body?.facebookPageUrl === null || typeof body?.facebookPageUrl === "string" ? { facebookPageUrl: body.facebookPageUrl as string | null } : {}),
       ...(target === null || typeof target === "number" ? { dailySalesTargetMinor: target as number | null } : {}),
     };

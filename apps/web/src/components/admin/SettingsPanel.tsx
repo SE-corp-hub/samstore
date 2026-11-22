@@ -554,7 +554,7 @@ export default function SettingsPanel({ role = "", onNavigate }: { role?: string
                 </Field>
               </div>
               <div className="col-12 col-md-6">
-                <Field id="st-prefix" label="Order number starts with" help={<>Example: <strong>{(form.orderPrefix.trim().toUpperCase() || "PIN")}-2026-000001</strong>. Leave empty for the usual numbers.</>}>
+                <Field id="st-prefix" label="Receipt numbers start with (stores with no own start)" help={<>Example: <strong>{(form.orderPrefix.trim().toUpperCase() || "PIN")}-2026-000001</strong>. Leave empty for the usual numbers.</>}>
                   <input id="st-prefix" className="form-control form-control-lg text-uppercase" maxLength={6} value={form.orderPrefix} onChange={(e) => set({ orderPrefix: e.target.value.replace(/[^a-z0-9]/gi, "") })} placeholder="PIN" />
                 </Field>
               </div>
