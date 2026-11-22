@@ -940,6 +940,8 @@ html[data-text-size] .start-cust.chosen, .start-cust.chosen { border: 3px solid 
 .drawer-pad { max-width: 22rem; width: 100%; margin: 0 auto; }
 .drawer-chips { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.5rem; }
 .drawer-chips .btn { min-height: 3rem; font-weight: 600; white-space: normal; }
+/* An odd number of choices (7 expense kinds with Food): the last one ("Other") fills the row, no half-empty line. */
+.drawer-chips .btn:last-child:nth-child(odd) { grid-column: 1 / -1; }
 @media (min-width: 700px) {
   .drawer-grid { grid-template-columns: minmax(0, 22rem) minmax(0, 1fr); align-items: start; }
 }

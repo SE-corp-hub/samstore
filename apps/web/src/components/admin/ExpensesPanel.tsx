@@ -19,6 +19,7 @@ interface ExpenseRow {
 interface Place { id: string; name: string; code?: string | null; type?: string; isActive?: boolean }
 
 const CATEGORIES: { id: string; label: string; icon: string }[] = [
+  { id: "food", label: "Food", icon: "bi-cup-hot" },
   { id: "supplies", label: "Supplies", icon: "bi-bag" },
   { id: "transport", label: "Transport", icon: "bi-truck" },
   { id: "wages", label: "Wages", icon: "bi-people" },
@@ -107,10 +108,8 @@ export default function ExpensesPanel() {
         body: JSON.stringify({ category, amountMinor, note: note.trim() || undefined, locationId: own ?? (paidBy === BUSINESS ? null : paidBy), paidFromDrawer: paidBy !== BUSINESS && drawer }),
       });
       if (res.ok) {
-        const saved = await res.json().catch(() => null);
         setAmount(""); setNote(""); setDrawer(false);
-        // Staff over the day's drawer limit: it is written only when the owner says yes (Approvals).
-        toast(saved?.waitingForOwner ? "Sent to the owner for OK. It counts when the owner approves it." : `Expense saved for ${own ? ownName : paidByName}`);
+        toast(`Expense saved for ${own ? ownName : paidByName}`);
         await load();
       } else {
         const d = await res.json().catch(() => null);

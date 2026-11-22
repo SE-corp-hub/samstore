@@ -11,32 +11,23 @@
 //
 // System review 2026-11-20, finding 6: a login that is not the owner or a manager
 //   - writes TODAY's expenses only (no back-dating into a day that is closed),
-//   - says what a drawer expense was for,
-//   - may take up to STAFF_DRAWER_DAY_LIMIT_MINOR a day out of one store's drawer. Above that the
-//     expense waits for the owner's OK (Approvals) and lowers the expected cash only when approved.
+//   - says what a drawer expense was for.
+// 2026-11-22 (owner): NO limit on drawer expenses for any role. Every amount is saved at once; nothing
+//   waits in "For your approval". An expense that was already waiting there is still written when the
+//   owner approves it (the handler below).
 
 import { mainLocationId } from "../domain/main-store.js";
 import { prisma } from "../persistence/prisma-repositories.js";
-import { randomId } from "../persistence/repositories.js";
 import type { ApiError } from "@sam-store/contracts";
 import { ALL_LOCATION_ROLES, hasNoStoreYet, NO_STORE_YET } from "../domain/people.js";
-import { dayRange, manilaDate } from "../domain/reports.js";
+import { manilaDate } from "../domain/reports.js";
 import { cashTimeFor, closedTodayRefusal } from "../day/day-gate.js";
-import { registerApprovalHandler, requestApproval } from "../people/people.service.js";
+import { registerApprovalHandler } from "../people/people.service.js";
 
-/** What staff may take out of one store's drawer in a day without the owner's OK: ₱500. */
-export const STAFF_DRAWER_DAY_LIMIT_MINOR = 50_000;
 /** How old a POS expense that waited on the tablet may be and still be taken from staff. */
 export const POS_LATE_DAYS = 3;
 
-const pesos = (minor: number) => `₱${(minor / 100).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-
-/** Pure rule: does this staff drawer expense need the owner's OK? `alreadyMinor` = staff drawer expenses there today. */
-export function needsOwnerOk(alreadyMinor: number, amountMinor: number, limitMinor = STAFF_DRAWER_DAY_LIMIT_MINOR): boolean {
-  return alreadyMinor + amountMinor > limitMinor;
-}
-
-// The owner said yes: now the expense is written (dated when the money left the drawer) and counts.
+// An expense that was still waiting for the owner's OK from before the limit was removed: when the owner says yes the expense is written (dated when the money left the drawer) and counts.
 registerApprovalHandler("EXPENSE", async (tx, a) => {
   if (a.status !== "APPROVED") return;
   if (await tx.expense.findFirst({ where: { id: a.documentId }, select: { id: true } })) return;
@@ -55,7 +46,7 @@ export type ExpenseResult<T> = { ok: true; value: T } | { ok: false; error: ApiE
 
 export const EXPENSES_SERVICE = Symbol("EXPENSES_SERVICE");
 
-export const EXPENSE_CATEGORIES = ["rent", "utilities", "supplies", "wages", "transport", "other"] as const;
+export const EXPENSE_CATEGORIES = ["food", "rent", "utilities", "supplies", "wages", "transport", "other"] as const;
 
 /** The login that is asking. */
 export interface ExpenseActor { userId: string; role: string; homeLocationId: string | null }
@@ -74,13 +65,13 @@ export const COUNTED = { voidedAt: null } as const;
 
 /** Every store (and the whole-business expenses): the owner only. 2026-11-22: a manager runs one store. */
 const seesAll = (a: ExpenseActor) => (ALL_LOCATION_ROLES as readonly string[]).includes(a.role);
-/** The owner or a manager: any day's expense, no drawer limit, may cancel (a manager: at their own store). */
+/** The owner or a manager: any day's expense, may cancel (a manager: at their own store). */
 const boss = (a: ExpenseActor) => seesAll(a) || a.role === "MANAGER";
 const invalid = (msg: string): { ok: false; error: ApiError } => ({ ok: false, error: { type: "validation", errors: [msg] } });
 const refused = (msg: string): { ok: false; error: ApiError } => ({ ok: false, error: { type: "forbidden", message: msg } });
 
 export class ExpensesService {
-  async create(storeId: string, actor: ExpenseActor, input: ExpenseInput): Promise<ExpenseResult<{ id: string; locationId: string | null; /** Not written yet: it becomes expense `id` when the owner approves. */ waitingForOwner?: boolean; approvalId?: string }>> {
+  async create(storeId: string, actor: ExpenseActor, input: ExpenseInput): Promise<ExpenseResult<{ id: string; locationId: string | null; }>> {
     if (!EXPENSE_CATEGORIES.includes(input.category as (typeof EXPENSE_CATEGORIES)[number])) return invalid(`category must be one of: ${EXPENSE_CATEGORIES.join(", ")}`);
     if (!Number.isInteger(input.amountMinor) || input.amountMinor <= 0) return invalid("amountMinor must be a positive integer");
     let spentAt = input.spentAt ? new Date(input.spentAt) : new Date();
@@ -122,23 +113,8 @@ export class ExpensesService {
       if (closed) return { ok: false, error: { type: "conflict", message: closed } };
     }
     const note = input.note?.trim().slice(0, 200) || null;
-    if (staff && fromDrawer && locationId) {
-      if (!note || note.length < 3) return invalid("Write what the money from the drawer was for.");
-      // What staff already took out of this drawer today (the owner's own expenses do not use up the limit).
-      const bosses = (await prisma.userStore.findMany({ where: { storeId, role: { in: ["OWNER", "MANAGER"] } }, select: { userId: true } })).map((u) => u.userId);
-      const { from, to } = dayRange(manilaDate(new Date()));
-      const already = (await prisma.expense.aggregate({ where: { storeId, locationId, paidFromDrawer: true, ...COUNTED, spentAt: { gte: from, lt: to }, OR: [{ createdBy: null }, { createdBy: { notIn: bosses } }] }, _sum: { amountMinor: true } }))._sum.amountMinor ?? 0;
-      if (needsOwnerOk(already, input.amountMinor)) {
-        const place = await prisma.warehouse.findFirst({ where: { storeId, id: locationId }, select: { name: true } });
-        const id = randomId();
-        const approval = await prisma.$transaction((tx) => requestApproval(tx, {
-          storeId, kind: "EXPENSE", documentType: "EXPENSE", documentId: id, locationId, requestedById: actor.userId,
-          summary: `Expense from the drawer: ${pesos(input.amountMinor)} for ${input.category} at ${place?.name ?? "the store"} (${note}). Staff already took ${pesos(already)} today; the limit without your OK is ${pesos(STAFF_DRAWER_DAY_LIMIT_MINOR)} a day.`,
-          detail: { category: input.category, amountMinor: input.amountMinor, note, spentAt: spentAt.toISOString(), locationId, createdBy: actor.userId },
-        }));
-        return { ok: true, value: { id, locationId, waitingForOwner: true, approvalId: approval.id } };
-      }
-    }
+    if (staff && fromDrawer && locationId && (!note || note.length < 3)) return invalid("Write what the money from the drawer was for.");
+    // No money limit for any role (owner's rule 2026-11-22): the expense is saved at once.
 
     const e = await prisma.expense.create({
       data: {
