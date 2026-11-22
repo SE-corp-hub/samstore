@@ -6,7 +6,7 @@
 // screens ask the same way. It sits where the price list goes (its own scroll box), so the screen still
 // fits the tablet with no page scroll.
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import type { StoreOption } from "./StoreBar";
 import { AREAS, areaCounts, areaLabel, type Area, type AreaInfo } from "../../lib/customer-area";
 
@@ -183,11 +183,17 @@ export function NewCustomerChoice({ chosenName, onAdd, defaultTown = "" }: {
 }
 
 const AREA_KEY = "sam.customerArea";
-/** The area filter remembered on this tablet (Lipa / Bauan / everyone), shared by POS and Pre-order. */
-export function useCustomerArea(): [string, (a: string) => void] {
+/**
+ * The area filter (Lipa / Bauan / everyone), shared by POS and Pre-order. 2026-11-22: it starts on the town of the
+ * store the sale is at (`storeTown`, from storeArea): a Lipa login sees Lipa customers, Bogs and Lucy / Bahay Tindahan
+ * / Bodega see Bauan. It is put back on that town for every new sale (`fresh` = nothing chosen yet), and whenever the
+ * store changes; "All" or the other town is still one tap away. With no store known, the last choice on this tablet.
+ */
+export function useCustomerArea(storeTown?: string | null, fresh = true): [string, (a: string) => void] {
   const [area, setArea] = useState("");
   useEffect(() => { try { const v = localStorage.getItem(AREA_KEY); if (v && AREAS.some((a) => a.id === v)) setArea(v); } catch { /* private window */ } }, []);
-  const pick = (a: string) => { setArea(a); try { localStorage.setItem(AREA_KEY, a); } catch { /* private window */ } };
+  const pick = useCallback((a: string) => { setArea(a); try { localStorage.setItem(AREA_KEY, a); } catch { /* private window */ } }, []);
+  useEffect(() => { if (storeTown && fresh) setArea(storeTown); }, [storeTown, fresh]);
   return [area, pick];
 }
 

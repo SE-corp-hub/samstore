@@ -969,6 +969,10 @@ html[data-text-size] .start-cust.chosen, .start-cust.chosen { border: 3px solid 
 .start-list-title { font-weight: 700; color: var(--sam-text); display: flex; align-items: center; }
 .start-list .start-cust { width: 100%; }
 @container (max-width: 24rem) { .start-list .area-count { display: none; } }
+/* Credit town buttons (2026-11-22): the town on top, what that town owes under it, so the split reads at a glance.
+   Two short lines fit even on a phone; nothing is cut at Large / Extra large text. */
+.credit-towns .area-btn { flex-direction: column; min-height: 3.75rem; line-height: 1.2; white-space: normal; padding-block: 0.35rem; }
+.credit-towns .town-owed { font-size: 0.9em; font-weight: 700; }
 
 /* §22 POS stages alignment (2026-11-21): every payment way is the same shape (icon on top, word under it), the quick
    cash amounts fill the same width as the buttons above them, and the Done screen keeps the steps on the left like

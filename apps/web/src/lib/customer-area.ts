@@ -21,9 +21,18 @@ export const lastTown = (s: string | null | undefined): Area | null => {
   return last ? (last.toLowerCase() as Area) : null;
 };
 
+/**
+ * The town a STORE is in (2026-11-22, the owner's rule): the Lipa store is Lipa; Bogs and Lucy, Bahay Tindahan and the
+ * Bodega are all Bauan. So any place whose name does not say Lipa (or another town) counts as Bauan.
+ */
+export function storeArea(storeName: string | null | undefined): Area | null {
+  if (!storeName?.trim()) return null;
+  return lastTown(storeName) ?? "bauan";
+}
+
 /** Lipa, Bauan, or null (not known). */
 export function customerArea(c: AreaInfo): Area | null {
-  return lastTown(c.name) ?? lastTown(c.address) ?? lastTown(c.addedAt?.name);
+  return lastTown(c.name) ?? lastTown(c.address) ?? storeArea(c.addedAt?.name);
 }
 
 const az = (s: string | null | undefined) => (s ?? "").trim().toLowerCase();

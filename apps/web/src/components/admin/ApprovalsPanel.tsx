@@ -9,6 +9,7 @@ import { useCallback, useEffect, useState } from "react";
 import { API_URL } from "../../config";
 import { adminHeaders } from "../../lib/admin";
 import { toast } from "../../lib/toast";
+import { savedThenFresh } from "../../lib/offlineCache";
 
 interface Approval {
   id: string;
@@ -17,7 +18,7 @@ interface Approval {
   documentId: string;
   summary: string;
   status: string;
-  location: { code: string | null; name: string } | null;
+  location: { id: string; code: string | null; name: string } | null;
   createdAt: string;
   decidedAt: string | null;
   decisionNote: string | null;
@@ -37,6 +38,11 @@ const KIND_LABEL: Record<string, string> = {
   COUNT: "Count",
   EXPENSE: "Expense from the drawer",
 };
+// The same store colours as Orders (stores first, then the bodega), and the name is always written.
+const STORE_TONES = ["store-tone-1", "store-tone-2", "store-tone-3", "store-tone-4", "store-tone-5"];
+interface Place { id: string; name: string; type?: string; isActive?: boolean }
+const NO_STORE = "none";
+
 const STATUS: Record<string, [string, string]> = {
   PENDING: ["text-bg-warning", "Waiting"],
   APPROVED: ["text-bg-success", "Approved"],
@@ -53,6 +59,16 @@ export default function ApprovalsPanel() {
   const [pin, setPin] = useState("");
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
+  const [places, setPlaces] = useState<Place[]>([]);
+  const [storeFilter, setStoreFilter] = useState("");
+
+  useEffect(() => {
+    void savedThenFresh<{ warehouses?: Place[] }>("/admin/warehouses", (d) => {
+      const live = (d.warehouses ?? []).filter((w) => w.isActive !== false && w.type !== "BUFFER");
+      const isStore = (w: Place) => w.type !== "WAREHOUSE";
+      setPlaces([...live.filter(isStore), ...live.filter((w) => !isStore(w))]);
+    }, { headers: adminHeaders() });
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -90,15 +106,44 @@ export default function ApprovalsPanel() {
     await load();
   };
 
+  // Every store that has a request in this list, in the usual store order; a place not in the list (closed) goes last.
+  const placeIds = places.map((p) => p.id);
+  const extra = rows.map((r) => r.location).filter((l): l is NonNullable<Approval["location"]> => !!l && !placeIds.includes(l.id));
+  const shown: { id: string; name: string }[] = [...places, ...extra.filter((l, i) => extra.findIndex((x) => x.id === l.id) === i)];
+  const toneOf = (id: string) => { const i = shown.findIndex((p) => p.id === id); return STORE_TONES[(i < 0 ? 0 : i) % STORE_TONES.length] ?? "store-tone-1"; };
+  const keyOf = (a: Approval) => a.location?.id ?? NO_STORE;
+  const countBy: Record<string, number> = {};
+  for (const r of rows) countBy[keyOf(r)] = (countBy[keyOf(r)] ?? 0) + 1;
+  const filtered = storeFilter ? rows.filter((r) => keyOf(r) === storeFilter) : rows;
+
+  const storeTag = (a: Approval) => a.location
+    ? <span className={`store-tag store-tag-lg ${toneOf(a.location.id)}`}><i className="bi bi-shop" aria-hidden="true"></i>{a.location.name}</span>
+    : <span className="store-tag store-tag-lg store-tone-home"><i className="bi bi-buildings" aria-hidden="true"></i>Whole business</span>;
+
+  const chip = (id: string, label: string, n: number, tone: string) => (
+    <button key={id || "all"} type="button" className={`btn store-chip ${tone} ${storeFilter === id ? "is-on" : ""}`} aria-pressed={storeFilter === id}
+      onClick={() => setStoreFilter(id)}>
+      {id && id !== NO_STORE && <i className="bi bi-shop me-1" aria-hidden="true"></i>}{label}
+      <span className="badge rounded-pill ms-2" aria-label={`${n} ${view === "PENDING" ? "waiting" : "in the list"}`}>{n > 99 ? "99+" : n}</span>
+    </button>
+  );
+
   return (
     <div style={{ fontSize: 18 }}>
-      <div className="d-flex align-items-center justify-content-between mb-3">
+      <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
         <h1 className="h4 mb-0">For your approval</h1>
         <div className="btn-group" role="group" aria-label="Show">
-          <button className={`btn btn-sm ${view === "PENDING" ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setView("PENDING")}>Waiting</button>
-          <button className={`btn btn-sm ${view === "ALL" ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setView("ALL")}>All</button>
+          <button className={`btn btn-sm text-nowrap ${view === "PENDING" ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setView("PENDING")}>Waiting</button>
+          <button className={`btn btn-sm text-nowrap ${view === "ALL" ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setView("ALL")}>All</button>
         </div>
       </div>
+      {shown.length > 0 && rows.length > 0 && (
+        <div className="d-flex flex-wrap gap-2 mb-3" role="group" aria-label="Which store">
+          {chip("", "All stores", rows.length, "store-chip-all")}
+          {shown.filter((p) => (countBy[p.id] ?? 0) > 0 || storeFilter === p.id).map((p) => chip(p.id, p.name, countBy[p.id] ?? 0, toneOf(p.id)))}
+          {((countBy[NO_STORE] ?? 0) > 0 || storeFilter === NO_STORE) && chip(NO_STORE, "Whole business", countBy[NO_STORE] ?? 0, "store-tone-home")}
+        </div>
+      )}
       {error && <div className="alert alert-danger py-2" role="alert">{error}</div>}
 
       {deciding && (
@@ -126,24 +171,27 @@ export default function ApprovalsPanel() {
         </form>
       )}
 
-      {loading ? <p className="text-muted">Loading…</p> : rows.length === 0 ? (
+      {loading ? <p className="text-muted">Loading…</p> : filtered.length === 0 ? (
         <div className="text-center text-muted py-5">
           <i className="bi bi-check2-circle fs-1 d-block mb-2" aria-hidden="true"></i>
-          {view === "PENDING" ? "Nothing waiting. All good." : "No approvals yet."}
+          {storeFilter && rows.length > 0
+            ? <>Nothing here for this store. <button type="button" className="btn btn-link p-0 align-baseline" onClick={() => setStoreFilter("")}>Show all stores</button></>
+            : view === "PENDING" ? "Nothing waiting. All good." : "No approvals yet."}
         </div>
       ) : (
         <div className="list-group">
-          {rows.map((a) => {
+          {filtered.map((a) => {
             const [badge, word] = STATUS[a.status] ?? ["text-bg-secondary", a.status];
             return (
               <div key={a.id} className="list-group-item py-3">
                 <div className="d-flex justify-content-between align-items-start gap-2">
-                  <div>
-                    <div className="small text-muted">{KIND_LABEL[a.kind] ?? a.kind}{a.location ? ` · ${a.location.code ?? a.location.name}` : ""} · {new Date(a.createdAt).toLocaleString("en-PH")}</div>
+                  <div style={{ minWidth: 0 }}>
+                    <div className="mb-1">{storeTag(a)}</div>
+                    <div className="small text-muted">{KIND_LABEL[a.kind] ?? a.kind} · {new Date(a.createdAt).toLocaleString("en-PH")}</div>
                     <div className="fw-semibold">{a.summary}</div>
                     {a.decisionNote && <div className="small mt-1">Note: {a.decisionNote}</div>}
                   </div>
-                  <span className={`badge ${badge}`}>{word}</span>
+                  <span className={`badge ${badge} text-nowrap flex-shrink-0`}>{word}</span>
                 </div>
                 {a.status === "PENDING" && (
                   a.canDecide ? (
