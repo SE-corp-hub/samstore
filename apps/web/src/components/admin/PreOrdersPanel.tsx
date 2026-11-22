@@ -28,7 +28,7 @@ import ProductFinder from "./ProductFinder";
 import PickTile from "./PickTile";
 import StoreBar, { type StoreOption } from "./StoreBar";
 import StartChoices, { ChosenRow, CustomerAreaFilter, CustomerListPick, NewCustomerChoice, sameName, useCustomerArea } from "./StartChoices";
-import { areaLabel, byArea, nameWithTown, type Area } from "../../lib/customer-area";
+import { areaLabel, byArea, nameWithTown, storeArea, type Area } from "../../lib/customer-area";
 import { noteUse } from "../../lib/product-find";
 import { printSlip, type Slip } from "../../lib/slip-print";
 import { cachedGet, offlineRef, savedCopy, savedThenFresh, useOffline } from "../../lib/offlineCache";
@@ -245,12 +245,14 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
   const [seesCost, setSeesCost] = useState(false);
   const keptBelow = useRef(new Set<string>()); // below-cost prices someone chose to keep
   const [buildCustomers, setBuildCustomers] = useState<PosCustomer[]>([]);
-  // "All · Lipa · Bauan" above the customer list (remembered on this tablet, same as POS).
-  const [area, setArea] = useCustomerArea();
   const [buildCart, setBuildCart] = useState<CartLine[]>([]);
   const [newItemOpen, setNewItemOpen] = useState(false);
   const [buildCustomerId, setBuildCustomerId] = useState("");
   const [buildNewName, setBuildNewName] = useState("");
+  // "All · Lipa · Bauan" above the customer list (same as POS): starts on the town of the store the pre-order is at
+  // (2026-11-22), for every new pre-order; the owner's own choice of store first.
+  const orderTown = isOwner && !homeLocationId && !storePicked && locations.length > 1 ? null : storeArea(locations.find((l) => l.id === locationId)?.name);
+  const [area, setArea] = useCustomerArea(orderTown, buildCart.length === 0 && !buildCustomerId && !buildNewName.trim());
   const [buildNewPhone, setBuildNewPhone] = useState("");
   /** The town chosen for the new name on the start card ("Lipa"/"Bauan"/""), only for the name it was chosen with. */
   const [buildNewTown, setBuildNewTown] = useState<{ name: string; town: string } | null>(null);
