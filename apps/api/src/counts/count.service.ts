@@ -474,11 +474,11 @@ export class CountService {
       const diffKinds = new Set(differing.map((x) => varietyOf(x.l.product)));
       const jobs = diffKinds.size === 0 ? [] : await prisma.resackJob.findMany({
         where: { storeId, locationId: c.locationId, status: { not: "CANCELLED" }, startedAt: { gte: new Date(c.startedAt.getTime() - 30 * 86_400_000), lte: c.decidedAt ?? c.startedAt } },
-        include: { inputProduct: { select: productSelect }, outputs: { include: { product: { select: productSelect } } } }, orderBy: { startedAt: "desc" }, take: 40,
+        include: { inputProduct: { select: productSelect }, moreInputs: { include: { product: { select: productSelect } } }, outputs: { include: { product: { select: productSelect } } } }, orderBy: { startedAt: "desc" }, take: 40,
       });
-      const resacks = jobs.filter((j) => diffKinds.has(varietyOf(j.inputProduct))).slice(0, 10).map((j) => ({
+      const resacks = jobs.filter((j) => [j.inputProduct, ...j.moreInputs.map((m) => m.product)].some((p) => diffKinds.has(varietyOf(p)))).slice(0, 10).map((j) => ({
         docNumber: j.docNumber, at: j.startedAt, status: j.status,
-        from: `${qtyText(j.inputProduct, j.inputQty)}${isLooseP(j.inputProduct) ? "" : " ×"} ${j.inputProduct.name}`,
+        from: [{ product: j.inputProduct, quantity: j.inputQty }, ...j.moreInputs].map((m) => `${qtyText(m.product, m.quantity)}${isLooseP(m.product) ? "" : " ×"} ${m.product.name}`).join(" + "),
         to: j.outputs.map((o) => `${qtyText(o.product, o.quantity)}${isLooseP(o.product) ? "" : " ×"} ${o.product.name}`).join(", "),
         lossGrams: j.lossGrams,
       }));

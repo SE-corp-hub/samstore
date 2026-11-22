@@ -79,3 +79,27 @@ test("M4: a sack is valued per sack; loose rice per kilo", () => {
   assert.equal(valueOf({ ...loose, costMinor: 4_800 }, 1_250), 6_000, "1.25 kg at ₱48/kg = ₱60");
   assert.equal(valueOf({ ...loose, costMinor: 4_801 }, 1), 5, "rounded half-up to the centavo");
 });
+
+test("Resack, more going in: 1 × 25 kg + 5 kg loose → 6 × 5 kg — weights and costs add up", () => {
+  const plan = planResack({
+    input: { productId: "S25", name: "Sinandomeng 25 kg", grams: 25_000, valueMinor: 110_000 },
+    moreInputs: [{ productId: "SK", name: "Sinandomeng (per kilo)", grams: 5_000, valueMinor: 23_000 }],
+    outputs: [{ productId: "S5", name: "Sinandomeng 5kg", grams: 30_000 }],
+  });
+  assert.deepEqual([plan.gramsIn, plan.gramsOut, plan.lossGrams, plan.needsApproval, plan.varietyChange, plan.valueInMinor], [30_000, 30_000, 0, false, false, 133_000]);
+  assert.deepEqual(plan.outputValuesMinor, [133_000]);
+});
+
+test("Resack, more going in: two kinds mixed is a variety change; the same rice twice is refused", () => {
+  const plan = planResack({
+    input: { productId: "S25", name: "Sinandomeng 25 kg", grams: 25_000, valueMinor: 110_000 },
+    moreInputs: [{ productId: "D25", name: "Dinorado 25 kg", grams: 25_000, valueMinor: 140_000 }],
+    outputs: [{ productId: "S25", name: "Sinandomeng 25 kg", grams: 50_000 }],
+  });
+  assert.equal(plan.varietyChange, true);
+  assert.throws(() => planResack({
+    input: { productId: "S25", name: "Sinandomeng 25 kg", grams: 25_000, valueMinor: 110_000 },
+    moreInputs: [{ productId: "S25", name: "Sinandomeng 25 kg", grams: 25_000, valueMinor: 110_000 }],
+    outputs: [{ productId: "S5", name: "Sinandomeng 5kg", grams: 50_000 }],
+  }), /listed only once/);
+});

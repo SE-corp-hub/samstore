@@ -124,19 +124,29 @@ export const resackAllowance = (gramsIn: number) => Math.round((gramsIn * RESACK
 
 /** Charge a consignment store for resack loss beyond the allowance. Returns the amount (0 when nothing is charged). */
 export async function chargeResackLoss(
-  tx: Tx, input: { storeId: string; locationId: string; jobDoc: string; productId: string; gramsIn: number; lossGrams: number; actorId: string },
+  tx: Tx, input: {
+    storeId: string; locationId: string; jobDoc: string; productId: string; gramsIn: number; lossGrams: number; actorId: string;
+    /** More than one rice went in: the lost rice is valued at their cost mixed by weight. */
+    inputs?: { productId: string; grams: number }[];
+  },
 ): Promise<number> {
   const main = await consignmentMain(tx, input.storeId, input.locationId);
   if (!main) return 0;
   const allowance = resackAllowance(input.gramsIn);
   const over = input.lossGrams - allowance;
   if (over <= 0) return 0;
-  const product = await tx.product.findFirstOrThrow({ where: { id: input.productId, storeId: input.storeId }, select: { stockBaseUnit: true, stockBaseQuantity: true } });
-  const unit = await shelfCostFor(tx, input.storeId, input.productId, main);
-  // The cost is per stock unit: per kilo for loose rice, per sack otherwise.
-  const gramsPerUnit = looseOf(product) ? 1000 : product.stockBaseQuantity ?? 0;
-  if (unit <= 0 || gramsPerUnit <= 0) return 0;
-  const amount = Math.round((over * unit) / gramsPerUnit);
+  // Cost of everything that went in (at the main store's cost), then the lost part of it by weight.
+  let valueIn = 0;
+  for (const part of input.inputs ?? [{ productId: input.productId, grams: input.gramsIn }]) {
+    const product = await tx.product.findFirstOrThrow({ where: { id: part.productId, storeId: input.storeId }, select: { stockBaseUnit: true, stockBaseQuantity: true } });
+    const unit = await shelfCostFor(tx, input.storeId, part.productId, main);
+    // The cost is per stock unit: per kilo for loose rice, per sack otherwise.
+    const gramsPerUnit = looseOf(product) ? 1000 : product.stockBaseQuantity ?? 0;
+    if (unit <= 0 || gramsPerUnit <= 0) continue;
+    valueIn += (part.grams * unit) / gramsPerUnit;
+  }
+  if (valueIn <= 0 || input.gramsIn <= 0) return 0;
+  const amount = Math.round((over * valueIn) / input.gramsIn);
   if (amount <= 0) return 0;
   const kg = (g: number) => `${(g / 1000).toLocaleString("en-PH", { maximumFractionDigits: 3 })} kg`;
   const docNumber = await nextDocNumber(tx, input.storeId, "SP");

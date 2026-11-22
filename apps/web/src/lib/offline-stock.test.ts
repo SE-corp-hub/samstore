@@ -32,3 +32,15 @@ test("sales and opened sacks still waiting on the tablet come off the store they
   const after = takeOffShelf(items, waitingShelf(steps, items));
   assert.deepEqual(after.map((i) => i.stock), [{ s1: 2, s2: 2 }, { s1: 2_000 - 500 - 2_000 + 25_000 }]);
 });
+
+test("a resack waiting on the tablet takes every rice going in off that store and puts what came out on it", async () => {
+  const { waitingShelf } = await import("./offline-stock");
+  const items: { id: string; stock: Record<string, number> }[] = [
+    { id: "sack", stock: { s1: 5, s2: 3 } },
+    { id: "kilo", stock: { s1: 8_000 } },
+    { id: "pack", stock: { s1: 0 } },
+  ];
+  const steps = [{ path: "/admin/resacks", body: { locationId: "s1", inputProductId: "sack", inputQty: 1, moreInputs: [{ productId: "kilo", quantity: 5_000 }], outputs: [{ productId: "pack", quantity: 6 }] } }];
+  const after = takeOffShelf(items, waitingShelf(steps, items));
+  assert.deepEqual(after.map((i) => i.stock), [{ s1: 4, s2: 3 }, { s1: 3_000 }, { s1: 6 }]);
+});

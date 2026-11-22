@@ -213,3 +213,52 @@ test("M4: one store cannot see or finish another store's resack", async () => {
   const cross = await svc.resack(b.storeId, b.owner, { locationId: b.s1, inputProductId: a.sin25.id, inputQty: 1, outputs: [{ productId: b.sin5.id, quantity: 5 }], kargadorId: b.kargadorId, signatures: withKargador(b.kargadorId) });
   assert.equal(cross.ok, false, "store B cannot use store A's product");
 });
+
+test("Resack, more going in: 1 × 25 kg + 5 kg loose → 6 × 5 kg — both leave THIS store's shelf, costs add up", async () => {
+  const fx = await fixture();
+  await prisma.stockLevel.create({ data: { storeId: fx.storeId, productId: fx.loose.id, warehouseId: fx.s1, quantityOnHand: 8_000 } });
+  await prisma.stockLevel.create({ data: { storeId: fx.storeId, productId: fx.sin25.id, warehouseId: fx.s2, quantityOnHand: 4 } });
+  const r = await svc.resack(fx.storeId, fx.staff1, {
+    locationId: fx.s1, inputProductId: fx.sin25.id, inputQty: 1, moreInputs: [{ productId: fx.loose.id, quantity: 5_000 }],
+    outputs: [{ productId: fx.sin5.id, quantity: 6 }], kargadorId: fx.kargadorId, signatures: withKargador(fx.kargadorId),
+  });
+  assert.equal(r.ok, true, msg(r));
+  if (!r.ok) return;
+  assert.deepEqual([r.value.gramsIn, r.value.gramsOut, r.value.lossGrams, r.value.needsApproval], [30_000, 30_000, 0, false]);
+  assert.equal(await onHand(fx, fx.sin25.id), 9);
+  assert.equal(await onHand(fx, fx.loose.id), 3_000, "5 kg of the 8 kg loose went in");
+  assert.equal(await onHand(fx, fx.sin5.id), 6);
+  assert.equal(await onHand(fx, fx.sin25.id, fx.s2), 4, "the other store is not touched");
+  const job = await prisma.resackJob.findUniqueOrThrow({ where: { id: r.value.id }, include: { outputs: true, moreInputs: true } });
+  assert.equal(job.inputGrams, 30_000);
+  assert.equal(job.inputValueMinor, 110_000 + 23_000, "₱1,100 sack + 5 kg × ₱46");
+  assert.deepEqual(job.moreInputs.map((m) => [m.productId, m.quantity, m.grams, m.valueMinor]), [[fx.loose.id, 5_000, 5_000, 23_000]]);
+  assert.equal(job.outputs[0]!.valueMinor, 133_000);
+  const moves = await prisma.stockMovement.findMany({ where: { storeId: fx.storeId, documentType: "RESACK", documentId: job.id }, select: { type: true, delta: true } });
+  assert.deepEqual(moves.map((m) => `${m.type}${m.delta}`).sort(), ["RESACK_IN6", "RESACK_OUT-1", "RESACK_OUT-5000"]);
+  const listed = (await svc.list(fx.storeId, fx.staff1, { status: "ALL", locationId: fx.s1 })).find((j) => j.id === job.id)!;
+  assert.deepEqual(listed.moreInputs.map((m) => [m.product.name, m.quantity]), [["Sinandomeng (per kilo)", 5_000]]);
+});
+
+test("Resack, more going in: short over 1% goes to the owner naming every rice; open a sack takes one rice only", async () => {
+  const fx = await fixture();
+  await prisma.stockLevel.create({ data: { storeId: fx.storeId, productId: fx.din25.id, warehouseId: fx.s1, quantityOnHand: 2 } });
+  const r = await svc.resack(fx.storeId, fx.staff1, {
+    locationId: fx.s1, inputProductId: fx.sin25.id, inputQty: 1, moreInputs: [{ productId: fx.din25.id, quantity: 1 }],
+    outputs: [{ productId: fx.sin5.id, quantity: 9 }], kargadorId: fx.kargadorId, signatures: withKargador(fx.kargadorId),
+  });
+  assert.equal(r.ok, true, msg(r));
+  if (!r.ok) return;
+  assert.deepEqual([r.value.lossGrams, r.value.needsApproval, r.value.varietyChange], [5_000, true, true]);
+  const approval = await prisma.approvalRequest.findUniqueOrThrow({ where: { id: r.value.approvalId! } });
+  assert.match(approval.summary, /1 × Sinandomeng 25 kg \+ 1 × Dinorado 25 kg \(50 kg\)/);
+  assert.equal(await onHand(fx, fx.din25.id), 1);
+
+  const open = await svc.resack(fx.storeId, fx.staff1, {
+    locationId: fx.s1, inputProductId: fx.sin25.id, inputQty: 1, moreInputs: [{ productId: fx.din25.id, quantity: 1 }], openSack: true,
+    outputs: [{ productId: fx.loose.id, quantity: 50_000 }], kargadorId: fx.kargadorId, signatures: withKargador(fx.kargadorId),
+  });
+  assert.equal(open.ok, false);
+  assert.match(msg(open), /only one rice goes in/);
+  assert.equal(await onHand(fx, fx.din25.id), 1, "nothing moved");
+});
