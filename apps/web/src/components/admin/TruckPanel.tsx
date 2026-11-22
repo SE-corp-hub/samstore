@@ -7,7 +7,7 @@
 // 1 What came (supplier order or typed, good and damaged sacks)  2 Customers at the truck (waiting pre-orders)
 // 3 The rest on shelves  4 Sign and finish → the truck sheet, and the pre-orders to collect payment for.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { API_URL } from "../../config";
 import { adminHeaders } from "../../lib/admin";
 import { toast } from "../../lib/toast";
@@ -20,7 +20,10 @@ interface Product { id: string; name: string; stockBaseUnit: string | null; stoc
 interface PoLine { id: string; productId: string; name: string; loose: boolean; quantity: number; receivedQty: number }
 interface Po { id: string; docNumber: string; supplierName: string; locationId: string; locationName: string; expectedAt: string | null; lines: PoLine[] }
 interface PreOrder { id: string; orderNumber: string; customerName: string; status: string; totalMinor: number; locationId: string | null; locationName: string | null; createdAt: string; items: { productId: string | null; productName: string; quantity: number }[] }
-interface Line { productId: string; good: string; damaged: string; cost: string }
+interface Line { productId: string; good: string; damaged: string; price: string } // price: pesos typed, "" = the store's price
+interface Cat { priceMinor: number; floorMinor: number }
+interface Cust { id: string; name: string }
+interface Draft { poId: string; supplier: string; lines: Line[]; unloadId: string; sellId: string; given: string[]; shelf: Record<string, Record<string, string>> }
 interface Summary {
   sellingName: string; unloadName: string; purchaseOrder: { docNumber: string } | null; supplierName: string | null;
   lines: { productId: string; name: string; good: number; damaged: number; short: number; toCustomers: number }[];
@@ -37,6 +40,16 @@ const n = (v: string | undefined) => Number(v || 0) || 0;
 const errText = (d: ApiBody | null, f: string) => d?.errors?.join(", ") ?? d?.message ?? f;
 const get = (path: string) => fetch(`${API_URL}${path}`, { headers: adminHeaders() }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
 const sacks = (q: number) => `${q} sack${q === 1 ? "" : "s"}`;
+const money = (v: string) => v.replace(/[^\d.]/g, "").replace(/(\..*)\./g, "$1").slice(0, 9);
+const toMinor = (v: string) => Math.round(Number(v) * 100);
+// The truck being counted stays on this tablet while the user looks at other screens (2026-11-22).
+const DRAFT_KEY = "sam.truckDraft.v1";
+const readDraft = (): Draft | null => { try { const t = localStorage.getItem(DRAFT_KEY); return t ? (JSON.parse(t) as Draft) : null; } catch { return null; } };
+const writeDraft = (d: Draft | null) => { try { if (d) localStorage.setItem(DRAFT_KEY, JSON.stringify(d)); else localStorage.removeItem(DRAFT_KEY); } catch { /* private window */ } };
+const send = (path: string, method: string, body: unknown) =>
+  fetch(`${API_URL}${path}`, { method, headers: { ...adminHeaders(), "Content-Type": "application/json" }, body: JSON.stringify(body) })
+    .then(async (r) => ({ ok: r.ok, d: (await r.json().catch(() => null)) as ApiBody | null }))
+    .catch(() => ({ ok: false, d: { message: "No internet. Try again when it is back." } as ApiBody }));
 
 export default function TruckPanel({ onNavigate }: { role?: string; onNavigate?: (tab: string) => void }) {
   const [locations, setLocations] = useState<Loc[]>([]);
@@ -50,7 +63,7 @@ export default function TruckPanel({ onNavigate }: { role?: string; onNavigate?:
 
   const [poId, setPoId] = useState("");
   const [supplier, setSupplier] = useState("");
-  const [lines, setLines] = useState<Line[]>([{ productId: "", good: "", damaged: "", cost: "" }]);
+  const [lines, setLines] = useState<Line[]>([{ productId: "", good: "", damaged: "", price: "" }]);
   const [unloadId, setUnloadId] = useState("");
   const [sellId, setSellId] = useState("");
   const [given, setGiven] = useState<Set<string>>(new Set());
@@ -61,6 +74,13 @@ export default function TruckPanel({ onNavigate }: { role?: string; onNavigate?:
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<Truck | null>(null);
   const [paid, setPaid] = useState<Set<string>>(new Set());
+  const [cat, setCat] = useState<Record<string, Cat>>({}); // the selling store's prices
+  const [custs, setCusts] = useState<Cust[] | null>(null);
+  const [newOpen, setNewOpen] = useState(false);
+  const [newCust, setNewCust] = useState("");
+  const [newName, setNewName] = useState("");
+  const [newQty, setNewQty] = useState<Record<string, string>>({});
+  const restored = useRef(false);
 
   const load = useCallback(async () => {
     const [me, locs, ps, po, pre, tr, st] = await Promise.all([
@@ -83,16 +103,91 @@ export default function TruckPanel({ onNavigate }: { role?: string; onNavigate?:
   }, []);
   useEffect(() => { void load(); }, [load]);
 
+  // Bring back the truck typed before (another screen was opened in between). A supplier order that is
+  // already filled, or a pre-order that is no longer waiting, is dropped.
+  useEffect(() => {
+    if (!loaded || restored.current) return;
+    restored.current = true;
+    const d = readDraft();
+    if (!d) return;
+    if (d.poId && !orders.some((o) => o.id === d.poId)) { writeDraft(null); return; }
+    setPoId(d.poId); setSupplier(d.supplier); setLines(d.lines.length ? d.lines.map((l) => ({ ...l, price: l.price ?? "" })) : lines);
+    if (locations.some((l) => l.id === d.unloadId)) setUnloadId(d.unloadId);
+    if (!homeId && locations.some((l) => l.id === d.sellId)) setSellId(d.sellId);
+    setGiven(new Set(d.given.filter((id) => preorders.some((o) => o.id === id))));
+    setShelf(d.shelf ?? {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaded]);
+  const started = !!poId || !!supplier.trim() || lines.some((l) => l.productId || l.good || l.damaged || l.price);
+  useEffect(() => {
+    if (!restored.current) return;
+    writeDraft(started ? { poId, supplier, lines, unloadId, sellId, given: [...given], shelf } : null);
+  }, [started, poId, supplier, lines, unloadId, sellId, given, shelf]);
+  const startOver = () => {
+    writeDraft(null);
+    setPoId(""); setLines([{ productId: "", good: "", damaged: "", price: "" }]); setSupplier(""); setGiven(new Set()); setShelf({}); setSig(null); setSigKey((k) => k + 1);
+    setNewOpen(false); setNewQty({}); setError(null);
+  };
+
+  // The selling store's own prices: what each rice from this truck will sell for there.
+  useEffect(() => {
+    if (!sellId) return;
+    let live = true;
+    void get(`/admin/benta/catalog?locationId=${encodeURIComponent(sellId)}`).then((c) => {
+      if (!live) return;
+      const m: Record<string, Cat> = {};
+      for (const p of (c?.products ?? []) as { id: string; priceMinor: number; floorMinor?: number }[]) m[p.id] = { priceMinor: p.priceMinor, floorMinor: p.floorMinor ?? 0 };
+      setCat(m);
+    });
+    return () => { live = false; };
+  }, [sellId]);
+  const priceOf = (l: Line) => (l.price !== "" ? toMinor(l.price) : cat[l.productId]?.priceMinor ?? 0);
+  const priceChanged = (l: Line) => !!l.productId && l.price !== "" && toMinor(l.price) > 0 && toMinor(l.price) !== cat[l.productId]?.priceMinor;
+  /** Saves every changed selling price as the selling store's price. Returns an error to show, or null. */
+  const savePrices = async (): Promise<string | null> => {
+    for (const l of lines.filter(priceChanged)) {
+      const r = await send(`/admin/warehouses/${encodeURIComponent(sellId)}/prices/${encodeURIComponent(l.productId)}`, "PUT", { priceMinor: toMinor(l.price) });
+      if (!r.ok) return `${nameOf(l.productId)} price: ${errText(r.d, "did not save")}`;
+      setCat((c) => ({ ...c, [l.productId]: { priceMinor: toMinor(l.price), floorMinor: c[l.productId]?.floorMinor ?? 0 } }));
+    }
+    setLines((ls) => ls.map((l) => (priceChanged(l) ? { ...l, price: "" } : l)));
+    return null;
+  };
+
+  // A customer who orders right at the truck: a pre-order of the selling store, ticked as given.
+  const openNew = () => {
+    setNewOpen(true); setNewCust(""); setNewName(""); setNewQty({});
+    if (!custs) void get("/admin/customers").then((c) => setCusts((((c?.customers ?? []) as Cust[]).slice()).sort((a, b) => a.name.localeCompare(b.name))));
+  };
+  const newItems = lines.filter((l) => l.productId && n(newQty[l.productId]) > 0).map((l) => ({ productId: l.productId, quantity: n(newQty[l.productId]) }));
+  const newReady = newItems.length > 0 && (!!newCust || newName.trim().length > 0);
+  const saveNew = async () => {
+    if (!newReady || busy) return;
+    setBusy(true); setError(null);
+    const priceErr = await savePrices();
+    if (priceErr) { setBusy(false); setError(priceErr); return; }
+    const who = newCust ? { customerId: newCust } : { customerName: newName.trim().slice(0, 80) };
+    const r = await send("/admin/pos/preorder", "POST", { ...who, items: newItems, locationId: sellId, idempotencyKey: `truck-new-${Date.now()}-${Math.random().toString(36).slice(2, 8)}` });
+    setBusy(false);
+    if (!r.ok) { setError(errText(r.d, "The order did not save")); return; }
+    const id = String(r.d?.orderId ?? "");
+    toast(`Order saved: ${String(r.d?.orderNumber ?? "")}`);
+    setNewOpen(false); setNewQty({});
+    if (!newCust) setCusts(null); // a new customer was added
+    await load();
+    if (id) setGiven((s) => new Set(s).add(id));
+  };
+
   const po = orders.find((o) => o.id === poId);
   const byId = useMemo(() => new Map(products.map((p) => [p.id, p])), [products]);
   const nameOf = (pid: string) => po?.lines.find((l) => l.productId === pid)?.name ?? byId.get(pid)?.name ?? "Rice";
   const pickOrder = (id: string) => {
     setPoId(id); setGiven(new Set()); setShelf({});
     const o = orders.find((x) => x.id === id);
-    if (!o) { setLines([{ productId: "", good: "", damaged: "", cost: "" }]); setSupplier(""); return; }
+    if (!o) { setLines([{ productId: "", good: "", damaged: "", price: "" }]); setSupplier(""); return; }
     setSupplier(o.supplierName);
     setUnloadId(o.locationId);
-    setLines(o.lines.filter((l) => !l.loose && l.quantity > l.receivedQty).map((l) => ({ productId: l.productId, good: String(l.quantity - l.receivedQty), damaged: "", cost: "" })));
+    setLines(o.lines.filter((l) => !l.loose && l.quantity > l.receivedQty).map((l) => ({ productId: l.productId, good: String(l.quantity - l.receivedQty), damaged: "", price: "" })));
   };
   const onTruck = new Set(lines.filter((l) => l.productId).map((l) => l.productId));
 
@@ -145,9 +240,11 @@ export default function TruckPanel({ onNavigate }: { role?: string; onNavigate?:
   const finish = async () => {
     if (!balanced || !sig || busy) return;
     setBusy(true); setError(null);
+    const priceErr = await savePrices();
+    if (priceErr) { setBusy(false); setError(priceErr); return; }
     const body = {
       locationId: sellId, unloadLocationId: unloadId, purchaseOrderId: po?.id, supplierName: po ? undefined : supplier.trim() || undefined,
-      lines: lines.map((l) => ({ productId: l.productId, good: n(l.good), damaged: n(l.damaged), unitCostMinor: !po && l.cost ? Math.round(Number(l.cost) * 100) : undefined })),
+      lines: lines.map((l) => ({ productId: l.productId, good: n(l.good), damaged: n(l.damaged) })),
       preorders: waiting.filter((o) => given.has(o.id)).map((o) => o.id),
       shelves: Object.entries(shelf).flatMap(([productId, m]) => Object.entries(m).filter(([, v]) => n(v) > 0).map(([locationId, v]) => ({ locationId, productId, quantity: n(v) }))),
       signatures: [{ signerKind: "STAFF", imagePng: sig }],
@@ -160,7 +257,7 @@ export default function TruckPanel({ onNavigate }: { role?: string; onNavigate?:
     const t: Truck = { id: String(d?.id), docNumber: String(d?.docNumber), createdAt: new Date().toISOString(), summary: d?.summary as unknown as Summary };
     toast(`Truck saved: ${t.docNumber}`);
     setDone(t); setPaid(new Set());
-    setPoId(""); setLines([{ productId: "", good: "", damaged: "", cost: "" }]); setSupplier(""); setGiven(new Set()); setShelf({}); setSig(null); setSigKey((k) => k + 1);
+    startOver();
     void load();
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
@@ -185,6 +282,12 @@ export default function TruckPanel({ onNavigate }: { role?: string; onNavigate?:
     <div className="truck-ui" style={{ fontSize: 18, maxWidth: 760 }}>
       <h1 className="h4 mb-1">Truck arrived</h1>
       <p className="text-muted mb-3">Count the truck once: what customers take from the truck, and what goes on each shelf.</p>
+      {started && !done && (
+        <div className="truck-draft d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+          <span><i className="bi bi-cloud-check me-1" aria-hidden="true"></i>Saved on this tablet. You can open other screens and come back.</span>
+          <button type="button" className="btn btn-outline-danger" onClick={startOver}>Start over</button>
+        </div>
+      )}
 
       {done && (
         <div className="card mb-4 border-success">
@@ -256,17 +359,21 @@ export default function TruckPanel({ onNavigate }: { role?: string; onNavigate?:
                 <label className="truck-field"><span>Damaged</span>
                   <input className="form-control form-control-lg text-center" inputMode="numeric" placeholder="0" value={l.damaged} onChange={(e) => setLines(lines.map((x, j) => (j === i ? { ...x, damaged: whole(e.target.value) } : x)))} />
                 </label>
-                {!po && (
-                  <label className="truck-field"><span>₱ cost each</span>
-                    <input className="form-control form-control-lg text-center" inputMode="decimal" value={l.cost} onChange={(e) => setLines(lines.map((x, j) => (j === i ? { ...x, cost: e.target.value.replace(/[^\d.]/g, "").slice(0, 9) } : x)))} />
-                  </label>
-                )}
+                <label className="truck-field"><span>₱ selling price</span>
+                  <input className="form-control form-control-lg text-center" inputMode="decimal" aria-label={`Selling price of ${nameOf(l.productId)} at ${sellLoc?.name ?? "the store"}`}
+                    placeholder={cat[l.productId] ? String(cat[l.productId]!.priceMinor / 100) : ""} value={l.price}
+                    onChange={(e) => setLines(lines.map((x, j) => (j === i ? { ...x, price: money(e.target.value) } : x)))} />
+                  {l.productId && cat[l.productId] && cat[l.productId]!.floorMinor > 0 && priceOf(l) > 0 && priceOf(l) < cat[l.productId]!.floorMinor
+                    ? <small className="text-danger fw-semibold">Below cost</small>
+                    : priceChanged(l) ? <small className="text-primary fw-semibold">New price</small> : null}
+                </label>
                 {!po && <button type="button" className="btn btn-link text-danger truck-remove" aria-label="Remove" onClick={() => setLines(lines.filter((_, j) => j !== i))}><i className="bi bi-trash3" aria-hidden="true"></i></button>}
               </div>
             );
           })}
-          {!po && <button type="button" className="btn btn-outline-dark btn-lg" onClick={() => setLines([...lines, { productId: "", good: "", damaged: "", cost: "" }])}>+ Add rice</button>}
+          {!po && <button type="button" className="btn btn-outline-dark btn-lg" onClick={() => setLines([...lines, { productId: "", good: "", damaged: "", price: "" }])}>+ Add rice</button>}
           {po && <p className="small text-muted mb-0 mt-2">Change the numbers to what really came. Damaged sacks are not paid to the supplier.</p>}
+          <p className="small text-muted mb-0 mt-2">Selling price = the price at <strong>{sellLoc?.name ?? "the store"}</strong>. Type a new one and it becomes that store&apos;s price when you save. The cost comes from the supplier order or the product; only the owner changes costs (Products).</p>
         </div>
       </section>
 
@@ -283,6 +390,35 @@ export default function TruckPanel({ onNavigate }: { role?: string; onNavigate?:
                     {l.id === sellId && <i className="bi bi-check-lg me-1" aria-hidden="true"></i>}{l.name}
                   </button>
                 ))}
+              </div>
+            )}
+            {newOpen ? (
+              <div className="truck-new mb-3">
+                <div className="fw-semibold mb-2">New order at the truck · sale of {sellLoc?.name}</div>
+                <label className="form-label" htmlFor="tr-cust">Customer</label>
+                <select id="tr-cust" className="form-select form-select-lg mb-2" value={newCust} onChange={(e) => setNewCust(e.target.value)}>
+                  <option value="">New customer (type the name)</option>
+                  {(custs ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+                {!newCust && <input className="form-control form-control-lg mb-2" placeholder="Customer name" aria-label="New customer name" value={newName} onChange={(e) => setNewName(e.target.value.slice(0, 80))} />}
+                {lines.filter((l) => l.productId).map((l) => (
+                  <div key={l.productId} className="truck-new-line">
+                    <span style={{ minWidth: 0 }}><strong>{nameOf(l.productId)}</strong><span className="d-block small text-muted">{peso(priceOf(l))} each</span></span>
+                    <label className="truck-field"><span>Sacks</span>
+                      <input className="form-control form-control-lg text-center" inputMode="numeric" placeholder="0" value={newQty[l.productId] ?? ""} onChange={(e) => setNewQty({ ...newQty, [l.productId]: whole(e.target.value) })} />
+                    </label>
+                  </div>
+                ))}
+                {newItems.length > 0 && <div className="mt-2">Total: <strong>{peso(newItems.reduce((a, it) => a + it.quantity * priceOf(lines.find((l) => l.productId === it.productId)!), 0))}</strong></div>}
+                <div className="d-flex flex-wrap gap-2 mt-3">
+                  <button type="button" className="btn btn-success btn-lg" disabled={!newReady || busy} onClick={() => void saveNew()}>{busy ? "Please wait…" : "Save order and give from truck"}</button>
+                  <button type="button" className="btn btn-outline-secondary btn-lg" onClick={() => setNewOpen(false)}>Cancel</button>
+                </div>
+              </div>
+            ) : (
+              <div className="d-flex flex-wrap gap-2 mb-3">
+                <button type="button" className="btn btn-outline-success btn-lg" onClick={openNew}><i className="bi bi-person-plus me-1" aria-hidden="true"></i>New order at the truck</button>
+                {onNavigate && <button type="button" className="btn btn-link btn-lg" onClick={() => onNavigate("preorders")}>Open Pre-order screen</button>}
               </div>
             )}
             {waiting.length === 0 ? <p className="text-muted mb-0">No pre-orders are waiting for this rice.</p> : (<>

@@ -123,3 +123,15 @@ test("a truck of 100: 7 to pre-orders from the truck, 93 to shelves; every sack 
   assert.equal(paid.ok, true, msg(paid));
   assert.equal(await fx.onHand(fx.s1.id), 3, "paying takes no more rice");
 });
+
+test("only the owner sets the cost: a staff Stock in with a typed cost keeps the product's cost", async () => {
+  const fx = await fixture();
+  const { BentaService } = await import("./benta.service.js");
+  const benta = new BentaService();
+  const r = await benta.stockIn(fx.storeId, fx.staff, { locationId: fx.s1.id, lines: [{ productId: fx.mango.id, quantity: 4, unitCostMinor: 100 }], signatures: sig });
+  assert.equal(r.ok, true, msg(r));
+  if (!r.ok) return;
+  const line = await prisma.stockInLine.findFirstOrThrow({ where: { stockInId: r.value.id } });
+  assert.equal(line.unitCostMinor, 100_000, "recorded at the product's cost, not the typed ₱1");
+  assert.equal((await prisma.product.findUniqueOrThrow({ where: { id: fx.mango.id } })).costMinor, 100_000);
+});

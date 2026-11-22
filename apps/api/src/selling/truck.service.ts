@@ -29,7 +29,7 @@ type Result<T> = { ok: true; value: T } | { ok: false; error: ApiError };
 const invalid = (m: string): Result<never> => ({ ok: false, error: { type: "validation", errors: [m] } });
 const forbidden = (m: string): Result<never> => ({ ok: false, error: { type: "forbidden", message: m } });
 
-export interface TruckLineInput { productId?: string; good?: unknown; damaged?: unknown; unitCostMinor?: unknown }
+export interface TruckLineInput { productId?: string; good?: unknown; damaged?: unknown }
 export interface TruckShelfInput { locationId?: string; productId?: string; quantity?: unknown }
 export interface TruckInput {
   /** The store doing the truck: hand-outs become its orders. Store logins: always their own store. */
@@ -118,8 +118,9 @@ export class TruckService {
       if (po && !pl) throw new SellingError(`${p.name} is not on ${po.docNumber}`);
       const left = pl ? pl.quantity - pl.receivedQty : 0;
       if (pl && good > left) throw new SellingError(`${p.name}: only ${isLoose(p) ? formatKilos(left) : `${left}`} left on ${po!.docNumber}. Enter the extra as a separate Stock in.`);
-      const typed = l.unitCostMinor === undefined || l.unitCostMinor === null || l.unitCostMinor === "" ? null : count(l.unitCostMinor, `${p.name} cost`);
-      return { product: p, good, damaged, short: pl ? Math.max(0, left - good - damaged) : 0, unitCostMinor: pl ? pl.unitCostMinor : typed, poLineId: pl?.id ?? null };
+      // The cost is never typed on a truck (2026-11-22): the supplier order's agreed cost, else the product's
+      // cost as the owner set it on Products, so a truck never changes what a sack costs.
+      return { product: p, good, damaged, short: pl ? Math.max(0, left - good - damaged) : 0, unitCostMinor: pl ? pl.unitCostMinor : p.costMinor > 0 ? p.costMinor : null, poLineId: pl?.id ?? null };
     });
     const lineOf = new Map(lines.map((l) => [l.product.id, l]));
 

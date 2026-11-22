@@ -162,7 +162,7 @@ export class BentaController {
     return unwrap(await this.trucks.finish(storeId, actor, {
       locationId: str(body?.locationId), unloadLocationId: str(body?.unloadLocationId), purchaseOrderId: str(body?.purchaseOrderId),
       supplierName: str(body?.supplierName), note: str(body?.note),
-      lines: list(body?.lines).map((x) => ({ productId: str(x.productId), good: x.good, damaged: x.damaged, unitCostMinor: x.unitCostMinor })),
+      lines: list(body?.lines).map((x) => ({ productId: str(x.productId), good: x.good, damaged: x.damaged })),
       preorders: Array.isArray(body?.preorders) ? (body.preorders as unknown[]).filter((x): x is string => typeof x === "string") : [],
       shelves: list(body?.shelves).map((x) => ({ locationId: str(x.locationId), productId: str(x.productId), quantity: x.quantity })),
       signatures: signaturesFrom(body?.signatures),

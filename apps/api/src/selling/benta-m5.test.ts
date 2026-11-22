@@ -205,7 +205,7 @@ test("M5: a pre-order item can be added with a cost and a price and nothing on h
 
 test("M5: recent stock-ins are listed with their lines (for the receipt)", async () => {
   const fx = await fixture();
-  const r = await svc.stockIn(fx.storeId, fx.staff1, { lines: [{ productId: fx.sin25.id, quantity: 4, unitCostMinor: 120_000 }], supplierName: "Mang Ben", signatures: staffSig });
+  const r = await svc.stockIn(fx.storeId, fx.owner, { locationId: fx.s1, lines: [{ productId: fx.sin25.id, quantity: 4, unitCostMinor: 120_000 }], supplierName: "Mang Ben", signatures: staffSig });
   assert.equal(r.ok, true, msg(r));
   const l = await svc.stockInList(fx.storeId, fx.staff1, undefined);
   assert.equal(l.ok, true, msg(l));
@@ -345,9 +345,15 @@ test("M5: Manual na pasok adds signed stock and records the latest cost", async 
   assert.equal(r.ok, true, msg(r));
   assert.match(r.ok ? r.value.docNumber : "", /^IN-\d{6}$/);
   assert.equal(await onHand(fx, fx.sin25.id, fx.s1), 14);
-  assert.equal((await prisma.product.findUniqueOrThrow({ where: { id: fx.sin25.id } })).costMinor, 112_000);
+  // Only the owner sets cost (2026-11-22): staff's typed ₱1,120 is ignored, the product keeps its cost.
+  const before = (await prisma.product.findUniqueOrThrow({ where: { id: fx.sin25.id } })).costMinor;
+  assert.notEqual(before, 112_000);
   const mv = await prisma.stockMovement.findFirstOrThrow({ where: { storeId: fx.storeId, type: "STOCK_IN" } });
   assert.deepEqual([mv.delta, mv.warehouseId, mv.documentType], [4, fx.s1, "STOCK_IN"]);
+  // The owner's Stock in records the latest cost.
+  const own = await svc.stockIn(fx.storeId, fx.owner, { locationId: fx.s1, supplierName: "Mang Tonyo", lines: [{ productId: fx.sin25.id, quantity: 1, unitCostMinor: 112_000 }], signatures: staffSig });
+  assert.equal(own.ok, true, msg(own));
+  assert.equal((await prisma.product.findUniqueOrThrow({ where: { id: fx.sin25.id } })).costMinor, 112_000);
   const away = await svc.stockIn(fx.storeId, fx.staff2, { locationId: fx.s1, lines: [{ productId: fx.sin25.id, quantity: 1 }], signatures: staffSig });
   assert.equal(away.ok, false, "Store 2 staff cannot receive at Store 1");
 });

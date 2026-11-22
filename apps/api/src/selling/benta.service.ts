@@ -53,7 +53,7 @@ import { txOptions } from "../persistence/tx-options.js";
 import { shelvesFor } from "../domain/sources.js";
 import { findOrMakeQuickCustomer } from "../pos/quick-customer.js";
 import { counterItemVia, productAdded } from "../domain/added-where.js";
-import { ownerOrManager } from "../domain/product-edit-rights.js";
+import { ownerOrManager, ownsProducts } from "../domain/product-edit-rights.js";
 import { manilaDate } from "../domain/reports.js";
 
 export type BentaResult<T> = { ok: true; value: T } | { ok: false; error: ApiError };
@@ -711,6 +711,9 @@ export class BentaService {
           if (l.quantity > left) throw new SellingError(left > 0 ? `${p.name}: only ${isLoose(p) ? formatKilos(left) : `${left} sack${left === 1 ? "" : "s"}`} left on ${po.docNumber}. Enter any extra as a separate Stock in.` : `${p.name} is already complete on ${po.docNumber}`);
           return { product: p, quantity: l.quantity, unitCostMinor: pl.unitCostMinor as number | null, poLineId: pl.id as string | null };
         }
+        // Only the owner sets what a product costs (Products, or a cost typed here). Anyone else's Stock in
+        // is recorded at the product's cost as it stands, so it never changes the cost (2026-11-22).
+        if (!ownsProducts(actor.role)) return { product: p, quantity: l.quantity, unitCostMinor: (p.costMinor > 0 ? p.costMinor : null) as number | null, poLineId: null as string | null };
         const cost = l.unitCostMinor === undefined || l.unitCostMinor === null ? null : l.unitCostMinor;
         if (cost !== null && (typeof cost !== "number" || !Number.isInteger(cost) || cost < 0 || cost > 100_000_000)) throw new SellingError("Wrong cost");
         return { product: p, quantity: l.quantity, unitCostMinor: cost as number | null, poLineId: null as string | null };
