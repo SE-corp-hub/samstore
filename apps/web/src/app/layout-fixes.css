@@ -202,3 +202,26 @@ section + section > .settings-scope-head { margin-top: 22px; }
    screen; now they share the row and wrap instead of pushing past the edge. */
 .side-who-row .side-drawer-btns { flex-wrap: wrap; min-width: 0; max-width: 100%; }
 .side-who-row .side-drawer-btns > .btn { flex: 1 1 auto; }
+
+/* ───────── Truck arrived (2026-11-22): one truck counted once. */
+.truck-step { display: flex; align-items: center; gap: 0.6rem; }
+.truck-num { display: inline-flex; align-items: center; justify-content: center; width: 2rem; height: 2rem; border-radius: 50%; border: 2px solid currentColor; font-size: 1rem; flex: 0 0 auto; }
+.truck-places { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.truck-places .btn { min-height: 48px; }
+.truck-line { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 0.5rem; padding: 0.6rem 0; border-top: 1px solid #e6e1d9; }
+.truck-line-name { flex: 1 1 14rem; min-width: 0; }
+.truck-field { display: flex; flex-direction: column; gap: 0.2rem; flex: 0 1 8.5rem; min-width: 6rem; margin: 0; }
+.truck-field > span { font-weight: 600; color: var(--sam-muted, #5c5148); font-size: max(16px, 0.9rem); overflow-wrap: anywhere; }
+.truck-remove { min-height: 48px; min-width: 48px; }
+.truck-cust { display: flex; align-items: center; gap: 0.75rem; min-height: 56px; width: 100%; white-space: normal; }
+.truck-shelf { padding-top: 0.6rem; border-top: 1px solid #e6e1d9; }
+.truck-shelf-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr)); gap: 0.6rem; }
+.truck-shelf-cell .truck-field { flex: none; width: 100%; }
+.truck-shelf-cell .btn-link { min-height: 44px; }
+.truck-left { font-weight: 700; font-size: 1.15rem; padding: 0.2rem 0.6rem; border-radius: 0.5rem; }
+.truck-left.ok { background: #E5F4E4; color: #1E6B35; }
+.truck-left.warn { background: #FFF3D6; color: #6F4800; border: 1px solid #8A5A00; }
+.truck-pay { padding: 0.5rem 0.75rem; border-radius: 0.6rem; background: #f4efe7; }
+.truck-pay .btn { min-height: 48px; }
+.truck-given { position: sticky; top: 0; z-index: 2; background: #fff; padding: 0.4rem 0; font-size: 1.05rem; }
+@media (max-width: 479.98px) { .truck-cust > .ms-auto { display: none; } .truck-shelf-grid { grid-template-columns: 1fr 1fr; } }
