@@ -36,6 +36,7 @@ export const RULES: Rule[] = [
   { id: "onlineShop", what: "Online shop, Messenger and points", where: "Settings → Online shop, Messenger", scope: "business", rights: { owner: "yes", manager: "look", head: "no", staff: "no" } },
   { id: "businessLock", what: "PIN lock for the whole business", where: "Settings → PIN lock", scope: "business", rights: { owner: "yes", manager: "no", head: "no", staff: "no" } },
   { id: "locations", what: "Add a store, rename it, where it takes rice from", where: "Menu → Locations", scope: "business", rights: { owner: "yes", manager: "look", head: "no", staff: "no" } },
+  { id: "productAdd", what: "Add a new rice (counter logins: \"+ New item\" on POS, the owner checks it)", where: "Products → New product", scope: "business", rights: { owner: "yes", manager: "yes", head: "look", staff: "look" } },
   { id: "productSetup", what: "Rice name, SKU, cost, group, sack size, per kilo, hide", where: "Products", scope: "business", rights: { owner: "yes", manager: "look", head: "look", staff: "look" } },
   { id: "productPrice", what: "Price for all stores, reorder level, picture", where: "Products", scope: "business", rights: { owner: "yes", manager: "yes", head: "look", staff: "look" } },
   { id: "lowestPrice", what: "Lowest price a store may sell at", where: "Store prices", scope: "business", rights: { owner: "yes", manager: "look", head: "look", staff: "no" } },

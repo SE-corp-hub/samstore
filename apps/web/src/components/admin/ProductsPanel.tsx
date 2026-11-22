@@ -10,6 +10,7 @@ import { useCallback, useEffect, useState } from "react";
 import AddSeveralProducts from "./AddSeveralProducts";
 import { API_URL } from "../../config";
 import { adminHeaders, roleCan } from "../../lib/admin";
+import { cachedGet } from "../../lib/offlineCache";
 import LabelSheet from "./LabelSheet";
 import VariantEditor from "./VariantEditor";
 import PhotoPicker, { type PhotoChange } from "./PhotoPicker";
@@ -289,10 +290,11 @@ function PriceHistoryList({ productId }: { productId: string }) {
 
 export default function ProductsPanel({ role = "" }: { role?: string }) {
   const [products, setProducts] = useState<AdminProduct[]>([]);
-  // Owner: everything. Manager: selling price, reorder level and picture only. Staff: look only.
+  // Owner: everything. Manager: add a new product, and on an existing one the selling price, reorder
+  // level and picture only. Staff: look only (they add at POS with "+ New item").
   const canSetUp = roleCan(role, "setUpProducts");
   const canPrice = roleCan(role, "changePrices");
-  const locked = !canSetUp;
+  const canAdd = roleCan(role, "addProducts");
   const viewOnly = !canPrice;
   // Staff get no cost from the server, so the cost column and field are hidden for them.
   const hasCost = products.length === 0 || typeof products[0]!.costMinor === "number";
@@ -300,6 +302,8 @@ export default function ProductsPanel({ role = "" }: { role?: string }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [modal, setModal] = useState<{ open: boolean; editing: AdminProduct | null }>({ open: false, editing: null });
+  // A new product is filled in whole by whoever may add one; an existing one's details are the owner's.
+  const locked = modal.editing ? !canSetUp : !canAdd;
   const [form, setForm] = useState<ProductForm>(EMPTY_FORM);
   const [creatingCategory, setCreatingCategory] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -372,6 +376,9 @@ export default function ProductsPanel({ role = "" }: { role?: string }) {
   const [places, setPlaces] = useState<{ id: string; name: string; isDefault: boolean }[]>([]);
   const [stockAt, setStockAt] = useState("");
   const mainPlace = places.find((w) => w.isDefault) ?? null;
+  // A login tied to one store (e.g. the Lipa manager): a new rice's opening stock goes there unless they pick another.
+  const [homeId, setHomeId] = useState<string | null>(null);
+  useEffect(() => { void cachedGet<{ homeLocationId?: string | null }>("/admin/me/rice").then((me) => setHomeId(me?.homeLocationId ?? null)); }, []);
   useEffect(() => {
     void fetch(`${API_URL}/admin/warehouses`, { headers: adminHeaders() }).then((r) => (r.ok ? r.json() : null)).then((d) => {
       setPlaces(((d?.warehouses ?? []) as { id: string; name: string; isDefault: boolean; isActive?: boolean; type?: string }[]).filter((w) => w.isActive !== false && w.type !== "BUFFER"));
@@ -379,7 +386,7 @@ export default function ProductsPanel({ role = "" }: { role?: string }) {
   }, []);
   const openCreate = () => {
     setForm(EMPTY_FORM);
-    setStockAt("");
+    setStockAt(homeId && places.some((w) => w.id === homeId) ? homeId : "");
     setPhoto({ kind: "keep" });
     setCreatingCategory(false);
     setModal({ open: true, editing: null });
@@ -429,7 +436,7 @@ export default function ProductsPanel({ role = "" }: { role?: string }) {
       // Selling price under the unit cost: fix the price, change the cost, or save anyway.
       const costNow = costMinor ?? modal.editing?.costMinor;
       if (isBelowCost(priceMinor, costNow)) {
-        const pick = await askBelowCost({ name: form.name.trim() || "This product", priceMinor, costMinor: costNow!, unit: form.soldByWeight ? "kilo" : form.conversionEnabled && form.packageUnit === "kg" ? "sack" : "piece", showCost: true, canChangeCost: hasCost && canSetUp, proceed: "Save anyway" });
+        const pick = await askBelowCost({ name: form.name.trim() || "This product", priceMinor, costMinor: costNow!, unit: form.soldByWeight ? "kilo" : form.conversionEnabled && form.packageUnit === "kg" ? "sack" : "piece", showCost: true, canChangeCost: hasCost && !locked, proceed: "Save anyway" });
         if (!pick) return;
         if (pick.kind === "price") priceMinor = pick.priceMinor;
         if (pick.kind === "cost") costMinor = pick.costMinor;
@@ -468,7 +475,7 @@ export default function ProductsPanel({ role = "" }: { role?: string }) {
       return payload;
       })();
       // A manager sends only what a manager may change (the server refuses the rest).
-      const payload = canSetUp ? fullPayload : { priceMinor, reorderThreshold: fullPayload.reorderThreshold };
+      const payload = !locked ? fullPayload : { priceMinor, reorderThreshold: fullPayload.reorderThreshold };
       const res = await fetch(
         `${API_URL}/admin/products${modal.editing ? `/${modal.editing.id}` : ""}`,
         {
@@ -541,14 +548,14 @@ export default function ProductsPanel({ role = "" }: { role?: string }) {
                     </button>
                   )}
                   {canSetUp && (
-                    <>
                   <button className="btn btn-outline-success btn-sm" onClick={() => setSeveral(true)}>
                     <i className="bi bi-table me-1"></i>Add several
                   </button>
+                  )}
+                  {canAdd && (
                   <button className="btn btn-primary btn-sm" onClick={openCreate}>
           <i className="bi bi-plus-lg me-1"></i>New product
                   </button>
-                    </>
                   )}
                   </div>
                 </div>
@@ -815,7 +822,7 @@ export default function ProductsPanel({ role = "" }: { role?: string }) {
                     </div>
                     <fieldset disabled={locked}>
                     {modal.editing && canSellPerKilo(modal.editing) && <AlsoPerKilo sack={modal.editing} onChanged={() => void load()} />}
-                    {!modal.editing && !form.soldByWeight && (
+                    {!modal.editing && !form.soldByWeight && canSetUp && (
                       <div className="border rounded p-2 mb-2" style={{ background: "var(--bs-tertiary-bg, #f7f5f2)" }}>
                         <div className="form-check form-switch mb-1">
                           <input className="form-check-input" type="checkbox" role="switch" id="newAlsoPerKilo" checked={form.alsoPerKilo && newSackCanKilo} disabled={!newSackCanKilo}
