@@ -426,6 +426,7 @@ model Product {
   stockReturns   StockReturn[]
   resacksIn      ResackJob[]
   resackOutputs  ResackOutput[]
+  resackInputs   ResackInput[]
   stockInLines   StockInLine[]
   countLines     StockCountLine[]
   writeOffs      StockWriteOff[]
@@ -2122,10 +2123,27 @@ model ResackJob {
   finishedAt      DateTime?
   cancelReason    String?
   outputs         ResackOutput[]
+  moreInputs      ResackInput[] // more rice going in besides inputProduct (inputGrams/inputValueMinor are the totals)
 
   @@unique([storeId, docNumber])
   @@index([storeId, status, locationId])
   @@index([storeId, startedAt])
+}
+
+// 2026-11-22: more rice going in with the job's first input (inputProductId). The job's
+// inputGrams and inputValueMinor are the totals of the first input and these.
+model ResackInput {
+  id         String    @id @default(cuid())
+  storeId    String
+  jobId      String
+  job        ResackJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  productId  String
+  product    Product   @relation(fields: [productId], references: [id])
+  quantity   Int // stock units of the product (grams for loose rice)
+  grams      Int
+  valueMinor Int // its cost at the time
+
+  @@index([storeId, jobId])
 }
 
 model ResackOutput {

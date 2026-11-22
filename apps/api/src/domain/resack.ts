@@ -60,11 +60,15 @@ export function varietyOf(p: { name: string; variety?: string | null }): string 
 
 export interface ResackPlanInput {
   input: { productId: string; name: string; variety?: string | null; grams: number; valueMinor: number };
+  /** More rice going in with the first one (2026-11-22: "add another item going in"), e.g. a half-used sack of another rice. */
+  moreInputs?: { productId: string; name: string; variety?: string | null; grams: number; valueMinor: number }[];
   outputs: { productId: string; name: string; variety?: string | null; grams: number }[];
   toleranceBp?: number;
 }
 
 export interface ResackPlan {
+  /** What all the rice going in cost. */
+  valueInMinor: number;
   gramsIn: number;
   gramsOut: number;
   lossGrams: number;
@@ -79,9 +83,17 @@ export interface ResackPlan {
 export function planResack(p: ResackPlanInput): ResackPlan {
   if (p.outputs.length === 0) throw new ResackError("Enter what came out");
   if (p.outputs.length > 10) throw new ResackError("Up to 10 kinds of output only");
-  const gramsIn = p.input.grams;
-  if (!Number.isInteger(gramsIn) || gramsIn < 1) throw new ResackError("No rice went in");
-  if (!Number.isInteger(p.input.valueMinor) || p.input.valueMinor < 0) throw new ResackError("invalid input value");
+  const inputs = [p.input, ...(p.moreInputs ?? [])];
+  if (inputs.length > 10) throw new ResackError("Up to 10 kinds going in only");
+  const inIds = inputs.map((i) => i.productId);
+  if (new Set(inIds).size !== inIds.length) throw new ResackError("Each rice going in can be listed only once");
+  for (const i of inputs) {
+    if (!Number.isInteger(i.grams) || i.grams < 1) throw new ResackError(`Enter how many ${i.name} go in`);
+    if (!Number.isInteger(i.valueMinor) || i.valueMinor < 0) throw new ResackError("invalid input value");
+  }
+  const gramsIn = inputs.reduce((s, i) => s + i.grams, 0);
+  const valueInMinor = inputs.reduce((s, i) => s + i.valueMinor, 0);
+  if (!Number.isSafeInteger(gramsIn) || gramsIn > 2_147_483_647 || valueInMinor > 2_147_483_647) throw new ResackError("The weight is too big");
   const gramsOut = p.outputs.reduce((s, o) => {
     if (!Number.isInteger(o.grams) || o.grams < 1) throw new ResackError(`Enter the amount of ${o.name}`);
     return s + o.grams;
@@ -89,20 +101,21 @@ export function planResack(p: ResackPlanInput): ResackPlan {
   if (gramsOut > gramsIn) {
     throw new ResackError(`What came out (${gramsOut} g) weighs more than what went in (${gramsIn} g). Weigh it again.`);
   }
-  if (p.outputs.length === 1 && p.outputs[0]!.productId === p.input.productId) {
+  if (inputs.length === 1 && p.outputs.length === 1 && p.outputs[0]!.productId === p.input.productId) {
     throw new ResackError("What went in and what came out are the same — nothing was resacked");
   }
   const lossGrams = gramsIn - gramsOut;
   const tolerance = p.toleranceBp ?? DEFAULT_LOSS_TOLERANCE_BP;
   // Exact comparison (no rounding): loss / in > tolerance / 10 000.
   const needsApproval = lossGrams * 10_000 > tolerance * gramsIn;
-  const inVariety = varietyOf(p.input);
-  const varietyChange = p.outputs.some((o) => varietyOf(o) !== inVariety);
+  // Two kinds of rice mixed together, or rice that comes out as another kind, is a variety change.
+  const inVarieties = new Set(inputs.map((i) => varietyOf(i)));
+  const varietyChange = inVarieties.size > 1 || p.outputs.some((o) => !inVarieties.has(varietyOf(o)));
 
-  // Value: the lost part at the input's cost; the rest split by weight (largest remainder).
-  const valueIn = BigInt(p.input.valueMinor);
+  // Value: the lost part at the inputs' cost; the rest split by weight (largest remainder).
+  const valueIn = BigInt(valueInMinor);
   const lossValueMinor = Number((valueIn * BigInt(lossGrams)) / BigInt(gramsIn));
-  const carried = p.input.valueMinor - lossValueMinor;
+  const carried = valueInMinor - lossValueMinor;
   const raw = p.outputs.map((o) => (BigInt(carried) * BigInt(o.grams)));
   const base = raw.map((r) => Number(r / BigInt(gramsOut)));
   let rest = carried - base.reduce((a, b) => a + b, 0);
@@ -113,7 +126,7 @@ export function planResack(p: ResackPlanInput): ResackPlan {
     rest -= 1;
   }
   return {
-    gramsIn, gramsOut, lossGrams, lossBp: lossBasisPoints(gramsIn, gramsOut), needsApproval, varietyChange,
+    valueInMinor, gramsIn, gramsOut, lossGrams, lossBp: lossBasisPoints(gramsIn, gramsOut), needsApproval, varietyChange,
     lossValueMinor, outputValuesMinor: base,
   };
 }
