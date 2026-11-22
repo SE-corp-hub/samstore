@@ -19,9 +19,15 @@ test("a manager may change only the selling price, reorder level and picture", (
   assert.equal(productEditRefusal("MANAGER", "owner-only"), OWNER_ONLY_PRODUCT_MESSAGE);
 });
 
+test("a manager may add a new product (2026-11-22: a Lipa manager could not add rice)", () => {
+  assert.equal(productEditRefusal("MANAGER", "add"), null);
+  assert.equal(productEditRefusal("OWNER", "add"), null);
+});
+
 test("staff and others may not change products", () => {
   for (const role of ["STAFF", "SALES_AGENT", "DELIVERY", undefined]) {
     assert.notEqual(productEditRefusal(role, "edit", { priceMinor: 1 }), null);
     assert.notEqual(productEditRefusal(role, "price-or-photo"), null);
+    assert.notEqual(productEditRefusal(role, "add"), null);
   }
 });

@@ -5,6 +5,7 @@
 // helpers so the ledger can never silently diverge from the balances.
 
 import { mainLocationId } from "./main-store.js";
+import { markStockChanged } from "./stock-changed.js";
 import type { Prisma } from "@prisma/client";
 import { allocateRestore, pickDeductionLevel, type LevelView } from "./stock-location.js";
 
@@ -47,6 +48,7 @@ export interface MovementInput {
 
 /** Append a movement to the ledger (inside an existing transaction). */
 export async function recordMovement(tx: MovementTx, m: MovementInput): Promise<void> {
+  markStockChanged(); // Inventory / Products caches are cleared when the request ends
   await tx.stockMovement.create({
     data: {
       storeId: m.storeId,
