@@ -1,6 +1,7 @@
 // 2026-11-21 (owner's ask: "why in manager role can I change the name of the product?"):
 // who may change what on a product. The owner sets up the products; a manager may only fix
-// the selling price, the reorder level and the picture. Counter logins are already refused
+// the selling price, the reorder level and the picture, and add a NEW product (2026-11-22: a manager
+// at Lipa could not add rice). Changing an existing product's name/cost/setup stays the owner's. Counter logins are already refused
 // every product change by the store wall (auth/wall.ts).
 
 const OWNER_ROLES = ["OWNER", "STORE_OWNER", "PLATFORM_ADMIN"];
@@ -19,14 +20,14 @@ export const ownerOrManager = (role: string | undefined): boolean => OWNER_MANAG
 
 /**
  * Why this login may not make this product change, or null when it may.
- * `owner-only`: add, delete, hide, per-kilo, rack sacks, variants, add-ons.
- * `price-or-photo`: the picture (owner or manager).
+ * `owner-only`: delete, hide, per-kilo, rack sacks, variants, add-ons.
+ * `add` / `price-or-photo`: a new product (2026-11-22: a manager adds rice too, e.g. at Lipa) and the picture — owner or manager.
  * `edit`: PATCH /admin/products/:id — a manager only with MANAGER_PRODUCT_FIELDS in the body.
  */
-export function productEditRefusal(role: string | undefined, what: "owner-only" | "price-or-photo" | "edit", body?: Record<string, unknown> | null): string | null {
+export function productEditRefusal(role: string | undefined, what: "owner-only" | "add" | "price-or-photo" | "edit", body?: Record<string, unknown> | null): string | null {
   if (ownsProducts(role)) return null;
   if (!OWNER_MANAGER_ROLES.includes(role ?? "")) return NOT_FOR_STAFF_MESSAGE;
-  if (what === "price-or-photo") return null;
+  if (what === "price-or-photo" || what === "add") return null;
   if (what === "owner-only") return OWNER_ONLY_PRODUCT_MESSAGE;
   const keys = Object.keys(body ?? {}).filter((k) => (body as Record<string, unknown>)[k] !== undefined);
   return keys.every((k) => MANAGER_PRODUCT_FIELDS.includes(k)) ? null : OWNER_ONLY_PRODUCT_MESSAGE;

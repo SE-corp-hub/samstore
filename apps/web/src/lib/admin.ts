@@ -331,7 +331,7 @@ export const TABS_BY_ROLE: Record<string, string[]> = {
 export const isOwnerRole = (role: string) => role === "OWNER" || role === "STORE_OWNER";
 
 /** Write-level permissions (from live write probes). */
-export function roleCan(role: string, action: "manageTeam" | "manageLink" | "voidRefund" | "write" | "profit" | "setUpProducts" | "changePrices"): boolean {
+export function roleCan(role: string, action: "manageTeam" | "manageLink" | "voidRefund" | "write" | "profit" | "setUpProducts" | "addProducts" | "changePrices"): boolean {
   const owner = isOwnerRole(role);
   switch (action) {
     case "manageTeam": return owner || role === "PLATFORM_ADMIN";
@@ -343,6 +343,8 @@ export function roleCan(role: string, action: "manageTeam" | "manageLink" | "voi
     // a manager may only change the selling price, reorder level and picture. Mirrors api domain/product-edit-rights.ts.
     case "setUpProducts": return owner || role === "PLATFORM_ADMIN";
     case "changePrices": return owner || role === "PLATFORM_ADMIN" || role === "MANAGER";
+    // 2026-11-22: a manager adds a new rice on Products too (a Lipa manager could not). Counter logins use "+ New item" on POS.
+    case "addProducts": return owner || role === "PLATFORM_ADMIN" || role === "MANAGER";
     default: return false;
   }
 }

@@ -716,7 +716,7 @@ export class AdminController {
     const user = req.user;
     requireUser(user);
     const { storeId, role } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
-    refuseProductEdit(role, "owner-only");
+    refuseProductEdit(role, "add");
     // Made on Products: at the store its opening stock goes to, else the login's own store.
     const placeAt = await addedAtStore(storeId, await loadActor(storeId, user.sub, role), body?.stockLocationId ?? null);
     const result = await this.productsAdmin.create(storeId, body, user.sub, { locationId: placeAt, userId: user.sub, via: "PRODUCTS" });

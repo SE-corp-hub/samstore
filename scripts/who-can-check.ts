@@ -60,6 +60,8 @@ async function main() {
     { rule: "quotaPromo", method: "PATCH", path: "/admin/settings", body: { quotaPromoEnabled: settings.settings?.quotaPromoEnabled ?? false } },
     { rule: "onlineShop", method: "PATCH", path: "/admin/settings", body: { allowGuestOrders: settings.settings?.allowGuestOrders ?? false } },
     ...places.map((p) => ({ rule: "locations", at: p.id, method: "PATCH", path: `/admin/warehouses/${p.id}`, body: { name: p.name } })),
+    // An empty new product: allowed logins get 422 (name needed), refused ones 403. Nothing is saved.
+    { rule: "productAdd", method: "POST", path: "/admin/products", body: {} },
     { rule: "productSetup", method: "PATCH", path: `/admin/products/${product.id}`, body: { name: product.name } },
     { rule: "productPrice", method: "PATCH", path: `/admin/products/${product.id}`, body: { priceMinor: product.priceMinor } },
     { rule: "lowestPrice", method: "PUT", path: `/admin/products/${product.id}/lowest-price`, body: { floorPriceMinor: product.floorPriceMinor } },
@@ -83,7 +85,7 @@ async function main() {
         body: probe.body === undefined ? undefined : JSON.stringify(probe.body),
       });
       tried++;
-      const gotYes = res.ok || res.status === 400;
+      const gotYes = res.ok || res.status === 400 || res.status === 422; // 400/422: let in, but the (empty) change was refused as incomplete
       const place = probe.at ? ` at ${places.find((x) => x.id === probe.at)?.name}` : "";
       if (gotYes !== expectYes) {
         const msg = await res.text().catch(() => "");

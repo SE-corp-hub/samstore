@@ -19,7 +19,7 @@ import { lastReason, reasonOk, ReasonButtons } from "./PriceReason";
 import { askBelowCost, saveUnitCost } from "./BelowCostDialog";
 import { isBelowCost, okKey, OWNER_COST_NOTE, ownsCostRole } from "../../lib/below-cost";
 import { buildText, openTextApp } from "../../lib/text-message";
-import { FIT, useMediaQuery, WIDE } from "../../lib/use-media-query";
+import { FIT, SELL_WIDE, useMediaQuery } from "../../lib/use-media-query";
 import { useLinesCap } from "../../lib/use-lines-cap";
 import { useFitHeight } from "../../lib/use-fit-height";
 import { quickCash } from "../../lib/quick-cash";
@@ -261,7 +261,7 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
   const [hideRule, setHideRule] = useState<{ business: boolean; byStore: Record<string, { hidePricePreOrder?: boolean }> }>({ business: false, byStore: {} });
   const [promo, setPromo] = useState<QuotaPromo>(PROMO_OFF); // quota promo (Settings), from the saved price list
   const [promoInfo, setPromoInfo] = useState<Map<string, { categoryId: string | null; isSack: boolean }>>(new Map());
-  const wide = useMediaQuery(WIDE);
+  const wide = useMediaQuery(SELL_WIDE);
   // Tablet or PC: the screen is exactly the space between the bars (no page scroll); the list and the products scroll in their own boxes.
   const fit = useMediaQuery(FIT);
   // Upright on the tablet each order line is one row (name, − n +, price, amount), and a long order can take the
