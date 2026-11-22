@@ -202,3 +202,82 @@ section + section > .settings-scope-head { margin-top: 22px; }
    screen; now they share the row and wrap instead of pushing past the edge. */
 .side-who-row .side-drawer-btns { flex-wrap: wrap; min-width: 0; max-width: 100%; }
 .side-who-row .side-drawer-btns > .btn { flex: 1 1 auto; }
+
+/* ───────── POS + Pre-order check at every Text size, 2026-11-22 (user: "analyze every screen on pos and pre order,
+   test also every text size settings ... fix overlapping"). Measured on 9 screen sizes × Normal / Large / Extra large. */
+
+/* 21. Start a sale / pre-order: the customer list sat under the sticky green button (sideways Large: the
+   "Choose a customer…" box was fully hidden). The town buttons now share the row with "From the customer list"
+   when there is room, the help line steps aside on short screens, and after the store is tapped part 2 slides
+   into view (StartChoices) with room left for the green button. */
+.start-list { flex-direction: row; flex-wrap: wrap; align-items: center; }
+.start-list > .start-list-title { flex: 1 0 auto; }
+.start-list > .area-filter { flex: 1 1 17rem; }
+.start-list > select, .start-list > :not(.start-list-title):not(.area-filter) { flex: 1 1 100%; }
+.sell-fit .start-who-q { scroll-margin-bottom: 5rem; }
+@media (max-width: 599.98px) { .sell-fit .start-who-q { scroll-margin-bottom: calc(5rem + var(--staff-bar-h, 0px)); } }
+@media (min-width: 600px) and (max-height: 820px) { .sell-fit .start-card .start-sub { display: none; } .sell-fit .start-card #start-title { margin-bottom: 0.75rem !important; } }
+
+/* 22. Pop-ups (Cash in, Expense, Complete sale …) on a touch screen: their Save / Cancel row went under the
+   bottom bar (upright 600–615 px wide, and sideways with bigger Display size). They now end above the bar. */
+main.has-staff-bar .modal { padding-bottom: var(--staff-bar-h, 0px); }
+
+/* 23. Pay step on short screens (sideways tablet, PC 1024): "Customer pays ₱…" on one line and the ways to pay
+   with the icon beside the word, so Finish sale and the number pad fit with less scrolling. */
+@media (min-width: 600px) and (max-height: 820px) {
+  .sell-fit .fit-pay .pay-head { display: flex; align-items: baseline; justify-content: space-between; gap: 0.75rem; text-align: start !important; }
+  .sell-fit .fit-pay .pay-way { flex-direction: row; gap: 0.4rem; min-height: 3.25rem; }
+  .sell-fit .fit-pay .pay-way .bi { font-size: 1.1em; }
+  .sell-fit .fit-pay .sale-pay.py-3 { padding-top: 0.6rem !important; padding-bottom: 0.6rem !important; }
+}
+
+/* 24. Check the order: each line took three rows (name, "1 sack × price", then − n + Price), so only three lines
+   showed sideways. Where the list is wide enough the buttons sit beside the name on the same row. */
+.order-check .check-lines { container-type: inline-size; container-name: checklines; }
+@container checklines (min-width: 34rem) {
+  .order-check .check-line { align-items: center; }
+  .order-check .check-what { flex: 1 1 8rem; }
+  .order-check .check-edit { flex: 0 0 auto; padding-left: 0; order: 1; }
+  .order-check .check-amount { order: 2; min-width: 7rem; }
+  .order-check .check-price { order: 3; flex: 1 0 100%; }
+}
+
+/* 25. Sale done, upright / phone: with a long sale "New sale" ended up under the bottom bar (the page had to be
+   scrolled). It now stays in view at the bottom of the screen while the sold lines scroll. */
+@media (max-width: 899.98px), (orientation: portrait) {
+  .sell-done .done-new { position: sticky; bottom: calc(var(--staff-bar-h, 0px) + 0.5rem); z-index: 3; box-shadow: 0 0 0 0.5rem var(--bs-body-bg, #faf7f2); }
+}
+
+/* 26. Sideways on a short screen (bigger Display size ≈ 985 × 615, small laptops): the sale column lost its
+   lines to the rows above them ("Done" wrapped onto its own line, Cash in / Expense took a row). The steps keep
+   only the current step's word (screen readers still hear them all), the store, customer and the two money buttons
+   share one slimmer row (a long name ends in "…", its full text is in the Check step), and at Extra large the
+   steps step aside here (they still show on Check and Pay). */
+@media (min-width: 600px) and (max-height: 680px) {
+  .sell-fit .fit-side .steps { flex-wrap: nowrap; gap: 0.4rem !important; }
+  .sell-fit .fit-side .steps > li:not([aria-current]) > span:last-child {
+    position: absolute !important; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
+  }
+  html:not([data-text-size="xl"]) .sell-fit .fit-side .side-who-row .chosen-row { flex-wrap: nowrap; min-width: 0; }
+  html:not([data-text-size="xl"]) .sell-fit .fit-side .side-who-row .chosen-chip.chosen-who { display: block; min-width: 0; line-height: 2.25rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  html:not([data-text-size="xl"]) .sell-fit .fit-side .side-who-row .chosen-chip.chosen-who .bi { margin-right: 0.35rem; }
+  .sell-fit .fit-side .drawer-btn { min-height: 44px; padding: 0.25rem 0.6rem; font-size: 0.95rem; }
+  .sell-fit .fit-side .side-who-row { margin-bottom: 0.35rem !important; }
+  html:not([data-text-size="xl"]) .sell-fit .fit-side .side-who-row { flex-wrap: nowrap; }
+  html:not([data-text-size="xl"]) .sell-fit .fit-side .side-who-row .side-drawer-btns { flex-wrap: nowrap; }
+  .sell-fit .fit-side .side-who-row .chosen-row .btn, .sell-fit .fit-side .side-who-row > .btn { padding-inline: 0.5rem; }
+  /* A little more room for the sale column, and "Pay ₱…" on one line (it broke into two lines at Extra large). */
+  .sell-fit .fit-row > .fit-side { flex-basis: 44%; max-width: 34rem; }
+  .sell-fit .fit-side .sale-pay { white-space: nowrap; font-size: 1.1rem; padding-inline: 0.5rem; }
+  html[data-text-size="xl"] .sell-fit .fit-side .steps { display: none !important; }
+}
+
+/* 27. Check the order, sideways on a short screen at Extra large: "Back — change" went under the bottom bar.
+   Store and Customer sit side by side there, and the right column can scroll as a last resort. */
+@media (min-width: 600px) and (max-height: 680px) {
+  .order-check.wide .check-who { flex-direction: row; }
+  .order-check.wide .check-who > div { flex: 1 1 0; padding: 0.25rem 0.5rem; }
+  .order-check.wide .check-who dd { font-size: 1rem; }
+  .order-check.wide .sale-total .amount { font-size: 1.8rem; }
+}
+.sell-fit .order-check.wide .check-right { min-height: 0; overflow-y: auto; }

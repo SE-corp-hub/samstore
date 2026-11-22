@@ -30,11 +30,22 @@ export default function StartChoices({ title, storeQuestion, locations, storeId,
   goLabel: string;
   onGo: () => void;
 }) {
+  // 2026-11-22: after the store is tapped, part 2 slides fully into view. On most tablet sizes the customer list sat
+  // under the sticky green button, so the owner did not see it without scrolling the card.
+  const whoRef = useRef<HTMLDivElement>(null);
+  const pickStore = (id: string) => {
+    onStore(id);
+    if (whoDone) return;
+    requestAnimationFrame(() => {
+      const reduce = typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      whoRef.current?.scrollIntoView({ block: "nearest", behavior: reduce ? "auto" : "smooth" });
+    });
+  };
   return (
     <div className="fit-scroll">
       <section className="start-card" aria-labelledby="start-title">
         <h2 id="start-title" className="h4 fw-bold mb-1">{title}</h2>
-        <p className="text-muted mb-3">Answer both, then tap the rice.</p>
+        <p className="text-muted mb-3 start-sub">Answer both, then tap the rice.</p>
 
         <div className="start-q" role="group" aria-labelledby="start-where">
           <h3 id="start-where" className="h5 start-q-title"><Num n={1} done={!!storeId} />{storeQuestion}</h3>
@@ -42,7 +53,7 @@ export default function StartChoices({ title, storeQuestion, locations, storeId,
             {locations.map((l) => {
               const on = l.id === storeId;
               return (
-                <button key={l.id} type="button" className={`btn btn-lg start-choice ${on ? "btn-dark" : "btn-outline-dark"}`} aria-pressed={on} onClick={() => onStore(l.id)}>
+                <button key={l.id} type="button" className={`btn btn-lg start-choice ${on ? "btn-dark" : "btn-outline-dark"}`} aria-pressed={on} onClick={() => pickStore(l.id)}>
                   {on && <i className="bi bi-check-circle-fill me-2" aria-hidden="true"></i>}
                   {l.code && <span className="start-code">{l.code}</span>}{l.name}
                 </button>
@@ -51,7 +62,7 @@ export default function StartChoices({ title, storeQuestion, locations, storeId,
           </div>
         </div>
 
-        <div className="start-q" role="group" aria-labelledby="start-who">
+        <div ref={whoRef} className="start-q start-who-q" role="group" aria-labelledby="start-who">
           <h3 id="start-who" className="h5 start-q-title"><Num n={2} done={whoDone} />{whoQuestion}</h3>
           {children}
         </div>

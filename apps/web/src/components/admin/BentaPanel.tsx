@@ -41,7 +41,7 @@ import { saleReceipt } from "../../lib/sale-receipt";
 import { getPrinterSettings } from "../../lib/printer-settings";
 import { creditStatusWords } from "../../lib/credit-status";
 import { peso, kg } from "../../lib/number-format";
-import { FIT, useMediaQuery, WIDE } from "../../lib/use-media-query";
+import { FIT, SELL_WIDE, useMediaQuery } from "../../lib/use-media-query";
 import { useLinesCap } from "../../lib/use-lines-cap";
 import { useFitHeight } from "../../lib/use-fit-height";
 import { quickCash } from "../../lib/quick-cash";
@@ -352,7 +352,7 @@ export default function BentaPanel() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step, last]);
 
-  const wide = useMediaQuery(WIDE);
+  const wide = useMediaQuery(SELL_WIDE);
   // Tablet or PC: the screen is exactly the space between the bars (no page scroll); only the product list scrolls.
   const fit = useMediaQuery(FIT);
   const fitRef = useFitHeight<HTMLDivElement>(fit && step !== "done");
@@ -590,7 +590,7 @@ export default function BentaPanel() {
             </div>
           </div>
         )}
-        <button className="btn btn-success btn-lg w-100 py-3" data-pos-key="newSale" data-pos-enter onClick={reset}><i className="bi bi-plus-lg me-1"></i>New sale<KeyHint action="newSale" /></button>
+        <button className="btn btn-success btn-lg w-100 py-3 done-new" data-pos-key="newSale" data-pos-enter onClick={reset}><i className="bi bi-plus-lg me-1"></i>New sale<KeyHint action="newSale" /></button>
         </div></div>
       </div>
       </PosKeysContext.Provider>
@@ -1220,7 +1220,7 @@ export default function BentaPanel() {
              {/* Two columns on a tablet: what and how on the left, the number pad (or the signature) on the right. */}
              <div className="row g-3">
              <div className={padSide ? "col-md-6" : "col-12"}>
-              <div className="text-center mb-1">
+              <div className="text-center mb-1 pay-head">
                 <div className="text-muted">Customer pays</div>
                 <div className="big-amount">{peso(total)}</div>
               </div>
