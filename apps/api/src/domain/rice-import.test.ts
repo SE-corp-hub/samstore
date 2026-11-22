@@ -91,7 +91,7 @@ test("M12 import: staff — roles, home location, PINs (leading zero kept), karg
   assert.equal(s.rows[0]!.role, "STAFF");
   assert.equal(s.rows[0]!.home, "S2");
   assert.equal(s.rows[0]!.pin, "0482");
-  assert.equal(s.rows[1]!.home, null, "a manager covers every location");
+  assert.match(new Map(s.errors.map((e) => [e.row, e.message])).get(3) ?? "", /home:/, "a manager works at one store too (2026-11-22)");
   assert.equal(s.rows.find((r) => r.name === "Excel")?.pin, "0482", "Excel dropped the leading zero; it is put back");
   const byRow = new Map(s.errors.map((e) => [e.row, e.message]));
   assert.match(byRow.get(4) ?? "", /Unknown location/);

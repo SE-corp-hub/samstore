@@ -27,10 +27,11 @@ async function main() {
   const owner = await prisma.userStore.findFirstOrThrow({ where: { storeId, role: "OWNER" }, select: { userId: true } });
   const hash = await bcrypt.hash(PASSWORD, 10);
 
-  // ── the logins: owner, a manager, then a head and a counter login at every place ──
+  // ── the logins: owner, then a manager, a head and a counter login at every place ──
+  // (2026-11-22: a manager runs their own store, like a head, so there is one at every place.)
   const want: { key: string; role: "MANAGER" | "STAFF"; home: string | null; head: boolean; who: Who; label: string }[] = [
-    { key: "manager", role: "MANAGER", home: null, head: false, who: "manager", label: "Manager" },
     ...places.flatMap((p) => [
+      { key: `manager-${p.code ?? p.id}`, role: "MANAGER" as const, home: p.id, head: false, who: "manager" as Who, label: `Manager of ${p.name}` },
       { key: `head-${p.code ?? p.id}`, role: "STAFF" as const, home: p.id, head: true, who: "head" as Who, label: `Head of ${p.name}` },
       { key: `staff-${p.code ?? p.id}`, role: "STAFF" as const, home: p.id, head: false, who: "staff" as Who, label: `Counter at ${p.name}` },
     ]),
@@ -67,6 +68,20 @@ async function main() {
     { rule: "lowestPrice", method: "PUT", path: `/admin/products/${product.id}/lowest-price`, body: { floorPriceMinor: product.floorPriceMinor } },
     ...places.map((p) => ({ rule: "thisStore", at: p.id, method: "PATCH", path: `/admin/store-settings/${p.id}`, body: {} })),
   ];
+  // Work at a store (2026-11-22): each login may only touch its own store. Nothing is changed:
+  // reads, a move of a product that does not exist (allowed → 422, refused → 403), a reorder level written back.
+  const other = (id: string) => places.find((x) => x.id !== id)!.id;
+  for (const p of places) {
+    probes.push({ rule: "storeSee", at: p.id, method: "GET", path: `/admin/inventory?warehouseId=${p.id}` });
+    probes.push({ rule: "storeSee", at: p.id, method: "GET", path: `/admin/warehouses/${p.id}/prices` });
+    probes.push({ rule: "storeWork", at: p.id, method: "GET", path: `/admin/counts/items?locationId=${p.id}` });
+    probes.push({ rule: "storeMove", at: p.id, method: "POST", path: "/admin/moves", body: { fromLocationId: p.id, toLocationId: other(p.id), productId: "who-can-no-such-rice", quantity: 1 } });
+    const level = await prisma.stockLevel.findFirst({ where: { storeId, warehouseId: p.id, productId: product.id }, select: { reorderThreshold: true } });
+    probes.push({ rule: "storeReorder", at: p.id, method: "POST", path: "/admin/stock/reorder", body: { productId: product.id, warehouseId: p.id, reorderThreshold: level?.reorderThreshold ?? 0 } });
+  }
+  probes.push({ rule: "storeMoney", method: "GET", path: "/admin/payable/summary" });
+  probes.push({ rule: "storeMoney", method: "GET", path: "/admin/reports/sales" });
+  probes.push({ rule: "productPhoto", method: "DELETE", path: "/admin/products/who-can-no-such-rice/photo" });
   for (const p of sells) {
     const own = await prisma.locationPrice.findFirst({ where: { warehouseId: p.id, productId: product.id }, select: { priceMinor: true } }).catch(() => null);
     probes.push({ rule: "storePrice", at: p.id, method: "PUT", path: `/admin/warehouses/${p.id}/prices/${product.id}`, body: { priceMinor: own?.priceMinor ?? null } });
@@ -85,7 +100,8 @@ async function main() {
         body: probe.body === undefined ? undefined : JSON.stringify(probe.body),
       });
       tried++;
-      const gotYes = res.ok || res.status === 400 || res.status === 422; // 400/422: let in, but the (empty) change was refused as incomplete
+      // 400/422: let in, but the (empty) change was refused as incomplete; 404 on a made-up product: let in, nothing to change
+      const gotYes = res.ok || res.status === 400 || res.status === 422 || (res.status === 404 && probe.path.includes("who-can-no-such"));
       const place = probe.at ? ` at ${places.find((x) => x.id === probe.at)?.name}` : "";
       if (gotYes !== expectYes) {
         const msg = await res.text().catch(() => "");

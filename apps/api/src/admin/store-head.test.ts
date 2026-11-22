@@ -67,8 +67,9 @@ test("the owner names the head of a store; only a staff login with a store can b
   assert.equal(seesProfitAt(head, fx.main), false, "no profit of another store");
   assert.equal(seesProfitAt(await loadActor(fx.storeId, fx.loose, "STAFF"), fx.bt), false, "plain staff see no profit");
 
-  // Taking the store away ends it.
-  assert.equal((await people.updateMember(fx.storeId, fx.btStaff, { homeLocationId: null }, fx.owner)).ok, true);
+  // 2026-11-22: a counter login must keep a store, so the store cannot be taken away; the owner ends it with isLocationHead: false.
+  assert.equal((await people.updateMember(fx.storeId, fx.btStaff, { homeLocationId: null }, fx.owner)).ok, false);
+  assert.equal((await people.updateMember(fx.storeId, fx.btStaff, { isLocationHead: false }, fx.owner)).ok, true);
   const row = await prisma.userStore.findUnique({ where: { userId_storeId: { userId: fx.btStaff, storeId: fx.storeId } }, select: { isLocationHead: true } });
   assert.equal(row?.isLocationHead, false);
 });

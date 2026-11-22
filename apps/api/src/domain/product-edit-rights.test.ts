@@ -9,9 +9,9 @@ test("the owner may change anything on a product", () => {
   }
 });
 
-test("a manager may change only the selling price, reorder level and picture", () => {
-  assert.equal(productEditRefusal("MANAGER", "edit", { priceMinor: 150000 }), null);
-  assert.equal(productEditRefusal("MANAGER", "edit", { priceMinor: 150000, reorderThreshold: 3, name: undefined }), null);
+test("a manager may change only the picture (2026-11-22: the main price and reorder level change every store)", () => {
+  assert.equal(productEditRefusal("MANAGER", "edit", { priceMinor: 150000 }), OWNER_ONLY_PRODUCT_MESSAGE);
+  assert.equal(productEditRefusal("MANAGER", "edit", { reorderThreshold: 3, name: undefined }), OWNER_ONLY_PRODUCT_MESSAGE);
   assert.equal(productEditRefusal("MANAGER", "price-or-photo"), null);
   assert.equal(productEditRefusal("MANAGER", "edit", { name: "Renamed" }), OWNER_ONLY_PRODUCT_MESSAGE);
   assert.equal(productEditRefusal("MANAGER", "edit", { priceMinor: 1, costMinor: 1 }), OWNER_ONLY_PRODUCT_MESSAGE);

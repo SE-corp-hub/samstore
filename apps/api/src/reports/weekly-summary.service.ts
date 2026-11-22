@@ -15,7 +15,8 @@ import { StoreReportService } from "./store-report.service.js";
 
 export type WeeklyResult<T> = { ok: true; value: T } | { ok: false; error: ApiError };
 
-const OWNERS = ["OWNER", "MANAGER", "STORE_OWNER", "PLATFORM_ADMIN"];
+// 2026-11-22: money between stores / the whole business's week: the owner only (a manager runs one store).
+const OWNERS = ["OWNER", "STORE_OWNER", "PLATFORM_ADMIN"];
 const DAY_MS = 86_400_000;
 
 export interface WeeklyStore { id: string; name: string; thisMinor: number; lastMinor: number; changePct: number | null; count: number; profitMinor: number }
@@ -40,7 +41,7 @@ export class WeeklySummaryService {
   private readonly orders = new PurchaseOrderService();
 
   async summary(storeId: string, actor: Actor, input: { to?: string }): Promise<WeeklyResult<WeeklySummary>> {
-    if (!OWNERS.includes(actor.role)) return { ok: false, error: { type: "forbidden", message: "The weekly summary is for the owner and manager" } };
+    if (!OWNERS.includes(actor.role)) return { ok: false, error: { type: "forbidden", message: "The weekly summary is for the owner" } };
     let w: WeekRanges;
     try { w = weekRanges(input.to || manilaDate(new Date())); } catch { return { ok: false, error: { type: "validation", errors: ["Wrong date"] } }; }
     if (w.thisTo > manilaDate(new Date())) return { ok: false, error: { type: "validation", errors: ["Choose today or an earlier day"] } };

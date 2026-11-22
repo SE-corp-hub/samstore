@@ -34,7 +34,8 @@ export class ProductAdminService {
   }
 
   /** List with filters: search (name/SKU), category, price range, active status, featured, tag. */
-  async listFiltered(storeId: string, f: { search?: string; categoryId?: string; minPriceMinor?: number; maxPriceMinor?: number; active?: boolean; featured?: boolean; tag?: string }) {
+  /** `onlyLocationId` (2026-11-22): a store login's stock numbers are its own store's only. */
+  async listFiltered(storeId: string, f: { search?: string; categoryId?: string; minPriceMinor?: number; maxPriceMinor?: number; active?: boolean; featured?: boolean; tag?: string; onlyLocationId?: string }) {
     const where: Record<string, unknown> = { storeId };
     if (f.search) {
       where.OR = [
@@ -58,7 +59,7 @@ export class ProductAdminService {
       orderBy: { createdAt: "asc" },
       include: {
         category: { select: { id: true, name: true, slug: true } },
-        stockLevels: { select: { quantityOnHand: true, quantityReserved: true, reorderThreshold: true, warehouse: { select: { isDefault: true } } } },
+        stockLevels: { ...(f.onlyLocationId ? { where: { warehouseId: f.onlyLocationId } } : {}), select: { quantityOnHand: true, quantityReserved: true, reorderThreshold: true, warehouse: { select: { isDefault: true } } } },
         variants: { orderBy: { name: "asc" }, select: { id: true, name: true, sku: true, priceMinor: true, costMinor: true, stockBaseQuantity: true, quantityOnHand: true, quantityReserved: true, isActive: true } },
         addons: { orderBy: { sortOrder: "asc" }, include: { options: { orderBy: { sortOrder: "asc" }, select: { id: true, name: true, priceMinor: true, isActive: true } } } },
         relationsFrom: { orderBy: { sortOrder: "asc" }, select: { kind: true, targetProduct: { select: { id: true, name: true, priceMinor: true, isActive: true } } } },

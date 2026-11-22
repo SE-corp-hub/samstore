@@ -440,7 +440,7 @@ export default function UtangRicePanel({ role }: { role?: string; onNavigate?: (
       <ul className="nav nav-tabs mb-3">
         <li className="nav-item"><button className={`nav-link ${tab === "list" ? "active" : ""}`} onClick={() => { setTab("list"); open(null); }}>Customers</button></li>
         <li className="nav-item"><button className={`nav-link ${tab === "texts" ? "active" : ""}`} onClick={() => { setTab("texts"); open(null); }}>Texts</button></li>
-        {owner && <li className="nav-item"><button className={`nav-link ${tab === "settings" ? "active" : ""}`} onClick={() => { setTab("settings"); open(null); }}>Settings</button></li>}
+        {owner && isOwnerRole(role ?? "") && <li className="nav-item"><button className={`nav-link ${tab === "settings" ? "active" : ""}`} onClick={() => { setTab("settings"); open(null); }}>Settings</button></li>}
       </ul>
       {error && <div className="alert alert-danger py-2" role="alert">{error}</div>}
 

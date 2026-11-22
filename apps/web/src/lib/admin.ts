@@ -339,10 +339,11 @@ export function roleCan(role: string, action: "manageTeam" | "manageLink" | "voi
     case "voidRefund": return owner || role === "PLATFORM_ADMIN" || role === "MANAGER";
     case "profit": return owner || role === "PLATFORM_ADMIN" || role === "MANAGER";
     case "write": return owner || role === "PLATFORM_ADMIN" || role === "MANAGER" || role === "STAFF";
-    // 2026-11-21: the owner sets up products (name, SKU, cost, category, hide, per kilo, variants);
-    // a manager may only change the selling price, reorder level and picture. Mirrors api domain/product-edit-rights.ts.
+    // 2026-11-21: the owner sets up products (name, SKU, cost, category, hide, per kilo, variants).
+    // 2026-11-22: the main selling price and reorder level change every store, so they are the owner's too;
+    // a manager changes the picture here, their store's price on Store prices. Mirrors api domain/product-edit-rights.ts.
     case "setUpProducts": return owner || role === "PLATFORM_ADMIN";
-    case "changePrices": return owner || role === "PLATFORM_ADMIN" || role === "MANAGER";
+    case "changePrices": return owner || role === "PLATFORM_ADMIN";
     // 2026-11-22: a manager adds a new rice on Products too (a Lipa manager could not). Counter logins use "+ New item" on POS.
     case "addProducts": return owner || role === "PLATFORM_ADMIN" || role === "MANAGER";
     default: return false;
@@ -361,7 +362,8 @@ export function defaultTabFor(role: string): string {
 
 // Per-store build, step 6 (the wall): a login tied to one store does not get the screens that show
 // the whole business. The server refuses them too; this only keeps them out of the menu.
-const WHOLE_BUSINESS_TABS = ["purchaseorders", "reports", "analytics", "export", "profit"];
+// 2026-11-22: a manager is tied to their store too, so they lose these as well (and the money between stores).
+const WHOLE_BUSINESS_TABS = ["purchaseorders", "reports", "analytics", "export", "profit", "payable", "warehouses"]; // Locations: changing them is the owner's
 const HOME_KEY = "sam.homeLocationId";
 const HEAD_KEY = "sam.isStoreHead";
 let homeLocationId: string | null | undefined;
@@ -383,7 +385,7 @@ export function isStoreHead(): boolean {
   }
   return !!storeHead && !!homeLocation();
 }
-/** The login's home store, null for the owner, a manager, or a login with no store. */
+/** The login's home store (managers too, 2026-11-22), null for the owner or a login with no store. */
 export const getHomeLocation = (): string | null => homeLocation();
 function homeLocation(): string | null {
   if (homeLocationId === undefined) {
@@ -391,9 +393,14 @@ function homeLocation(): string | null {
   }
   return homeLocationId ?? null;
 }
-/** Is this login tied to one store (and not the owner or a manager)? */
+/** Is this login tied to one store? Everyone but the owner (2026-11-22: managers too) who has a home store. */
 export function isStoreLogin(role: string): boolean {
-  return !isOwnerRole(role) && role !== "MANAGER" && role !== "PLATFORM_ADMIN" && !!homeLocation();
+  return !isOwnerRole(role) && role !== "PLATFORM_ADMIN" && !!homeLocation();
+}
+
+/** A manager or counter login the owner has not given a store yet: the server lets it do no store work. */
+export function hasNoStoreYet(role: string): boolean {
+  return (role === "MANAGER" || role === "STAFF") && !homeLocation();
 }
 
 export function allowedTabs(role: string): string[] {
@@ -406,7 +413,7 @@ export function allowedTabs(role: string): string[] {
 
 /** Screens a login tied to one store can open (what a store's own PIN lock can lock). */
 export function storeLoginTabs(): string[] {
-  const all = new Set([...(TABS_BY_ROLE.STAFF ?? []), ...(TABS_BY_ROLE.SALES_AGENT ?? []), "storeprices", "storelock", "mystore", "team"]);
+  const all = new Set([...(TABS_BY_ROLE.STAFF ?? []), ...(TABS_BY_ROLE.MANAGER ?? []), ...(TABS_BY_ROLE.SALES_AGENT ?? []), "storeprices", "storelock", "mystore", "team"]);
   return [...all].filter((t) => !WHOLE_BUSINESS_TABS.includes(t));
 }
 

@@ -21,7 +21,7 @@ import { isKiloItem, kiloCostFrom, rackCostAfter } from "../domain/kilo.js";
 import { recordCostIn, shelfCostFor } from "../domain/shelf-cost.js";
 import { chargeResackLoss } from "../payable/charges.js";
 import {
-  captureSignatures, locationRefusal, nextDocNumber, requestApproval, requireSignatures, signatureErrorResult,
+  captureSignatures, locationRefusal, nextDocNumber, requestApproval, seesAllStores, requireSignatures, signatureErrorResult,
   type Actor, type SignatureInput,
 } from "../people/people.service.js";
 import { txOptions } from "../persistence/tx-options.js";
@@ -375,6 +375,7 @@ export class ResackService {
   /** Jobs at a location: STARTED ones are the rice "nasa resack". */
   async list(storeId: string, actor: Actor, opts: { status?: string; locationId?: string }) {
     const loc = opts.locationId || actor.homeLocationId || undefined;
+    if (!loc && !seesAllStores(actor)) return []; // a store login with no store sees no jobs
     if (loc && locationRefusal(actor, loc)) return [];
     const rows = await prisma.resackJob.findMany({
       where: {

@@ -5,7 +5,15 @@ import { resolveTenant, TENANT_ROLES } from "../auth/tenant-context.js";
 import { prisma } from "../persistence/prisma-repositories.js";
 import { cacheBust, cacheGet, cacheKey, cacheSet } from "../persistence/ttl-cache.js";
 import { assertDto, STOCK_ADJUST_DTO, STOCK_CONVERSION_DTO } from "../security/validate.js";
+import { currentWall } from "../auth/wall.js";
+import { loadActor, locationRefusal } from "../people/people.service.js";
 import { INVENTORY_SERVICE, InventoryService, type InventoryConversionInput } from "./inventory.service.js";
+
+/** 2026-11-22: everyone but the owner changes stock at their own store only. */
+async function refuseOtherStore(storeId: string, userId: string, role: string, locationId: string | null | undefined): Promise<void> {
+  const why = locationRefusal(await loadActor(storeId, userId, role), locationId);
+  if (why) throw new HttpException({ type: "forbidden", message: why }, HttpStatus.FORBIDDEN);
+}
 
 function statusFor(error: { type: string }): HttpStatus {
   switch (error.type) {
@@ -35,6 +43,12 @@ export class InventoryController {
     const user = req.user;
     const { storeId, role } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
     const shownTo = <T,>(d: T): T => (seesCost(role) ? d : redactCost(d));
+    // 2026-11-22: a store login sees its own store's stock only (no other store's numbers, no store list).
+    const wall = currentWall();
+    if (wall) {
+      if (warehouseId && warehouseId !== wall.locationId) throw new HttpException({ type: "forbidden", message: "You can see your own store's stock only" }, HttpStatus.FORBIDDEN);
+      warehouseId = wall.locationId;
+    }
     // The inventory list aggregates every product's stock levels (expensive) and the admin
     // dashboard fires ~10 queries in parallel — a saturated Prisma pool turns that into 10s
     // pool waits and 500s. A short store-scoped cache keeps the panel cheap; adjustments bust it.
@@ -42,7 +56,8 @@ export class InventoryController {
     const hit = await cacheGet<Record<string, unknown>>(key);
     if (hit) return shownTo(hit);
     const data = await this.inventorySvc.list(storeId, { search, categoryId, warehouseId, status });
-    const warehouses = await prisma.warehouse.findMany({ where: { storeId }, select: { id: true, name: true, code: true, type: true, isActive: true, isDefault: true }, orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }] });
+    if (wall) for (const item of data.items) item.stockLevels = item.stockLevels.filter((l) => l.warehouseId === wall.locationId);
+    const warehouses = await prisma.warehouse.findMany({ where: { storeId, ...(wall ? { id: wall.locationId } : {}) }, select: { id: true, name: true, code: true, type: true, isActive: true, isDefault: true }, orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }] });
     const categories = await prisma.category.findMany({ where: { storeId, isActive: true }, select: { id: true, name: true } });
     const payload = { ...data, warehouses, categories };
     await cacheSet(key, payload, 15_000);
@@ -58,8 +73,9 @@ export class InventoryController {
   ) {
     const user = req.user;
     if (!user) throw new HttpException({ type: "unauthorized", message: "Not authenticated" }, HttpStatus.UNAUTHORIZED);
-    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.OWNER_MANAGER);
+    const { storeId, role } = await resolveTenant(user, headerStoreId, TENANT_ROLES.OWNER_MANAGER);
     const dto = assertDto<{ productId: string; warehouseId?: string; delta?: number; setTo?: number; reason: string; allowNegative?: boolean }>(body ?? {}, STOCK_ADJUST_DTO);
+    await refuseOtherStore(storeId, user.sub, role, dto.warehouseId);
     const result = await this.inventorySvc.adjust(storeId, user.sub, dto);
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
     await cacheBust(cacheKey("inventory", storeId)); // the panel must not show the pre-adjust balance
@@ -75,7 +91,8 @@ export class InventoryController {
   ) {
     const user = req.user;
     if (!user) throw new HttpException({ type: "unauthorized", message: "Not authenticated" }, HttpStatus.UNAUTHORIZED);
-    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.OWNER_MANAGER);
+    const { storeId, role } = await resolveTenant(user, headerStoreId, TENANT_ROLES.OWNER_MANAGER);
+    await refuseOtherStore(storeId, user.sub, role, body?.warehouseId);
     const result = await this.inventorySvc.setReorder(storeId, user.sub, body ?? {});
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
     return result.value;
@@ -90,8 +107,9 @@ export class InventoryController {
   ) {
     const user = req.user;
     if (!user) throw new HttpException({ type: "unauthorized", message: "Not authenticated" }, HttpStatus.UNAUTHORIZED);
-    const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.OWNER_MANAGER);
+    const { storeId, role } = await resolveTenant(user, headerStoreId, TENANT_ROLES.OWNER_MANAGER);
     const dto = assertDto<InventoryConversionInput>(body ?? {}, STOCK_CONVERSION_DTO);
+    await refuseOtherStore(storeId, user.sub, role, dto.warehouseId);
     const result = await this.inventorySvc.convert(storeId, user.sub, dto);
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
     return { ...result.value, storeId };
@@ -111,7 +129,7 @@ export class InventoryController {
     const user = req.user;
     const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.VIEW);
     return this.inventorySvc.movements(storeId, {
-      productId, type, from, to,
+      productId, type, from, to, warehouseId: currentWall()?.locationId,
       limit: limit ? Number.parseInt(limit, 10) : undefined,
     });
   }
@@ -129,7 +147,7 @@ export class InventoryController {
     const user = req.user;
     const { storeId } = await resolveTenant(user, headerStoreId, TENANT_ROLES.VIEW);
     return this.inventorySvc.adjustments(storeId, {
-      productId, from, to,
+      productId, from, to, warehouseId: currentWall()?.locationId,
       limit: limit ? Number.parseInt(limit, 10) : undefined,
     });
   }

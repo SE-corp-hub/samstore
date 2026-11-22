@@ -798,7 +798,7 @@ export class BentaService {
 
   /** Pagsamahin: fold a manual item into an existing product. Stock is converted by weight through the ledger. */
   async merge(storeId: string, actor: Actor, productId: string, intoProductId: string | undefined): Promise<BentaResult<{ id: string; mergedIntoId: string; moved: { locationId: string; from: number; to: number }[] }>> {
-    if (!["OWNER", "MANAGER", "STORE_OWNER"].includes(actor.role)) return forbidden("Only the owner or a manager can merge products");
+    if (!["OWNER", "STORE_OWNER", "PLATFORM_ADMIN"].includes(actor.role)) return forbidden("Only the owner can merge products. It changes every store.");
     if (!intoProductId || intoProductId === productId) return invalid("Choose the product to merge into");
     return this.run(async () => {
       const [from, into] = await Promise.all([

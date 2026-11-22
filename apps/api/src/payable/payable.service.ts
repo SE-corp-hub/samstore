@@ -28,12 +28,13 @@ class StepError extends Error {
   }
 }
 
-const OWNERS = ["OWNER", "MANAGER", "STORE_OWNER", "PLATFORM_ADMIN"];
+// 2026-11-22: money between stores / the whole business's week: the owner only (a manager runs one store).
+const OWNERS = ["OWNER", "STORE_OWNER", "PLATFORM_ADMIN"];
 const productSelect = { id: true, name: true, variety: true, priceMinor: true, stockBaseUnit: true, stockBaseQuantity: true } as const;
 
 export class PayableService {
   private async run<T>(actor: Actor, fn: () => Promise<T>): Promise<PayableResult<T>> {
-    if (!OWNERS.includes(actor.role)) return forbidden("Store payable is for the owner and manager");
+    if (!OWNERS.includes(actor.role)) return forbidden("Store payable is for the owner");
     try {
       return { ok: true, value: await fn() };
     } catch (e) {

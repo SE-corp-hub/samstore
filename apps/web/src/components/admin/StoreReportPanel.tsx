@@ -62,6 +62,8 @@ async function getJson<T>(path: string): Promise<{ ok: boolean; data: (T & { mes
 
 export default function StoreReportPanel({ role, onNavigate }: { role?: string; onNavigate?: (tab: string) => void }) {
   const owner = role === "OWNER" || role === "STORE_OWNER" || role === "MANAGER";
+  // 2026-11-22: comparing stores and "All stores" are the owner's; a manager sees their own store.
+  const allStoresOk = role === "OWNER" || role === "STORE_OWNER";
   const [tab, setTab] = useState<Tab>("stock");
   const [places, setPlaces] = useState<Place[]>([]);
   const [home, setHome] = useState<string | null>(null);
@@ -130,7 +132,7 @@ export default function StoreReportPanel({ role, onNavigate }: { role?: string; 
         const r = await getJson<{ sections: DaySection[] }>(`/admin/rice/daily?date=${from}&locationId=${locationId}`);
         if (!r.ok) throw new Error(r.data?.errors?.join(", ") ?? r.data?.message ?? "Could not load the day");
         setDay(r.data?.sections?.[0] ?? null);
-        if (owner) {
+        if (allStoresOk) {
           const b = await getJson<BufferData>(`/admin/rice/store-buffer`); setBuffer(b.ok ? b.data : null);
           const pay = await getJson<{ stores: { id: string; owesMinor: number }[] }>(`/admin/payable/summary`);
           setOwesMap(pay.ok && pay.data ? Object.fromEntries(pay.data.stores.map((x) => [x.id, x.owesMinor])) : {});
@@ -141,7 +143,7 @@ export default function StoreReportPanel({ role, onNavigate }: { role?: string; 
     } finally {
       setLoading(false);
     }
-  }, [tab, locationId, from, to, kind, productId, allStores, owner]);
+  }, [tab, locationId, from, to, kind, productId, allStores, owner, allStoresOk]);
   useEffect(() => { void load(); }, [load]);
 
   const placeName = useMemo(() => places.find((p) => p.id === locationId)?.name ?? "", [places, locationId]);
@@ -176,7 +178,7 @@ export default function StoreReportPanel({ role, onNavigate }: { role?: string; 
     });
   };
 
-  const tabs: [Tab, string][] = [["stock", "Stock left"], ["sales", "Sales"], ["records", "All records"], ...(owner ? ([["compare", "Compare stores"]] as [Tab, string][]) : []), ["day", "One day"]];
+  const tabs: [Tab, string][] = [["stock", "Stock left"], ["sales", "Sales"], ["records", "All records"], ...(allStoresOk ? ([["compare", "Compare stores"]] as [Tab, string][]) : []), ["day", "One day"]];
   const single = tab !== "compare" && tab !== "buffer";
   const range = tab === "sales" || tab === "compare" || tab === "records";
 
@@ -193,7 +195,7 @@ export default function StoreReportPanel({ role, onNavigate }: { role?: string; 
             {([["all", "Everything"], ["sales", "Sales"], ["stock", "Stock"], ["money", "Money in"]] as const).map(([k, label]) => (
               <button key={k} type="button" className={`btn ${kind === k ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setKind(k)}>{label}</button>
             ))}
-            {owner && <button type="button" className={`btn ${allStores ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setAllStores(!allStores)}>{allStores ? "All stores" : "One store"}</button>}
+            {allStoresOk && <button type="button" className={`btn ${allStores ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setAllStores(!allStores)}>{allStores ? "All stores" : "One store"}</button>}
           </div>
           <select className="form-select" aria-label="Item" value={productId} onChange={(e) => setProductId(e.target.value)}>
             <option value="">All items</option>

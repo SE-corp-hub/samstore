@@ -212,7 +212,8 @@ export function parseStaff(text: string, codes: string[]): Parsed<StaffRow> {
     const role = r.get("role").toUpperCase().replace(/\s+/g, "_") as StaffRow["role"];
     if (!STAFF_ROLES.includes(role)) throw new Error(`role must be ${STAFF_ROLES.join(", ")} (the owner is not imported)`);
     const home = locationCode(r.get("home"), codes);
-    if ((role === "STAFF" || role === "SALES_AGENT") && !home) throw new Error("home: which location does this person work at? (e.g. S1)");
+    // 2026-11-22: a manager works at one store too.
+    if ((role === "STAFF" || role === "SALES_AGENT" || role === "MANAGER") && !home) throw new Error("home: which location does this person work at? (e.g. S1)");
     const pinRaw = r.get("pin");
     const pin = pinRaw ? pinRaw.padStart(4, "0") : null; // Excel drops leading zeros
     if (pin) {

@@ -31,10 +31,11 @@ import { balanceOf, costValue, countedUnits, CountError, gramsIn, isLooseP, line
 import { formatKilos } from "../domain/weight.js";
 import { cashOfDay } from "../cash/cash-book.js";
 import {
-  captureSignatures, locationRefusal, nextDocNumber, registerApprovalHandler, requestApproval, requireSignatures, signatureErrorResult,
+  captureSignatures, locationRefusal, nextDocNumber, onlyStoreOf, registerApprovalHandler, requestApproval, requireSignatures, seesAllStores, signatureErrorResult,
   type Actor, type SignatureInput,
 } from "../people/people.service.js";
 import { txOptions } from "../persistence/tx-options.js";
+import { NO_STORE_YET } from "../domain/people.js";
 
 export type CountResult<T> = { ok: true; value: T } | { ok: false; error: ApiError };
 type Tx = Prisma.TransactionClient;
@@ -239,7 +240,8 @@ export class CountService {
 
   async list(storeId: string, actor: Actor, f: { locationId?: string; status?: string }) {
     const status = f.status && ["OPEN", "SUBMITTED", "APPROVED", "CANCELLED"].includes(f.status) ? (f.status as "OPEN") : undefined;
-    const loc = f.locationId || (OWNERS.includes(actor.role) ? undefined : actor.homeLocationId ?? undefined);
+    // 2026-11-22: everyone but the owner sees their own store's counts only, whatever store is asked for.
+    const loc = seesAllStores(actor) ? f.locationId || undefined : onlyStoreOf(actor);
     const rows = await prisma.stockCount.findMany({
       where: { storeId, ...(loc ? { locationId: loc } : {}), ...(status ? { status } : {}) },
       include: { location: { select: { name: true } }, _count: { select: { lines: true } } },
@@ -536,8 +538,8 @@ export class CountService {
       const to = f.to && day.test(f.to) ? f.to : todayMnl;
       const from = f.from && day.test(f.from) ? f.from : new Date(Date.parse(`${to}T00:00:00Z`) - 29 * 86_400_000).toISOString().slice(0, 10);
       if (from > to) throw new CountError("The first date is after the last date");
-      const isOwner = OWNERS.includes(actor.role);
-      if (!isOwner && !actor.homeLocationId) throw new StepError(forbidden("You are not assigned to a location"));
+      const isOwner = seesAllStores(actor);
+      if (!isOwner && !actor.homeLocationId) throw new StepError(forbidden(NO_STORE_YET));
       const loc = isOwner ? f.locationId || undefined : actor.homeLocationId ?? undefined;
       const counts = await prisma.stockCount.findMany({
         where: { storeId, status: "APPROVED", decidedAt: { gte: new Date(`${from}T00:00:00+08:00`), lte: new Date(`${to}T23:59:59.999+08:00`) }, ...(loc ? { locationId: loc } : {}) },
@@ -588,8 +590,10 @@ export class CountService {
   async overview(storeId: string, actor: Actor) {
     return this.run(async () => {
       if (!OWNERS.includes(actor.role)) throw new StepError(forbidden("Only the owner or a manager can see all stores"));
+      // 2026-11-22: a manager sees their own store's column only.
+      const own = seesAllStores(actor) ? {} : { id: onlyStoreOf(actor) };
       const [locations, products, levels, last] = await Promise.all([
-        prisma.warehouse.findMany({ where: { storeId, isActive: true }, select: { id: true, name: true, type: true }, orderBy: [{ isDefault: "desc" }, { name: "asc" }] }),
+        prisma.warehouse.findMany({ where: { storeId, isActive: true, ...own }, select: { id: true, name: true, type: true }, orderBy: [{ isDefault: "desc" }, { name: "asc" }] }),
         prisma.product.findMany({ where: { storeId, trackStock: true }, select: { id: true, name: true, variety: true, isActive: true, stockBaseUnit: true, stockBaseQuantity: true }, orderBy: { name: "asc" } }),
         prisma.stockLevel.findMany({ where: { storeId }, select: { productId: true, warehouseId: true, quantityOnHand: true } }),
         prisma.$queryRaw<{ productId: string; locationId: string; last: Date }[]>`
@@ -634,7 +638,7 @@ export class CountService {
       const limits = await this.limitsOf(storeId);
       const now = Date.now();
       const counts = await prisma.stockCount.findMany({
-        where: { storeId, status: "APPROVED", decidedAt: { gte: new Date(now - REPEAT_DAYS * 86_400_000) } },
+        where: { storeId, status: "APPROVED", decidedAt: { gte: new Date(now - REPEAT_DAYS * 86_400_000) }, ...(seesAllStores(actor) ? {} : { locationId: onlyStoreOf(actor) }) },
         include: {
           location: { select: { name: true } },
           lines: { where: { countedQty: { not: null } }, select: { id: true, productId: true, reason: true, varianceQty: true, postedQty: true, product: { select: productSelect } } },
@@ -681,7 +685,7 @@ export class CountService {
   async review(storeId: string, actor: Actor, id: string, note: unknown) {
     return this.run(async () => {
       this.ownerOnly(actor);
-      const c = await prisma.stockCount.findFirst({ where: { id, storeId, status: "APPROVED" }, select: { id: true, docNumber: true } });
+      const c = await prisma.stockCount.findFirst({ where: { id, storeId, status: "APPROVED", ...(seesAllStores(actor) ? {} : { locationId: onlyStoreOf(actor) }) }, select: { id: true, docNumber: true } });
       if (!c) throw new StepError(notFound());
       const text = cleanNote(note);
       await prisma.$transaction(async (tx) => {
@@ -703,6 +707,8 @@ export class CountService {
   async setLimits(storeId: string, actor: Actor, input: { recountMinor: unknown; lookMinor: unknown }) {
     return this.run(async () => {
       this.ownerOnly(actor);
+      // The two limits are the whole business's: the owner's (2026-11-22).
+      if (!seesAllStores(actor)) throw new StepError(forbidden("Only the owner sets the count limits. They are for every store."));
       const ok = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= 100_000_000;
       if (!ok(input.recountMinor) || !ok(input.lookMinor)) throw new CountError("Enter the amounts in pesos (0 switches one off)");
       await prisma.storeSettings.upsert({
@@ -738,7 +744,7 @@ export class CountService {
       this.ownerOnly(actor);
       const now = Date.now();
       const rows = await prisma.stockCountLine.findMany({
-        where: { storeId, countedQty: { not: null }, expectedQty: { not: null }, countedAt: { gte: new Date(now - 28 * 86_400_000) }, count: { status: "APPROVED" } },
+        where: { storeId, countedQty: { not: null }, expectedQty: { not: null }, countedAt: { gte: new Date(now - 28 * 86_400_000) }, count: { status: "APPROVED", ...(seesAllStores(actor) ? {} : { locationId: onlyStoreOf(actor) }) } },
         select: { countedAt: true, countedById: true, countedQty: true, firstCountedQty: true, expectedQty: true, count: { select: { locationId: true } } },
         take: 50_000,
       });
@@ -892,7 +898,7 @@ export class CountService {
    */
   async closingStatus(storeId: string, actor: Actor) {
     return this.run(async () => {
-      const mineOnly = !OWNERS.includes(actor.role);
+      const mineOnly = !seesAllStores(actor);
       if (mineOnly && !actor.homeLocationId) return { today: manilaDate(new Date()), stores: [] };
       const locs = await prisma.warehouse.findMany({
         where: { storeId, isActive: true, type: "STORE", ...(mineOnly ? { id: actor.homeLocationId! } : {}) },
@@ -1027,7 +1033,7 @@ export class CountService {
   }
 
   async writeOffs(storeId: string, actor: Actor, f: { locationId?: string }) {
-    const loc = f.locationId || (OWNERS.includes(actor.role) ? undefined : actor.homeLocationId ?? undefined);
+    const loc = seesAllStores(actor) ? f.locationId || undefined : onlyStoreOf(actor);
     const rows = await prisma.stockWriteOff.findMany({
       where: { storeId, ...(loc ? { locationId: loc } : {}) }, orderBy: { createdAt: "desc" }, take: 100,
       include: { product: { select: { name: true, stockBaseUnit: true, stockBaseQuantity: true } }, location: { select: { name: true } } },

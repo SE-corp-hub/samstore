@@ -3,7 +3,7 @@
 import ProductPhoto from "./ProductPhoto";
 import { useCallback, useEffect, useState } from "react";
 import { API_URL } from "../../config";
-import { adminHeaders, roleCan } from "../../lib/admin";
+import { adminHeaders, isStoreLogin, roleCan } from "../../lib/admin";
 import { cachedGet } from "../../lib/offlineCache";
 import { kg, peso } from "../../lib/number-format";
 import { adjustUnits, isLooseItem, unitsText } from "../../lib/stock-units";
@@ -49,6 +49,7 @@ const STATUS_WORD: Record<InvItem["status"], string> = { in: "In stock", low: "L
 const qtyText = (r: Pick<InvItem, "stockBaseUnit" | "stockBaseQuantity">, q: number) => (isLooseItem(r) ? kg(q) : String(q));
 
 export default function InventoryPanel({ role = "" }: { role?: string }) {
+  const walled = isStoreLogin(role);
   // Changing a number by hand is for the owner and managers (the server refuses everyone else): staff use Stock in and Count.
   const canChange = roleCan(role, "profit");
   const [items, setItems] = useState<InvItem[]>([]);
@@ -351,8 +352,9 @@ export default function InventoryPanel({ role = "" }: { role?: string }) {
       <div className="d-flex flex-wrap align-items-center gap-2 mb-2">
         <span className="fw-semibold me-1" id="invStoreLabel">Showing</span>
         <span className="d-flex flex-wrap gap-2" role="group" aria-labelledby="invStoreLabel">
-          <button type="button" aria-pressed={warehouseId === ""} className={`btn ${warehouseId === "" ? "btn-dark" : "btn-outline-dark"}`} style={{ minHeight: 44 }} onClick={() => setWarehouseId("")}>All stores</button>
-          {places.map((w) => (
+          {!walled && <button type="button" aria-pressed={warehouseId === ""} className={`btn ${warehouseId === "" ? "btn-dark" : "btn-outline-dark"}`} style={{ minHeight: 44 }} onClick={() => setWarehouseId("")}>All stores</button>}
+          {/* 2026-11-22: a store login sees its own store only (the server sends nothing else). */}
+          {places.filter((w) => !walled || w.id === homeId).map((w) => (
             <button key={w.id} type="button" aria-pressed={warehouseId === w.id} className={`btn ${warehouseId === w.id ? "btn-dark" : "btn-outline-dark"}`} style={{ minHeight: 44 }} onClick={() => setWarehouseId(w.id)}>
               {w.code ? `${w.code} · ` : ""}{w.name}{w.id === homeId ? " (yours)" : ""}
             </button>

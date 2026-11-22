@@ -298,14 +298,17 @@ test.skip("M3: one store cannot see or touch another store's trips", async () =>
 
 // ─────────────────────────── automatic moves and returns ───────────────────────────
 
-test("Move stock: one step changes both counts and keeps a record; staff can't move between two other places", async () => {
-  const fx = await fixture({ s1: 1, s2: 5, wh: 20 });
+test("Move stock: one step changes both counts and keeps a record; staff send only from their own store", async () => {
+  const fx = await fixture({ s1: 5, s2: 5, wh: 20 });
   const flow = new TransferFlowService();
-  const ok = await flow.moveNow(fx.storeId, fx.staff1, { fromLocationId: fx.wh, toLocationId: fx.s1, productId: fx.productId, quantity: 4 });
+  // 2026-11-22: a store login sends from its own store only; pulling from another place is refused.
+  const pull = await flow.moveNow(fx.storeId, fx.staff1, { fromLocationId: fx.wh, toLocationId: fx.s1, productId: fx.productId, quantity: 4 });
+  assert.equal(!pull.ok && pull.error.type, "forbidden");
+  const ok = await flow.moveNow(fx.storeId, fx.staff1, { fromLocationId: fx.s1, toLocationId: fx.wh, productId: fx.productId, quantity: 4 });
   assert.equal(ok.ok, true, msg(ok));
   assert.match(ok.ok ? ok.value.docNumber : "", /^TR-\d{6}$/);
-  assert.deepEqual(await level(fx, fx.wh), { quantityOnHand: 16, quantityReserved: 0 });
-  assert.deepEqual(await level(fx, fx.s1), { quantityOnHand: 5, quantityReserved: 0 });
+  assert.deepEqual(await level(fx, fx.wh), { quantityOnHand: 24, quantityReserved: 0 });
+  assert.deepEqual(await level(fx, fx.s1), { quantityOnHand: 1, quantityReserved: 0 });
   assert.equal((await flow.recentMoves(fx.storeId, fx.staff1)).length, 1);
   const hour = 3_600_000;
   assert.equal((await flow.recentMoves(fx.storeId, fx.staff1, undefined, { from: new Date(Date.now() - hour).toISOString(), to: new Date(Date.now() + hour).toISOString() })).length, 1, "the date range includes today's move");

@@ -28,7 +28,9 @@ test("PIN lock: a broken stored value counts as no lock", () => {
 test("store PIN lock: owner and manager set any store, a head only its own, counter staff none", async () => {
   const { canSetLocationLock } = await import("./feature-lock.js");
   assert.equal(canSetLocationLock({ role: "OWNER", homeLocationId: null }, "lipa01"), true);
-  assert.equal(canSetLocationLock({ role: "MANAGER", homeLocationId: null }, "lipa01"), true);
+  assert.equal(canSetLocationLock({ role: "MANAGER", homeLocationId: null }, "lipa01"), false, "2026-11-22: a manager with no store sets no lock");
+  assert.equal(canSetLocationLock({ role: "MANAGER", homeLocationId: "lipa01" }, "lipa01"), true);
+  assert.equal(canSetLocationLock({ role: "MANAGER", homeLocationId: "lipa01" }, "bahay01"), false, "a manager sets their own store's lock only");
   assert.equal(canSetLocationLock({ role: "STAFF", homeLocationId: "lipa01", isHead: true }, "lipa01"), true);
   assert.equal(canSetLocationLock({ role: "STAFF", homeLocationId: "lipa01", isHead: true }, "bahay01"), false);
   assert.equal(canSetLocationLock({ role: "STAFF", homeLocationId: "lipa01", isHead: false }, "lipa01"), false);

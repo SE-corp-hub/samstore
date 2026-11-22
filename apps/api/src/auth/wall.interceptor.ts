@@ -23,7 +23,8 @@ export class WallInterceptor implements NestInterceptor {
       const ctx = await resolveTenant(req.user, typeof header === "string" ? header : undefined);
       storeId = ctx.storeId;
       wall = await wallFor(ctx.storeId, req.user.sub, ctx.role);
-      counter = wall !== null || await isCounterLogin(ctx.storeId, req.user.sub, ctx.role);
+      // A walled manager is not a counter login: they may still use the `managerMay` routes for their store.
+      counter = await isCounterLogin(ctx.storeId, req.user.sub, ctx.role);
     } catch {
       // No store for this login: the route itself answers that (403), there is nothing to wall.
       return next.handle();

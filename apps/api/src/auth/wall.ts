@@ -1,12 +1,14 @@
 // The wall — a login tied to one store reads and changes only that store.
 // Per-store build, step 6.
 //
-// Who is behind the wall: a login that is not the owner or a manager AND has a home store
-// (`UserStore.homeLocationId`). The owner and a manager see everything.
+// Who is behind the wall: every login but the owner (2026-11-22, owner's ask: "every feature
+// filtered by the location of the login"). A manager or counter login is walled to its home store; a
+// manager or counter login with NO home store is walled to no store at all (it sees no store's orders
+// until the owner chooses its store in Team). Only the owner (and the platform) sees everything.
 //
-// A counter login (not the owner or a manager) with NO home store is not tied to one store's orders,
-// but it is still refused every "owner-only" rule below (2026-11-21, review finding 20: before, a
-// staff login saved without a store had close to owner power).
+// Counter logins (not the owner or a manager) are also refused every "owner-only" rule below; a
+// walled manager is refused the ones not marked `managerMay` (the whole business's numbers, supplier
+// money, business-wide settings).
 //
 // How it works: the wall interceptor (wall.interceptor.ts) works the wall out once per request and
 // runs the request inside it. Code that lists orders adds `orderWall()` to its filter; outside a
@@ -14,7 +16,7 @@
 
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { Prisma } from "@prisma/client";
-import { ALL_LOCATION_ROLES } from "../domain/people.js";
+import { ALL_LOCATION_ROLES, STORE_BOUND_ROLES } from "../domain/people.js";
 import { prisma } from "../persistence/prisma-repositories.js";
 import { loadActor } from "../people/people.service.js";
 import { mainLocationId, ordersOfStore } from "../reports/sales-book.js";
@@ -29,7 +31,7 @@ export interface Wall {
 
 const als = new AsyncLocalStorage<Wall | null>();
 
-/** The wall of the request that is running, or null (owner, manager, no home store, or not in a request). */
+/** The wall of the request that is running, or null (owner, an agent with no store, or not in a request). */
 export const currentWall = (): Wall | null => als.getStore() ?? null;
 /** Run `fn` behind a wall (the interceptor and the tests use this). */
 export const runWithWall = <T>(wall: Wall | null, fn: () => T): T => als.run(wall, fn);
@@ -51,19 +53,28 @@ export function wallAt(locationId: string, mainId: string | null): Wall {
   return { locationId, mainId, orders: ordersOfStore(locationId, mainId) };
 }
 
-/** The wall for a login in a business, or null when it sees everything. */
+/** A location id no store has: the wall of a manager or counter login that has no store yet. */
+export const NO_STORE_WALL = "__no_store__";
+
+/** The wall for a login in a business, or null when it sees everything (the owner, or an agent/delivery login with no store). */
 export async function wallFor(storeId: string, userId: string, role: string): Promise<Wall | null> {
   if ((ALL_LOCATION_ROLES as readonly string[]).includes(role)) return null;
   const actor = await loadActor(storeId, userId, role);
-  if ((ALL_LOCATION_ROLES as readonly string[]).includes(actor.role) || !actor.homeLocationId) return null;
+  if ((ALL_LOCATION_ROLES as readonly string[]).includes(actor.role)) return null;
+  if (!actor.homeLocationId) {
+    if (!(STORE_BOUND_ROLES as readonly string[]).includes(actor.role)) return null;
+    // A manager or counter login with no store yet sees no store, unless the business has no stores set up at all.
+    const places = await prisma.warehouse.count({ where: { storeId, isActive: true } });
+    return places > 0 ? { locationId: NO_STORE_WALL, mainId: null, orders: { id: NO_STORE_WALL } } : null;
+  }
   return wallAt(actor.homeLocationId, await mainOf(storeId));
 }
 
 /** A counter login: not the owner, a manager or the platform. These are refused the owner-only rules, home store or not. */
 export async function isCounterLogin(storeId: string, userId: string, role: string): Promise<boolean> {
-  if ((ALL_LOCATION_ROLES as readonly string[]).includes(role)) return false;
+  if ((ALL_LOCATION_ROLES as readonly string[]).includes(role) || role === "MANAGER") return false;
   const actor = await loadActor(storeId, userId, role);
-  return !(ALL_LOCATION_ROLES as readonly string[]).includes(actor.role);
+  return !(ALL_LOCATION_ROLES as readonly string[]).includes(actor.role) && actor.role !== "MANAGER";
 }
 
 /** Is this order inside the wall? (No wall: yes.) */
@@ -75,8 +86,11 @@ export async function orderInsideWall(storeId: string, orderId: string, wall: Wa
 // ─────────────────────────────── the rules, in one table ───────────────────────────────
 
 export type WallRule =
-  /** The whole business's numbers or settings: refused behind a wall. */
-  | { kind: "owner-only"; methods?: readonly string[]; path: RegExp; what: string }
+  /**
+   * The whole business's numbers or settings: refused to counter logins and behind a wall.
+   * `managerMay`: a walled manager may still call it (the route itself limits them to their store).
+   */
+  | { kind: "owner-only"; methods?: readonly string[]; path: RegExp; what: string; managerMay?: boolean }
   /** One order named in the address (`:id`): it must be the store's own. */
   | { kind: "own-order"; path: RegExp };
 
@@ -93,11 +107,14 @@ export const WALL_RULES: readonly WallRule[] = [
   { kind: "owner-only", path: /^\/admin\/crm\//, what: "Customer messages" },
   { kind: "owner-only", path: /^\/admin\/export$/, what: "Export data" },
   { kind: "owner-only", path: /^\/admin\/rice\/weekly$/, what: "The weekly summary" },
-  { kind: "owner-only", methods: ["POST", "PATCH", "PUT", "DELETE"], path: /^\/admin\/products(\/|$)/, what: "Changing products and main prices" },
+  // Managers: add a rice, picture, reorder level (domain/product-edit-rights.ts decides what exactly).
+  { kind: "owner-only", methods: ["POST", "PATCH", "PUT", "DELETE"], path: /^\/admin\/products(\/|$)/, what: "Changing products and main prices", managerMay: true },
   { kind: "owner-only", methods: ["POST", "PATCH", "PUT", "DELETE"], path: /^\/admin\/vouchers(\/|$)/, what: "Making and changing vouchers" },
   { kind: "owner-only", methods: ["POST", "PATCH", "PUT", "DELETE"], path: /^\/admin\/payment-methods(\/|$)/, what: "Changing payment methods" },
   { kind: "owner-only", methods: ["POST", "PATCH", "PUT", "DELETE"], path: /^\/admin\/delivery-zones(\/|$)/, what: "Changing delivery areas" },
-  { kind: "owner-only", methods: ["PATCH"], path: /^\/admin\/customers\/:id\/approval$/, what: "Approving customers" },
+  { kind: "owner-only", methods: ["PATCH"], path: /^\/admin\/customers\/:id\/approval$/, what: "Approving customers", managerMay: true },
+  // 2026-11-22: the business settings and the store-to-store money are the owner's (a manager runs one store).
+  { kind: "owner-only", path: /^\/admin\/payable(\/|$)/, what: "The money between stores" },
   { kind: "own-order", path: /^\/admin\/orders\/:id(\/|$)/ },
   { kind: "own-order", path: /^\/admin\/pos\/(holds|preorders|sells)\/:id(\/|$)/ },
 ];
@@ -115,6 +132,7 @@ export async function checkWall(wall: Wall | null, storeId: string, method: stri
     if (!rule.path.test(routePath)) continue;
     if (rule.kind === "owner-only") {
       if (rule.methods && !rule.methods.includes(method.toUpperCase())) continue;
+      if (rule.managerMay && !counter) continue; // a walled manager
       return { ok: false, status: 403, message: `${rule.what}: this is for the owner.` };
     }
     if (!wall) continue;

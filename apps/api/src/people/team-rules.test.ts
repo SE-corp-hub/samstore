@@ -28,12 +28,15 @@ test("a store head looks after counter logins of its own store only", () => {
   assert.ok(teamRefusal(head, { role: "OWNER", homeLocationId: null, isLocationHead: false }));
 });
 
-test("a manager looks after counter logins of every store", () => {
-  assert.equal(teamRefusal(manager, staffAt("S3")), null);
-  assert.equal(teamRefusal(manager, staffAt("S3"), { homeLocationId: "S1" }), null);
-  assert.ok(teamRefusal(manager, staffAt(null)), "an every-store staff login stays with the owner");
-  assert.ok(teamRefusal(manager, staffAt("S1"), { isLocationHead: true }));
-  assert.ok(teamRefusal(manager, { role: "MANAGER", homeLocationId: null, isLocationHead: false }));
+test("a manager looks after the counter logins of their own store only (2026-11-22)", () => {
+  const mgr: Actor = { userId: "m", role: "MANAGER", homeLocationId: "S1" };
+  assert.equal(teamRefusal(mgr, staffAt("S1")), null);
+  assert.ok(teamRefusal(mgr, staffAt("S3")), "not another store's");
+  assert.ok(teamRefusal(mgr, staffAt("S1"), { homeLocationId: "S3" }), "cannot move someone to another store");
+  assert.ok(teamRefusal(mgr, staffAt(null)), "an every-store staff login stays with the owner");
+  assert.ok(teamRefusal(mgr, staffAt("S1"), { isLocationHead: true }));
+  assert.ok(teamRefusal(mgr, { role: "MANAGER", homeLocationId: null, isLocationHead: false }));
+  assert.ok(teamRefusal(manager, staffAt("S1")), "a manager with no store yet looks after no one");
 });
 
 test("counter staff may not change the team", () => {

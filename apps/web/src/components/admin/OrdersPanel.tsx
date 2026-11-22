@@ -7,7 +7,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { API_URL } from "../../config";
-import { adminHeaders, type AdminOrder, getAdminRole, getHomeLocation, roleCan } from "../../lib/admin";
+import { adminHeaders, type AdminOrder, getAdminRole, getHomeLocation, isStoreLogin, roleCan } from "../../lib/admin";
 import ReceiptModal from "./ReceiptModal";
 import OrderEditor from "./OrderEditor";
 import { isKiloLine, lineText } from "../../lib/order-lines";
@@ -118,9 +118,9 @@ export default function OrdersPanel({ onAgentOrders }: { /** Opens Agent orders 
   const [detailHistory, setDetailHistory] = useState<{ fromStatus: string | null; toStatus: string; createdAt: string; reason?: string | null; actorType?: string }[] | null>(null);
   const [detailToken, setDetailToken] = useState<string | null>(null);
   const [counts, setCounts] = useState<Record<string, number>>({});
-  // Stores: the owner and manager see every store's orders, so they pick one with the store buttons;
-  // a store login sees only its own store's (the server keeps it so) and gets its name, no buttons.
-  const walled = !["OWNER", "MANAGER", "PLATFORM_ADMIN"].includes(role) && !!getHomeLocation();
+  // Stores: the owner sees every store's orders, so they pick one with the store buttons; a store login
+  // (2026-11-22: managers too) sees only its own store's (the server keeps it so) and gets its name, no buttons.
+  const walled = isStoreLogin(role);
   const [places, setPlaces] = useState<StorePlace[]>([]);
   const [storeFilter, setStoreFilter] = useState(""); // "" = all stores | a store id | "none" = no store named yet
   const [byStore, setByStore] = useState<Record<string, number>>({});

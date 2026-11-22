@@ -56,7 +56,7 @@ async function fixture(stock: { s1?: number; s2?: number; wh?: number; s1Reserve
 // M2: receiving a transfer needs the receiver's signature (1×1 PNG stands in for a drawn one).
 const PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==";
 function receive(svc: WarehouseService, fx: { storeId: string; actorId: string }, id: string) {
-  return svc.completeTransfer(fx.storeId, id, { userId: fx.actorId, role: "MANAGER", homeLocationId: null }, [{ signerKind: "STAFF", imagePng: PNG }]);
+  return svc.completeTransfer(fx.storeId, id, { userId: fx.actorId, role: "OWNER", homeLocationId: null }, [{ signerKind: "STAFF", imagePng: PNG }]);
 }
 
 async function onHand(storeId: string, productId: string, warehouseId: string) {
