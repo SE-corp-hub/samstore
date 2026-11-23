@@ -424,3 +424,9 @@ main.has-staff-bar .modal { padding-bottom: var(--staff-bar-h, 0px); }
 .shared-details[open] { padding-bottom: 12px; }
 .admin-shell .btn-manage { min-height: 44px; min-width: 44px; }
 @media (max-width: 575.98px) { .prod-form .modal-footer .me-auto { flex: 1 1 100%; margin-right: 0 !important; } .prod-form .modal-footer .btn:not(.me-auto) { flex: 1 1 0; } }
+/* Settings → Managers and Products: what a manager can do now (green tick = can, grey lock = cannot). */
+.mgr-can { list-style: none; margin: 0 0 0.75rem; padding: 0; display: grid; gap: 0.35rem; }
+.mgr-can li { display: flex; align-items: flex-start; gap: 0.6rem; padding: 0.45rem 0.7rem; border-radius: 0.6rem; font-size: 1.05rem; }
+.mgr-can .bi { margin-top: 0.15rem; flex-shrink: 0; }
+.mgr-can .mgr-yes { background: #e4f3ea; color: #14532d; }
+.mgr-can .mgr-no { background: #ece8e1; color: #4a4640; }

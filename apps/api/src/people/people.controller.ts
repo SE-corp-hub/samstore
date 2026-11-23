@@ -77,7 +77,10 @@ export class PeopleController {
   @Get("me/rice")
   async me(@Req() req: Req_, @Headers("x-store-id") h?: string) {
     const { storeId, actor } = await this.ctx(req, h, TENANT_ROLES.VIEW);
-    return { storeId, userId: actor.userId, role: actor.role, homeLocationId: actor.homeLocationId, isHead: !!actor.isHead, pendingApprovals: await this.people.countPending(storeId, actor.role, actor) };
+    // 2026-11-23: the owner's switch "Managers have full access to Products" (only a manager's screen needs it).
+    const fullProducts = actor.role === "MANAGER"
+      && !!(await prisma.storeSettings.findUnique({ where: { storeId }, select: { managersFullProducts: true } }))?.managersFullProducts;
+    return { storeId, userId: actor.userId, role: actor.role, homeLocationId: actor.homeLocationId, isHead: !!actor.isHead, fullProducts, pendingApprovals: await this.people.countPending(storeId, actor.role, actor) };
   }
 
   /** POST /admin/me/pin — change your own PIN (prove the current PIN, or your password if none yet). */

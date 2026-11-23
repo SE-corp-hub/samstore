@@ -60,6 +60,7 @@ async function main() {
     { rule: "credit", method: "PATCH", path: "/admin/settings", body: { creditTermDays: settings.settings?.creditTermDays ?? 30 } },
     { rule: "quotaPromo", method: "PATCH", path: "/admin/settings", body: { quotaPromoEnabled: settings.settings?.quotaPromoEnabled ?? false } },
     { rule: "onlineShop", method: "PATCH", path: "/admin/settings", body: { allowGuestOrders: settings.settings?.allowGuestOrders ?? false } },
+    { rule: "managerProducts", method: "PATCH", path: "/admin/settings", body: { managersFullProducts: settings.settings?.managersFullProducts ?? false } },
     ...places.map((p) => ({ rule: "locations", at: p.id, method: "PATCH", path: `/admin/warehouses/${p.id}`, body: { name: p.name } })),
     // An empty new product: allowed logins get 422 (name needed), refused ones 403. Nothing is saved.
     { rule: "productAdd", method: "POST", path: "/admin/products", body: {} },

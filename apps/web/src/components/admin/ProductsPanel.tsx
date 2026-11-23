@@ -298,8 +298,13 @@ export default function ProductsPanel({ role = "" }: { role?: string }) {
   // Owner: everything. Manager: add a new product (its opening stock goes to their own store), and on an
   // existing one the picture only (2026-11-22: the main price and reorder level change every store; a
   // manager sets their store's price on Store prices). Staff: look only (they add at POS with "+ New item").
-  const canSetUp = roleCan(role, "setUpProducts");
-  const canPrice = roleCan(role, "changePrices");
+  // 2026-11-23 (owner: "an on and off feature that managers can have full access on the products"): with
+  // Settings → Managers and Products on, a manager gets the owner's rights here (`full`).
+  const ownerRole = roleCan(role, "setUpProducts");
+  const [fullFlag, setFullFlag] = useState(false);
+  const full = role === "MANAGER" && fullFlag;
+  const canSetUp = ownerRole || full;
+  const canPrice = roleCan(role, "changePrices") || full;
   const canAdd = roleCan(role, "addProducts");
   const canPhoto = canAdd; // the owner and a manager change the picture
   // 2026-11-22 ("make manager role can manage own location products"): a manager with a home store runs
@@ -310,7 +315,7 @@ export default function ProductsPanel({ role = "" }: { role?: string }) {
   const storeMode = !canSetUp && canAdd && !!homeId;
   // 2026-11-23 (Products made easy for every role): every login tied to one store sees ITS price and stock.
   // A store head may change the store's price here too (the server says so: canEdit); counter staff only look.
-  const hereMode = !canSetUp && !!homeId;
+  const hereMode = !ownerRole && !!homeId;
   const [hereCanPrice, setHereCanPrice] = useState(false);
   const [herePrices, setHerePrices] = useState<Record<string, HerePrice>>({});
   const [here, setHere] = useState<HereForm>({ name: "", price: "", reorder: "", useMain: false });
@@ -386,7 +391,7 @@ export default function ProductsPanel({ role = "" }: { role?: string }) {
   const [stockAt, setStockAt] = useState("");
   const mainPlace = places.find((w) => w.isDefault) ?? null;
   // A login tied to one store (e.g. the Lipa manager): a new rice's opening stock goes there unless they pick another.
-  useEffect(() => { void cachedGet<{ homeLocationId?: string | null }>("/admin/me/rice").then((me) => setHomeId(me?.homeLocationId ?? null)); }, []);
+  useEffect(() => { void cachedGet<{ homeLocationId?: string | null; fullProducts?: boolean }>("/admin/me/rice").then((me) => { setHomeId(me?.homeLocationId ?? null); setFullFlag(!!me?.fullProducts); }); }, []);
   useEffect(() => {
     void fetch(`${API_URL}/admin/warehouses`, { headers: adminHeaders() }).then((r) => (r.ok ? r.json() : null)).then((d) => {
       setPlaces(((d?.warehouses ?? []) as { id: string; name: string; isDefault: boolean; isActive?: boolean; type?: string }[]).filter((w) => w.isActive !== false && w.type !== "BUFFER"));
@@ -455,56 +460,70 @@ export default function ProductsPanel({ role = "" }: { role?: string }) {
   // A new sack of 10 kg or more can get its kilo item when it is first saved.
   const newSackMeasure = form.conversionEnabled ? stockMeasureToBase(form.packageSize, form.packageUnit) : null;
   const newSackCanKilo = !form.soldByWeight && newSackMeasure?.stockBaseUnit === "g" && (newSackMeasure.stockBaseQuantity ?? 0) >= 10_000;
-  /** Manager, existing rice: save this store's price, its reorder level and the picture. */
-  const saveHere = async (p: AdminProduct) => {
+  /** What is wrong with the "At <store>" boxes, or null. */
+  const hereProblem = (p: AdminProduct, parts: { price: boolean; name: boolean; reorder: boolean }): string | null => {
+    const hp = herePrices[p.id];
+    const typed = pesosToMinor(here.price);
+    if (parts.price && !here.useMain && (!typed || typed <= 0)) return "Type the price at your store, above ₱0.";
+    const wouldSellAt = here.useMain ? (hp?.mainPriceMinor ?? p.priceMinor) : typed!;
+    if (parts.price && typeof hp?.lowestPriceMinor === "number" && wouldSellAt < hp.lowestPriceMinor) {
+      return `${peso(wouldSellAt)} is under the lowest price for ${p.name} (${peso(hp.lowestPriceMinor)}). Ask the owner to go lower.`;
+    }
+    if (parts.name && !here.name.trim()) return "Type the rice name.";
+    const reorder = here.reorder.trim() === "" ? 0 : parseInt(here.reorder, 10);
+    if (parts.reorder && (!Number.isInteger(reorder) || reorder < 0)) return "Low-stock level: type a whole number, 0 or more.";
+    return null;
+  };
+  /** Sends the "At <store>" parts that changed. Returns what was saved, or the first problem. */
+  const sendHere = async (p: AdminProduct, parts: { price: boolean; name: boolean; reorder: boolean; photo: boolean }): Promise<{ done: string[]; error?: string }> => {
     const hp = herePrices[p.id];
     const ownNow = hp?.locationPriceMinor ?? null;
     const sellsNow = hp?.effectivePriceMinor ?? p.priceMinor;
-    const mayPrice = hereCanPrice, mayRest = storeMode; // rest = reorder level, picture, name (a manager)
     const typed = pesosToMinor(here.price);
-    if (mayPrice && !here.useMain && (!typed || typed <= 0)) { setError("Type the price at your store, above ₱0."); return; }
-    const wouldSellAt = here.useMain ? (hp?.mainPriceMinor ?? p.priceMinor) : typed!;
-    if (mayPrice && typeof hp?.lowestPriceMinor === "number" && wouldSellAt < hp.lowestPriceMinor) {
-      setError(`${peso(wouldSellAt)} is under the lowest price for ${p.name} (${peso(hp.lowestPriceMinor)}). Ask the owner to go lower.`);
-      return;
-    }
     const name = here.name.trim();
-    if (!name) { setError("Type the rice name."); return; }
     const reorder = here.reorder.trim() === "" ? 0 : parseInt(here.reorder, 10);
-    if (!Number.isInteger(reorder) || reorder < 0) { setError("Reorder level: type a whole number, 0 or more."); return; }
     const send = async (path: string, method: string, body?: unknown) => {
       const res = await fetch(`${API_URL}${path}`, { method, headers: { "Content-Type": "application/json", ...adminHeaders() }, body: body === undefined ? undefined : JSON.stringify(body) });
       if (res.ok) return null;
       const d = await res.json().catch(() => null);
       return (d?.errors?.join(", ") ?? d?.message ?? "Not saved. Try again.") as string;
     };
+    const done: string[] = [];
+    if (parts.name && name !== p.name) {
+      const why = await send(`/admin/products/${encodeURIComponent(p.id)}`, "PATCH", { name });
+      if (why) return { done, error: `Name not saved: ${why}` };
+      done.push(`now called ${name}`);
+    }
+    // Price: only when it changed. Back to the price for all stores = remove this store's own price.
+    const priceBody = !parts.price ? undefined : here.useMain ? (ownNow === null ? undefined : null) : typed === sellsNow && ownNow === null ? undefined : typed === ownNow ? undefined : typed;
+    if (priceBody !== undefined) {
+      const why = await send(`/admin/warehouses/${encodeURIComponent(homeId!)}/prices/${encodeURIComponent(p.id)}`, "PUT", { priceMinor: priceBody });
+      if (why) return { done, error: `Price at ${homeName} not saved: ${why}` };
+      done.push(priceBody === null ? `${homeName} back to the price for all stores` : `${peso(priceBody!)} at ${homeName}`);
+    }
+    if (parts.reorder && reorder !== (p.reorderThreshold || 0)) {
+      const why = await send("/admin/stock/reorder", "POST", { productId: p.id, warehouseId: homeId, reorderThreshold: reorder });
+      if (why) return { done, error: `Low-stock level not saved: ${why}` };
+      done.push(`low at ${reorder}`);
+    }
+    if (parts.photo && photo.kind !== "keep") {
+      const why = await send(`/admin/products/${encodeURIComponent(p.id)}/photo`, photo.kind === "new" ? "PUT" : "DELETE", photo.kind === "new" ? { dataUrl: photo.dataUrl } : undefined);
+      if (why) return { done, error: `Picture not saved: ${why}` };
+      done.push(photo.kind === "new" ? "new picture" : "picture removed");
+    }
+    return { done };
+  };
+  /** A store login, existing rice: the store's price (manager or head), and a manager's low-stock level, picture and name. */
+  const saveHere = async (p: AdminProduct) => {
+    const parts = { price: hereCanPrice, name: storeMode, reorder: storeMode, photo: storeMode };
+    const problem = hereProblem(p, parts);
+    if (problem) { setError(problem); return; }
     setSaving(true);
     try {
-      const done: string[] = [];
-      if (mayRest && name !== p.name) {
-        const why = await send(`/admin/products/${encodeURIComponent(p.id)}`, "PATCH", { name });
-        if (why) { setError(`Name not saved: ${why}`); return; }
-        done.push(`now called ${name}`);
-      }
-      // Price: only when it changed. Back to the main price = remove this store's own price.
-      const priceBody = !mayPrice ? undefined : here.useMain ? (ownNow === null ? undefined : null) : typed === sellsNow && ownNow === null ? undefined : typed === ownNow ? undefined : typed;
-      if (priceBody !== undefined) {
-        const why = await send(`/admin/warehouses/${encodeURIComponent(homeId!)}/prices/${encodeURIComponent(p.id)}`, "PUT", { priceMinor: priceBody });
-        if (why) { setError(`Price not saved: ${why}`); return; }
-        done.push(priceBody === null ? "back to the main price" : `${peso(priceBody)} at ${homeName}`);
-      }
-      if (mayRest && reorder !== (p.reorderThreshold || 0)) {
-        const why = await send("/admin/stock/reorder", "POST", { productId: p.id, warehouseId: homeId, reorderThreshold: reorder });
-        if (why) { setError(`Reorder level not saved: ${why}`); return; }
-        done.push(`reorder at ${reorder}`);
-      }
-      if (mayRest && photo.kind !== "keep") {
-        const why = await send(`/admin/products/${encodeURIComponent(p.id)}/photo`, photo.kind === "new" ? "PUT" : "DELETE", photo.kind === "new" ? { dataUrl: photo.dataUrl } : undefined);
-        if (why) { setError(`Picture not saved: ${why}`); return; }
-        done.push(photo.kind === "new" ? "new picture" : "picture removed");
-      }
+      const r = await sendHere(p, parts);
+      if (r.error) { setError(r.error); return; }
       setModal({ open: false, editing: null });
-      if (done.length) toast(`${p.name}: ${done.join(", ")}`, "success");
+      if (r.done.length) toast(`${p.name}: ${r.done.join(", ")}`, "success");
       else toast("Nothing changed.");
       await Promise.all([load(), loadHere()]);
     } catch {
@@ -513,11 +532,15 @@ export default function ProductsPanel({ role = "" }: { role?: string }) {
       setSaving(false);
     }
   };
+  /** A manager with full access and a home store: the owner's form, plus their own store's price and low-stock level. */
+  const fullHereParts = { price: hereCanPrice, name: false, reorder: true, photo: false };
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-    if (hereMode && modal.editing) { await saveHere(modal.editing); return; }
+    if (hereMode && !canSetUp && modal.editing) { await saveHere(modal.editing); return; }
+    const alsoHere = full && hereMode ? modal.editing : null;
+    if (alsoHere) { const problem = hereProblem(alsoHere, fullHereParts); if (problem) { setError(problem); return; } }
     try {
       let priceMinor = Math.round(parseFloat(form.priceMinor) * 100);
       let costMinor = form.costMinor.trim() === "" ? undefined : Math.round(parseFloat(form.costMinor) * 100);
@@ -556,7 +579,8 @@ export default function ProductsPanel({ role = "" }: { role?: string }) {
         taxExempt: form.taxExempt,
         featured: form.featured,
         tags: form.tags.split(",").map((t) => t.trim()).filter((t) => t.length > 0),
-        reorderThreshold: form.reorderThreshold === "" ? undefined : parseInt(form.reorderThreshold, 10),
+        // A store login sets ITS store's low-stock level (stock/reorder); this box is the main store's.
+        reorderThreshold: hereMode || form.reorderThreshold === "" ? undefined : parseInt(form.reorderThreshold, 10),
         ...(modal.editing
           ? { relatedProductIds: form.related, upsellProductIds: form.upsell }
           : {}),
@@ -606,8 +630,26 @@ export default function ProductsPanel({ role = "" }: { role?: string }) {
         }
         toast(`${form.name.trim()} saved, with its kilo item in the 1 kg group`, "success");
       }
+      // A login tied to one store: its price and low-stock level are that store's own (never the main store's).
+      if (alsoHere) {
+        const r = await sendHere(alsoHere, fullHereParts);
+        if (r.error) {
+          setModal({ open: false, editing: null });
+          await Promise.all([load(), loadHere()]);
+          setError(`The rice was saved, but: ${r.error}`);
+          return;
+        }
+      } else if (!modal.editing && hereMode && homeId && productId && form.trackStock) {
+        const level = form.reorderThreshold === "" ? 0 : parseInt(form.reorderThreshold, 10);
+        if (Number.isInteger(level) && level > 0) {
+          await fetch(`${API_URL}/admin/stock/reorder`, {
+            method: "POST", headers: { "Content-Type": "application/json", ...adminHeaders() },
+            body: JSON.stringify({ productId, warehouseId: homeId, reorderThreshold: level }),
+          }).catch(() => null);
+        }
+      }
       setModal({ open: false, editing: null });
-      await load();
+      await Promise.all([load(), loadHere()]);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Save failed");
     } finally {
@@ -661,7 +703,8 @@ export default function ProductsPanel({ role = "" }: { role?: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [products, madeAt, groupNow, viewNow, sort, herePrices, hereMode]);
 
-  const canLine = canSetUp ? "Tap Edit on a rice to change its name, price, cost or picture. The price here is for all stores."
+  const canLine = full && hereMode ? `The owner gave managers full access. Tap Edit on a rice to change anything on it. The price shown is ${homeName}'s.`
+    : canSetUp ? "Tap Edit on a rice to change its name, price, cost or picture. The price here is for all stores."
     : storeMode ? `Tap Manage on a rice to set its price, reorder level and picture at ${homeName}.`
     : hereMode && hereCanPrice ? `Tap Price on a rice to change what it sells for at ${homeName}.`
     : canAdd ? "You can add a new rice and change pictures. Ask the owner to give your login a store to set prices."
@@ -676,15 +719,16 @@ export default function ProductsPanel({ role = "" }: { role?: string }) {
   // ── The rice window ───────────────────────────────────────────────────────────────────────────────
   /** A store login opening a rice: "At <store>" first, the shared details to read below. */
   const ed = modal.editing;
-  const storeEdit = hereMode && !!ed;
+  const storeEdit = hereMode && !canSetUp && !!ed;
+  /** A manager with full access and a home store: the owner's form, with their own store's card on top. */
+  const fullHere = full && hereMode && !!ed;
+  const hereLevelBox = storeMode || fullHere;
   const hp = ed ? herePrices[ed.id] : undefined;
   const hereMaySave = storeEdit && (hereCanPrice || storeMode);
   const closeModal = () => { setModal({ open: false, editing: null }); setError(null); };
   const modalTitle = !ed ? "New rice" : ed.name;
 
-  const storeBody = ed && storeEdit && (
-    <>
-      <ScopeTag scope="store" storeName={homeName} />
+  const hereCard = ed && hereMode && (
       <section className="here-card" aria-labelledby="here-title">
         <h6 id="here-title" className="here-title">At {homeName}</h6>
         <div className="row g-3">
@@ -711,7 +755,7 @@ export default function ProductsPanel({ role = "" }: { role?: string }) {
               <strong>{ed.trackStock === false ? "Not counted" : qty(ed, ed.availableQuantity)}</strong>
             </div>
             <div className="small text-muted mt-1 mb-2">Change stock with Stock in, Count or Inventory.</div>
-            {storeMode && (
+            {hereLevelBox && (
               <>
                 <label className="form-label" htmlFor="hereReorder">Tell me it is low at</label>
                 <WholeInput id="hereReorder" placeholder="0" value={here.reorder} onChange={(v) => setHere({ ...here, reorder: v })} aria-describedby="hereReorder-help" />
@@ -720,8 +764,17 @@ export default function ProductsPanel({ role = "" }: { role?: string }) {
             )}
           </div>
         </div>
-        {(storeMode || ed.photoKey) && <PhotoPicker photoKey={ed.photoKey} value={photo} onChange={setPhoto} disabled={saving || !storeMode} />}
+        {fullHere && hereCanPrice && hp?.locationPriceMinor == null && (
+          <p className="small text-muted mt-3 mb-0">{homeName} follows the price for all stores until you type its own price here.</p>
+        )}
+        {!fullHere && (storeMode || ed.photoKey) && <PhotoPicker photoKey={ed.photoKey} value={photo} onChange={setPhoto} disabled={saving || !storeMode} />}
       </section>
+  );
+
+  const storeBody = ed && storeEdit && (
+    <>
+      <ScopeTag scope="store" storeName={homeName} />
+      {hereCard}
       {storeMode && (
         <section className="prod-sec">
           <div><ScopeTag scope="business" /></div>
@@ -746,6 +799,12 @@ export default function ProductsPanel({ role = "" }: { role?: string }) {
 
   const ownerBody = !storeEdit && (
     <>
+      {fullHere && (
+        <>
+          <ScopeTag scope="store" storeName={homeName} />
+          {hereCard}
+        </>
+      )}
       {/* A product is the same rice at every store (2026-11-21: say so, so nobody thinks it changes one store only). */}
       <ScopeTag scope="business" />
       {locked && (
@@ -860,16 +919,16 @@ export default function ProductsPanel({ role = "" }: { role?: string }) {
       <section className="prod-sec" aria-labelledby="prod-s4">
         <h6 id="prod-s4" className="prod-sec-title"><span className="prod-step">4</span>Stock</h6>
         <div className="row g-3">
-          {ed ? (
+          {ed ? (!fullHere && (
             <div className="col-sm-6">
-              <div className="here-stock"><span>Stock, all stores</span><strong>{ed.trackStock === false ? "Not counted" : qty(ed, ed.availableQuantity)}</strong></div>
+              <div className="here-stock"><span>{stockWord}</span><strong>{ed.trackStock === false ? "Not counted" : qty(ed, ed.availableQuantity)}</strong></div>
               <div className="small text-muted mt-1">Change stock with Stock in, Move stock, Count or Inventory.</div>
             </div>
-          ) : (
+          )) : (
             <fieldset className="col-sm-6" disabled={locked}>
               <label className="form-label" htmlFor="openingStock">How many do you have now</label>
               <WholeInput id="openingStock" value={form.stock} onChange={(v) => setForm({ ...form, stock: v })} placeholder="0" />
-              {places.length > 1 && !canSetUp && homeId ? (
+              {places.length > 1 && hereMode ? (
                 <div className="small text-muted mt-2">Goes to your store: {homeName}</div>
               ) : places.length > 1 && (
                 <>
@@ -881,11 +940,14 @@ export default function ProductsPanel({ role = "" }: { role?: string }) {
               )}
             </fieldset>
           )}
-          <fieldset className="col-sm-6" disabled={priceLocked}>
-            <label className="form-label" htmlFor="reorderAtMain">Tell me it is low at{mainPlace ? ` (${mainPlace.name})` : ""}</label>
-            <WholeInput id="reorderAtMain" placeholder="0" value={form.reorderThreshold} onChange={(v) => setForm({ ...form, reorderThreshold: v })} aria-describedby="reorderAtMain-help" />
-            <div id="reorderAtMain-help" className="small text-muted mt-1">Shows Low at this many or fewer. Other stores: Inventory.</div>
-          </fieldset>
+          {/* A store login's level is its own store's: on an existing rice it is in the "At <store>" card above. */}
+          {!(hereMode && ed) && (
+            <fieldset className="col-sm-6" disabled={priceLocked}>
+              <label className="form-label" htmlFor="reorderAtMain">Tell me it is low at{hereMode ? ` (${homeName})` : mainPlace ? ` (${mainPlace.name})` : ""}</label>
+              <WholeInput id="reorderAtMain" placeholder="0" value={form.reorderThreshold} onChange={(v) => setForm({ ...form, reorderThreshold: v })} aria-describedby="reorderAtMain-help" />
+              <div id="reorderAtMain-help" className="small text-muted mt-1">Shows Low at this many or fewer.{hereMode ? "" : " Other stores: Inventory."}</div>
+            </fieldset>
+          )}
         </div>
         <fieldset disabled={locked} className="mt-3">
           <div className="form-check form-switch prod-switch">

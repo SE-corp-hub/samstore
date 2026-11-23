@@ -27,9 +27,12 @@ export const ownerOrManager = (role: string | undefined): boolean => OWNER_MANAG
  * `owner-only`: delete, hide, per-kilo, rack sacks, variants, add-ons.
  * `add` / `price-or-photo`: a new product (2026-11-22: a manager adds rice too, e.g. at Lipa) and the picture — owner or manager.
  * `edit`: PATCH /admin/products/:id — a manager only with MANAGER_PRODUCT_FIELDS in the body.
+ * `managerFull` (2026-11-23): the owner's switch "Managers have full access to Products" is on, so a
+ * manager may make every product change the owner may.
  */
-export function productEditRefusal(role: string | undefined, what: "owner-only" | "add" | "price-or-photo" | "edit", body?: Record<string, unknown> | null): string | null {
+export function productEditRefusal(role: string | undefined, what: "owner-only" | "add" | "price-or-photo" | "edit", body?: Record<string, unknown> | null, managerFull = false): string | null {
   if (ownsProducts(role)) return null;
+  if (role === "MANAGER" && managerFull) return null;
   if (!OWNER_MANAGER_ROLES.includes(role ?? "")) return NOT_FOR_STAFF_MESSAGE;
   if (what === "price-or-photo" || what === "add") return null;
   if (what === "owner-only") return OWNER_ONLY_PRODUCT_MESSAGE;

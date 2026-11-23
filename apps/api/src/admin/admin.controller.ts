@@ -52,10 +52,18 @@ import { NOTIFICATIONS_SERVICE, type NotificationsService } from "../notificatio
 import { type OrderState, ORDER_STATES } from "../domain/order-state.js";
 import { hubLinkStatus, hubSyncNow } from "../integrations/hub-orders.service.js";
 
-/** Refuse a product change this login may not make (owner sets up products; manager fixes prices). */
-function refuseProductEdit(...args: Parameters<typeof productEditRefusal>): void {
-  const why = productEditRefusal(...args);
+/**
+ * Refuse a product change this login may not make (the owner sets up products; a manager changes the name,
+ * the picture and adds new rice). 2026-11-23: with the owner's switch "Managers have full access to
+ * Products" on, a manager may make every change. Returns true when the login has the owner's full rights.
+ */
+async function refuseProductEdit(storeId: string, role: string | undefined, what: Parameters<typeof productEditRefusal>[1], body?: Record<string, unknown> | null): Promise<boolean> {
+  if (ownsProducts(role)) return true;
+  const managerFull = role === "MANAGER"
+    && !!(await prisma.storeSettings.findUnique({ where: { storeId }, select: { managersFullProducts: true } }))?.managersFullProducts;
+  const why = productEditRefusal(role, what, body, managerFull);
   if (why) throw new HttpException({ type: "forbidden", message: why }, HttpStatus.FORBIDDEN);
+  return managerFull;
 }
 
 function statusFor(error: ApiError): HttpStatus {
@@ -719,7 +727,7 @@ export class AdminController {
     const user = req.user;
     requireUser(user);
     const { storeId, role } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
-    refuseProductEdit(role, "add");
+    await refuseProductEdit(storeId, role, "add");
     // Made on Products: at the store its opening stock goes to, else the login's own store.
     const maker = await loadActor(storeId, user.sub, role);
     // 2026-11-22: a manager's new rice and its opening stock are at their own store, never another.
@@ -747,11 +755,11 @@ export class AdminController {
     const user = req.user;
     requireUser(user);
     const { storeId, role } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
-    refuseProductEdit(role, "edit", body);
+    const fullRights = await refuseProductEdit(storeId, role, "edit", body);
     const result = await this.productsAdmin.update(storeId, id, body, user.sub);
         if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
         // The owner saving a counter-made item on its form has looked at it: its "Check" goes away.
-        if (ownsProducts(role)) await this.productsAdmin.markChecked(storeId, id, user.sub);
+        if (fullRights) await this.productsAdmin.markChecked(storeId, id, user.sub);
         await cacheBust(cacheKey("products", storeId));
         await cacheBust(cacheKey("inventory", storeId));
         return result.value;
@@ -763,7 +771,7 @@ export class AdminController {
     const user = req.user;
     requireUser(user);
     const { storeId, role } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
-    refuseProductEdit(role, "owner-only");
+    await refuseProductEdit(storeId, role, "owner-only");
     const done = await this.productsAdmin.markChecked(storeId, id, user.sub);
     await cacheBust(cacheKey("products", storeId));
     return { id, checked: true, changed: done };
@@ -787,7 +795,7 @@ export class AdminController {
     const user = req.user;
     requireUser(user);
     const { storeId, role } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
-    refuseProductEdit(role, "price-or-photo");
+    await refuseProductEdit(storeId, role, "price-or-photo");
     const result = await this.productsAdmin.setPhoto(storeId, id, body?.dataUrl);
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
     await cacheBust(cacheKey("products", storeId));
@@ -801,7 +809,7 @@ export class AdminController {
     const user = req.user;
     requireUser(user);
     const { storeId, role } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
-    refuseProductEdit(role, "price-or-photo");
+    await refuseProductEdit(storeId, role, "price-or-photo");
     const result = await this.productsAdmin.removePhoto(storeId, id);
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
     await cacheBust(cacheKey("products", storeId));
@@ -815,7 +823,7 @@ export class AdminController {
     const user = req.user;
     requireUser(user);
     const { storeId, role } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
-    refuseProductEdit(role, "owner-only");
+    await refuseProductEdit(storeId, role, "owner-only");
     const result = await this.productsAdmin.remove(storeId, id);
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
     await cacheBust(cacheKey("products", storeId));
@@ -829,7 +837,7 @@ export class AdminController {
     const user = req.user;
     requireUser(user);
     const { storeId, role } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
-    refuseProductEdit(role, "owner-only");
+    await refuseProductEdit(storeId, role, "owner-only");
     if (typeof body?.on !== "boolean") throw new HttpException({ type: "validation", errors: ["on must be true or false"] }, HttpStatus.BAD_REQUEST);
     const result = await this.productsAdmin.setKiloItem(storeId, id, body.on, body.force === true);
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
@@ -844,7 +852,7 @@ export class AdminController {
     const user = req.user;
     requireUser(user);
     const { storeId, role } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
-    refuseProductEdit(role, "owner-only");
+    await refuseProductEdit(storeId, role, "owner-only");
     const result = await this.productsAdmin.setRackSacks(storeId, id, body?.sackIds);
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
     await cacheBust(cacheKey("products", storeId));
@@ -859,7 +867,7 @@ export class AdminController {
     const user = req.user;
     requireUser(user);
     const { storeId, role } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
-    refuseProductEdit(role, "owner-only");
+    await refuseProductEdit(storeId, role, "owner-only");
     const result = await this.productsAdmin.addVariant(storeId, id, body, user.sub);
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
     await cacheBust(cacheKey("products", storeId));
@@ -873,7 +881,7 @@ export class AdminController {
     const user = req.user;
     requireUser(user);
     const { storeId, role } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
-    refuseProductEdit(role, "owner-only");
+    await refuseProductEdit(storeId, role, "owner-only");
     const result = await this.productsAdmin.updateVariant(storeId, variantId, body);
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
     await cacheBust(cacheKey("products", storeId));
@@ -887,7 +895,7 @@ export class AdminController {
     const user = req.user;
     requireUser(user);
     const { storeId, role } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
-    refuseProductEdit(role, "owner-only");
+    await refuseProductEdit(storeId, role, "owner-only");
     const result = await this.productsAdmin.deleteVariant(storeId, variantId);
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
     await cacheBust(cacheKey("products", storeId));
@@ -901,7 +909,7 @@ export class AdminController {
     const user = req.user;
     requireUser(user);
     const { storeId, role } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
-    refuseProductEdit(role, "owner-only");
+    await refuseProductEdit(storeId, role, "owner-only");
     const result = await this.productsAdmin.addAddon(storeId, id, body);
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
     await cacheBust(cacheKey("products", storeId));
@@ -914,7 +922,7 @@ export class AdminController {
     const user = req.user;
     requireUser(user);
     const { storeId, role } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
-    refuseProductEdit(role, "owner-only");
+    await refuseProductEdit(storeId, role, "owner-only");
     const result = await this.productsAdmin.updateAddonOption(storeId, optionId, body);
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
     await cacheBust(cacheKey("products", storeId));
@@ -927,7 +935,7 @@ export class AdminController {
     const user = req.user;
     requireUser(user);
     const { storeId, role } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
-    refuseProductEdit(role, "owner-only");
+    await refuseProductEdit(storeId, role, "owner-only");
     const result = await this.productsAdmin.updateAddon(storeId, addonId, body);
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
     await cacheBust(cacheKey("products", storeId));
@@ -940,7 +948,7 @@ export class AdminController {
     const user = req.user;
     requireUser(user);
     const { storeId, role } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
-    refuseProductEdit(role, "owner-only");
+    await refuseProductEdit(storeId, role, "owner-only");
     const result = await this.productsAdmin.addAddonOption(storeId, addonId, body);
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
     await cacheBust(cacheKey("products", storeId));
@@ -953,7 +961,7 @@ export class AdminController {
     const user = req.user;
     requireUser(user);
     const { storeId, role } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
-    refuseProductEdit(role, "owner-only");
+    await refuseProductEdit(storeId, role, "owner-only");
     const result = await this.productsAdmin.deleteAddon(storeId, addonId);
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
     await cacheBust(cacheKey("products", storeId));
@@ -966,7 +974,7 @@ export class AdminController {
     const user = req.user;
     requireUser(user);
     const { storeId, role } = await resolveTenant(user, headerStoreId, TENANT_ROLES.ADMIN);
-    refuseProductEdit(role, "owner-only");
+    await refuseProductEdit(storeId, role, "owner-only");
     const result = await this.productsAdmin.deleteAddonOption(storeId, optionId);
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
     await cacheBust(cacheKey("products", storeId));
@@ -1140,6 +1148,7 @@ export class AdminController {
       orderNumberPrefix?: string | null;
       privacyRetentionDays?: number;
       quotaPromoEnabled?: boolean; quotaPromoMinSacks?: number; quotaPromoOffMinor?: number; quotaPromoCategoryIds?: string[];
+      managersFullProducts?: boolean;
     },
     @Headers("x-store-id") headerStoreId?: string,
   ) {

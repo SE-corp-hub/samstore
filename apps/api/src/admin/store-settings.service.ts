@@ -38,6 +38,7 @@ export interface StoreSettingsInput {
   quotaPromoOffMinor?: number;
   quotaPromoCategoryIds?: string[];
   seniorPwdDiscountEnabled?: boolean; // P3b: statutory 20% senior/PWD discount
+  managersFullProducts?: boolean; // 2026-11-23: managers change everything on Products, like the owner
   // P3g: Website→Messenger bridge — recorded connection state (sends stay suppressed).
   messengerConnected?: boolean;
   messengerPageId?: string | null;
@@ -99,6 +100,7 @@ export class StoreSettingsService {
         quotaPromoOffMinor: store.settings?.quotaPromoOffMinor ?? 2000,
         quotaPromoCategoryIds: store.settings?.quotaPromoCategoryIds ?? [],
         seniorPwdDiscountEnabled: store.settings?.seniorPwdDiscountEnabled ?? false,
+        managersFullProducts: store.settings?.managersFullProducts ?? false,
         messengerConnected: store.settings?.messengerConnected ?? false,
         messengerPageId: store.settings?.messengerPageId ?? null,
         loyaltyPointsPerPeso: store.settings?.loyaltyPointsPerPeso ?? 1,
@@ -123,6 +125,9 @@ export class StoreSettingsService {
       if (typeof value === "number" && (!Number.isInteger(value) || value < 0)) {
         return { ok: false, error: { type: "validation", errors: [`${key} must be a non-negative integer`] } };
       }
+    }
+    if (input.managersFullProducts !== undefined && typeof input.managersFullProducts !== "boolean") {
+      return { ok: false, error: { type: "validation", errors: ["Managers have full access to Products: on or off"] } };
     }
     if (input.dayOpenClose !== undefined && typeof input.dayOpenClose !== "boolean") {
       return { ok: false, error: { type: "validation", errors: ["Open and close the day: on or off"] } };
@@ -176,6 +181,7 @@ export class StoreSettingsService {
         ...(input.quotaPromoOffMinor !== undefined ? { quotaPromoOffMinor: input.quotaPromoOffMinor } : {}),
         ...(input.quotaPromoCategoryIds !== undefined ? { quotaPromoCategoryIds: [...new Set(input.quotaPromoCategoryIds)] } : {}),
         ...(input.seniorPwdDiscountEnabled !== undefined ? { seniorPwdDiscountEnabled: input.seniorPwdDiscountEnabled } : {}),
+        ...(input.managersFullProducts !== undefined ? { managersFullProducts: input.managersFullProducts } : {}),
         ...(input.messengerConnected !== undefined ? { messengerConnected: input.messengerConnected } : {}),
         ...(input.messengerPageId !== undefined ? { messengerPageId: input.messengerPageId } : {}),
         ...(input.loyaltyPointsPerPeso !== undefined ? { loyaltyPointsPerPeso: input.loyaltyPointsPerPeso } : {}),
@@ -209,6 +215,7 @@ export class StoreSettingsService {
         quotaPromoOffMinor: input.quotaPromoOffMinor ?? 2000,
         quotaPromoCategoryIds: input.quotaPromoCategoryIds ? [...new Set(input.quotaPromoCategoryIds)] : [],
         seniorPwdDiscountEnabled: input.seniorPwdDiscountEnabled ?? false,
+        managersFullProducts: input.managersFullProducts ?? false,
         messengerConnected: input.messengerConnected ?? false,
         messengerPageId: input.messengerPageId ?? null,
         loyaltyPointsPerPeso: input.loyaltyPointsPerPeso ?? 1,

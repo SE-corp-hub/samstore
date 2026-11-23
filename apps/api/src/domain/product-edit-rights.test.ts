@@ -21,6 +21,14 @@ test("a manager may change the picture and the name only (2026-11-22: the main p
   assert.equal(productEditRefusal("MANAGER", "owner-only"), OWNER_ONLY_PRODUCT_MESSAGE);
 });
 
+test("with the owner's switch on, a manager may change everything on a product (2026-11-23)", () => {
+  assert.equal(productEditRefusal("MANAGER", "edit", { name: "Renamed", sku: "X", costMinor: 1, priceMinor: 2, isActive: false }, true), null);
+  assert.equal(productEditRefusal("MANAGER", "owner-only", null, true), null);
+  // The switch is for managers only: counter logins stay refused.
+  assert.notEqual(productEditRefusal("STAFF", "edit", { name: "x" }, true), null);
+  assert.notEqual(productEditRefusal("STAFF", "owner-only", null, true), null);
+});
+
 test("a manager may add a new product (2026-11-22: a Lipa manager could not add rice)", () => {
   assert.equal(productEditRefusal("MANAGER", "add"), null);
   assert.equal(productEditRefusal("OWNER", "add"), null);
