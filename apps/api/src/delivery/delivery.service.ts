@@ -18,10 +18,13 @@ export const DELIVERY_SERVICE = Symbol("DELIVERY_SERVICE");
 
 /** What the courier records when handing over an order (all optional: older app versions send none). */
 export interface DeliveryProof {
-  actor: Actor;
+  /** The signed-in courier. Left out for a tap that came from SE Corp Hub (integrations/hub-taps.ts): no login here made it. */
+  actor?: Actor;
   cashCollectedMinor?: number;
   receivedBy?: string;
   signaturePng?: string;
+  /** Where the step came from when not from this app, e.g. "Tapped Delivered in the hub by rey": kept on the history line. */
+  via?: string;
 }
 
 
@@ -84,9 +87,10 @@ export class DeliveryService {
     // A GCash payment still to be checked stays in Payment review after delivery; everything else is paid on delivery.
     const paymentStatus = toStatus === "DELIVERED" ? paymentEffectFor("DELIVERED", order.paymentStatus) : order.paymentStatus;
     // Delivered: the cash the courier says they collected goes on the order's history line.
-    const note = toStatus === "DELIVERED" && proof?.cashCollectedMinor !== undefined
+    const said = toStatus === "DELIVERED" && proof?.cashCollectedMinor !== undefined
       ? cashNote(proof.cashCollectedMinor, order.totalMinor)
       : reason?.trim() ?? null;
+    const note = [said, proof?.via].filter(Boolean).join(". ") || null;
     try {
       await prisma.$transaction(async (tx) => {
         await tx.order.update({
@@ -96,13 +100,13 @@ export class DeliveryService {
         await tx.orderStatusHistory.create({
           data: { orderId, storeId, fromStatus: "OUT_FOR_DELIVERY", toStatus, reason: note, actorType: "delivery" },
         });
-        if (toStatus === "DELIVERED" && proof?.signaturePng) {
+        if (toStatus === "DELIVERED" && proof?.signaturePng && proof.actor) {
           await captureSignatures(tx, storeId, proof.actor, { documentType: "ORDER", documentId: orderId, step: "DELIVERED", locationId: null },
             [{ signerKind: "CUSTOMER", signerName: proof.receivedBy, imagePng: proof.signaturePng }]);
         }
         // Delivered: the order becomes a sale at its store today, and the cash the rider collected is that store's cash.
         if (toStatus === "DELIVERED") {
-          await settleHandedOverOrder(tx, { storeId, orderId, actorId: proof?.actor.userId ?? null, cashCollectedMinor: proof?.cashCollectedMinor });
+          await settleHandedOverOrder(tx, { storeId, orderId, actorId: proof?.actor?.userId ?? null, cashCollectedMinor: proof?.cashCollectedMinor });
         }
         // Handed to the customer: consume the checkout reservation in the same
         // transaction. A FAILED_DELIVERY keeps the reservation so a retry can go out.
@@ -124,6 +128,8 @@ export class DeliveryService {
   async retryDelivery(
     storeId: string,
     orderId: string,
+    /** The history line, when the retry did not come from the Delivery screen. */
+    note = "Retry dispatch",
   ): Promise<DeliveryResult<{ id: string; status: string }>> {
     const order = await prisma.order.findFirst({ where: { storeId, id: orderId } });
     if (!order) return { ok: false, error: { type: "not_found", message: "Order not found" } };
@@ -136,7 +142,7 @@ export class DeliveryService {
         data: { status: "OUT_FOR_DELIVERY" },
       });
       await tx.orderStatusHistory.create({
-        data: { orderId, storeId, fromStatus: "FAILED_DELIVERY", toStatus: "OUT_FOR_DELIVERY", reason: "Retry dispatch", actorType: "delivery" },
+        data: { orderId, storeId, fromStatus: "FAILED_DELIVERY", toStatus: "OUT_FOR_DELIVERY", reason: note, actorType: "delivery" },
       });
     });
     return { ok: true, value: { id: orderId, status: "OUT_FOR_DELIVERY" } };

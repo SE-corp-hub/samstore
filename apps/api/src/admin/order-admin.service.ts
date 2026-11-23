@@ -323,7 +323,7 @@ export class OrderAdminService {
   }
 
   /** W1: one-tap advance CONFIRMED/PREPARING/READY → OUT_FOR_DELIVERY (delivery-type only). */
-  async sendForDelivery(storeId: string, orderId: string): Promise<AdminResult<{ id: string; status: string }>> {
+  async sendForDelivery(storeId: string, orderId: string, /** The history line, when the step did not come from the Orders screen. */ note = "send-for-delivery (one-tap)"): Promise<AdminResult<{ id: string; status: string }>> {
     const order = await prisma.order.findFirst({ where: { storeId, id: orderId } });
     if (!order) return { ok: false, error: { type: "not_found", message: "Order not found" } };
     if (order.source === "AGENT") return { ok: false, error: { type: "conflict", message: "This is an agent's order: approve it, and mark it delivered or not delivered, in Orders → Agent orders." } };
@@ -341,7 +341,7 @@ export class OrderAdminService {
       await tx.order.update({ where: { id: orderId }, data: { status: "OUT_FOR_DELIVERY", paymentStatus: order.paymentStatus } });
       for (let i = 0; i < hops.length; i++) {
         await tx.orderStatusHistory.create({
-          data: { orderId, storeId, fromStatus: i === 0 ? order.status : (hops[i - 1] as OrderState), toStatus: hops[i] as OrderState, reason: "send-for-delivery (one-tap)", actorType: "admin", actorId: null },
+          data: { orderId, storeId, fromStatus: i === 0 ? order.status : (hops[i - 1] as OrderState), toStatus: hops[i] as OrderState, reason: note, actorType: "admin", actorId: null },
         });
       }
     });

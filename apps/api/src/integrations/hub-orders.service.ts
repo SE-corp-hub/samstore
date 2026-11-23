@@ -9,6 +9,7 @@ import type { CheckoutService } from "../checkout/checkout.service.js";
 import type { CartRepository, CatalogRepository, StoreRepository } from "../persistence/repositories.js";
 import { randomId } from "../persistence/repositories.js";
 import { checkDto, HUB_ORDER_DTO } from "../security/validate.js";
+import type { HubTap, HubTapApplier } from "./hub-taps.js";
 
 export const HUB_CHANNELS = ["messenger", "order_form", "comment", "live", "agent", "counter"] as const;
 
@@ -102,7 +103,18 @@ export class HubOrderService {
     private readonly freeFor: (storeId: string, locationId: string | null) => Promise<Map<string, number> | null> = async () => null,
     /** The store's customers that changed after a point, for the hub's Customers list: this store owns their details. */
     private readonly changedCustomers: ChangedCustomers = async () => [],
+    /** Moves one of the store's hub orders on a delivery tap from the hub (integrations/hub-taps.ts). */
+    private readonly applyTap: HubTapApplier = async () => "This Sam Store cannot take delivery taps yet",
   ) {}
+
+  /**
+   * A tap from the hub's Deliveries page (On the way, Delivered) on one of this store's hub orders: null when the
+   * order is there now, else why not, in words the delivery person reads in the hub.
+   */
+  async tap(storeSlug: string, tap: HubTap): Promise<string | null> {
+    const store = await this.stores.findBySlug(storeSlug);
+    return store ? this.applyTap(store.id, tap) : "Store not found";
+  }
 
   /** Up to 200 of the store's customers changed after the hub's last copy, oldest change first. */
   async customers(storeSlug: string, after: { at: string; id: string }): Promise<HubCustomer[]> {
@@ -280,6 +292,8 @@ function linkError(e: unknown): string {
  * calls out of Render are not blocked. Each beat fetches the hub's waiting orders, places them (the same key gives
  * the same order back, so a lost answer is safe), says what became of each, and sends the linked stores' items and
  * how their hub orders stand now (step, items, total, paid), so an order changed here shows changed in the hub too.
+ * The hub's delivery team taps On the way and Delivered in the hub: those taps come with the waiting orders, move
+ * the order here, and the hub then follows it like any other change. A tap we can't act on goes back with why.
  */
 export async function syncWithHub(
   hub: HubOrderService,
@@ -295,10 +309,12 @@ export async function syncWithHub(
   try {
     const res = await send(door, { headers, signal: AbortSignal.timeout(20_000) });
     if (!res.ok) throw new Error(`hub answered ${res.status}`);
-    const got = (await res.json()) as { stores?: unknown; orders?: unknown };
+    const got = (await res.json()) as { stores?: unknown; orders?: unknown; taps?: unknown };
     const offered = Array.isArray(got.orders) ? got.orders.slice(0, 50) : [];
+    // Delivery taps the hub is holding for orders that live here (see hub-taps.ts).
+    const tapped = Array.isArray(got.taps) ? got.taps.slice(0, 50) : [];
     // Quick beat with nothing waiting: no answer, so the hub's copy of items and orders is not rewritten every 15 s.
-    if (opts.full === false && offered.length === 0) {
+    if (opts.full === false && offered.length === 0 && tapped.length === 0) {
       link.stuck = [];
       link.lastOkAt = new Date().toISOString();
       link.lastError = null;
@@ -340,6 +356,32 @@ export async function syncWithHub(
       }
     }
     link.stuck = stuck;
+    // Taps come before `updates` is built, so the same answer tells the hub where each order stands now. A tap we
+    // can't act on goes back with the reason; one that crashed is left alone, and the hub offers it again.
+    const refusedTaps: { id: number; error: string }[] = [];
+    for (const t of tapped) {
+      const raw = (t ?? {}) as Record<string, unknown>;
+      const id = raw.id;
+      if (typeof id !== "number" || !Number.isSafeInteger(id)) continue;
+      const status = raw.status;
+      if (typeof raw.store !== "string" || typeof raw.orderNumber !== "string" || !raw.orderNumber || (status !== "OUT_FOR_DELIVERY" && status !== "DELIVERED")) {
+        refusedTaps.push({ id, error: "Sam Store could not read this tap" });
+        continue;
+      }
+      const cash = raw.cashMinor;
+      try {
+        const error = await hub.tap(raw.store.slice(0, 120), {
+          orderNumber: raw.orderNumber.slice(0, 64),
+          status,
+          ...(typeof raw.at === "string" ? { at: raw.at.slice(0, 40) } : {}),
+          ...(typeof raw.by === "string" && raw.by.trim() ? { by: raw.by.trim().slice(0, 60) } : {}),
+          ...(typeof cash === "number" && Number.isSafeInteger(cash) && cash >= 0 ? { cashMinor: cash } : {}),
+        });
+        if (error) refusedTaps.push({ id, error: error.slice(0, 300) });
+      } catch (e) {
+        console.warn(`[sam-store] hub tap ${id}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
     const products = [];
     const updates = [];
     const stores = Array.isArray(got.stores) ? got.stores.filter((s): s is string => typeof s === "string").slice(0, 20) : [];
@@ -365,7 +407,7 @@ export async function syncWithHub(
     const answer = await send(door, {
       method: "POST",
       headers,
-      body: JSON.stringify({ results, products, updates: updates.slice(0, 200), ...(customers.length ? { customers } : {}) }),
+      body: JSON.stringify({ results, products, updates: updates.slice(0, 200), ...(customers.length ? { customers } : {}), ...(refusedTaps.length ? { taps: refusedTaps } : {}) }),
       signal: AbortSignal.timeout(20_000),
     });
     if (!answer.ok) throw new Error(`hub answered ${answer.status}`);
