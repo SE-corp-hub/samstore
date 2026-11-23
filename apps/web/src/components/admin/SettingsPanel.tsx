@@ -65,6 +65,7 @@ interface StoreSettings {
     hidePricePreOrder: boolean;
     quotaPromoEnabled?: boolean; quotaPromoMinSacks?: number; quotaPromoOffMinor?: number; quotaPromoCategoryIds?: string[];
     seniorPwdDiscountEnabled: boolean;
+    managersFullProducts?: boolean;
     messengerConnected: boolean;
     messengerPageId: string | null;
     loyaltyPointsPerPeso: number;
@@ -109,7 +110,7 @@ function formFrom(s: StoreSettings["settings"]): Form {
 }
 
 type ServerGroup = "counter" | "credit" | "receipt" | "shop" | "messenger";
-type Group = "business" | "store" | "printer" | "keys" | ServerGroup | "lock" | "account";
+type Group = "business" | "managers" | "store" | "printer" | "keys" | ServerGroup | "lock" | "account";
 
 /** What each group sends when saved. Also used to tell whether a group has unsaved changes. */
 const PAYLOAD: Record<ServerGroup, (f: Form) => Record<string, unknown>> = {
@@ -160,6 +161,7 @@ function problems(g: ServerGroup, f: Form): Partial<Record<keyof Form, string>> 
 // row of lib/who-can.ts that says who may change the group; a login that may not sees it locked.
 const GROUPS: { id: Group; icon: string; title: string; server: boolean; scope: Scope; rule?: string }[] = [
   { id: "business", icon: "bi-shop-window", title: "Business name", server: true, scope: "business", rule: "businessName" },
+  { id: "managers", icon: "bi-person-gear", title: "Managers and Products", server: true, scope: "business", rule: "managerProducts" },
   { id: "receipt", icon: "bi-percent", title: "VAT and tax", server: true, scope: "business", rule: "vat" },
   { id: "credit", icon: "bi-journal-text", title: "Credit (utang)", server: true, scope: "business", rule: "credit" },
   { id: "counter", icon: "bi-cash-coin", title: "Quota promo", server: true, scope: "business", rule: "quotaPromo" },
@@ -334,6 +336,7 @@ export default function SettingsPanel({ role = "", onNavigate }: { role?: string
     if (!saved) return "";
     switch (g) {
       case "business": return data?.name ?? "";
+      case "managers": return data?.settings?.managersFullProducts ? "On · managers change everything on Products" : "Off · managers change their own store's price, picture and the name";
       case "printer": { const p = getPrinterSettings(); return `${p.widthMm} mm · ${p.autoPrint ? "prints after each sale" : "print by hand"}${p.bluetooth ? " · Bluetooth" : ""}`; }
       case "keys": { const k = readPosKeys(); return k.on ? `On for POS on this PC · ${k.keys.search} search, ${k.keys.next} pay` : "Off on this PC"; }
       case "store": return "Each store's Open day and Z-read, drawer, per kilo, receipt details";
@@ -408,6 +411,9 @@ export default function SettingsPanel({ role = "", onNavigate }: { role?: string
       case "business":
         return <BusinessNameSection current={data?.name ?? ""} canChange={mayChange("business")} offline={offline}
           onSaved={(name) => { setData((d) => (d ? { ...d, name } : d)); window.dispatchEvent(new Event(STORES_CHANGED_EVENT)); }} />;
+      case "managers":
+        return <ManagerProductsSection on={!!data?.settings?.managersFullProducts} canChange={mayChange("managers")} offline={offline}
+          onSaved={(on) => setData((d) => (d ? { ...d, settings: { ...d.settings, managersFullProducts: on } } : d))} />;
       case "printer":
         return <div onChange={() => setPrinterTick((n) => n + 1)} onClick={() => setPrinterTick((n) => n + 1)}><PrinterSettingsCard storeName={data?.name} /></div>;
       case "keys":
@@ -735,6 +741,54 @@ function BusinessNameSection({ current, canChange, offline, onSaved }: { current
           {busy ? "Saving…" : "Save business name"}
         </button>
       )}
+    </div>
+  );
+}
+
+/**
+ * 2026-11-23 (owner: "have an on and off feature that managers can have full access on the products").
+ * Off: a manager changes a rice's name, picture and their own store's price and low-stock level.
+ * On: a manager changes everything on Products, like the owner. Saved at once.
+ */
+function ManagerProductsSection({ on, canChange, offline, onSaved }: { on: boolean; canChange: boolean; offline: boolean; onSaved: (on: boolean) => void }) {
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const flip = async (next: boolean) => {
+    setBusy(true); setMsg(null);
+    try {
+      const res = await fetch(`${API_URL}/admin/settings`, {
+        method: "PATCH", headers: { "Content-Type": "application/json", ...adminHeaders() },
+        body: JSON.stringify({ managersFullProducts: next }),
+      });
+      const d = await res.json().catch(() => null);
+      if (!res.ok) { setMsg({ ok: false, text: d?.message ?? d?.errors?.join(", ") ?? "Did not save. Try again." }); return; }
+      onSaved(next);
+      setMsg({ ok: true, text: next ? "Saved. Managers now have full access to Products." : "Saved. Managers are back to their own store's price, picture and the name." });
+    } catch {
+      setMsg({ ok: false, text: "No internet. Nothing was saved." });
+    } finally { setBusy(false); }
+  };
+  const can = (yes: boolean, text: string) => (
+    <li className={yes ? "mgr-yes" : "mgr-no"}><i className={`bi ${yes ? "bi-check-circle-fill" : "bi-lock-fill"}`} aria-hidden="true"></i><span><span className="visually-hidden">{yes ? "Can: " : "Cannot: "}</span>{text}</span></li>
+  );
+  return (
+    <div className="border rounded-3 p-3 mb-3 bg-white">
+      <fieldset disabled={!canChange || busy || offline} className="border-0 p-0 m-0">
+        <SwitchRow id="st-mgr-products" label="Managers have full access to Products" checked={on} onChange={(v) => void flip(v)}
+          help="On: every manager can change everything on Products, like you. Off: only their own store's side." />
+      </fieldset>
+      {busy && <div className="mt-2" role="status">Saving…</div>}
+      {msg && <div className={`alert ${msg.ok ? "alert-success" : "alert-danger"} py-2 mt-2 mb-0`} role={msg.ok ? "status" : "alert"}>{msg.text}</div>}
+      <h3 className="h6 mt-3 mb-2">What a manager can do on Products now</h3>
+      <ul className="mgr-can">
+        {can(true, "Add a new rice")}
+        {can(true, "Change a rice's name and picture")}
+        {can(true, "Set their own store's price and low-stock level")}
+        {can(on, "Change the price for all stores and the cost")}
+        {can(on, "Change group, size, per kilo and other details")}
+        {can(on, "Hide a rice from sale, check items added by staff, add several at once")}
+      </ul>
+      <p className="small text-muted mb-0">This is for every manager at every store. Stock in still uses the cost on Products.</p>
     </div>
   );
 }

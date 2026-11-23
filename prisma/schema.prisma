@@ -300,6 +300,7 @@ model StoreSettings {
   seniorPwdDiscountEnabled  Boolean        @default(false)
   dailySalesTargetMinor     Int            @default(0) // Overview: daily sales target (0 = off)
   hidePricePreOrder         Boolean        @default(false) // Hide per-product prices in Pre Orders screen
+  managersFullProducts      Boolean        @default(false) // 2026-11-23: owner's switch — managers change everything on Products, like the owner
   // Quota promo (2026-11-09): with at least quotaPromoMinSacks sacks of the chosen groups (categories) in
   // one sale or pre-order, each of those sacks is quotaPromoOffMinor cheaper. The tablet applies it.
   quotaPromoEnabled         Boolean        @default(false)

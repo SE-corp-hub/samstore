@@ -4,6 +4,7 @@ import { JwtAuthGuard, type AuthPrincipal } from "../auth/auth.guard.js";
 import { resolveTenant, TENANT_ROLES } from "../auth/tenant-context.js";
 import { prisma } from "../persistence/prisma-repositories.js";
 import { cacheBust, cacheGet, cacheKey, cacheSet } from "../persistence/ttl-cache.js";
+import { bustStockCaches } from "../persistence/stock-cache.js";
 import { assertDto, STOCK_ADJUST_DTO, STOCK_CONVERSION_DTO } from "../security/validate.js";
 import { currentWall } from "../auth/wall.js";
 import { loadActor, locationRefusal } from "../people/people.service.js";
@@ -95,6 +96,8 @@ export class InventoryController {
     await refuseOtherStore(storeId, user.sub, role, body?.warehouseId);
     const result = await this.inventorySvc.setReorder(storeId, user.sub, body ?? {});
     if (!result.ok) throw new HttpException(result.error, statusFor(result.error));
+    // Products and Inventory show the reorder level (Low): never the old one for 30 s.
+    await bustStockCaches(storeId);
     return result.value;
   }
 
