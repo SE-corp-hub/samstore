@@ -15,6 +15,7 @@ import {
   pinProblem, ruleFor, type ApprovalKind, type DocPrefix, type SignerKindName,
 } from "../domain/people.js";
 import { toE164 } from "../domain/phone.js";
+import { closedTodayRefusal } from "../day/day-gate.js";
 import { accountBelongsToStore } from "../auth/account-scope.js";
 
 export type PeopleResult<T> = { ok: true; value: T } | { ok: false; error: ApiError };
@@ -686,6 +687,17 @@ export class PeopleService {
     const u = await prisma.user.findUnique({ where: { id: actor.userId }, select: { pinHash: true } });
     if (!u?.pinHash) return fail("validation", "Set a PIN first before deciding");
     if (!(await bcrypt.compare(input.pin ?? "", u.pinHash))) return forbidden("Wrong PIN");
+
+    // Money back for returned or refused rice comes off the day's sales and its cash. Once the store's
+    // Z-read is done for today, that money would be on no Z-read at all: it waits for tomorrow, or the
+    // owner reopens the day. Saying no (Decline) moves no money, so it is always allowed.
+    if (decision === "APPROVED" && approval.kind === "REFUND" && approval.locationId) {
+      const closed = await closedTodayRefusal(prisma, storeId, approval.locationId);
+      if (closed) {
+        const name = closed.split(" is closed for today")[0];
+        return conflict(`${name} is closed for today (Z-read done), so this money back would not be on any Z-read. Approve it tomorrow, or reopen the day first (owner only).`);
+      }
+    }
 
     try {
       await prisma.$transaction(async (tx) => {
