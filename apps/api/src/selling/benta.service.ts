@@ -294,7 +294,7 @@ export class BentaService {
       const kiloOf = new Map<string, typeof items>();
       for (const i of items) if (i.kiloOfId && listed.has(i.kiloOfId)) kiloOf.set(i.kiloOfId, [...(kiloOf.get(i.kiloOfId) ?? []), i]);
       const ordered = items.flatMap((i) => (i.kiloOfId && listed.has(i.kiloOfId) ? [] : [i, ...(kiloOf.get(i.id) ?? [])]));
-      const locations = warehouses.filter((w) => w.isActive).map((w) => ({ id: w.id, name: w.name, code: w.code, type: w.type }));
+      const locations = warehouses.filter((w) => w.isActive).map((w) => ({ id: w.id, name: w.name, code: w.code, type: w.type, isMain: w.isDefault, consignment: w.consignment }));
       // The quota promo travels with the price list, so the tablet applies it with no internet too.
       const quotaPromo = promo ? { quotaPromoEnabled: promo.quotaPromoEnabled, quotaPromoMinSacks: promo.quotaPromoMinSacks, quotaPromoOffMinor: promo.quotaPromoOffMinor, quotaPromoCategoryIds: promo.quotaPromoCategoryIds } : null;
       // Where this store may take rice from, itself first (null = no rule yet, any place).
