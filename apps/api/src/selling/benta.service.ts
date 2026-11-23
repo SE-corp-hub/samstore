@@ -53,7 +53,7 @@ import { txOptions } from "../persistence/tx-options.js";
 import { shelvesFor } from "../domain/sources.js";
 import { findOrMakeQuickCustomer } from "../pos/quick-customer.js";
 import { counterItemVia, productAdded } from "../domain/added-where.js";
-import { ownerOrManager } from "../domain/product-edit-rights.js";
+import { ownerOrManager, ownsProducts } from "../domain/product-edit-rights.js";
 import { manilaDate } from "../domain/reports.js";
 
 export type BentaResult<T> = { ok: true; value: T } | { ok: false; error: ApiError };
@@ -148,11 +148,11 @@ async function soldLast30Days(storeId: string): Promise<Record<string, number>> 
   return counts;
 }
 
-const productSelect = {
+export const productSelect = {
   id: true, name: true, sku: true, priceMinor: true, costMinor: true, floorPriceMinor: true, isActive: true, reviewStatus: true,
   stockBaseUnit: true, stockBaseQuantity: true, stockConversionFamily: true, soldByWeight: true, trackStock: true, photoKey: true, categoryId: true, kiloOfId: true,
 } as const;
-type P = Prisma.ProductGetPayload<{ select: typeof productSelect }>;
+export type P = Prisma.ProductGetPayload<{ select: typeof productSelect }>;
 
 // Owner/manager confirms a Bagong item from Para sa iyo: it becomes a normal product.
 registerApprovalHandler("MANUAL_ITEM", async (tx, a) => {
@@ -657,14 +657,14 @@ export class BentaService {
 
   // ─────────────────────────── Manual na pasok ───────────────────────────
 
-  /** Inside a transaction: an IN- document with its lines, signed by the receiver, stock added. */
-  private async writeStockIn(
+  /** Inside a transaction: an IN- document with its lines, signed by the receiver, stock added. (Also used by a truck delivery.) */
+  async writeStockIn(
     tx: Tx, storeId: string, actor: Actor, locationId: string,
-    data: { supplierName: string | null; note: string | null; purchaseOrderId?: string | null; lines: { product: P; quantity: number; unitCostMinor: number | null; poLineId?: string | null }[] },
+    data: { supplierName: string | null; note: string | null; purchaseOrderId?: string | null; truckId?: string | null; lines: { product: P; quantity: number; unitCostMinor: number | null; poLineId?: string | null }[] },
     signatures: SignatureInput[] | undefined,
   ) {
     const docNumber = await nextDocNumber(tx, storeId, "IN");
-    const doc = await tx.stockIn.create({ data: { storeId, docNumber, locationId, supplierName: data.supplierName, note: data.note, purchaseOrderId: data.purchaseOrderId ?? null, createdById: actor.userId }, select: { id: true, docNumber: true } });
+    const doc = await tx.stockIn.create({ data: { storeId, docNumber, locationId, supplierName: data.supplierName, note: data.note, purchaseOrderId: data.purchaseOrderId ?? null, truckId: data.truckId ?? null, createdById: actor.userId }, select: { id: true, docNumber: true } });
     await captureSignatures(tx, storeId, actor, { documentType: "STOCK_IN", documentId: doc.id, step: "RECEIVE", locationId }, signatures);
     await requireSignatures(tx, storeId, { documentType: "STOCK_IN", documentId: doc.id, step: "RECEIVE" });
     const costMode = await costModeOf(tx, storeId);
@@ -711,6 +711,9 @@ export class BentaService {
           if (l.quantity > left) throw new SellingError(left > 0 ? `${p.name}: only ${isLoose(p) ? formatKilos(left) : `${left} sack${left === 1 ? "" : "s"}`} left on ${po.docNumber}. Enter any extra as a separate Stock in.` : `${p.name} is already complete on ${po.docNumber}`);
           return { product: p, quantity: l.quantity, unitCostMinor: pl.unitCostMinor as number | null, poLineId: pl.id as string | null };
         }
+        // Only the owner sets what a product costs (Products, or a cost typed here). Anyone else's Stock in
+        // is recorded at the product's cost as it stands, so it never changes the cost (2026-11-22).
+        if (!ownsProducts(actor.role)) return { product: p, quantity: l.quantity, unitCostMinor: (p.costMinor > 0 ? p.costMinor : null) as number | null, poLineId: null as string | null };
         const cost = l.unitCostMinor === undefined || l.unitCostMinor === null ? null : l.unitCostMinor;
         if (cost !== null && (typeof cost !== "number" || !Number.isInteger(cost) || cost < 0 || cost > 100_000_000)) throw new SellingError("Wrong cost");
         return { product: p, quantity: l.quantity, unitCostMinor: cost as number | null, poLineId: null as string | null };
@@ -798,7 +801,7 @@ export class BentaService {
 
   /** Pagsamahin: fold a manual item into an existing product. Stock is converted by weight through the ledger. */
   async merge(storeId: string, actor: Actor, productId: string, intoProductId: string | undefined): Promise<BentaResult<{ id: string; mergedIntoId: string; moved: { locationId: string; from: number; to: number }[] }>> {
-    if (!["OWNER", "MANAGER", "STORE_OWNER"].includes(actor.role)) return forbidden("Only the owner or a manager can merge products");
+    if (!["OWNER", "STORE_OWNER", "PLATFORM_ADMIN"].includes(actor.role)) return forbidden("Only the owner can merge products. It changes every store.");
     if (!intoProductId || intoProductId === productId) return invalid("Choose the product to merge into");
     return this.run(async () => {
       const [from, into] = await Promise.all([

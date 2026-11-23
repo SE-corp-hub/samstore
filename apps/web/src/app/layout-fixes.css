@@ -203,6 +203,33 @@ section + section > .settings-scope-head { margin-top: 22px; }
 .side-who-row .side-drawer-btns { flex-wrap: wrap; min-width: 0; max-width: 100%; }
 .side-who-row .side-drawer-btns > .btn { flex: 1 1 auto; }
 
+/* ───────── Truck arrived (2026-11-22): one truck counted once. */
+.truck-step { display: flex; align-items: center; gap: 0.6rem; }
+.truck-num { display: inline-flex; align-items: center; justify-content: center; width: 2rem; height: 2rem; border-radius: 50%; border: 2px solid currentColor; font-size: 1rem; flex: 0 0 auto; }
+.truck-places { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.truck-places .btn { min-height: 48px; }
+.truck-line { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 0.5rem; padding: 0.6rem 0; border-top: 1px solid #e6e1d9; }
+.truck-line-name { flex: 1 1 14rem; min-width: 0; }
+.truck-field { display: flex; flex-direction: column; gap: 0.2rem; flex: 0 1 8.5rem; min-width: 6rem; margin: 0; }
+.truck-field > span { font-weight: 600; color: var(--sam-muted, #5c5148); font-size: max(16px, 0.9rem); overflow-wrap: anywhere; }
+.truck-remove { min-height: 48px; min-width: 48px; }
+.truck-cust { display: flex; align-items: center; gap: 0.75rem; min-height: 56px; width: 100%; white-space: normal; }
+.truck-shelf { padding-top: 0.6rem; border-top: 1px solid #e6e1d9; }
+.truck-shelf-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr)); gap: 0.6rem; }
+.truck-shelf-cell .truck-field { flex: none; width: 100%; }
+.truck-shelf-cell .btn-link { min-height: 44px; }
+.truck-left { font-weight: 700; font-size: 1.15rem; padding: 0.2rem 0.6rem; border-radius: 0.5rem; }
+.truck-left.ok { background: #E5F4E4; color: #1E6B35; }
+.truck-left.warn { background: #FFF3D6; color: #6F4800; border: 1px solid #8A5A00; }
+.truck-pay { padding: 0.5rem 0.75rem; border-radius: 0.6rem; background: #f4efe7; }
+.truck-pay .btn { min-height: 48px; }
+.truck-given { position: sticky; top: 0; z-index: 2; background: #fff; padding: 0.4rem 0; font-size: 1.05rem; }
+.truck-draft { padding: 0.5rem 0.75rem; border-radius: 0.6rem; background: #EEF4FB; color: #1D4F86; }
+.truck-draft .btn { min-height: 48px; }
+.truck-new { padding: 0.75rem; border-radius: 0.6rem; border: 2px solid #1E6B35; background: #F6FBF5; }
+.truck-new-line { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 0.5rem; padding: 0.5rem 0; border-top: 1px solid #e6e1d9; }
+.truck-new .btn, .truck-ui .btn-outline-success { min-height: 48px; }
+@media (max-width: 479.98px) { .truck-cust > .ms-auto { display: none; } .truck-shelf-grid { grid-template-columns: 1fr 1fr; } }
 /* ───────── POS + Pre-order check at every Text size, 2026-11-22 (user: "analyze every screen on pos and pre order,
    test also every text size settings ... fix overlapping"). Measured on 9 screen sizes × Normal / Large / Extra large. */
 
@@ -326,3 +353,124 @@ main.has-staff-bar .modal { padding-bottom: var(--staff-bar-h, 0px); }
   html[data-text-size="xl"] .order-check .check-order-store .check-from-count { margin-left: 0.2rem; font-size: 0.8em; }
   .sell-fit .order-check.wide .check-right .check-actions { position: sticky; bottom: 0; background: #fff; padding-top: 0.25rem; }
 }
+/* ── Products, easy for every role (2026-11-23) ─────────────────────────────────────────────────────
+   One list of rice rows (no wide table), tiles for what needs a look, group buttons, and one rice
+   window in numbered parts. Colours keep their meaning: green = go, blue = one store / information,
+   red = below cost, amber = careful, grey = hidden. All sizes in rem so Text size applies. */
+.prod-screen { --prod-ink: #1f1d1a; --prod-line: #c9c4bc; --prod-blue: #0B4F8A; --prod-blue-bg: #E3F0FB; --prod-red: #a3201b; --prod-red-bg: #fdecea;
+  --prod-amber: #6f4800; --prod-amber-bg: #fff3d6; --prod-green: #1f6f3f; --prod-green-bg: #e4f3ea; --prod-grey: #4a4640; --prod-grey-bg: #ece8e1; }
+.prod-top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem 1rem; margin-bottom: 0.5rem; }
+.prod-count { display: inline-block; margin-left: 0.5rem; padding: 0.1rem 0.6rem; border-radius: 999px; background: var(--prod-green-bg); color: var(--prod-green); font-size: 1rem; font-weight: 700; vertical-align: middle; }
+.prod-top-btns { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.prod-top-btns .btn { min-height: 3rem; font-weight: 700; }
+.prod-can { display: flex; align-items: flex-start; gap: 0.5rem; margin: 0 0 0.75rem; padding: 0.6rem 0.8rem; border-radius: 0.6rem; background: var(--prod-blue-bg); color: #0a3c69; font-size: 1rem; line-height: 1.4; }
+.prod-can .bi { margin-top: 0.1rem; flex-shrink: 0; }
+.prod-tiles { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.75rem; }
+.prod-tile { flex: 1 1 11rem; display: flex; align-items: center; gap: 0.6rem; min-height: 3.5rem; padding: 0.35rem 0.85rem; border-radius: 0.75rem; border: 2px solid currentColor; background: #fff; font: inherit; text-align: left; cursor: pointer; }
+.prod-tile-num { font-size: 1.9rem; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1; }
+.prod-tile-word { display: inline-flex; align-items: center; gap: 0.35rem; font-size: 1rem; font-weight: 700; line-height: 1.2; }
+.prod-tile-all { color: var(--prod-ink); }
+.prod-tile-below { color: var(--prod-red); background: var(--prod-red-bg); }
+.prod-tile-check { color: var(--prod-amber); background: var(--prod-amber-bg); }
+.prod-tile-hidden { color: var(--prod-grey); background: var(--prod-grey-bg); }
+.prod-tile.is-on { color: #fff; }
+.prod-tile-all.is-on { background: var(--prod-ink); border-color: var(--prod-ink); }
+.prod-tile-below.is-on { background: var(--prod-red); border-color: var(--prod-red); }
+.prod-tile-check.is-on { background: var(--prod-amber); border-color: var(--prod-amber); }
+.prod-tile-hidden.is-on { background: var(--prod-grey); border-color: var(--prod-grey); }
+.prod-tile:focus-visible, .prod-groups .btn:focus-visible, .prod-act .btn:focus-visible { outline: 3px solid #1F6F3F; outline-offset: 2px; }
+.prod-tools { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.5rem; }
+.prod-search { position: relative; flex: 2 1 16rem; }
+.prod-search .bi { position: absolute; left: 0.9rem; top: 50%; transform: translateY(-50%); color: var(--prod-grey); pointer-events: none; }
+.prod-search .form-control { min-height: 3rem; padding-left: 2.6rem; font-size: 1.05rem; }
+.prod-sort, .prod-made { flex: 1 1 11rem; }
+.admin-shell .prod-sort, .admin-shell .prod-made .form-select { min-height: 3rem; font-size: 1rem; }
+.prod-groups { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.75rem; }
+.prod-groups .btn { min-height: 2.75rem; padding-inline: 0.9rem; border-radius: 999px; font-weight: 700; }
+.prod-group-n { display: inline-block; min-width: 1.5rem; margin-left: 0.3rem; padding: 0 0.4rem; border-radius: 999px; background: rgba(0, 0, 0, 0.12); font-size: 0.9rem; text-align: center; }
+.prod-groups .btn-dark .prod-group-n { background: #fff; color: var(--prod-ink); }
+.prod-empty { padding: 1.5rem; text-align: center; border: 2px dashed var(--prod-line); border-radius: 0.9rem; font-size: 1.1rem; }
+.prod-pick-all { display: flex; align-items: center; gap: 0.6rem; min-height: 2.75rem; margin-bottom: 0.4rem; font-weight: 700; }
+.prod-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.5rem; }
+.prod-row { display: grid; grid-template-columns: auto minmax(0, 1fr) 9.5rem 8.5rem auto; align-items: center; gap: 0.5rem 0.9rem;
+  padding: 0.6rem 0.8rem; background: #fff; border: 1px solid var(--prod-line); border-left: 6px solid var(--prod-green); border-radius: 0.75rem; }
+.prod-row.is-picking { grid-template-columns: auto auto minmax(0, 1fr) 9.5rem 8.5rem auto; }
+.prod-row.is-below { border-left-color: var(--prod-red); }
+.prod-row.is-hidden { border-left-color: #8d867c; background: #f4f1ec; }
+.prod-tick { width: 1.75rem; height: 1.75rem; margin: 0; }
+.prod-main { min-width: 0; display: flex; flex-direction: column; gap: 0.25rem; }
+.prod-name { font-size: 1.15rem; font-weight: 700; line-height: 1.25; color: var(--prod-ink); overflow-wrap: anywhere; }
+.prod-tags { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+.prod-tag { display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.1rem 0.55rem; border-radius: 999px; border: 1px solid var(--prod-line); background: #fff; color: var(--prod-ink); font-size: 0.9rem; font-weight: 600; line-height: 1.4; }
+.prod-tag-group { background: var(--prod-blue-bg); border-color: var(--prod-blue); color: var(--prod-blue); }
+.prod-tag-ok { background: var(--prod-green-bg); border-color: var(--prod-green); color: var(--prod-green); }
+.prod-tag-warn { background: var(--prod-amber-bg); border-color: var(--prod-amber); color: var(--prod-amber); }
+.prod-tag-bad { background: var(--prod-red-bg); border-color: var(--prod-red); color: var(--prod-red); }
+.prod-tag-off { background: var(--prod-grey-bg); border-color: var(--prod-grey); color: var(--prod-grey); }
+.prod-num { display: flex; flex-direction: column; align-items: flex-end; text-align: right; line-height: 1.25; }
+.prod-num-word { font-size: 0.875rem; color: var(--prod-grey); }
+.prod-num strong { font-size: 1.3rem; font-weight: 800; font-variant-numeric: tabular-nums; color: var(--prod-ink); white-space: nowrap; }
+.prod-num-note { font-size: 0.9rem; color: var(--prod-grey); }
+.prod-act .btn { min-height: 3rem; min-width: 6.5rem; font-weight: 700; white-space: nowrap; }
+/* Tablet upright: price over stock in one column, so the name gets the room. */
+@media (min-width: 768px) and (max-width: 991.98px) {
+  .prod-row { grid-template-columns: auto minmax(0, 1fr) auto auto; }
+  .prod-row.is-picking { grid-template-columns: auto auto minmax(0, 1fr) auto auto; }
+  .prod-row > .prod-pic, .prod-row > .prod-main, .prod-row > .prod-act, .prod-row > .prod-tick { grid-row: 1 / span 2; }
+  .prod-row > .prod-price { grid-row: 1; align-self: end; }
+  .prod-row > .prod-stock { grid-row: 2; align-self: start; flex-direction: row; align-items: baseline; justify-content: flex-end; gap: 0.4rem; flex-wrap: wrap; }
+  .prod-row > .prod-price, .prod-row > .prod-stock { grid-column: -3; }
+  .prod-row > .prod-stock strong { font-size: 1.1rem; }
+}
+@media (max-width: 767.98px) {
+  .prod-row, .prod-row.is-picking { grid-template-columns: auto minmax(0, 1fr) minmax(0, 1fr); }
+  .prod-row .prod-main { grid-column: 2 / -1; }
+  .prod-row.is-picking .prod-pic { display: none; }
+  .prod-row .prod-price { grid-column: 1 / 3; align-items: flex-start; text-align: left; }
+  .prod-row .prod-stock { grid-column: 3; }
+  .prod-row .prod-act { grid-column: 1 / -1; }
+  .prod-row .prod-act .btn { width: 100%; }
+  .prod-tile { flex: 1 1 calc(50% - 0.5rem); min-height: 3rem; padding-inline: 0.6rem; }
+  .prod-tile-num { font-size: 1.5rem; }
+  .prod-top-btns { width: 100%; }
+  .prod-top-btns .btn { flex: 1 1 auto; }
+}
+/* The rice window. */
+.prod-dialog { max-width: 42rem; }
+.prod-form { display: flex; flex-direction: column; min-height: 0; max-height: 100%; overflow: hidden; }
+.prod-form .modal-body { overflow-y: auto; }
+.prod-form .modal-title { font-weight: 700; overflow-wrap: anywhere; }
+.prod-form .modal-footer .btn { min-height: 3rem; font-weight: 700; }
+.prod-form .form-label { font-weight: 700; margin-bottom: 0.3rem; }
+.prod-form .form-control, .prod-form .form-select { min-height: 3rem; }
+.prod-form fieldset:disabled .form-control, .prod-form fieldset:disabled .form-select { background: #ece8e1; color: #4a4640; }
+.prod-sec { border: 1px solid var(--prod-line, #c9c4bc); border-radius: 0.75rem; padding: 0.9rem 1rem; margin: 0 0 1rem; background: #fff; }
+.prod-sec-title { display: flex; align-items: center; font-size: 1.1rem; font-weight: 700; margin: 0 0 0.75rem; color: #1f1d1a; }
+.prod-step { display: inline-flex; align-items: center; justify-content: center; width: 1.9rem; height: 1.9rem; margin-right: 0.6rem; border-radius: 50%; background: #1f1d1a; color: #fff; font-size: 1rem; flex-shrink: 0; }
+.prod-switch { display: flex; align-items: flex-start; gap: 0.75rem; min-height: 2.75rem; padding-left: 0; margin-bottom: 0.75rem; }
+.prod-switch .form-check-input { float: none; margin: 0.15rem 0 0; flex-shrink: 0; }
+.prod-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr)); gap: 0.5rem; margin: 0 0 0.6rem; }
+.prod-facts > div { padding: 0.45rem 0.7rem; border-radius: 0.6rem; background: #f4f1ec; }
+.prod-facts dt { font-size: 0.875rem; font-weight: 400; color: #4a4640; }
+.prod-facts dd { margin: 0; font-size: 1.05rem; font-weight: 700; overflow-wrap: anywhere; }
+.here-read { min-height: 3rem; display: flex; align-items: center; font-size: 1.5rem; font-weight: 800; font-variant-numeric: tabular-nums; }
+
+/* Products → Manage (2026-11-22): a manager's own store's side of a rice (price, reorder, stock, picture).
+   Stock blue edge = one store; the shared details fold away under "More details". */
+.here-card { border: 1px solid #c9c4bc; border-left: 6px solid #0B4F8A; border-radius: 12px; padding: 14px 16px; margin: 0 0 16px; background: #fff; }
+.here-title { font-size: 1.15rem; font-weight: 700; margin: 0 0 10px; color: #0B4F8A; overflow-wrap: anywhere; }
+.here-stock { display: flex; align-items: center; min-height: 3rem; justify-content: space-between; gap: 8px; padding: 8px 12px; border-radius: 10px; background: #E3F0FB; }
+.here-stock strong { font-size: 1.25rem; }
+.here-card .photo-picker, .here-card > :last-child { margin-top: 12px; }
+.shared-details { border: 1px solid #c9c4bc; border-radius: 12px; padding: 0 12px; margin: 0 0 8px; }
+.shared-details > summary { min-height: 48px; display: flex; align-items: center; font-weight: 700; cursor: pointer; color: #1f1d1a; }
+.shared-details > summary:focus-visible { outline: 3px solid #0B4F8A; outline-offset: 2px; border-radius: 8px; }
+.shared-details[open] { padding-bottom: 12px; }
+.admin-shell .btn-manage { min-height: 44px; min-width: 44px; }
+@media (max-width: 575.98px) { .prod-form .modal-footer .me-auto { flex: 1 1 100%; margin-right: 0 !important; } .prod-form .modal-footer .btn:not(.me-auto) { flex: 1 1 0; } }
+/* Settings → Managers and Products: what a manager can do now (green tick = can, grey lock = cannot). */
+.mgr-can { list-style: none; margin: 0 0 0.75rem; padding: 0; display: grid; gap: 0.35rem; }
+.mgr-can li { display: flex; align-items: flex-start; gap: 0.6rem; padding: 0.45rem 0.7rem; border-radius: 0.6rem; font-size: 1.05rem; }
+.mgr-can .bi { margin-top: 0.15rem; flex-shrink: 0; }
+.mgr-can .mgr-yes { background: #e4f3ea; color: #14532d; }
+.mgr-can .mgr-no { background: #ece8e1; color: #4a4640; }

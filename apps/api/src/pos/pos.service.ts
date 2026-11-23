@@ -232,13 +232,15 @@ export class PosService {
       if (refusal) return { ok: false, error: { type: "forbidden", message: refusal } };
       return { ok: true, value: { id: loc.id, name: loc.name } };
     }
+    // No store asked (an old app, or a sale saved offline): never refused, so a sale is never lost. A login with
+    // no store yet lands at the main store, as before; asking for a store by name is refused (locationRefusal).
     const home = actor.homeLocationId ? await pick(actor.homeLocationId) : null;
     if (home && home.type !== "BUFFER") return { ok: true, value: { id: home.id, name: home.name } };
     const main = await mainLocation(prisma, storeId);
     return { ok: true, value: main };
   }
 
-  /** May this login work on a pre-order that belongs to `locationId`? (Owner and manager: any store.) */
+  /** May this login work on a pre-order that belongs to `locationId`? (Owner: any store; everyone else: their own.) */
   private async preorderRefusal(storeId: string, actor: Actor, locationId: string | null): Promise<string | null> {
     if (!locationId || !locationRefusal(actor, locationId)) return null;
     const loc = await prisma.warehouse.findFirst({ where: { id: locationId, storeId }, select: { name: true } });
@@ -724,7 +726,8 @@ export class PosService {
    */
   async listPreorders(storeId: string, from?: string, to?: string, who?: PosActor) {
     const actor = who ? actorOf(who) : null;
-    const own = actor?.homeLocationId && !(ALL_LOCATION_ROLES as readonly string[]).includes(actor.role) ? actor.homeLocationId : null;
+    // 2026-11-22: everyone but the owner (managers too) sees their own store's pre-orders only.
+    const own = actor && !(ALL_LOCATION_ROLES as readonly string[]).includes(actor.role) ? actor.homeLocationId ?? "__no_store__" : null;
     return prisma.order.findMany({
       where: {
         storeId, source: "PRE_ORDER",

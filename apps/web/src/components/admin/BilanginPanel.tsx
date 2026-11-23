@@ -155,7 +155,7 @@ export default function BilanginPanel({ role, onNavigate }: { role?: string; onN
       {chosen && !(tab === "counts" && open) && <ul className="nav nav-tabs mb-3">
         <li className="nav-item"><button className={`nav-link ${tab === "counts" ? "active" : ""}`} onClick={() => setTab("counts")}>Counts</button></li>
         <li className="nav-item"><button className={`nav-link ${tab === "report" ? "active" : ""}`} onClick={() => { setOpen(null); setTab("report"); }}>Report</button></li>
-        {owner && <li className="nav-item"><button className={`nav-link ${tab === "stores" ? "active" : ""}`} onClick={() => { setOpen(null); setTab("stores"); }}>All stores</button></li>}
+        {owner && !homeLocationId && <li className="nav-item"><button className={`nav-link ${tab === "stores" ? "active" : ""}`} onClick={() => { setOpen(null); setTab("stores"); }}>All stores</button></li>}
         {owner && <li className="nav-item"><button className={`nav-link ${tab === "look" ? "active" : ""}`} onClick={() => { setOpen(null); setTab("look"); }}>Needs a look{lookCount > 0 && <span className="badge text-bg-danger ms-1">{lookCount}</span>}</button></li>}
         <li className="nav-item"><button className={`nav-link ${tab === "bawas" ? "active" : ""}`} onClick={() => setTab("bawas")}>Write-off</button></li>
         {owner && <li className="nav-item"><button className={`nav-link ${tab === "balance" ? "active" : ""}`} onClick={() => setTab("balance")}>Balance</button></li>}
@@ -182,7 +182,7 @@ export default function BilanginPanel({ role, onNavigate }: { role?: string; onN
       )}
 
       {chosen && tab === "counts" && open && <CountSheet count={open} owner={owner} onClose={async () => { setOpen(null); await loadCounts(); }} onReload={() => void openCount(open.id)} />}
-      {chosen && tab === "report" && <CountReportList locations={locations} locationId={locationId} owner={owner} />}
+      {chosen && tab === "report" && <CountReportList locations={locations} locationId={locationId} owner={owner && !homeLocationId} />}
       {chosen && tab === "stores" && owner && <CountOverview />}
       {chosen && tab === "look" && owner && !open && <NeedsLook onOpenCount={(id) => void openCount(id)} onNavigate={onNavigate} onChanged={() => void loadLooks()} />}
       {chosen && tab === "look" && owner && open && <CountSheet count={open} owner={owner} onClose={() => setOpen(null)} onReload={() => void openCount(open.id)} />}

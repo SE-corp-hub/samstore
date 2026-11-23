@@ -34,7 +34,7 @@ import { queueSms } from "../sms/sms.service.js";
 import { wakeOutbox } from "../notifications/outbox.service.js";
 import { TransferFlowService } from "../transfers/transfer-flow.service.js";
 import { BentaService } from "../selling/benta.service.js";
-import { captureSignatures, locationRefusal, requireSignatures, signatureErrorResult, type Actor, type SignatureInput } from "../people/people.service.js";
+import { captureSignatures, locationRefusal, requireSignatures, seesAllStores, signatureErrorResult, type Actor, type SignatureInput } from "../people/people.service.js";
 import { txOptions } from "../persistence/tx-options.js";
 
 export type AgentResult<T> = { ok: true; value: T } | { ok: false; error: ApiError };
@@ -204,7 +204,7 @@ export class AgentOrderService {
     if (actor.role === "SALES_AGENT") return [];
     const where: Prisma.OrderWhereInput = {
       storeId, source: "AGENT",
-      ...(actor.homeLocationId && !["OWNER", "MANAGER", "PLATFORM_ADMIN"].includes(actor.role) ? { sellingLocationId: actor.homeLocationId } : {}),
+      ...(!seesAllStores(actor) ? { sellingLocationId: actor.homeLocationId ?? "__no_store__" } : {}), // 2026-11-22: managers too
       ...(view === "done" ? { status: { in: ["COMPLETED", "CANCELLED"] }, updatedAt: { gte: new Date(Date.now() - 30 * 86_400_000) } }
         : view === "active" ? { status: "CONFIRMED" } : { status: "RECEIVED" }),
     };

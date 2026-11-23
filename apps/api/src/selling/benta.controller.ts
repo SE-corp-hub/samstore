@@ -10,6 +10,7 @@ import { loadActor } from "../people/people.service.js";
 import { badRequest, signaturesFrom } from "../people/signature-input.js";
 import { BentaService, type BentaLineInput } from "./benta.service.js";
 import { CustomerPriceService } from "./customer-price.service.js";
+import { TruckService } from "./truck.service.js";
 
 function statusFor(error: ApiError): HttpStatus {
   switch (error.type) {
@@ -49,6 +50,7 @@ function linesFrom(v: unknown): BentaLineInput[] {
 export class BentaController {
   private readonly benta = new BentaService();
   private readonly customerPrices = new CustomerPriceService();
+  private readonly trucks = new TruckService();
 
   private async ctx(req: Req_, headerStoreId: string | undefined) {
     const user = req.user;
@@ -146,6 +148,32 @@ export class BentaController {
     return unwrap(await this.benta.stockIn(storeId, actor, {
       locationId: str(body?.locationId), supplierName: str(body?.supplierName), note: str(body?.note), purchaseOrderId: str(body?.purchaseOrderId), lines, signatures: signaturesFrom(body?.signatures),
     }));
+  }
+
+  /**
+   * POST /admin/truck — a truck delivery in one save (owner/manager): { locationId (the store doing it), unloadLocationId?,
+   * purchaseOrderId?, supplierName?, note?, lines:[{productId, good, damaged?, unitCostMinor?}], preorders:[orderId],
+   * shelves:[{locationId, productId, quantity}], signatures }. Refused unless pre-orders + shelves = good sacks, per rice.
+   */
+  @Post("truck")
+  async truck(@Req() req: Req_, @Body() body: Record<string, unknown>, @Headers("x-store-id") h?: string) {
+    const { storeId, actor } = await this.ctx(req, h);
+    const list = (v: unknown) => (Array.isArray(v) ? (v as unknown[]).map((x) => obj(x) ?? {}) : []);
+    return unwrap(await this.trucks.finish(storeId, actor, {
+      locationId: str(body?.locationId), unloadLocationId: str(body?.unloadLocationId), purchaseOrderId: str(body?.purchaseOrderId),
+      supplierName: str(body?.supplierName), note: str(body?.note),
+      lines: list(body?.lines).map((x) => ({ productId: str(x.productId), good: x.good, damaged: x.damaged })),
+      preorders: Array.isArray(body?.preorders) ? (body.preorders as unknown[]).filter((x): x is string => typeof x === "string") : [],
+      shelves: list(body?.shelves).map((x) => ({ locationId: str(x.locationId), productId: str(x.productId), quantity: x.quantity })),
+      signatures: signaturesFrom(body?.signatures),
+    }));
+  }
+
+  /** GET /admin/trucks — the trucks of the last 60 days with their sheets (owner/manager). */
+  @Get("trucks")
+  async trucksList(@Req() req: Req_, @Headers("x-store-id") h?: string) {
+    const { storeId, actor } = await this.ctx(req, h);
+    return unwrap(await this.trucks.list(storeId, actor));
   }
 
   /** GET /admin/stock-in?locationId= — recent manual stock-ins at a location (for the receipt button). */

@@ -21,7 +21,7 @@ import { isKiloItem, kiloCostFrom, rackCostAfter } from "../domain/kilo.js";
 import { recordCostIn, shelfCostFor } from "../domain/shelf-cost.js";
 import { chargeResackLoss } from "../payable/charges.js";
 import {
-  captureSignatures, locationRefusal, nextDocNumber, requestApproval, requireSignatures, signatureErrorResult,
+  captureSignatures, locationRefusal, nextDocNumber, requestApproval, seesAllStores, requireSignatures, signatureErrorResult,
   type Actor, type SignatureInput,
 } from "../people/people.service.js";
 import { txOptions } from "../persistence/tx-options.js";
@@ -44,6 +44,12 @@ export interface OutputInput {
   /** Stock units of the output product: sacks, or grams for loose rice. */
   quantity?: unknown;
 }
+
+/** One more rice going in (besides the first). */
+interface MoreIn { product: P; quantity: number; grams: number; valueMinor: number }
+/** "3 × Sinandomeng 5kg", or "3.5 kg Sinandomeng (per kilo)" for loose rice. */
+const amountText = (o: { product: { name: string; stockBaseQuantity: number | null }; quantity: number }) =>
+  (o.product.stockBaseQuantity === 1 ? `${formatKilos(o.quantity)} ${o.product.name}` : `${o.quantity} × ${o.product.name}`);
 
 const productSelect = { id: true, name: true, variety: true, stockBaseUnit: true, stockBaseQuantity: true, stockConversionFamily: true, costMinor: true, isActive: true } as const;
 type P = Prisma.ProductGetPayload<{ select: typeof productSelect }>;
@@ -82,8 +88,19 @@ export class ResackService {
     return k;
   }
 
+  /** More rice going in besides the first: each one known, active and weighed in grams. */
+  private moreIns(more: OutputInput[], byId: Map<string, P>): MoreIn[] {
+    return more.map((m) => {
+      const p = m.productId ? byId.get(m.productId) : undefined;
+      if (!p || !p.isActive) throw new ResackError("Unknown rice going in");
+      const qty = m.quantity;
+      if (typeof qty !== "number") throw new ResackError(`Enter how many ${p.name} go in`);
+      return { product: p, quantity: qty, grams: gramsOf(p, qty), valueMinor: valueOf(p, qty) };
+    });
+  }
+
   /** Validate outputs against the input (same rice family, weighed in grams) and plan the numbers. */
-  private plan(input: P, inputQty: number, outputs: OutputInput[], byId: Map<string, P>, inputValueMinor?: number) {
+  private plan(input: P, inputQty: number, outputs: OutputInput[], byId: Map<string, P>, inputValueMinor?: number, more: MoreIn[] = []) {
     if (!Array.isArray(outputs) || outputs.length === 0) throw new ResackError("Enter what came out");
     const outs = outputs.map((o) => {
       const p = o.productId ? byId.get(o.productId) : undefined;
@@ -103,6 +120,7 @@ export class ResackService {
     const inputGrams = gramsOf(input, inputQty);
     const plan = planResack({
       input: { productId: input.id, name: input.name, variety: input.variety, grams: inputGrams, valueMinor: inputValueMinor ?? valueOf(input, inputQty) },
+      moreInputs: more.map((m) => ({ productId: m.product.id, name: m.product.name, variety: m.product.variety, grams: m.grams, valueMinor: m.valueMinor })),
       outputs: outs.map((o) => ({ productId: o.product.id, name: o.product.name, variety: o.product.variety, grams: o.grams })),
     });
     return { outs, plan, inputGrams };
@@ -118,6 +136,7 @@ export class ResackService {
     job: { id: string; docNumber: string; locationId: string; inputProductId: string; inputQty: number; inputGrams: number; kargadorId: string | null },
     input: P, locationName: string,
     outs: { product: P; quantity: number; grams: number }[], plan: ResackPlan, signatures: SignatureInput[] | undefined,
+    more: MoreIn[] = [],
   ) {
     const claimed = await tx.resackJob.updateMany({
       where: { id: job.id, storeId, status: "STARTED" },
@@ -133,13 +152,16 @@ export class ResackService {
       await tx.resackOutput.create({ data: { storeId, jobId: job.id, productId: o.product.id, quantity: o.quantity, grams: o.grams, valueMinor: plan.outputValuesMinor[i] ?? 0 } });
       await addForTrip(tx, this.leg(storeId, o.product.id, job.locationId, actor, job.id, job.docNumber), o.quantity, "RESACK_IN");
     }
-    await chargeResackLoss(tx, { storeId, locationId: job.locationId, jobDoc: job.docNumber, productId: input.id, gramsIn: plan.gramsIn, lossGrams: plan.lossGrams, actorId: actor.userId });
+    await chargeResackLoss(tx, {
+      storeId, locationId: job.locationId, jobDoc: job.docNumber, productId: input.id, gramsIn: plan.gramsIn, lossGrams: plan.lossGrams, actorId: actor.userId,
+      inputs: more.length ? [{ productId: input.id, grams: plan.gramsIn - more.reduce((sum, m) => sum + m.grams, 0) }, ...more.map((m) => ({ productId: m.product.id, grams: m.grams }))] : undefined,
+    });
     let approvalId: string | null = null;
     if (plan.needsApproval) {
       approvalId = (await requestApproval(tx, {
         storeId, kind: "LOSS_OVER_TOLERANCE", documentType: "RESACK", documentId: job.id, locationId: job.locationId,
         // formatKilos already ends in "kg"; loose rice reads as its weight, sacks as a count.
-        summary: `Resack ${job.docNumber} at ${locationName}: ${job.inputQty} × ${input.name} (${formatKilos(plan.gramsIn)}) → ${outs.map((o) => (o.product.stockBaseQuantity === 1 ? `${formatKilos(o.grams)} ${o.product.name}` : `${o.quantity} × ${o.product.name}`)).join(", ")} (${formatKilos(plan.gramsOut)}). Short ${formatKilos(plan.lossGrams)} (${(plan.lossBp / 100).toFixed(2)}%).`,
+        summary: `Resack ${job.docNumber} at ${locationName}: ${[{ product: input, quantity: job.inputQty, grams: 0 }, ...more].map(amountText).join(" + ")} (${formatKilos(plan.gramsIn)}) → ${outs.map(amountText).join(", ")} (${formatKilos(plan.gramsOut)}). Short ${formatKilos(plan.lossGrams)} (${(plan.lossBp / 100).toFixed(2)}%).`,
         detail: { gramsIn: plan.gramsIn, gramsOut: plan.gramsOut, lossGrams: plan.lossGrams, lossBp: plan.lossBp, lossValueMinor: plan.lossValueMinor, kargadorId: job.kargadorId },
         requestedById: actor.userId,
       })).id;
@@ -154,14 +176,17 @@ export class ResackService {
   /** Inside a transaction: create the job and take the input off the shelf. */
   private async writeStart(
     tx: Tx, storeId: string, actor: Actor,
-    data: { locationId: string; input: P; inputQty: number; inputGrams: number; kargadorId: string | null; note: string | null; openSack: boolean },
+    data: { locationId: string; input: P; inputQty: number; inputGrams: number; kargadorId: string | null; note: string | null; openSack: boolean; more?: MoreIn[] },
     startSignatures: SignatureInput[] | undefined, requireStartSignature: boolean,
   ) {
+    const more = data.more ?? [];
     const docNumber = await nextDocNumber(tx, storeId, "RSK");
     const job = await tx.resackJob.create({
       data: {
-        storeId, docNumber, locationId: data.locationId, inputProductId: data.input.id, inputQty: data.inputQty, inputGrams: data.inputGrams,
-        inputValueMinor: valueOf(data.input, data.inputQty), kargadorId: data.kargadorId, note: data.note, openSack: data.openSack, startedById: actor.userId,
+        storeId, docNumber, locationId: data.locationId, inputProductId: data.input.id, inputQty: data.inputQty,
+        // With more rice going in, the job's grams and value are the totals of everything that went in.
+        inputGrams: data.inputGrams + more.reduce((sum, m) => sum + m.grams, 0),
+        inputValueMinor: valueOf(data.input, data.inputQty) + more.reduce((sum, m) => sum + m.valueMinor, 0), kargadorId: data.kargadorId, note: data.note, openSack: data.openSack, startedById: actor.userId,
       },
       select: { id: true, docNumber: true, locationId: true, inputProductId: true, inputQty: true, inputGrams: true, kargadorId: true },
     });
@@ -169,12 +194,18 @@ export class ResackService {
       await captureSignatures(tx, storeId, actor, { documentType: "RESACK", documentId: job.id, step: "START", locationId: data.locationId }, startSignatures);
       await requireSignatures(tx, storeId, { documentType: "RESACK", documentId: job.id, step: "START" }, { kargador: !!data.kargadorId });
     }
-    const level = await tx.stockLevel.findFirst({ where: { storeId, productId: data.input.id, warehouseId: data.locationId }, select: { id: true } });
-    if (!level && !(await bufferIdOf(tx, storeId))) throw new StepError(conflict(`No ${data.input.name} is recorded at this location`));
-    await coverShortage(tx, storeId, { productId: data.input.id, warehouseId: data.locationId, needed: data.inputQty, actorId: actor.userId, documentType: "RESACK", documentId: job.id, reason: `resack ${docNumber}` });
-    await releaseForTrip(tx, this.leg(storeId, data.input.id, data.locationId, actor, job.id, docNumber), 0, data.inputQty, "RESACK_OUT");
+    // Every rice going in leaves THIS store's shelf (the store the resack is at).
+    for (const m of [{ product: data.input, quantity: data.inputQty }, ...more]) {
+      const level = await tx.stockLevel.findFirst({ where: { storeId, productId: m.product.id, warehouseId: data.locationId }, select: { id: true } });
+      if (!level && !(await bufferIdOf(tx, storeId))) throw new StepError(conflict(`No ${m.product.name} is recorded at this location`));
+      await coverShortage(tx, storeId, { productId: m.product.id, warehouseId: data.locationId, needed: m.quantity, actorId: actor.userId, documentType: "RESACK", documentId: job.id, reason: `resack ${docNumber}` });
+      await releaseForTrip(tx, this.leg(storeId, m.product.id, data.locationId, actor, job.id, docNumber), 0, m.quantity, "RESACK_OUT");
+    }
+    for (const m of more) {
+      await tx.resackInput.create({ data: { storeId, jobId: job.id, productId: m.product.id, quantity: m.quantity, grams: m.grams, valueMinor: m.valueMinor } });
+    }
     await tx.auditLog.create({
-      data: { storeId, actorType: "USER", actorId: actor.userId, action: "resack.start", entityType: "ResackJob", entityId: job.id, after: { inputQty: data.inputQty, inputGrams: data.inputGrams } },
+      data: { storeId, actorType: "USER", actorId: actor.userId, action: "resack.start", entityType: "ResackJob", entityId: job.id, after: { inputQty: data.inputQty, inputGrams: data.inputGrams, ...(more.length ? { moreInputs: more.map((m) => ({ productId: m.product.id, quantity: m.quantity, grams: m.grams })) } : {}) } },
     });
     return job;
   }
@@ -184,25 +215,28 @@ export class ResackService {
   /** One step: start + finish together (the usual case). Also used by Buksan ang sako. */
   async resack(
     storeId: string, actor: Actor,
-    input: { locationId?: string; inputProductId?: string; inputQty?: unknown; outputs?: OutputInput[]; kargadorId?: string; note?: string; openSack?: boolean; signatures?: SignatureInput[] },
+    input: { locationId?: string; inputProductId?: string; inputQty?: unknown; moreInputs?: OutputInput[]; outputs?: OutputInput[]; kargadorId?: string; note?: string; openSack?: boolean; signatures?: SignatureInput[] },
   ) {
     return this.run(async () => {
+      const moreRaw = input.moreInputs ?? [];
+      if (input.openSack && moreRaw.length) throw new ResackError("Open a sack: only one rice goes in");
       const loc = await this.location(storeId, actor, input.locationId);
       const kargador = await this.kargador(storeId, input.kargadorId);
       if (!kargador) throw new ResackError("Choose the porter (kargador) who did the resack — only the porter signs");
       const qty = input.inputQty;
       if (typeof qty !== "number") throw new ResackError("Enter how many go in");
-      const byId = await this.products(storeId, [input.inputProductId ?? "", ...(input.outputs ?? []).map((o) => o.productId ?? "")]);
+      const byId = await this.products(storeId, [input.inputProductId ?? "", ...moreRaw.map((m) => m.productId ?? ""), ...(input.outputs ?? []).map((o) => o.productId ?? "")]);
       const inP = byId.get(input.inputProductId ?? "");
       if (!inP || !inP.isActive) throw new ResackError("Unknown input product");
-      const { outs, plan, inputGrams } = this.plan(inP, qty, input.outputs ?? [], byId);
+      const more = this.moreIns(moreRaw, byId);
+      const { outs, plan, inputGrams } = this.plan(inP, qty, input.outputs ?? [], byId, undefined, more);
       if (input.openSack && (outs.length !== 1 || outs[0]!.product.stockBaseQuantity !== 1)) {
         throw new ResackError("Open a sack: only one loose (per kilo) product can come out");
       }
       let out = { id: "", docNumber: "", approvalId: null as string | null };
       await prisma.$transaction(async (tx) => {
-        const job = await this.writeStart(tx, storeId, actor, { locationId: loc.id, input: inP, inputQty: qty, inputGrams, kargadorId: kargador?.id ?? null, note: input.note?.trim() || null, openSack: !!input.openSack }, undefined, false);
-        const approvalId = await this.writeFinish(tx, storeId, actor, job, inP, loc.name, outs, plan, input.signatures);
+        const job = await this.writeStart(tx, storeId, actor, { locationId: loc.id, input: inP, inputQty: qty, inputGrams, kargadorId: kargador?.id ?? null, note: input.note?.trim() || null, openSack: !!input.openSack, more }, undefined, false);
+        const approvalId = await this.writeFinish(tx, storeId, actor, job, inP, loc.name, outs, plan, input.signatures, more);
         out = { id: job.id, docNumber: job.docNumber, approvalId };
       }, txOptions());
       return { ...out, status: "FINISHED", gramsIn: plan.gramsIn, gramsOut: plan.gramsOut, lossGrams: plan.lossGrams, lossBp: plan.lossBp, needsApproval: plan.needsApproval, varietyChange: plan.varietyChange };
@@ -341,6 +375,7 @@ export class ResackService {
   /** Jobs at a location: STARTED ones are the rice "nasa resack". */
   async list(storeId: string, actor: Actor, opts: { status?: string; locationId?: string }) {
     const loc = opts.locationId || actor.homeLocationId || undefined;
+    if (!loc && !seesAllStores(actor)) return []; // a store login with no store sees no jobs
     if (loc && locationRefusal(actor, loc)) return [];
     const rows = await prisma.resackJob.findMany({
       where: {
@@ -355,6 +390,7 @@ export class ResackService {
         location: { select: { id: true, name: true, code: true } },
         kargador: { select: { id: true, name: true } },
         outputs: { include: { product: { select: { id: true, name: true, soldByWeight: true } } } },
+        moreInputs: { include: { product: { select: { id: true, name: true, soldByWeight: true } } } },
       },
     });
     return rows.map((j) => ({
@@ -362,6 +398,7 @@ export class ResackService {
       inputGrams: j.inputGrams, outputGrams: j.outputGrams, lossGrams: j.lossGrams, lossBp: j.lossBp, varietyChange: j.varietyChange,
       openSack: j.openSack, kargador: j.kargador, approvalId: j.approvalId, startedAt: j.startedAt, finishedAt: j.finishedAt,
       outputs: j.outputs.map((o) => ({ product: o.product, quantity: o.quantity, grams: o.grams, valueMinor: o.valueMinor })),
+      moreInputs: j.moreInputs.map((m) => ({ product: m.product, quantity: m.quantity, grams: m.grams })),
     }));
   }
 }

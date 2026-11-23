@@ -27,17 +27,40 @@ export function pinLockSecondsLeft(lockedUntil: Date | null | undefined, now: Da
 
 // ─────────────────────────────── Locations ───────────────────────────────
 
-/** Roles that work across every location regardless of their home location. */
-export const ALL_LOCATION_ROLES = ["OWNER", "MANAGER", "PLATFORM_ADMIN"] as const;
+/**
+ * Roles that work across every location regardless of their home location: the owner and the
+ * platform. 2026-11-22 (owner's ask "every feature filtered by the location of the login"): a
+ * MANAGER is no longer here. A manager runs ONE store, their home store, like every other login.
+ */
+export const ALL_LOCATION_ROLES = ["OWNER", "STORE_OWNER", "PLATFORM_ADMIN"] as const;
+
+/** Store logins that must have a home store to work at all (no home store = no store work). */
+export const STORE_BOUND_ROLES = ["MANAGER", "STAFF"] as const;
+
+/** Does this role see and work at every store? Only the owner (and the platform). */
+export const seesEveryStore = (role: string): boolean => (ALL_LOCATION_ROLES as readonly string[]).includes(role);
 
 /**
- * May this person act (release, receive, count, sign as staff) at `locationId`?
- * Owner/manager: everywhere. Others: their home location, or everywhere when they
- * have no home location set.
+ * The one store this login is tied to: its home store. null = every store (the owner), or no store
+ * at all for a store login with no home store (see canActAtLocation).
+ */
+export const ownStoreOf = (role: string, homeLocationId: string | null | undefined): string | null =>
+  seesEveryStore(role) ? null : homeLocationId ?? null;
+
+/** A store login (manager or counter) that was never given a store: it may not work anywhere yet. */
+export const hasNoStoreYet = (role: string, homeLocationId: string | null | undefined): boolean =>
+  (STORE_BOUND_ROLES as readonly string[]).includes(role) && !homeLocationId;
+
+export const NO_STORE_YET = "Your login has no store yet. Ask the owner to choose your store in Team.";
+
+/**
+ * May this person act (sell, release, receive, count, sign as staff, see) at `locationId`?
+ * Owner: everywhere. Manager and counter staff: their home store only, and nowhere when they have
+ * no home store. Agents and delivery with no home store: every location (they do not work a store).
  */
 export function canActAtLocation(role: string, homeLocationId: string | null | undefined, locationId: string | null | undefined): boolean {
-  if ((ALL_LOCATION_ROLES as readonly string[]).includes(role)) return true;
-  if (!homeLocationId) return true;
+  if (seesEveryStore(role)) return true;
+  if (!homeLocationId) return !(STORE_BOUND_ROLES as readonly string[]).includes(role);
   return !!locationId && homeLocationId === locationId;
 }
 
@@ -154,7 +177,7 @@ export function checkPhotoImage(dataUrl: unknown): { ok: true; sha256: string } 
 // ─────────────────────────────── Numbering ───────────────────────────────
 
 /** Document number prefixes, one counter each (StoreCounter kind "DOC_<prefix>"). */
-export const DOC_PREFIXES = ["REL", "TR", "RSK", "CNT", "WO", "RET", "IN", "SLP", "SP", "PO", "SPY"] as const;
+export const DOC_PREFIXES = ["REL", "TR", "RSK", "CNT", "WO", "RET", "IN", "SLP", "SP", "PO", "SPY", "TRK"] as const;
 export type DocPrefix = (typeof DOC_PREFIXES)[number];
 
 export function formatDocNumber(prefix: DocPrefix, n: number): string {

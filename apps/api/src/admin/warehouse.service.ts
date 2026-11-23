@@ -424,9 +424,10 @@ export class WarehouseService {
     return { ok: true, value: { id: transferId, status: "CANCELLED" } };
   }
 
-  async listTransfers(storeId: string) {
+  /** `onlyLocationId`: a store login sees transfers to or from its own store only (2026-11-22). */
+  async listTransfers(storeId: string, onlyLocationId?: string) {
     return prisma.stockTransfer.findMany({
-      where: { storeId },
+      where: { storeId, ...(onlyLocationId ? { OR: [{ fromWarehouseId: onlyLocationId }, { toWarehouseId: onlyLocationId }] } : {}) },
       orderBy: { createdAt: "desc" },
       include: {
         fromWarehouse: { select: { name: true, code: true } },

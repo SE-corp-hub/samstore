@@ -25,14 +25,18 @@ test("M2 PIN: lock countdown", () => {
   assert.equal(pinLockSecondsLeft(new Date("2026-10-14T08:15:00Z"), now), 900);
 });
 
-test("M2 location: S2 staff cannot act for S1; owner, manager and unassigned staff can", () => {
+test("location (2026-11-22): every login but the owner works at its own store only", () => {
   assert.equal(canActAtLocation("STAFF", "S2", "S1"), false);
   assert.equal(canActAtLocation("STAFF", "S2", "S2"), true);
   assert.equal(canActAtLocation("STAFF", "S2", null), false, "a staff member with a home location must name a location");
-  assert.equal(canActAtLocation("STAFF", null, "S1"), true, "no home location = every location");
+  assert.equal(canActAtLocation("STAFF", null, "S1"), false, "a counter login with no store works nowhere");
   assert.equal(canActAtLocation("OWNER", "S2", "S1"), true);
-  assert.equal(canActAtLocation("MANAGER", "S2", "S1"), true);
+  assert.equal(canActAtLocation("STORE_OWNER", null, "S1"), true);
+  assert.equal(canActAtLocation("MANAGER", "S2", "S1"), false, "a manager runs their own store only");
+  assert.equal(canActAtLocation("MANAGER", "S2", "S2"), true);
+  assert.equal(canActAtLocation("MANAGER", null, "S1"), false, "a manager with no store works nowhere");
   assert.equal(canActAtLocation("SALES_AGENT", "S2", "S1"), false);
+  assert.equal(canActAtLocation("SALES_AGENT", null, "S1"), true, "an agent with no store is not a store login");
 });
 
 test("M2 signatures: a step without its signatures is refused", () => {

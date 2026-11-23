@@ -64,7 +64,7 @@ test("M12: a bad row anywhere means nothing is written; a good import lands ever
   const files = {
     products: `sku,name,variety,sold_as,kg_per_sack,cost,price,price_S1,price_S2,price_WH\n${sku},Sinandomeng 25 kg ${run},Sinandomeng,SACK,25,"1,180","1,300",,"1,320","1,250"\n${sku}-K,Sinandomeng kilo ${run},Sinandomeng,KILO,,48,54,,,\n`,
     customers: `name,phone,limit,utang,utang_since\nRosa,${rosa},"5,000","1,250.50",2026-09-01\nTomas,${tomas},,,\n`,
-    staff: `name,phone,role,home,pin\nLorna,${lorna},STAFF,S2,0482\nJun,${jun},MANAGER,,\n`,
+    staff: `name,phone,role,home,pin\nLorna,${lorna},STAFF,S2,0482\nJun,${jun},MANAGER,S1,\n`,
     kargadors: `name,phone,home,photo_url\nBoy ${run},,WH,\n`,
   };
   const bad = { ...files, kargadors: `name,phone,home,photo_url\nBoy ${run},,S9,\n` };
@@ -170,6 +170,6 @@ test("M12: the import never reaches another store; a sold-as change or the owner
   const kilo = await svc.plan(a.storeId, { products: `sku,name,sold_as,price\n${sku},Dinorado ${run},KILO,56\n` }, "2026-10-15");
   assert.match(kilo.errors[0]?.message ?? "", /already sold as SACK/);
   const owner = await prisma.user.findUniqueOrThrow({ where: { id: a.ownerId }, select: { phone: true } });
-  const self = await svc.plan(a.storeId, { staff: `name,phone,role,home\nAko,0${owner.phone!.slice(3)},MANAGER,\n` }, "2026-10-15");
+  const self = await svc.plan(a.storeId, { staff: `name,phone,role,home\nAko,0${owner.phone!.slice(3)},MANAGER,S1\n` }, "2026-10-15");
   assert.match(self.errors[0]?.message ?? "", /owner/);
 });

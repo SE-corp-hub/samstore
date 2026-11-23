@@ -17,7 +17,10 @@ import { CashService } from "../cash/cash.service.js";
 import { ExpensesService } from "../expenses/expenses.service.js";
 import { PaymentsService } from "../payments/payments.service.js";
 import { manilaDate } from "../domain/reports.js";
-import type { Actor } from "../people/people.service.js";
+import { PeopleService, type Actor } from "../people/people.service.js";
+import { TransferFlowService } from "../transfers/transfer-flow.service.js";
+import bcrypt from "bcryptjs";
+import "../utang/utang.service.js"; // registers the REFUND approval handler (the money back)
 
 const run = `zrd${Date.now()}${Math.floor(Math.random() * 1000)}`;
 const storeIds: string[] = [];
@@ -46,6 +49,7 @@ after(async () => {
     await prisma.cashHandover.deleteMany({ where });
     await prisma.cashIn.deleteMany({ where });
     await prisma.approvalRequest.deleteMany({ where });
+    await prisma.stockReturn.deleteMany({ where });
     await prisma.expense.deleteMany({ where });
     await prisma.registerSession.deleteMany({ where });
     await prisma.register.deleteMany({ where });
@@ -306,4 +310,49 @@ test("Cash in and Expense on POS balance on the Z-read: change fund + cash sales
   // Reopened by the owner: the refund goes through.
   must(await day.reopen(fx.storeId, fx.owner, { id: zId, reason: "customer came back" }));
   must(await payments.refundOrder(sale.id, fx.storeId, fx.owner.userId, undefined, "customer came back"));
+});
+
+// 2026-11-23: money back for returned rice approved AFTER the Z-read fell on the closed day, so it was on
+// no Z-read at all (only "After closing" on Reports). Now the approval waits: tomorrow, or reopen the day.
+test("money back for a return cannot be approved once the store's Z-read is done for today", async () => {
+  const fx = await fixture(true);
+  const day = new DayCloseService();
+  const people = new PeopleService();
+  await prisma.user.update({ where: { id: fx.owner.userId }, data: { pinHash: await bcrypt.hash("2468", 4) } });
+  must(await day.open(fx.storeId, fx.staff, { openingFloatMinor: 0 }));
+  const sale = must(await new BentaService().sell(fx.storeId, fx.staff, { idempotencyKey: key(), lines: [{ productId: fx.rice, quantity: 2 }], payment: { method: "cash" } } as never));
+  const ret = must(await new TransferFlowService().createReturn(fx.storeId, fx.staff, { locationId: fx.main, productId: fx.rice, quantity: 1, condition: "GOOD", reason: "brought back", orderId: sale.orderId, signatures: SIG }));
+  const z = must(await day.close(fx.storeId, fx.staff, { cashCountedMinor: 260_000, gcashCountedMinor: 0, signatures: SIG }));
+  assert.equal(z.cash.givenBackMinor, 0);
+
+  const late = await people.decideApproval(fx.storeId, ret.approvalId, fx.owner, { decision: "APPROVE", pin: "2468" });
+  assert.equal(late.ok, false);
+  assert.match(why(late), /Bogs and Lucy is closed for today \(Z-read done\).*Approve it tomorrow, or reopen the day/);
+  assert.equal((await prisma.approvalRequest.findUniqueOrThrow({ where: { id: ret.approvalId } })).status, "PENDING", "it still waits in For your approval");
+  assert.equal(await prisma.payment.count({ where: { storeId: fx.storeId, type: "refund" } }), 0, "no money moved");
+
+  // The owner reopens the day: now it can be approved, and the money back is on the next Z-read.
+  const zId = (await prisma.registerSession.findFirstOrThrow({ where: { storeId: fx.storeId, zNumber: 1 } })).id;
+  must(await day.reopen(fx.storeId, fx.owner, { id: zId, reason: "return to approve" }));
+  must(await people.decideApproval(fx.storeId, ret.approvalId, fx.owner, { decision: "APPROVE", pin: "2468" }));
+  const x = must(await day.xread(fx.storeId, fx.staff, {}));
+  assert.equal(x.cash.givenBackMinor, 130_000);
+  assert.equal(x.cash.shouldBeMinor, 130_000);
+  assert.deepEqual([x.sales.takenBackCount, x.sales.takenBackMinor, x.sales.netMinor], [1, 130_000, 130_000]);
+});
+
+test("declining the money back is allowed after the Z-read; with the switch off nothing is refused", async () => {
+  const fx = await fixture(true);
+  const day = new DayCloseService();
+  const people = new PeopleService();
+  await prisma.user.update({ where: { id: fx.owner.userId }, data: { pinHash: await bcrypt.hash("2468", 4) } });
+  must(await day.open(fx.storeId, fx.staff, { openingFloatMinor: 0 }));
+  const sale = must(await new BentaService().sell(fx.storeId, fx.staff, { idempotencyKey: key(), lines: [{ productId: fx.rice, quantity: 2 }], payment: { method: "cash" } } as never));
+  const flow = new TransferFlowService();
+  const a = must(await flow.createReturn(fx.storeId, fx.staff, { locationId: fx.main, productId: fx.rice, quantity: 1, condition: "DAMAGED", reason: "brought back", orderId: sale.orderId, signatures: SIG }));
+  const b = must(await flow.createReturn(fx.storeId, fx.staff, { locationId: fx.main, productId: fx.rice, quantity: 1, condition: "DAMAGED", reason: "brought back", orderId: sale.orderId, signatures: SIG }));
+  must(await day.close(fx.storeId, fx.staff, { cashCountedMinor: 260_000, gcashCountedMinor: 0, signatures: SIG }));
+  must(await people.decideApproval(fx.storeId, a.approvalId, fx.owner, { decision: "DECLINE", note: "no money back", pin: "2468" }));
+  await prisma.storeSettings.update({ where: { storeId: fx.storeId }, data: { dayOpenClose: false } });
+  must(await people.decideApproval(fx.storeId, b.approvalId, fx.owner, { decision: "APPROVE", pin: "2468" }));
 });

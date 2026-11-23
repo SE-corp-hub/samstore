@@ -25,6 +25,7 @@ interface Job {
   inputGrams: number; outputGrams: number | null; lossGrams: number | null; lossBp: number | null; varietyChange: boolean; openSack: boolean;
   kargador: { id: string; name: string } | null; approvalId: string | null; startedAt: string;
   outputs: { product: { name: string; soldByWeight?: boolean }; quantity: number }[];
+  moreInputs?: { product: { name: string; soldByWeight?: boolean }; quantity: number }[];
 }
 type Mode = "now";
 interface OutRow { productId: string; amount: string } // sacks, or kilos for loose rice
@@ -54,8 +55,8 @@ export default function ResackPanel() {
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<Mode | null>(null);
   const [finishing, setFinishing] = useState<Job | null>(null);
-  const [inputId, setInputId] = useState("");
-  const [inputQty, setInputQty] = useState("1");
+  // Going in: the first rice, plus any more added with "+ Add another item" (2026-11-22).
+  const [ins, setIns] = useState<OutRow[]>([{ productId: "", amount: "1" }]);
   const [outs, setOuts] = useState<OutRow[]>([{ productId: "", amount: "" }]);
   const [kargadorId, setKargadorId] = useState("");
   const [signing, setSigning] = useState(false);
@@ -118,9 +119,14 @@ export default function ResackPanel() {
 
   const byId = useMemo(() => new Map(products.map((p) => [p.id, p])), [products]);
   const here = locations.find((l) => l.id === locationId);
-  const inProduct = finishing ? byId.get(finishing.input.id) : byId.get(inputId);
-  const inQty = finishing ? finishing.inputQty : Number(inputQty);
-  const gramsIn = finishing ? finishing.inputGrams : inProduct?.stockBaseQuantity && Number.isInteger(inQty) && inQty > 0 ? inProduct.stockBaseQuantity * inQty : 0;
+  const inProduct = finishing ? byId.get(finishing.input.id) : byId.get(ins[0]?.productId ?? "");
+  const inUnits = ins.map((o) => unitsOf(byId.get(o.productId), o.amount));
+  const inQty = finishing ? finishing.inputQty : inUnits[0] ?? 0;
+  const insValid = ins.length > 0 && ins.every((o, i) => o.productId && (inUnits[i] ?? 0) > 0) && new Set(ins.map((o) => o.productId)).size === ins.length;
+  const gramsIn = finishing ? finishing.inputGrams : insValid ? ins.reduce((s, o, i) => s + (byId.get(o.productId)?.stockBaseQuantity ?? 0) * (inUnits[i] ?? 0), 0) : 0;
+  // "1 × Sinandomeng 25 kg + 3.5 kg Sinandomeng (per kilo)" — every rice going in, for the receipt and the porter's sentence.
+  const amountOf = (p: Product | undefined, units: number) => (p ? (isLoose(p) ? `${kg(units)} kg ${p.name}` : `${units} × ${p.name}`) : "");
+  const inText = finishing ? `${finishing.inputQty} × ${finishing.input.name}` : ins.map((o, i) => amountOf(byId.get(o.productId), inUnits[i] ?? 0)).filter(Boolean).join(" + ");
   const outUnits = outs.map((o) => unitsOf(byId.get(o.productId), o.amount));
   const gramsOut = outs.reduce((s, o, i) => s + (byId.get(o.productId)?.stockBaseQuantity ?? 0) * (outUnits[i] ?? 0), 0);
   const loss = gramsIn - gramsOut;
@@ -130,15 +136,15 @@ export default function ResackPanel() {
   const readyToSign = gramsIn > 0 && outsValid && gramsOut <= gramsIn && !!(finishing?.kargador?.id ?? kargadorId);
 
   const reset = () => {
-    setMode(null); setFinishing(null); setSigning(false); setInputId(""); setInputQty("1");
+    setMode(null); setFinishing(null); setSigning(false); setIns([{ productId: "", amount: "1" }]);
     setOuts([{ productId: "", amount: "" }]); setKargadorId("");
   };
 
   const sentence = () => {
-    const outText = outs.map((o, i) => { const p = byId.get(o.productId); return p ? (isLoose(p) ? `${kg(outUnits[i] ?? 0)} kg ${p.name}` : `${outUnits[i]} × ${p.name}`) : ""; }).filter(Boolean).join(", ");
+    const outText = outs.map((o, i) => amountOf(byId.get(o.productId), outUnits[i] ?? 0)).filter(Boolean).join(", ");
     const k = kargadors.find((x) => x.id === (finishing?.kargador?.id ?? kargadorId))?.name;
     const dala = k ? `, done by ${k}` : "";
-    return `Resack at ${here?.name}: ${inQty} × ${inProduct?.name} (${kg(gramsIn)} kg) → ${outText} (${kg(gramsOut)} kg). ${loss > 0 ? `Short ${kg(loss)} kg (${lossPct.toFixed(1)}%)` : "Nothing short"}${dala}.`;
+    return `Resack at ${here?.name}: ${inText} (${kg(gramsIn)} kg) → ${outText} (${kg(gramsOut)} kg). ${loss > 0 ? `Short ${kg(loss)} kg (${lossPct.toFixed(1)}%)` : "Nothing short"}${dala}.`;
   };
 
   const submit = async (signatures: SignatureOut[]) => {
@@ -149,17 +155,20 @@ export default function ResackPanel() {
     let path = "/admin/resacks";
     let body: Record<string, unknown>;
     if (finishing) { path = `/admin/resacks/${finishing.id}/finish`; body = { outputs, signatures }; }
-    else body = { locationId, inputProductId: inputId, inputQty: inQty, outputs, kargadorId: k, signatures };
+    else {
+      const moreInputs = ins.slice(1).map((o, i) => ({ productId: o.productId, quantity: inUnits[i + 1] }));
+      body = { locationId, inputProductId: ins[0]?.productId, inputQty: inQty, ...(moreInputs.length ? { moreInputs } : {}), outputs, kargadorId: k, signatures };
+    }
     const slip: Slip = {
       storeName: storeName || "SAM STORE", title: "RESACK RECEIPT", reference: null, when: new Date().toLocaleString("en-PH"),
-      lines: [{ label: "Store", value: here?.name ?? "" }, { label: "From", value: `${inQty} × ${inProduct?.name ?? ""} (${kg(gramsIn)} kg)` }],
+      lines: [{ label: "Store", value: here?.name ?? "" }, { label: "From", value: `${inText} (${kg(gramsIn)} kg)` }],
       rows: outs.map((o, i) => { const p = byId.get(o.productId); return { name: p?.name ?? "", qty: p ? (isLoose(p) ? `${kg(outUnits[i] ?? 0)} kg` : `${outUnits[i]} sacks`) : "" }; }),
       totals: [{ label: "Out", value: `${kg(gramsOut)} kg` }, { label: "Short", value: loss > 0 ? `${kg(loss)} kg (${lossPct.toFixed(1)}%)` : "none" }],
       signatures: [{ role: "Porter", name: kargadors.find((x) => x.id === (finishing?.kargador?.id ?? kargadorId))?.name ?? "" }],
       footer: "Signed on the device by the porter.", widthMm: 58,
     };
     const offline: Slip = { ...slip, reference: offlineRef(String(Date.now())), footer: "Saved on this tablet · uploads when online. Signed by the porter." };
-    const r = await sendStep(path, body, `Resack ${inProduct?.name ?? ""}`.trim(), offline);
+    const r = await sendStep(path, body, `Resack ${inProduct?.name ?? ""}${ins.length > 1 && !finishing ? ` + ${ins.length - 1} more` : ""}`.trim(), offline);
     setBusy(false);
     // No signal: the resack waits on the tablet, and its receipt still prints now.
     if (r.status === "queued") { reset(); setReceipt(offline); return; }
@@ -183,12 +192,43 @@ export default function ResackPanel() {
 
   const started = jobs.filter((j) => j.status === "STARTED");
   const recent = jobs.filter((j) => j.status !== "STARTED").slice(0, 10);
+  const jobIn = (j: Job) => [`${j.inputQty} × ${j.input.name}`, ...(j.moreInputs ?? []).map((m) => (m.product.soldByWeight ? `${kg(m.quantity)} kg ${m.product.name}` : `${m.quantity} × ${m.product.name}`))].join(" + ");
   const reprint = (j: Job) => printSlip({
     storeName: storeName || "SAM STORE", title: j.status === "STARTED" ? "RESACK (IN PROGRESS)" : "RESACK RECEIPT", reference: j.docNumber, when: new Date(j.startedAt).toLocaleString("en-PH"),
-    lines: [{ label: "Store", value: here?.name ?? "" }, { label: "From", value: `${j.inputQty} × ${j.input.name} (${kg(j.inputGrams)} kg)` }],
+    lines: [{ label: "Store", value: here?.name ?? "" }, { label: "From", value: `${jobIn(j)} (${kg(j.inputGrams)} kg)` }],
     rows: j.outputs.map((o) => ({ name: o.product.name, qty: o.product.soldByWeight ? `${kg(o.quantity)} kg` : `${o.quantity} sacks` })),
     totals: j.status === "FINISHED" ? [{ label: "Out", value: `${kg(j.outputGrams ?? 0)} kg` }, { label: "Short", value: `${kg(j.lossGrams ?? 0)} kg` }] : [],
     signatures: j.kargador ? [{ role: "Porter", name: j.kargador.name }] : [],
+  });
+
+  // One list of rice rows (Going in / Coming out): the rice with what is left here, how many (sacks, or kg
+  // for loose rice) and a Remove button once there is more than one row.
+  const riceRows = (rows: OutRow[], set: (r: OutRow[]) => void, what: string) => rows.map((o, i) => {
+    const p = byId.get(o.productId);
+    const twice = !!o.productId && rows.findIndex((x) => x.productId === o.productId) !== i;
+    const change = (patch: Partial<OutRow>) => set(rows.map((x, j) => (j === i ? { ...x, ...patch } : x)));
+    return (
+      <div key={i} className="mb-2">
+        {/* On a phone the rice takes its own line and the amount + Remove go under it. */}
+        <div className="d-flex flex-wrap gap-2 align-items-center">
+          <select className={`form-select form-select-lg${twice ? " is-invalid" : ""}`} style={{ flex: "1 1 14rem", minWidth: 0 }} aria-label={`${what} ${i + 1}`} value={o.productId} onChange={(e) => change({ productId: e.target.value })}>
+            <option value="">Choose…</option>
+            {products.map((x) => <option key={x.id} value={x.id}>{x.name} — {left(x)}</option>)}
+          </select>
+          <div className="input-group input-group-lg flex-shrink-0" style={{ width: "10.5rem" }}>
+            <input className="form-control text-center" aria-label={`${what} ${i + 1}: ${isLoose(p) ? "how many kilos" : "how many sacks"}`} inputMode="decimal" value={o.amount}
+              onChange={(e) => change({ amount: e.target.value.replace(/[^\d.,]/g, "").slice(0, 8) })} />
+            <span className="input-group-text">{isLoose(p) ? "kg" : "sacks"}</span>
+          </div>
+          {rows.length > 1 && (
+            <button type="button" className="btn btn-outline-danger btn-lg flex-shrink-0" aria-label={`Remove ${p?.name ?? `row ${i + 1}`} from ${what.toLowerCase()}`} onClick={() => set(rows.filter((_, j) => j !== i))}>
+              <i className="bi bi-trash" aria-hidden="true"></i>
+            </button>
+          )}
+        </div>
+        {twice && <div className="small text-danger mt-1">{p?.name} is already on this list — change the number on that line instead.</div>}
+      </div>
+    );
   });
 
   return (
@@ -254,7 +294,7 @@ export default function ResackPanel() {
                 <div key={j.id} className="list-group-item">
                   <div className="d-flex justify-content-between gap-2">
                     <div>
-                      <div className="fw-semibold">{j.docNumber} · {j.inputQty} × {j.input.name} → {j.outputs.map((o) => (o.product.soldByWeight ? `${kg(o.quantity)} kg ${o.product.name}` : `${o.quantity} × ${o.product.name}`)).join(", ") || "—"}</div>
+                      <div className="fw-semibold">{j.docNumber} · {jobIn(j)} → {j.outputs.map((o) => (o.product.soldByWeight ? `${kg(o.quantity)} kg ${o.product.name}` : `${o.quantity} × ${o.product.name}`)).join(", ") || "—"}</div>
                       {j.status === "FINISHED" && <div className="small">{kg(j.inputGrams)} kg → {kg(j.outputGrams ?? 0)} kg · short {kg(j.lossGrams ?? 0)} kg ({((j.lossBp ?? 0) / 100).toFixed(2)}%)</div>}
                     </div>
                     <div className="text-end">
@@ -278,46 +318,25 @@ export default function ResackPanel() {
 
             <div className="fw-semibold mt-2">Going in</div>
             {finishing ? <p className="mb-2">{finishing.inputQty} × {finishing.input.name} ({kg(finishing.inputGrams)} kg)</p> : (
-              <div className="row g-2 mb-2">
-                <div className="col-8">
-                  <select className="form-select form-select-lg" aria-label="Rice going in" value={inputId} onChange={(e) => setInputId(e.target.value)}>
-                    <option value="">Choose…</option>
-                    {products.map((p) => <option key={p.id} value={p.id}>{p.name} — {left(p)}</option>)}
-                  </select>
-                </div>
-                <div className="col-4">
-                  <input className="form-control form-control-lg text-center" aria-label="How many sacks" inputMode="numeric" value={inputQty} onChange={(e) => setInputQty(e.target.value.replace(/\D/g, "").slice(0, 4))} />
-                </div>
-              </div>
+              <>
+                {riceRows(ins, setIns, "Going in")}
+                {ins.length < 10 && (
+                  <button type="button" className="btn btn-outline-primary btn-lg mb-1" onClick={() => setIns([...ins, { productId: "", amount: "" }])}>
+                    <i className="bi bi-plus-lg me-1" aria-hidden="true"></i>Add another item going in
+                  </button>
+                )}
+              </>
             )}
 
             {(
               <>
                 <div className="fw-semibold mt-3">Coming out</div>
-                {outs.map((o, i) => {
-                  const p = byId.get(o.productId);
-                  return (
-                    <div key={i} className="row g-2 mb-2 align-items-center">
-                      <div className="col-7">
-                        <select className="form-select form-select-lg" aria-label={`Coming out ${i + 1}`} value={o.productId} onChange={(e) => setOuts(outs.map((x, j) => (j === i ? { ...x, productId: e.target.value } : x)))}>
-                          <option value="">Choose…</option>
-                          {products.map((x) => <option key={x.id} value={x.id}>{x.name} — {left(x)}</option>)}
-                        </select>
-                      </div>
-                      <div className="col-4">
-                        <div className="input-group input-group-lg">
-                          <input className="form-control text-center" aria-label={isLoose(p) ? "How many kilos" : "How many sacks"} inputMode="decimal" value={o.amount}
-                            onChange={(e) => setOuts(outs.map((x, j) => (j === i ? { ...x, amount: e.target.value.replace(/[^\d.,]/g, "").slice(0, 8) } : x)))} />
-                          <span className="input-group-text">{isLoose(p) ? "kg" : "sacks"}</span>
-                        </div>
-                      </div>
-                      <div className="col-1">
-                        {outs.length > 1 && <button type="button" className="btn btn-link text-danger" aria-label="Remove" onClick={() => setOuts(outs.filter((_, j) => j !== i))}>×</button>}
-                      </div>
-                    </div>
-                  );
-                })}
-                {outs.length < 10 && <button type="button" className="btn btn-outline-secondary" onClick={() => setOuts([...outs, { productId: "", amount: "" }])}>+ Another output</button>}
+                {riceRows(outs, setOuts, "Coming out")}
+                {outs.length < 10 && (
+                  <button type="button" className="btn btn-outline-primary btn-lg mb-1" onClick={() => setOuts([...outs, { productId: "", amount: "" }])}>
+                    <i className="bi bi-plus-lg me-1" aria-hidden="true"></i>Add another item coming out
+                  </button>
+                )}
 
                 {gramsIn > 0 && (
                   <div className={`alert mt-3 mb-0 ${gramsOut > gramsIn ? "alert-danger" : overTolerance ? "alert-warning" : "alert-success"}`} style={{ fontVariantNumeric: "tabular-nums" }}>
@@ -342,7 +361,7 @@ export default function ResackPanel() {
 
             <div className="d-flex justify-content-between mt-3">
               <button type="button" className="btn btn-outline-secondary btn-lg" onClick={reset}>Back</button>
-              <button type="button" className="btn btn-success btn-lg" disabled={!readyToSign || (!finishing && !inputId)} onClick={() => setSigning(true)}>Next</button>
+              <button type="button" className="btn btn-success btn-lg" disabled={!readyToSign || (!finishing && !insValid)} onClick={() => setSigning(true)}>Next</button>
             </div>
           </div>
         </div>

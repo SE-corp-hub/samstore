@@ -8,7 +8,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { API_URL } from "../../config";
 import { adminHeaders } from "../../lib/admin";
 import { toast } from "../../lib/toast";
-import { pesoToMinor, seesCostRole } from "../../lib/below-cost";
+import { ownsCostRole, pesoToMinor, seesCostRole } from "../../lib/below-cost";
 import { checkNewCosts } from "./BelowCostDialog";
 import { useOffline } from "../../lib/offlineCache";
 import { sendStep } from "../../lib/offlineQueue";
@@ -113,6 +113,7 @@ export default function PasokPanel({ role }: { role?: string; onNavigate?: (tab:
    */
   const passesCost = async (): Promise<Row[] | null> => {
     if (po) return rows; // the cost comes from the order (checked when the order was made)
+    if (!ownsCostRole(role)) return rows; // only the owner sets costs: everyone else receives at the product's cost
     const lines = rows.map((r) => { const p = byId.get(r.productId); return { productId: r.productId, name: p?.name ?? "", priceMinor: p?.priceMinor ?? 0, costMinor: pesoToMinor(r.cost) ?? 0, unit: isLoose(p) ? "kilo" : p?.stockBaseUnit === "g" ? "sack" : "piece" }; });
     const ok = await checkNewCosts(lines, { proceed: "Receive anyway", canChangePrice: !seesCostRole(role) ? false : offline ? "Needs internet" : true });
     if (!ok) return null;
@@ -130,7 +131,7 @@ export default function PasokPanel({ role }: { role?: string; onNavigate?: (tab:
     const body = {
       locationId, supplierName: po ? undefined : supplier.trim() || undefined, purchaseOrderId: po?.id,
       // On a purchase order the cost comes from the order, never from this phone.
-      lines: rows.map((r) => ({ productId: r.productId, quantity: units(r), unitCostMinor: !po && r.cost ? Math.round(Number(r.cost) * 100) : undefined })),
+      lines: rows.map((r) => ({ productId: r.productId, quantity: units(r), unitCostMinor: !po && ownsCostRole(role) && r.cost ? Math.round(Number(r.cost) * 100) : undefined })),
       signatures: [{ signerKind: "STAFF", imagePng: sig }],
     };
     const sent = await sendStep("/admin/stock-in", body, `Stock in${po ? ` (${po.docNumber})` : supplier.trim() ? ` (${supplier.trim()})` : ""}`);
@@ -223,7 +224,9 @@ export default function PasokPanel({ role }: { role?: string; onNavigate?: (tab:
                   <input className="form-control form-control-lg text-center" aria-label={isLoose(p) ? "How many kilos" : "How many"} placeholder={isLoose(p) ? "kilos" : "how many"} inputMode="decimal" value={r.amount} onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, amount: num(e.target.value) } : x)))} />
                 </div>
                 <div className="col-5 col-sm-3">
-                  <input className="form-control form-control-lg text-center" aria-label="Cost each" placeholder="₱ cost" inputMode="decimal" value={r.cost} onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, cost: num(e.target.value) } : x)))} />
+                  {ownsCostRole(role) && !po
+                    ? <input className="form-control form-control-lg text-center" aria-label="Cost each" placeholder="₱ cost" inputMode="decimal" value={r.cost} onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, cost: num(e.target.value) } : x)))} />
+                    : <div className="small text-muted">{po ? "Cost from the order" : "Cost set by the owner"}</div>}
                 </div>
                 <div className="col-2 col-sm-1">{rows.length > 1 && <button type="button" className="btn btn-link text-danger" aria-label="Remove" onClick={() => setRows(rows.filter((_, j) => j !== i))}>×</button>}</div>
               </div>

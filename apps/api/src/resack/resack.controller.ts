@@ -61,12 +61,12 @@ export class ResackController {
     return { storeId, resacks: await this.resacks.list(storeId, actor, { status: s, locationId }) };
   }
 
-  /** POST /admin/resacks — one step: { locationId, inputProductId, inputQty, outputs:[{productId, quantity}], kargadorId?, note?, signatures } */
+  /** POST /admin/resacks — one step: { locationId, inputProductId, inputQty, moreInputs?:[{productId, quantity}], outputs:[{productId, quantity}], kargadorId?, note?, signatures } */
   @Post("resacks")
   async resack(@Req() req: Req_, @Body() body: Record<string, unknown>, @Headers("x-store-id") h?: string) {
     const { storeId, actor } = await this.ctx(req, h);
     return unwrap(await this.resacks.resack(storeId, actor, {
-      locationId: str(body?.locationId), inputProductId: str(body?.inputProductId), inputQty: body?.inputQty,
+      locationId: str(body?.locationId), inputProductId: str(body?.inputProductId), inputQty: body?.inputQty, moreInputs: outputsFrom(body?.moreInputs),
       outputs: outputsFrom(body?.outputs), kargadorId: str(body?.kargadorId), note: str(body?.note), signatures: signaturesFrom(body?.signatures),
     }));
   }

@@ -940,6 +940,8 @@ html[data-text-size] .start-cust.chosen, .start-cust.chosen { border: 3px solid 
 .drawer-pad { max-width: 22rem; width: 100%; margin: 0 auto; }
 .drawer-chips { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.5rem; }
 .drawer-chips .btn { min-height: 3rem; font-weight: 600; white-space: normal; }
+/* An odd number of choices (7 expense kinds with Food): the last one ("Other") fills the row, no half-empty line. */
+.drawer-chips .btn:last-child:nth-child(odd) { grid-column: 1 / -1; }
 @media (min-width: 700px) {
   .drawer-grid { grid-template-columns: minmax(0, 22rem) minmax(0, 1fr); align-items: start; }
 }
@@ -1020,3 +1022,101 @@ html[data-text-size] .start-cust.chosen, .start-cust.chosen { border: 3px solid 
 .town-choice .btn { min-height: 3rem; padding-inline: 0.4rem; font-weight: 600; white-space: normal; line-height: 1.15; }
 .town-tag { display: inline-flex; align-items: center; gap: 0.25rem; margin-left: 0.4rem; padding: 0.05rem 0.5rem; border-radius: 999px;
   border: 1px solid #0b4f8a; color: #0b4f8a; background: #eef5fc; font-size: 0.875rem; font-weight: 600; vertical-align: middle; white-space: nowrap; }
+
+/* §24 Inventory stock board (2026-11-22): see every rice's stock at a glance. Four tiles on top count the
+   rice that are Sold out (red) / Low (amber) / Enough (green) and filter the list when tapped. The list is one
+   board: a row per rice, one big number per store (owner, All stores) or one big number (one store). A number
+   with none left is on red, a low one on amber, and the word "None" / "Low" is written beside it, so colour is
+   never the only cue. Stock group colour (blue) marks the All stores total. Phones get one card per rice. */
+.inv-board { --inv-red: #a3201b; --inv-red-bg: #fdecea; --inv-amber: #6f4800; --inv-amber-bg: #fff3d6; --inv-green: #1f6f3f; --inv-green-bg: #e4f3ea; --inv-blue: #0b4f8a; --inv-blue-bg: #e3f0fb; }
+.inv-top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem; }
+.inv-stores { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.inv-view .btn { min-height: 48px; }
+.inv-stores .store-chip { padding-inline: 1rem; }
+.inv-tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.5rem; }
+.inv-tile { display: flex; align-items: center; justify-content: flex-start; gap: 0.6rem; min-height: 3.75rem; padding: 0.35rem 0.85rem;
+  border-radius: 14px; border: 2px solid currentColor; background: #fff; text-align: left; line-height: 1.15; }
+.inv-tile-num { font-size: 2.1rem; font-weight: 800; font-variant-numeric: tabular-nums; }
+.inv-tile-word { display: inline-flex; align-items: center; gap: 0.35rem; font-size: 1rem; font-weight: 700; }
+.inv-tile-all { color: #2b2118; }
+.inv-tile-out { color: var(--inv-red); background: var(--inv-red-bg); }
+.inv-tile-low { color: var(--inv-amber); background: var(--inv-amber-bg); }
+.inv-tile-in { color: var(--inv-green); background: var(--inv-green-bg); }
+.inv-tile.is-on { color: #fff; }
+.inv-tile-all.is-on { background: #2b2118; border-color: #2b2118; }
+.inv-tile-out.is-on { background: var(--inv-red); border-color: var(--inv-red); }
+.inv-tile-low.is-on { background: var(--inv-amber); border-color: var(--inv-amber); }
+.inv-tile-in.is-on { background: var(--inv-green); border-color: var(--inv-green); }
+.inv-tile:focus-visible, .inv-act .btn:focus-visible { outline: 3px solid #1F6F3F; outline-offset: 2px; }
+.inv-tools { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+.inv-search { flex: 1 1 14rem; min-height: 48px; font-size: 1.05rem; }
+.inv-seg { display: inline-flex; flex-wrap: wrap; gap: 0.35rem; }
+.inv-seg .btn { min-height: 48px; padding-inline: 0.8rem; font-weight: 600; }
+.inv-value { font-size: 1rem; color: #2b2118; }
+.inv-note { font-size: 0.9375rem; color: #4a4844; }
+.inv-empty { padding: 1.5rem; text-align: center; border: 2px dashed #c9c4bc; border-radius: 14px; font-size: 1.1rem; }
+
+.inv-table { width: 100%; border-collapse: separate; border-spacing: 0; background: #fff; }
+.inv-table thead th { position: sticky; top: 0; z-index: 2; background: #2b2118; color: #fff; font-size: 0.95rem; font-weight: 700; line-height: 1.15;
+  padding: 0.55rem 0.5rem; vertical-align: bottom; }
+.inv-table thead th:first-child { border-top-left-radius: 10px; }
+.inv-table thead th:last-child { border-top-right-radius: 10px; }
+.inv-table thead th.inv-total { background: var(--inv-blue); }
+.inv-table th, .inv-table td { border-bottom: 1px solid #e6e1d9; }
+.inv-group th { background: #f4f1ec; color: var(--inv-blue); font-size: 1.05rem; font-weight: 800; padding: 0.5rem 0.75rem; }
+.inv-group-n { display: inline-block; min-width: 1.6rem; margin-left: 0.35rem; padding: 0 0.45rem; border-radius: 999px; background: #fff; color: #2b2118;
+  font-size: 0.875rem; text-align: center; border: 1px solid #c9c4bc; }
+.inv-name { padding: 0.45rem 0.5rem 0.45rem 0.6rem; font-weight: 400; border-left: 6px solid transparent; }
+.inv-row.inv-out .inv-name { border-left-color: var(--inv-red); }
+.inv-row.inv-low .inv-name { border-left-color: #c58a12; }
+.inv-name-in { display: flex; align-items: center; gap: 0.6rem; }
+.inv-name .product-thumb { flex: 0 0 auto; }
+.inv-rice { display: block; font-size: 1.1rem; font-weight: 700; line-height: 1.2; color: #1f1d1a; overflow-wrap: break-word; }
+.inv-sub { display: flex; flex-wrap: wrap; gap: 0.15rem 0.6rem; margin-top: 0.15rem; font-size: 0.9375rem; color: #4a4844; line-height: 1.3; }
+.inv-badge { display: inline-flex; align-items: center; gap: 0.25rem; padding: 0 0.45rem; border-radius: 6px; font-weight: 700; }
+.inv-badge-out { color: var(--inv-red); background: var(--inv-red-bg); }
+.inv-badge-low { color: var(--inv-amber); background: var(--inv-amber-bg); }
+.inv-num { text-align: center; padding: 0.35rem 0.25rem; min-width: 3.4rem; }
+.inv-big { display: block; font-size: 1.65rem; font-weight: 800; line-height: 1.1; font-variant-numeric: tabular-nums; color: #1f1d1a; }
+.inv-flag { display: block; font-size: 0.875rem; font-weight: 700; line-height: 1.2; }
+.inv-num.is-none { background: var(--inv-red-bg); }
+.inv-num.is-none .inv-big, .inv-num.is-none .inv-flag { color: var(--inv-red); }
+.inv-num.is-low { background: var(--inv-amber-bg); }
+.inv-num.is-low .inv-big, .inv-num.is-low .inv-flag { color: var(--inv-amber); }
+td.inv-sum { background: var(--inv-blue-bg); }
+td.inv-sum .inv-big { color: var(--inv-blue); }
+td.inv-sum.is-none { background: var(--inv-red-bg); }
+td.inv-sum.is-none .inv-big { color: var(--inv-red); }
+.inv-money { font-size: 1.05rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.inv-one .inv-num { width: 9rem; }
+.inv-one .inv-big { font-size: 2rem; }
+.inv-act { width: 1%; padding: 0.35rem 0.5rem; text-align: right; }
+.inv-act .btn { min-height: 48px; min-width: 48px; display: inline-flex; align-items: center; justify-content: center; gap: 0.35rem; white-space: nowrap; }
+/* Upright tablet with 4 store columns: the word goes, the button keeps its name for screen readers. */
+@media (max-width: 899.98px) { .inv-all .inv-act-word { display: none; } .inv-all .inv-name .product-thumb { display: none; } .inv-all .inv-act { padding-inline: 0.25rem; } .inv-all thead th { padding-inline: 0.25rem; }
+  .inv-all .inv-name { min-width: 8.5rem; padding-right: 0.25rem; } .inv-all .inv-big { font-size: 1.5rem; } .inv-all .inv-num { min-width: 3rem; padding-inline: 0.15rem; }
+  .inv-all .inv-act .btn { min-width: 44px; min-height: 44px; padding-inline: 0.5rem; }
+  .inv-tile { flex-direction: column; align-items: flex-start; justify-content: center; gap: 0; min-height: 4.5rem; } }
+
+/* Phones and narrow windows (also big Android text): one card per rice, the store numbers in a grid under the name. */
+@media (max-width: 599.98px) { .inv-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 719.98px) {
+  .inv-table, .inv-table tbody { display: block; }
+  .inv-table thead { display: none; }
+  .inv-table tr.inv-group { display: block; }
+  .inv-table tr.inv-group th { display: block; border-radius: 10px 10px 0 0; margin-top: 0.75rem; }
+  .inv-table tr.inv-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(6.5rem, 1fr)); gap: 0.35rem; padding: 0.5rem; margin-top: 0.5rem; border: 1px solid #e6e1d9; border-radius: 12px; }
+  .inv-table tr.inv-row.inv-out { border-left: 6px solid var(--inv-red); }
+  .inv-table tr.inv-row.inv-low { border-left: 6px solid #c58a12; }
+  .inv-table tr.inv-row > * { border-bottom: 0; }
+  .inv-table .inv-name { grid-column: 1 / -1; border-left: 0; padding: 0; }
+  .inv-table td.inv-num { display: flex; flex-direction: column; align-items: center; border-radius: 8px; border: 1px solid #e6e1d9; min-width: 0; }
+  .inv-table td.inv-num::before { content: attr(data-label); font-size: 0.875rem; font-weight: 700; color: #4a4844; }
+  .inv-table td.inv-num.is-none::before { color: var(--inv-red); }
+  .inv-table td.inv-num.is-low::before { color: var(--inv-amber); }
+  .inv-one tr.inv-row td.inv-num { grid-column: auto; width: auto; }
+  .inv-table .inv-act { grid-column: 1 / -1; width: auto; padding: 0; }
+  .inv-table .inv-act .btn { width: 100%; }
+  .inv-all .inv-act-word { display: inline; }
+}
+@media (prefers-reduced-motion: no-preference) { .inv-tile { transition: background-color 120ms ease, color 120ms ease; } }

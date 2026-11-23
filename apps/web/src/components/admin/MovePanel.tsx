@@ -123,9 +123,10 @@ export default function MovePanel() {
       ]);
       const active = ((locs?.warehouses ?? []) as Place[]).filter((l) => l.isActive);
       setPlaces(active);
+      // 2026-11-22: a store login SENDS from its own store (the server refuses taking another store's rice).
       setHome(me?.homeLocationId ?? null);
-      setTo(me?.homeLocationId ?? active[0]?.id ?? "");
-      setFrom(active.find((l) => l.id !== (me?.homeLocationId ?? active[0]?.id))?.id ?? "");
+      setFrom(me?.homeLocationId ?? active[0]?.id ?? "");
+      setTo(active.find((l) => l.id !== (me?.homeLocationId ?? active[0]?.id))?.id ?? "");
       // Kilo rice stays at its store (kept in grams; "1" would be 1 gram): move whole sacks and open them there.
       setProducts(((ps?.products ?? ps?.items ?? []) as (ProductOption & { stockBaseUnit?: string | null; stockBaseQuantity?: number | null })[])
         .filter((p) => !(p.stockBaseUnit === "g" && p.stockBaseQuantity === 1)).map((p) => ({ id: p.id, name: p.name })));
@@ -159,14 +160,15 @@ export default function MovePanel() {
     <div className="container py-3" style={{ maxWidth: 640 }}>
       <h5 className="mb-3">Move stock</h5>
       {error && !undoing && <div className="alert alert-danger py-2">{error}</div>}
-      <StoreBar label="Moving to" locations={places} value={to} homeLocationId={home} includeBuffer onPick={(id) => { setTo(id); if (id === from) setFrom(""); }} />
+      <StoreBar label="Sending from" locations={places} value={from} homeLocationId={home} includeBuffer onPick={(id) => { setFrom(id); if (id === to) setTo(""); }} />
       <div className="mb-3">
-        <div className="small text-muted mb-1">Taking from</div>
+        <div className="small text-muted mb-1">Sending to</div>
         <div className="d-flex flex-wrap gap-2">
-          {places.filter((p) => p.id !== to).map((p) => (
-            <button key={p.id} type="button" className={`btn btn-lg ${p.id === from ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setFrom(p.id)}>{p.name}</button>
+          {places.filter((p) => p.id !== from).map((p) => (
+            <button key={p.id} type="button" className={`btn btn-lg ${p.id === to ? "btn-dark" : "btn-outline-dark"}`} onClick={() => setTo(p.id)}>{p.name}</button>
           ))}
         </div>
+        {home && <div className="small text-muted mt-1">You send rice from your own store. To get rice from another store, ask that store to send it.</div>}
       </div>
       <label className="form-label small text-muted" htmlFor="mv-product">Product</label>
       <select id="mv-product" className="form-select form-select-lg mb-3" value={productId} onChange={(e) => setProductId(e.target.value)}>

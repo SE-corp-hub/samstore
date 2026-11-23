@@ -18,6 +18,7 @@ export type DrawerKind = "in" | "expense";
 
 const IN_REASONS = ["More change (panukli)", "Owner added money", "Other"];
 const EXPENSE_KINDS: { id: string; label: string; icon: string }[] = [
+  { id: "food", label: "Food", icon: "bi-cup-hot" },
   { id: "supplies", label: "Supplies", icon: "bi-bag" },
   { id: "transport", label: "Transport", icon: "bi-truck" },
   { id: "wages", label: "Wages", icon: "bi-people" },
@@ -82,8 +83,6 @@ export default function DrawerMoney({ kind, locationId, placeName, onClose, onSa
     } else if (!sent.ok) {
       setError(errText(sent.data, "Could not save. Try again."));
       return;
-    } else if (!isIn && sent.data?.waitingForOwner) {
-      toast(`Expense ${peso(minor)} is waiting for the owner's OK (over the staff limit for today).`);
     } else {
       toast(isIn ? `Cash in ${peso(minor)} saved. The drawer should have ${peso(minor)} more.` : `Expense ${peso(minor)} saved. The drawer should have ${peso(minor)} less.`);
     }

@@ -13,7 +13,7 @@ import { prisma } from "../persistence/prisma-repositories.js";
 import { PosService } from "../pos/pos.service.js";
 import { LoyaltyService } from "../loyalty/loyalty.service.js";
 import { AnalyticsService } from "../admin/analytics.service.js";
-import { checkWall, isCounterLogin, orderInsideWall, orderWall, runWithWall, wallAt, wallFor, WALL_RULES, type Wall } from "./wall.js";
+import { checkWall, isCounterLogin, NO_STORE_WALL, orderInsideWall, orderWall, runWithWall, wallAt, wallFor, WALL_RULES, type Wall } from "./wall.js";
 
 const run = `WAL${Date.now()}${Math.floor(Math.random() * 1000)}`;
 const storeIds: string[] = [];
@@ -67,8 +67,10 @@ test("the wall: who is behind it, what it refuses, and what the lists show", asy
 
   // Who is behind the wall.
   assert.equal(await wallFor(fx.storeId, fx.owner, "OWNER"), null, "the owner sees everything");
-  assert.equal(await wallFor(fx.storeId, fx.manager, "MANAGER"), null, "a manager sees everything, even with a home store");
-  assert.equal(await wallFor(fx.storeId, fx.floater, "STAFF"), null, "a login with no home store is not walled (as before)");
+  // 2026-11-22: a manager runs their own store only, and a store login with no store yet sees no store at all.
+  const mgr = await wallFor(fx.storeId, fx.manager, "MANAGER");
+  assert.equal(mgr?.locationId, fx.bt, "a manager is walled to their home store");
+  assert.equal((await wallFor(fx.storeId, fx.floater, "STAFF"))?.locationId, NO_STORE_WALL, "a login with no store yet sees no store");
   const bt = await wallFor(fx.storeId, fx.btStaff, "STAFF");
   const main = await wallFor(fx.storeId, fx.mainStaff, "STAFF");
   assert.equal(bt?.locationId, fx.bt);
@@ -125,7 +127,18 @@ test("the wall: who is behind it, what it refuses, and what the lists show", asy
   for (const [method, path] of [["GET", "/admin/products"], ["GET", "/admin/orders"], ["GET", "/admin/customers"]] as const) {
     assert.equal((await floater(method, path)).ok, true, `no home store: ${method} ${path} stays open`);
   }
-  assert.equal((await floater("GET", "/admin/orders/:id", fx.atLipa)).ok, true, "no home store: not tied to one store's orders");
+  const noStore = await wallFor(fx.storeId, fx.floater, "STAFF");
+  assert.equal((await checkWall(noStore, fx.storeId, "GET", "/admin/orders/:id", { id: fx.atLipa }, true)).ok, false, "no store yet: no store's orders");
+
+  // A walled manager: the whole-business screens are refused, but the `managerMay` routes (their own
+  // store's product pictures and new products, customer approval) stay open; the route limits them.
+  for (const [method, path] of [["GET", "/admin/reports/profit"], ["GET", "/admin/export"], ["GET", "/admin/payable/summary"], ["POST", "/admin/vouchers"]] as const) {
+    assert.equal((await checkWall(mgr, fx.storeId, method, path, {}, false)).ok, false, `manager: ${method} ${path} is for the owner`);
+  }
+  for (const [method, path] of [["POST", "/admin/products"], ["PUT", "/admin/products/:id/photo"], ["PATCH", "/admin/customers/:id/approval"]] as const) {
+    assert.equal((await checkWall(mgr, fx.storeId, method, path, {}, false)).ok, true, `manager: ${method} ${path} stays open`);
+  }
+  assert.equal((await checkWall(mgr, fx.storeId, "GET", "/admin/orders/:id", { id: fx.atLipa }, false)).ok, false, "manager: another store's order is not found");
 
   // The lists, read behind a wall.
   const ids = async () => (await prisma.order.findMany({ where: { storeId: fx.storeId, AND: [orderWall()] }, select: { id: true } })).map((o) => o.id).sort();

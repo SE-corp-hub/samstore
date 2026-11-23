@@ -252,7 +252,7 @@ test("D3: damage at Store 2 is Store 1's loss unless the owner charges it to Sto
   assert.equal(charged.ok, true, msg(charged));
   assert.equal(await owes(fx, fx.s2), 115_000);
   assert.match(msg(await payable.chargeDamage(fx.storeId, fx.owner, wo.value.id)), /Already recorded/);
-  assert.match(msg(await payable.chargeDamage(fx.storeId, fx.staff2, wo.value.id)), /owner and manager/);
+  assert.match(msg(await payable.chargeDamage(fx.storeId, fx.staff2, wo.value.id)), /for the owner/);
 
   const entry = await prisma.storePayableEntry.findFirstOrThrow({ where: { storeId: fx.storeId, writeOffId: wo.value.id } });
   assert.equal((await payable.reverse(fx.storeId, fx.owner, entry.id, "Store 2 was not at fault")).ok, true);

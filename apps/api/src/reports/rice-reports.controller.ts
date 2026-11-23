@@ -9,6 +9,7 @@ import type { ApiError } from "@sam-store/contracts";
 import { JwtAuthGuard, type AuthPrincipal } from "../auth/auth.guard.js";
 import { requireUser, resolveTenant, TENANT_ROLES } from "../auth/tenant-context.js";
 import { loadActor } from "../people/people.service.js";
+import { currentWall } from "../auth/wall.js";
 import { signaturesFrom } from "../people/signature-input.js";
 import { RiceReportsService, watchStock } from "./rice-reports.service.js";
 import { StoreReportService } from "./store-report.service.js";
@@ -154,7 +155,7 @@ export class RiceReportsController {
   @Get("stock-live")
   async stockLive(@Req() req: Req_, @Headers("x-store-id") h?: string) {
     const { storeId } = await this.ctx(req, h);
-    return this.reports.stockLive(storeId);
+    return this.reports.stockLive(storeId, currentWall()?.locationId);
   }
 
   /** GET /admin/rice/stream — server-sent events: "stock" whenever a signed step moves stock. */
@@ -178,7 +179,9 @@ export class RiceReportsController {
   async movements(@Req() req: Req_, @Query("productId") productId?: string, @Query("locationId") locationId?: string, @Headers("x-store-id") h?: string) {
     const { storeId } = await this.ctx(req, h);
     if (!productId) throw new HttpException({ type: "validation", errors: ["productId is required"] }, HttpStatus.UNPROCESSABLE_ENTITY);
-    return { storeId, movements: await this.reports.movements(storeId, productId, locationId) };
+    const wall = currentWall(); // a store login: its own store's movements only
+    if (wall && locationId && locationId !== wall.locationId) throw new HttpException({ type: "forbidden", message: "You can see your own store's stock only" }, HttpStatus.FORBIDDEN);
+    return { storeId, movements: await this.reports.movements(storeId, productId, wall?.locationId ?? locationId) };
   }
 
   /** GET /admin/rice/daily?date=YYYY-MM-DD&locationId= — Ulat ngayong araw (locked once closed). */

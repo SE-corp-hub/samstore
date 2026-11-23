@@ -7,8 +7,6 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { prisma } from "../persistence/prisma-repositories.js";
-import bcrypt from "bcryptjs";
-import { PeopleService } from "../people/people.service.js";
 import { ExpensesService, type ExpenseActor } from "./expenses.service.js";
 import { ReportsService } from "../reports/reports.service.js";
 import { RiceReportsService } from "../reports/rice-reports.service.js";
@@ -140,7 +138,7 @@ test("a wrong expense is cancelled by the owner with a reason, stays on the list
   if (month.ok) assert.equal(month.value.profit.expensesMinor, 80_000);
 });
 
-test("staff: today only, a reason for drawer money, and more than the day's limit waits for the owner", async () => {
+test("staff: today only, a reason for drawer money, and NO money limit (any amount saves at once)", async () => {
   const fx = await fixture();
   const yesterday = new Date(Date.now() - 2 * 86_400_000).toISOString();
   const old = await svc.create(fx.storeId, fx.btStaff, { category: "other", amountMinor: 1_000, spentAt: yesterday });
@@ -150,27 +148,11 @@ test("staff: today only, a reason for drawer money, and more than the day's limi
   const noWhy = await svc.create(fx.storeId, fx.btStaff, { category: "other", amountMinor: 1_000, paidFromDrawer: true });
   assert.equal(noWhy.ok, false, "drawer money needs a reason");
 
-  // The owner's own drawer expense does not use up the staff limit.
-  must(await svc.create(fx.storeId, fx.owner, { category: "wages", amountMinor: 900_000, locationId: fx.bt, paidFromDrawer: true }));
-  const small = must(await svc.create(fx.storeId, fx.btStaff, { category: "supplies", amountMinor: 30_000, note: "yelo", paidFromDrawer: true }));
-  assert.equal(small.waitingForOwner, undefined, "within the limit: saved at once");
   const drawer = async () => (await prisma.expense.aggregate({ where: { storeId: fx.storeId, locationId: fx.bt, paidFromDrawer: true, voidedAt: null, createdBy: fx.btStaff.userId }, _sum: { amountMinor: true } }))._sum.amountMinor ?? 0;
-  assert.equal(await drawer(), 30_000);
-
-  const big = must(await svc.create(fx.storeId, fx.btStaff, { category: "transport", amountMinor: 20_001, note: "delivery truck", paidFromDrawer: true }));
-  assert.equal(big.waitingForOwner, true, "over the limit for the day: waits for the owner");
-  assert.equal(await drawer(), 30_000, "nothing leaves the expected cash until the owner says yes");
-
-  const people = new PeopleService();
-  await prisma.user.update({ where: { id: fx.owner.userId }, data: { pinHash: await bcrypt.hash("1234", 4) } });
-  const ok = await people.decideApproval(fx.storeId, big.approvalId!, { userId: fx.owner.userId, role: "OWNER", homeLocationId: null }, { decision: "APPROVE", pin: "1234" });
-  assert.equal(ok.ok, true, JSON.stringify(ok));
-  assert.equal(await drawer(), 50_001, "approved: now it counts");
-  const row = await prisma.expense.findUniqueOrThrow({ where: { id: big.id } });
-  assert.deepEqual([row.note, row.paidFromDrawer, row.locationId, row.createdBy], ["delivery truck", true, fx.bt, fx.btStaff.userId]);
-
-  const no = must(await svc.create(fx.storeId, fx.btStaff, { category: "other", amountMinor: 5_000, note: "meryenda", paidFromDrawer: true }));
-  assert.equal(no.waitingForOwner, true);
-  must(await people.decideApproval(fx.storeId, no.approvalId!, { userId: fx.owner.userId, role: "OWNER", homeLocationId: null }, { decision: "DECLINE", note: "not allowed", pin: "1234" }));
-  assert.equal(await drawer(), 50_001, "declined: never written");
+  must(await svc.create(fx.storeId, fx.btStaff, { category: "food", amountMinor: 30_000, note: "tanghalian", paidFromDrawer: true }));
+  must(await svc.create(fx.storeId, fx.btStaff, { category: "transport", amountMinor: 2_000_000, note: "delivery truck", paidFromDrawer: true }));
+  assert.equal(await drawer(), 2_030_000, "every amount counts at once");
+  assert.equal(await prisma.approvalRequest.count({ where: { storeId: fx.storeId, kind: "EXPENSE" } }), 0, "nothing waits in For your approval");
+  const row = await prisma.expense.findFirstOrThrow({ where: { storeId: fx.storeId, note: "tanghalian" } });
+  assert.equal(row.category, "food");
 });

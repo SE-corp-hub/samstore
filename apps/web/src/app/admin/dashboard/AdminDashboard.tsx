@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   getAdminToken, getAdminStoreId, setAdminStoreId, getAdminRole, clearAdminSession,
-  NAV_GROUPS, MENU_HIDDEN, REPORT_SECTIONS, isReportSection, allowedTabs, setHomeLocation, adminHeaders, defaultTabFor, isOwnerRole, handleUnauthorized, STORES_CHANGED_EVENT, navItemFor, navGroupFor, toneFor, getHomeLocation, isStoreLogin, isStoreHead,
+  NAV_GROUPS, MENU_HIDDEN, REPORT_SECTIONS, isReportSection, allowedTabs, hasNoStoreYet, setHomeLocation, adminHeaders, defaultTabFor, isOwnerRole, handleUnauthorized, STORES_CHANGED_EVENT, navItemFor, navGroupFor, toneFor, getHomeLocation, isStoreLogin, isStoreHead,
 } from "../../../lib/admin";
 import dynamic from "next/dynamic";
 import { API_URL } from "../../../config";
@@ -33,7 +33,7 @@ import { OPEN_ORDER_EVENT, OPEN_ORDER_KEY } from "../../../lib/order-pulse";
 import { anyLockFor, isScreenClosed, isScreenLocked, lockAgain, storeLockOf, whoLocks, useFeatureLock } from "../../../lib/feature-lock";
 
 /** Rice Ops M10: the store screens get the large, high-contrast look (globals.css .rice-ui). */
-const RICE_TABS = new Set(["zreads", "pos", "preorders", "orders", "utang", "utangrice", "agentorders", "agent", "approvals", "moves", "returns", "resack", "pasok", "purchaseorders", "bilangin", "storereport", "profit", "payable", "ulat", "drafts", "kargadors", "settings", "expenses", "cash", "storeprices", "storelock", "mystore", "whatican", "storelink",
+const RICE_TABS = new Set(["zreads", "pos", "preorders", "orders", "utang", "utangrice", "agentorders", "agent", "approvals", "moves", "returns", "resack", "pasok", "truck", "purchaseorders", "bilangin", "storereport", "profit", "payable", "ulat", "drafts", "kargadors", "settings", "expenses", "cash", "storeprices", "storelock", "mystore", "whatican", "storelink",
   // 2026-11-12, step 4 of the app review: the last old-look screens get the same large, easy-read look.
   "products", "inventory", "warehouses", "customers", "overview", "reports"]);
 // The landing panel stays eager (it is the first paint); every other panel loads when
@@ -85,6 +85,7 @@ const ResackPanel = panel(() => import("../../../components/admin/ResackPanel"))
 // POS = the full sale screen (the separate Walk-in quick-sale screen was removed 2026-11-07).
 const PosPanel = panel(() => import("../../../components/admin/BentaPanel"));
 const PasokPanel = panel(() => import("../../../components/admin/PasokPanel"));
+const TruckPanel = panel(() => import("../../../components/admin/TruckPanel"));
 const UtangRicePanel = panel(() => import("../../../components/admin/UtangRicePanel"));
 const AgentPanel = panel(() => import("../../../components/admin/AgentPanel"));
 const AgentOrdersPanel = panel(() => import("../../../components/admin/AgentOrdersPanel"));
@@ -130,7 +131,7 @@ export default function AdminDashboard() {
   const [activeStore, setActiveStore] = useState<string | null>(null);
   const [role, setRole] = useState("");
   // Step 6 (the wall): the login's home store decides which screens the menu offers.
-  const [, setHomeSeen] = useState<string | null>(null);
+  const [homeSeen, setHomeSeen] = useState<string | null>(null);
   useEffect(() => {
     if (!authed || !activeStore) return;
     let off = false;
@@ -476,6 +477,7 @@ export default function AdminDashboard() {
       case "returns": return <ReturnsPanel />;
       case "resack": return <ResackPanel />;
       case "pasok": return <PasokPanel role={role} />;
+      case "truck": return <TruckPanel role={role} onNavigate={setTab} />;
       case "agent": return <AgentPanel />;
       case "agentorders": return <AgentOrdersPanel />;
       case "bilangin": return <BilanginPanel role={role} onNavigate={setTab} />;
@@ -677,6 +679,12 @@ export default function AdminDashboard() {
         )}
 
         <main className={`container-fluid py-4 flex-grow-1${BAR_ROLES.includes(role) ? " has-staff-bar" : ""}`} style={{ background: "var(--sam-bg)" }}>
+          {/* 2026-11-22: a manager or counter login works at its own store only; without one the server lets it do nothing. */}
+          {homeSeen !== null && hasNoStoreYet(role) && (
+            <div className="alert alert-warning py-2" role="alert">
+              <i className="bi bi-shop me-1" aria-hidden="true"></i>Your login has no store yet, so you cannot sell or change stock. Ask the owner to choose your store in Team.
+            </div>
+          )}
           {showPinPad && pinLock.lock ? (
             <LockScreen
               lock={pinLock.lock}

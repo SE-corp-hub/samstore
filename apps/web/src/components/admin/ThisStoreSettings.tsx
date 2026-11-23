@@ -25,12 +25,15 @@ interface Place {
   sellPerKilo?: boolean; kiloGramsLeft?: number;
   address: string | null; facebookPageUrl: string | null; receiptName: string | null; receiptHeader: string | null;
   receiptFooter: string | null; receiptContact: string | null; dailySalesTargetMinor: number | null;
+  /** The start of this store's receipt numbers (e.g. BL). Older servers leave it out. */
+  orderPrefix?: string | null;
 }
-interface Answer { places: Place[] }
+/** businessPrefix / slugPrefix: what numbers start with when a store has no own start. */
+interface Answer { places: Place[]; businessPrefix?: string | null; slugPrefix?: string }
 
 interface Form {
   dayOpenClose: boolean; requireOpenShift: boolean; hidePricePreOrder: boolean; sellPerKilo: boolean; target: string;
-  receiptName: string; address: string; receiptContact: string; receiptHeader: string; receiptFooter: string; facebookPageUrl: string;
+  receiptName: string; address: string; receiptContact: string; receiptHeader: string; receiptFooter: string; facebookPageUrl: string; orderPrefix: string;
 }
 
 const pesos = (minor: number | null | undefined) => (minor ? String(minor / 100) : "");
@@ -39,10 +42,11 @@ const toForm = (p: Place): Form => ({
   dayOpenClose: p.dayOpenClose, requireOpenShift: p.requireOpenShift, hidePricePreOrder: p.hidePricePreOrder, sellPerKilo: !!p.sellPerKilo, target: pesos(p.dailySalesTargetMinor),
   receiptName: p.receiptName ?? "", address: p.address ?? "", receiptContact: p.receiptContact ?? "",
   receiptHeader: p.receiptHeader ?? "", receiptFooter: p.receiptFooter ?? "", facebookPageUrl: p.facebookPageUrl ?? "",
+  orderPrefix: p.orderPrefix ?? "",
 });
 const orNull = (v: string) => v.trim() || null;
 const payload = (f: Form, sells: boolean) => ({
-  ...(sells ? { dayOpenClose: f.dayOpenClose, requireOpenShift: f.requireOpenShift, hidePricePreOrder: f.hidePricePreOrder, sellPerKilo: f.sellPerKilo, dailySalesTargetMinor: toMinor(f.target) } : {}),
+  ...(sells ? { dayOpenClose: f.dayOpenClose, requireOpenShift: f.requireOpenShift, hidePricePreOrder: f.hidePricePreOrder, sellPerKilo: f.sellPerKilo, dailySalesTargetMinor: toMinor(f.target), orderPrefix: orNull(f.orderPrefix) } : {}),
   receiptName: orNull(f.receiptName), address: orNull(f.address), receiptContact: orNull(f.receiptContact),
   receiptHeader: orNull(f.receiptHeader), receiptFooter: orNull(f.receiptFooter), facebookPageUrl: orNull(f.facebookPageUrl),
 });
@@ -194,6 +198,28 @@ export default function ThisStoreSettings({ standalone = false, onSaved }: { sta
           ) : (
             <p className="text-muted mb-3">{place.name} does not sell, so it has no Open day or drawer switches.</p>
           )}
+
+          {place.sells && (() => {
+            // Receipt numbers: the store's own start, else the business's, else the hidden business code.
+            const own = form.orderPrefix.trim();
+            const fallback = answer?.businessPrefix || "";
+            const year = new Date().getFullYear();
+            const example = own ? `${own}-${year}-000123` : fallback ? `${fallback}-${year}-000123` : `${answer?.slugPrefix || "TESTBI"}-000123`;
+            const short = own.length === 1;
+            return (
+              <div className="mb-3">
+                <label className="form-label fw-semibold mb-1" htmlFor="ts-prefix">Receipt numbers start with</label>
+                <input id="ts-prefix" className="form-control form-control-lg text-uppercase" style={{ maxWidth: 260 }} maxLength={6} autoCapitalize="characters"
+                  value={form.orderPrefix} placeholder="BL" aria-describedby="ts-prefix-help"
+                  onChange={(e) => set({ orderPrefix: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "") })} />
+                <div id="ts-prefix-help" className="small text-muted mt-1">
+                  New sales and orders here will look like <strong>{example}</strong>. 2 to 6 letters or numbers, like BL or LIPA. Old receipts keep their numbers.
+                  {!own && <> Leave empty to use {fallback ? <>the business&apos;s <strong>{fallback}</strong></> : "the business code"}.</>}
+                </div>
+                {short && <div className="small text-danger mt-1" role="alert">Use at least 2 letters.</div>}
+              </div>
+            );
+          })()}
 
           <h3 className="h5 mt-4 mb-2">{place.name} details</h3>
           <Box id="ts-name" label="Store name on receipts" value={form.receiptName} onChange={(v) => set({ receiptName: v })} help="Leave empty to print the business name." />

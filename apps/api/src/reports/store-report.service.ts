@@ -9,14 +9,14 @@ import { dayRange, manilaDate, ReportError, stockFlag } from "../domain/reports.
 import { isLooseP } from "../domain/counting.js";
 import { SOLD_STATES } from "../domain/order-state.js";
 import { bookLines, bookTotals, mainLocationId, ordersOfStore, paymentsOfStore, salesBook } from "./sales-book.js";
-import { locationRefusal, seesProfitAt, type Actor } from "../people/people.service.js";
+import { locationRefusal, seesAllStores, seesProfitAt, type Actor } from "../people/people.service.js";
 
 export type StoreReportResult<T> = { ok: true; value: T } | { ok: false; error: ApiError };
 const fail = (type: "validation" | "forbidden", m: string): { ok: false; error: ApiError } =>
   type === "validation" ? { ok: false, error: { type: "validation", errors: [m] } } : { ok: false, error: { type: "forbidden", message: m } };
 
-const OWNERS = ["OWNER", "MANAGER", "STORE_OWNER", "PLATFORM_ADMIN"];
-const isOwner = (a: Actor) => OWNERS.includes(a.role);
+// 2026-11-22: only the owner sees every store; a manager sees their own store, like any store login.
+const isOwner = (a: Actor) => seesAllStores(a);
 const MAX_DAYS = 93;
 const MAX_DAYS_SALES = 366; // the sales report may cover a whole year
 

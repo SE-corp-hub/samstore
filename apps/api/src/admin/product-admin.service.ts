@@ -34,7 +34,8 @@ export class ProductAdminService {
   }
 
   /** List with filters: search (name/SKU), category, price range, active status, featured, tag. */
-  async listFiltered(storeId: string, f: { search?: string; categoryId?: string; minPriceMinor?: number; maxPriceMinor?: number; active?: boolean; featured?: boolean; tag?: string }) {
+  /** `onlyLocationId` (2026-11-22): a store login's stock numbers are its own store's only. */
+  async listFiltered(storeId: string, f: { search?: string; categoryId?: string; minPriceMinor?: number; maxPriceMinor?: number; active?: boolean; featured?: boolean; tag?: string; onlyLocationId?: string }) {
     const where: Record<string, unknown> = { storeId };
     if (f.search) {
       where.OR = [
@@ -58,7 +59,7 @@ export class ProductAdminService {
       orderBy: { createdAt: "asc" },
       include: {
         category: { select: { id: true, name: true, slug: true } },
-        stockLevels: { select: { quantityOnHand: true, quantityReserved: true, reorderThreshold: true, warehouse: { select: { isDefault: true } } } },
+        stockLevels: { ...(f.onlyLocationId ? { where: { warehouseId: f.onlyLocationId } } : {}), select: { quantityOnHand: true, quantityReserved: true, reorderThreshold: true, warehouse: { select: { isDefault: true } } } },
         variants: { orderBy: { name: "asc" }, select: { id: true, name: true, sku: true, priceMinor: true, costMinor: true, stockBaseQuantity: true, quantityOnHand: true, quantityReserved: true, isActive: true } },
         addons: { orderBy: { sortOrder: "asc" }, include: { options: { orderBy: { sortOrder: "asc" }, select: { id: true, name: true, priceMinor: true, isActive: true } } } },
         relationsFrom: { orderBy: { sortOrder: "asc" }, select: { kind: true, targetProduct: { select: { id: true, name: true, priceMinor: true, isActive: true } } } },
@@ -117,7 +118,8 @@ export class ProductAdminService {
       availableQuantity: onHand - reserved,
       // The main store's row: the one update() writes (any row used to be read, so a save copied it over).
       // The main store's row: the one update() writes. (Each store's own level is on Inventory.)
-      reorderThreshold: p.stockLevels.find((l) => l.warehouse?.isDefault)?.reorderThreshold ?? 0,
+      // A store login (e.g. the Lipa manager) gets its OWN store's level; everyone else the main store's.
+      reorderThreshold: (f.onlyLocationId ? p.stockLevels[0] : p.stockLevels.find((l) => l.warehouse?.isDefault))?.reorderThreshold ?? 0,
       variants: p.variants.map((v) => ({
         id: v.id,
         name: v.name,

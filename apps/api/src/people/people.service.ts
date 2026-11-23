@@ -10,11 +10,12 @@ import { prisma } from "../persistence/prisma-repositories.js";
 import { bustMemberships, getMemberships } from "../auth/membership-cache.js";
 import { bustTokenVersion } from "../auth/token-version.js";
 import {
-  ALL_LOCATION_ROLES, APPROVAL_KINDS, DEFAULT_APPROVERS, DRAFT_FLOWS, MAX_DRAFT_BYTES, canActAtLocation, canDecide,
+  APPROVAL_KINDS, NO_STORE_YET, hasNoStoreYet, seesEveryStore, DEFAULT_APPROVERS, DRAFT_FLOWS, MAX_DRAFT_BYTES, canActAtLocation, canDecide,
   checkPhotoImage, checkSignatureImage, counterKind, formatDocNumber, isDraftStale, missingMessage, missingSigners,
   pinProblem, ruleFor, type ApprovalKind, type DocPrefix, type SignerKindName,
 } from "../domain/people.js";
 import { toE164 } from "../domain/phone.js";
+import { closedTodayRefusal } from "../day/day-gate.js";
 import { accountBelongsToStore } from "../auth/account-scope.js";
 
 export type PeopleResult<T> = { ok: true; value: T } | { ok: false; error: ApiError };
@@ -59,21 +60,31 @@ export interface Actor {
   isHead?: boolean;
 }
 
-const SEES_ALL_PROFIT = ["OWNER", "MANAGER", "STORE_OWNER", "PLATFORM_ADMIN"];
 
 /** Head of this very store (step 7). */
 export const isHeadOf = (actor: Actor, locationId: string | null | undefined): boolean => !!actor.isHead && !!locationId && actor.homeLocationId === locationId;
 
-/**
- * Who may change one store's own settings ("This store", its PIN lock, its team): the owner and
- * managers for every store, the head of a store for that store only. Same rule as canSetLocationLock.
- */
-export const canManageLocation = (actor: Actor, locationId: string | null | undefined): boolean =>
-  ["OWNER", "STORE_OWNER", "PLATFORM_ADMIN", "MANAGER"].includes(actor.role) || isHeadOf(actor, locationId);
+/** The manager of this very store (2026-11-22: a manager runs their home store only). */
+export const isManagerOf = (actor: Actor, locationId: string | null | undefined): boolean => actor.role === "MANAGER" && !!locationId && actor.homeLocationId === locationId;
+
+/** The owner (and the platform): sees and works at every store. Everybody else: their own store only. */
+export const seesAllStores = (actor: Actor): boolean => seesEveryStore(actor.role);
+
+/** The store a non-owner login is limited to (its home store), or undefined for the owner (every store). */
+export const onlyStoreOf = (actor: Actor): string | undefined => (seesAllStores(actor) ? undefined : actor.homeLocationId ?? NO_STORE);
+/** A location id that matches nothing: a store login with no store sees no store's records. */
+export const NO_STORE = "__no_store__";
 
 /**
- * May this login change the team here? The owner: anything. A manager (every store) and the head of a
- * store (that store only) look after COUNTER logins: add them, fix the name, PIN and password, unlock.
+ * Who may change one store's own settings ("This store", its PIN lock, its team): the owner for every
+ * store; the manager and the head of a store for that store only. Same rule as canSetLocationLock.
+ */
+export const canManageLocation = (actor: Actor, locationId: string | null | undefined): boolean =>
+  seesAllStores(actor) || isManagerOf(actor, locationId) || isHeadOf(actor, locationId);
+
+/**
+ * May this login change the team here? The owner: anything. The manager and the head of a store
+ * (that store only) look after COUNTER logins: add them, fix the name, PIN and password, unlock.
  * Only the owner gives other roles, chooses heads, moves people between stores of someone else, or removes.
  * `target`: the person being changed (null when adding). `change`: what is being set.
  */
@@ -82,18 +93,18 @@ export function teamRefusal(
   target: { role: string; homeLocationId: string | null; isLocationHead: boolean } | null,
   change: { homeLocationId?: string | null; isLocationHead?: boolean; role?: string } = {},
 ): string | null {
-  if (["OWNER", "STORE_OWNER", "PLATFORM_ADMIN"].includes(actor.role)) return null;
+  if (seesAllStores(actor)) return null;
   if (actor.role !== "MANAGER" && !actor.isHead) return "Only the owner, a manager or the head of a store can change the team";
   if (change.isLocationHead) return "Only the owner chooses the head of a store";
   if (change.role !== undefined && change.role !== "STAFF") return "Only the owner gives a role other than STAFF";
   if (target && (target.role !== "STAFF" || target.isLocationHead)) return "Only the owner can change this login";
   if (target && !(target.homeLocationId && canManageLocation(actor, target.homeLocationId))) return "This person works at another store";
-  if (change.homeLocationId !== undefined && !(change.homeLocationId && canManageLocation(actor, change.homeLocationId))) return actor.isHead && actor.role !== "MANAGER" ? "Choose your own store" : "Choose a store";
+  if (change.homeLocationId !== undefined && !(change.homeLocationId && canManageLocation(actor, change.homeLocationId))) return "Choose your own store";
   return null;
 }
 
-/** Who may see cost and profit of one store: the owner side, and the head of that store. Nobody else. */
-export const seesProfitAt = (actor: Actor, locationId: string | null | undefined): boolean => SEES_ALL_PROFIT.includes(actor.role) || isHeadOf(actor, locationId);
+/** Who may see cost and profit of one store: the owner (every store), and that store's manager and head. Nobody else. */
+export const seesProfitAt = (actor: Actor, locationId: string | null | undefined): boolean => seesAllStores(actor) || isManagerOf(actor, locationId) || isHeadOf(actor, locationId);
 
 /** A temporary password that is easy to read aloud and copy by hand: no 0/O, 1/l/I. Changed at the first sign-in. */
 function readablePassword(): string {
@@ -176,7 +187,8 @@ export async function loadActor(storeId: string, userId: string, role: string): 
 }
 
 export function locationRefusal(actor: Actor, locationId: string | null | undefined): string | null {
-  return canActAtLocation(actor.role, actor.homeLocationId, locationId) ? null : "You are not assigned to this location";
+  if (canActAtLocation(actor.role, actor.homeLocationId, locationId)) return null;
+  return hasNoStoreYet(actor.role, actor.homeLocationId) ? NO_STORE_YET : "You can only work at your own store";
 }
 
 async function locationInStore(db: Tx | typeof prisma, storeId: string, locationId: string) {
@@ -320,12 +332,19 @@ export async function requestApproval(
 
 // ─────────────────────────────── service ───────────────────────────────
 
+/** 2026-11-22: a manager decides only their own store's requests; whole-business ones (no store) are the owner's. */
+function approvalWall(actor: Actor | undefined): { locationId?: string } {
+  if (!actor || seesAllStores(actor)) return {};
+  return { locationId: onlyStoreOf(actor) };
+}
+
 export class PeopleService {
   // ── members: home location + PIN ──
 
-  async listMembers(storeId: string) {
+  async listMembers(storeId: string, actor?: Actor) {
     const rows = await prisma.userStore.findMany({
-      where: { storeId, status: "ACTIVE" },
+      // 2026-11-22: everyone but the owner sees their own store's people only (and themselves).
+      where: { storeId, status: "ACTIVE", ...(actor && !seesAllStores(actor) ? { OR: [{ homeLocationId: onlyStoreOf(actor) }, { userId: actor.userId }] } : {}) },
       orderBy: { createdAt: "asc" },
       select: {
         role: true,
@@ -370,6 +389,7 @@ export class PeopleService {
       }
     }
     // Step 7: the head of a store. Only a staff login that has a store can be one; taking the store away ends it.
+    if (input.homeLocationId !== undefined && !input.homeLocationId && hasNoStoreYet(m.role, null)) return fail("validation", "A manager or counter login needs a store");
     const homeAfter = input.homeLocationId === undefined ? m.homeLocationId : input.homeLocationId || null;
     if (input.isLocationHead === true) {
       if (m.role !== "STAFF") return fail("validation", "Only a staff login can be the head of a store");
@@ -536,9 +556,10 @@ export class PeopleService {
 
   // ── kargadors ──
 
-  async listKargadors(storeId: string, includeInactive = false) {
+  async listKargadors(storeId: string, includeInactive = false, actor?: Actor) {
     return prisma.kargador.findMany({
-      where: { storeId, ...(includeInactive ? {} : { isActive: true }) },
+      // A store login sees its own store's porters and the ones who work everywhere (no store).
+      where: { storeId, ...(includeInactive ? {} : { isActive: true }), ...(actor && !seesAllStores(actor) ? { OR: [{ homeLocationId: onlyStoreOf(actor) }, { homeLocationId: null }] } : {}) },
       orderBy: [{ isActive: "desc" }, { name: "asc" }],
       select: { id: true, name: true, phone: true, photoUrl: true, homeLocationId: true, isActive: true, createdAt: true },
     });
@@ -628,9 +649,9 @@ export class PeopleService {
 
   // ── approvals ──
 
-  async listApprovals(storeId: string, status: string = "PENDING", role?: string) {
+  async listApprovals(storeId: string, status: string = "PENDING", role?: string, actor?: Actor) {
     const rows = await prisma.approvalRequest.findMany({
-      where: { storeId, ...(status === "ALL" ? {} : { status: status as "PENDING" }) },
+      where: { storeId, ...(status === "ALL" ? {} : { status: status as "PENDING" }), ...approvalWall(actor) },
       orderBy: { createdAt: status === "PENDING" ? "asc" : "desc" },
       take: 200,
       include: { location: { select: { id: true, code: true, name: true } } },
@@ -643,8 +664,8 @@ export class PeopleService {
     }));
   }
 
-  async countPending(storeId: string, role: string) {
-    return prisma.approvalRequest.count({ where: { storeId, status: "PENDING", approverRoles: { has: role } } });
+  async countPending(storeId: string, role: string, actor?: Actor) {
+    return prisma.approvalRequest.count({ where: { storeId, status: "PENDING", approverRoles: { has: role }, ...approvalWall(actor) } });
   }
 
   /** Decide with the decider's own PIN — the phone may be in someone else's hand. */
@@ -658,7 +679,7 @@ export class PeopleService {
     if (!decision) return fail("validation", "decision must be APPROVE or DECLINE");
     const note = input.note?.trim() ?? "";
     if (decision === "DECLINED" && note.length < 3) return fail("validation", "Enter the reason for declining");
-    const approval = await prisma.approvalRequest.findFirst({ where: { id, storeId } });
+    const approval = await prisma.approvalRequest.findFirst({ where: { id, storeId, ...approvalWall(actor) } });
     if (!approval) return notFound("Approval not found");
     const may = canDecide(actor.role, approval.approverRoles, approval.requestedById === actor.userId);
     if (!may.ok) return forbidden(may.reason);
@@ -666,6 +687,17 @@ export class PeopleService {
     const u = await prisma.user.findUnique({ where: { id: actor.userId }, select: { pinHash: true } });
     if (!u?.pinHash) return fail("validation", "Set a PIN first before deciding");
     if (!(await bcrypt.compare(input.pin ?? "", u.pinHash))) return forbidden("Wrong PIN");
+
+    // Money back for returned or refused rice comes off the day's sales and its cash. Once the store's
+    // Z-read is done for today, that money would be on no Z-read at all: it waits for tomorrow, or the
+    // owner reopens the day. Saying no (Decline) moves no money, so it is always allowed.
+    if (decision === "APPROVED" && approval.kind === "REFUND" && approval.locationId) {
+      const closed = await closedTodayRefusal(prisma, storeId, approval.locationId);
+      if (closed) {
+        const name = closed.split(" is closed for today")[0];
+        return conflict(`${name} is closed for today (Z-read done), so this money back would not be on any Z-read. Approve it tomorrow, or reopen the day first (owner only).`);
+      }
+    }
 
     try {
       await prisma.$transaction(async (tx) => {
@@ -696,9 +728,9 @@ export class PeopleService {
       where: {
         storeId,
         status: "OPEN",
-        // Staff with a home location see their location's drafts (and location-less ones they started).
-        ...(actor.homeLocationId && !(ALL_LOCATION_ROLES as readonly string[]).includes(actor.role)
-          ? { OR: [{ locationId: actor.homeLocationId }, { locationId: null, createdById: actor.userId }] }
+        // Everyone but the owner sees their own store's drafts (and location-less ones they started).
+        ...(!seesAllStores(actor)
+          ? { OR: [{ locationId: onlyStoreOf(actor) }, { locationId: null, createdById: actor.userId }] }
           : {}),
       },
       orderBy: { updatedAt: "asc" },

@@ -50,6 +50,12 @@ export function waitingShelf(steps: Step[], items: Shelf[]): Taken[] {
       if (!sack || n <= 0) continue;
       out.push({ productId: sack.id, units: n, at: b.locationId });
       if (sack.gramsPerUnit) out.push({ productId: String(b.kiloProductId ?? ""), units: -n * sack.gramsPerUnit, at: b.locationId });
+    } else if (s.path === "/admin/resacks" && typeof b.locationId === "string") {
+      // A resack saved with no internet: every rice going in leaves the shelf, what came out goes on it.
+      const rows = (v: unknown) => (Array.isArray(v) ? (v as Record<string, unknown>[]) : []);
+      const ins = [{ productId: b.inputProductId, quantity: b.inputQty }, ...rows(b.moreInputs)];
+      for (const r of ins) { const n = Number(r.quantity) || 0; if (r.productId && n > 0) out.push({ productId: String(r.productId), units: n, at: b.locationId }); }
+      for (const r of rows(b.outputs)) { const n = Number(r.quantity) || 0; if (r.productId && n > 0) out.push({ productId: String(r.productId), units: -n, at: b.locationId }); }
     }
   }
   return out;

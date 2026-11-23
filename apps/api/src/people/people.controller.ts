@@ -6,7 +6,8 @@ import { Body, Controller, Get, Headers, HttpException, HttpStatus, Param, Patch
 import type { ApiError } from "@sam-store/contracts";
 import { JwtAuthGuard, type AuthPrincipal } from "../auth/auth.guard.js";
 import { requireUser, resolveTenant, TENANT_ROLES } from "../auth/tenant-context.js";
-import { loadActor, PeopleService, teamRefusal, type Actor } from "./people.service.js";
+import { loadActor, PeopleService, seesAllStores, teamRefusal, type Actor } from "./people.service.js";
+import { NO_STORE_YET } from "../domain/people.js";
 import { prisma } from "../persistence/prisma-repositories.js";
 import { badRequest, signaturesFrom } from "./signature-input.js";
 
@@ -54,13 +55,32 @@ export class PeopleController {
     if (why) throw new HttpException({ type: "forbidden", message: why }, HttpStatus.FORBIDDEN);
   }
 
+  /**
+   * 2026-11-22: a manager adds and changes only their own store's porters (a new one always goes to
+   * their store). The owner: any porter, any store. Returns the store to save.
+   */
+  private async porterStore(storeId: string, actor: Actor, id: string | null, wanted: string | null | undefined): Promise<string | null | undefined> {
+    if (seesAllStores(actor)) return wanted;
+    const own = actor.homeLocationId;
+    if (!own) throw new HttpException({ type: "forbidden", message: NO_STORE_YET }, HttpStatus.FORBIDDEN);
+    if (id) {
+      const k = await prisma.kargador.findFirst({ where: { id, storeId }, select: { homeLocationId: true } });
+      if (k && k.homeLocationId !== own) throw new HttpException({ type: "forbidden", message: "This porter works at another store" }, HttpStatus.FORBIDDEN);
+    }
+    if (wanted !== undefined && wanted !== own) throw new HttpException({ type: "forbidden", message: "Choose your own store" }, HttpStatus.FORBIDDEN);
+    return id ? wanted : own;
+  }
+
   // ── me ──
 
   /** GET /admin/me/rice — the home screen's facts: role, home location, approvals waiting. */
   @Get("me/rice")
   async me(@Req() req: Req_, @Headers("x-store-id") h?: string) {
     const { storeId, actor } = await this.ctx(req, h, TENANT_ROLES.VIEW);
-    return { storeId, userId: actor.userId, role: actor.role, homeLocationId: actor.homeLocationId, isHead: !!actor.isHead, pendingApprovals: await this.people.countPending(storeId, actor.role) };
+    // 2026-11-23: the owner's switch "Managers have full access to Products" (only a manager's screen needs it).
+    const fullProducts = actor.role === "MANAGER"
+      && !!(await prisma.storeSettings.findUnique({ where: { storeId }, select: { managersFullProducts: true } }))?.managersFullProducts;
+    return { storeId, userId: actor.userId, role: actor.role, homeLocationId: actor.homeLocationId, isHead: !!actor.isHead, fullProducts, pendingApprovals: await this.people.countPending(storeId, actor.role, actor) };
   }
 
   /** POST /admin/me/pin — change your own PIN (prove the current PIN, or your password if none yet). */
@@ -75,8 +95,8 @@ export class PeopleController {
   /** GET /admin/people — members with home location and PIN status. */
   @Get("people")
   async listPeople(@Req() req: Req_, @Headers("x-store-id") h?: string) {
-    const { storeId } = await this.ctx(req, h, TENANT_ROLES.ADMIN);
-    return { storeId, members: await this.people.listMembers(storeId) };
+    const { storeId, actor } = await this.ctx(req, h, TENANT_ROLES.ADMIN);
+    return { storeId, members: await this.people.listMembers(storeId, actor) };
   }
 
   /** PATCH /admin/people/:userId — owner sets home location, PIN, or unlocks a locked PIN. */
@@ -129,16 +149,17 @@ export class PeopleController {
   /** GET /admin/kargadors — active kargadors (?all=1 includes inactive). Staff need it to pick who signs. */
   @Get("kargadors")
   async listKargadors(@Req() req: Req_, @Query("all") all?: string, @Headers("x-store-id") h?: string) {
-    const { storeId } = await this.ctx(req, h, TENANT_ROLES.ADMIN);
-    return { storeId, kargadors: await this.people.listKargadors(storeId, all === "1") };
+    const { storeId, actor } = await this.ctx(req, h, TENANT_ROLES.ADMIN);
+    return { storeId, kargadors: await this.people.listKargadors(storeId, all === "1", actor) };
   }
 
   /** POST /admin/kargadors — add a kargador (not a login account). */
   @Post("kargadors")
   async createKargador(@Req() req: Req_, @Body() body: Record<string, unknown>, @Headers("x-store-id") h?: string) {
     const { storeId, actor } = await this.ctx(req, h, TENANT_ROLES.OWNER_MANAGER);
+    const home = await this.porterStore(storeId, actor, null, optNullStr(body?.homeLocationId));
     return unwrap(await this.people.saveKargador(storeId, null, {
-      name: str(body?.name), phone: optNullStr(body?.phone), photoUrl: optNullStr(body?.photoUrl), homeLocationId: optNullStr(body?.homeLocationId),
+      name: str(body?.name), phone: optNullStr(body?.phone), photoUrl: optNullStr(body?.photoUrl), homeLocationId: home,
     }, actor.userId));
   }
 
@@ -146,8 +167,9 @@ export class PeopleController {
   @Patch("kargadors/:id")
   async updateKargador(@Req() req: Req_, @Param("id") id: string, @Body() body: Record<string, unknown>, @Headers("x-store-id") h?: string) {
     const { storeId, actor } = await this.ctx(req, h, TENANT_ROLES.OWNER_MANAGER);
+    const home = await this.porterStore(storeId, actor, id, optNullStr(body?.homeLocationId));
     return unwrap(await this.people.saveKargador(storeId, id, {
-      name: str(body?.name), phone: optNullStr(body?.phone), photoUrl: optNullStr(body?.photoUrl), homeLocationId: optNullStr(body?.homeLocationId),
+      name: str(body?.name), phone: optNullStr(body?.phone), photoUrl: optNullStr(body?.photoUrl), homeLocationId: home,
       isActive: typeof body?.isActive === "boolean" ? body.isActive : undefined,
     }, actor.userId));
   }
@@ -181,7 +203,7 @@ export class PeopleController {
     const { storeId, actor } = await this.ctx(req, h, TENANT_ROLES.OWNER_MANAGER);
     const s = (status ?? "PENDING").toUpperCase();
     if (!["PENDING", "APPROVED", "DECLINED", "CANCELLED", "ALL"].includes(s)) badRequest("unknown status");
-    return { storeId, approvals: await this.people.listApprovals(storeId, s, actor.role) };
+    return { storeId, approvals: await this.people.listApprovals(storeId, s, actor.role, actor) };
   }
 
   /** POST /admin/approvals/:id/decide — { decision: APPROVE|DECLINE, note, pin }. */

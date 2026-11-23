@@ -1,5 +1,6 @@
 import { freeOnShelves } from "./domain/sources.js";
 import { APP_INTERCEPTOR } from "@nestjs/core";
+import { StockCacheInterceptor } from "./persistence/stock-cache.js";
 import { WallInterceptor } from "./auth/wall.interceptor.js";
 import { Module } from "@nestjs/common";
 import { claimSecret, jwtSecret } from "./security/secrets.js";
@@ -87,6 +88,8 @@ const CLAIM_SECRET = claimSecret(); // M11: no committed fallback (see security/
   providers: [
     // Per-store build, step 6: every signed-in request runs behind its store's wall.
     { provide: APP_INTERCEPTOR, useClass: WallInterceptor },
+    // Any request that moved stock clears the saved Inventory / Products answers (persistence/stock-cache.ts).
+    { provide: APP_INTERCEPTOR, useClass: StockCacheInterceptor },
     {
       provide: DELIVERY_SERVICE,
       useFactory: () => new DeliveryService(),
