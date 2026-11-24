@@ -8,6 +8,8 @@ import { CHECKOUT_SERVICE, CheckoutService } from "./checkout/checkout.service.j
 import { CheckoutController } from "./checkout/checkout.controller.js";
 import { HubOrdersController } from "./integrations/hub-orders.controller.js";
 import { HUB_ORDER_SERVICE, HubOrderService } from "./integrations/hub-orders.service.js";
+import { hubTapApplier } from "./integrations/hub-taps.js";
+import { OrderAdminService } from "./admin/order-admin.service.js";
 import { PublicStoreController } from "./public/public-store.controller.js";
 import { PublicStoreService } from "./public/public-store.service.js";
 import { CartController } from "./cart/cart.controller.js";
@@ -306,6 +308,13 @@ const CLAIM_SECRET = claimSecret(); // M11: no committed fallback (see security/
               points: r.points,
             }));
           },
+          // A delivery tap from the hub moves the order through the same steps the Orders and Delivery screens
+          // use. No customer notice from here: the hub tells the customer on Messenger when it sees the change.
+          hubTapApplier(
+            (storeId, orderNumber) => prisma.order.findFirst({ where: { storeId, orderNumber, source: "hub" }, select: { id: true, status: true } }),
+            new OrderAdminService(),
+            new DeliveryService(),
+          ),
         ),
     },
   ],

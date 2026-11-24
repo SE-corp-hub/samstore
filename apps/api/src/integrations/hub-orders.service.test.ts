@@ -402,3 +402,68 @@ test("a hub that asks for customers gets the store's changed ones after its last
   assert.deepEqual(body.customers, [{ store: "sam-store", ...ana }], "an unknown store sends nothing");
   assert.deepEqual(asked, [{ storeId: "store-1", after: { at: "2026-11-11T00:00:00.000Z", id: "sc0" }, limit: 200 }]);
 });
+
+test("delivery taps from the hub move the order before the answer is built; one we can't act on goes back with why", async () => {
+  const { svc: base } = build();
+  const seen: string[] = [];
+  let status = "READY";
+  const svc = new HubOrderService(
+    (base as unknown as { stores: InMemoryStoreRepository }).stores,
+    (base as unknown as { catalog: InMemoryCatalogRepository }).catalog,
+    (base as unknown as { carts: InMemoryCartRepository }).carts,
+    (base as unknown as { checkout: CheckoutService }).checkout,
+    // What we tell the hub afterwards is the order as the tap left it.
+    async () => [{ orderNumber: "SAMSTO-000031", status, deliveryType: "delivery", totalMinor: 290000, deliveryFeeMinor: 0, discountMinor: 0, items: [] }],
+    undefined, undefined, undefined, undefined,
+    async (storeId, tap) => {
+      seen.push(`${storeId} ${tap.orderNumber} ${tap.status} by=${tap.by} cash=${tap.cashMinor}`);
+      if (tap.orderNumber === "SAMSTO-000099") return "This order is cancelled in Sam Store";
+      if (tap.orderNumber === "SAMSTO-000500") throw new Error("database hiccup");
+      status = tap.status;
+      return null;
+    },
+  );
+  const calls: string[] = [];
+  let body: { taps?: unknown; updates?: { status: string }[] } = {};
+  const taps = [
+    { id: 7, store: "sam-store", orderNumber: "SAMSTO-000031", status: "DELIVERED", at: "2026-11-23T01:35:00Z", by: "rey", cashMinor: 290000 },
+    { id: 8, store: "sam-store", orderNumber: "SAMSTO-000099", status: "OUT_FOR_DELIVERY", at: "2026-11-23T01:36:00Z", by: "jun" },
+    { id: 9, store: "sam-store", orderNumber: "SAMSTO-000500", status: "DELIVERED" },
+    { id: 10, store: "no-such-store", orderNumber: "SAMSTO-000031", status: "DELIVERED" },
+    { id: 11, store: "sam-store", orderNumber: "SAMSTO-000031", status: "CANCELLED" },
+    { store: "sam-store", orderNumber: "SAMSTO-000031", status: "DELIVERED" },
+  ];
+  const hub = (async (_url: string, init: RequestInit = {}) => {
+    calls.push(init.method ?? "GET");
+    if (init.method === "POST") body = JSON.parse(String(init.body));
+    return Response.json(init.method === "POST" ? { ok: true } : { stores: ["sam-store"], orders: [], taps });
+  }) as unknown as typeof fetch;
+  // Even a quick beat answers in full when a tap came, so the hub hears at once.
+  await syncWithHub(svc, "https://hub.example", "h".repeat(40), hub, { full: false });
+  assert.deepEqual(calls, ["GET", "POST"]);
+  assert.deepEqual(seen, [
+    "store-1 SAMSTO-000031 DELIVERED by=rey cash=290000",
+    "store-1 SAMSTO-000099 OUT_FOR_DELIVERY by=jun cash=undefined",
+    "store-1 SAMSTO-000500 DELIVERED by=undefined cash=undefined",
+  ]);
+  assert.equal(body.updates?.[0]?.status, "DELIVERED", "the same answer carries the order as the tap left it");
+  assert.deepEqual(body.taps, [
+    { id: 8, error: "This order is cancelled in Sam Store" },
+    { id: 10, error: "Store not found" },
+    { id: 11, error: "Sam Store could not read this tap" },
+  ], "a crash (9) is not a refusal: the hub offers it again; a tap with no id is skipped");
+});
+
+test("a hub that sends no taps, and a Sam Store with no tap handler, behave as before", async () => {
+  const { svc } = build();
+  let body: Record<string, unknown> = {};
+  const hub = (taps?: unknown) =>
+    (async (_url: string, init: RequestInit = {}) => {
+      if (init.method === "POST") body = JSON.parse(String(init.body));
+      return Response.json(init.method === "POST" ? { ok: true } : { stores: ["sam-store"], orders: [], ...(taps ? { taps } : {}) });
+    }) as unknown as typeof fetch;
+  await syncWithHub(svc, "https://hub.example", "h".repeat(40), hub());
+  assert.equal("taps" in body, false, "nothing about taps is sent to an older hub");
+  await syncWithHub(svc, "https://hub.example", "h".repeat(40), hub([{ id: 1, store: "sam-store", orderNumber: "SAMSTO-000001", status: "DELIVERED" }]));
+  assert.deepEqual(body.taps, [{ id: 1, error: "This Sam Store cannot take delivery taps yet" }]);
+});

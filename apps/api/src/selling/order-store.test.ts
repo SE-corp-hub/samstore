@@ -15,6 +15,7 @@ import { randomBytes } from "node:crypto";
 import { prisma, PrismaCartRepository, PrismaCatalogRepository, PrismaOrderRepository, PrismaOrderSequenceRepository, PrismaStoreRepository } from "../persistence/prisma-repositories.js";
 import { CheckoutService } from "../checkout/checkout.service.js";
 import { HubOrderService, type HubOrderRequest } from "../integrations/hub-orders.service.js";
+import { hubTapApplier } from "../integrations/hub-taps.js";
 import { OrderAdminService } from "../admin/order-admin.service.js";
 import { DeliveryService } from "../delivery/delivery.service.js";
 import { PaymentsService } from "../payments/payments.service.js";
@@ -206,6 +207,53 @@ test("a Facebook order for Bahay Tindahan, delivered for cash: that store's sale
   assert.deepEqual([refund?.amountMinor, refund?.locationId], [-275_000, fx.bt]);
   assert.deepEqual(await shelf(fx, fx.bt), [20, 0], "the rice is back on Bahay Tindahan's shelf");
   assert.equal((await reports(fx)).day(fx.bt).sales.count, 0);
+});
+
+test("delivery taps from the hub: On the way sends the order out, Delivered with the cash makes it the store's sale once, and an order not confirmed here is refused", async () => {
+  const fx = await fixture();
+  // The same handler the app gives the hub door.
+  const tap = hubTapApplier(
+    (storeId, orderNumber) => prisma.order.findFirst({ where: { storeId, orderNumber, source: "hub" }, select: { id: true, status: true } }),
+    admin,
+    delivery,
+  );
+  const made = await place(fx, 2, { locationCode: "S2" });
+  // Not confirmed in Sam Store yet: the delivery team's tap does not confirm it for the store.
+  assert.match((await tap(fx.storeId, { orderNumber: made.orderNumber, status: "DELIVERED", by: "rey" })) ?? "", /has not confirmed this order yet/);
+  assert.equal((await order(made.orderId)).status, "RECEIVED");
+  const c = await admin.transition(fx.storeId, made.orderId, "CONFIRMED", undefined, { type: "OWNER", id: fx.owner.userId });
+  assert.equal(c.ok, true, msg(c));
+
+  // On the way, twice: sent out once.
+  for (let i = 0; i < 2; i++) assert.equal(await tap(fx.storeId, { orderNumber: made.orderNumber, status: "OUT_FOR_DELIVERY", by: "rey" }), null);
+  assert.equal((await order(made.orderId)).status, "OUT_FOR_DELIVERY");
+  assert.deepEqual(await shelf(fx, fx.bt), [20, 2], "still held, not sold yet");
+
+  // Delivered with the cash, twice (our answer to the hub was lost): one sale, one cash line.
+  for (let i = 0; i < 2; i++) assert.equal(await tap(fx.storeId, { orderNumber: made.orderNumber, status: "DELIVERED", by: "rey", cashMinor: 275_000 }), null);
+  const o = await order(made.orderId);
+  assert.deepEqual([o.status, o.paymentStatus, o.sellingLocationId], ["DELIVERED", "COLLECTED", fx.bt]);
+  assert.deepEqual(o.payments.map((p) => [p.method, p.amountMinor, p.locationId, p.type]), [["cash", 275_000, fx.bt, "payment"]], "the cash is Bahay Tindahan's, written once");
+  assert.deepEqual(await shelf(fx, fx.bt), [18, 0]);
+  assert.equal(await owes(fx, fx.bt), 2 * 115_000);
+  const history = await prisma.orderStatusHistory.findMany({ where: { orderId: made.orderId }, orderBy: { createdAt: "asc" }, select: { toStatus: true, reason: true } });
+  assert.deepEqual(
+    history.filter((h) => h.toStatus === "OUT_FOR_DELIVERY" || h.toStatus === "DELIVERED").map((h) => `${h.toStatus}: ${h.reason}`),
+    ["OUT_FOR_DELIVERY: Tapped On the way in the hub by rey", "DELIVERED: Cash collected ₱2,750. Tapped Delivered in the hub by rey"],
+    "the order's history says the steps came from the hub, and who tapped",
+  );
+
+  // A late On the way tap never takes a delivered order back; another store's number is not found.
+  assert.equal(await tap(fx.storeId, { orderNumber: made.orderNumber, status: "OUT_FOR_DELIVERY" }), null);
+  assert.equal((await order(made.orderId)).status, "DELIVERED");
+  const other = await fixture();
+  assert.equal(await tap(other.storeId, { orderNumber: made.orderNumber, status: "DELIVERED" }), "Sam Store has no hub order with this number");
+
+  // Delivered without tapping On the way first: sent out and delivered in one go.
+  const second = await place(fx, 1, { locationCode: "S2" });
+  await admin.transition(fx.storeId, second.orderId, "CONFIRMED", undefined, { type: "OWNER", id: fx.owner.userId });
+  assert.equal(await tap(fx.storeId, { orderNumber: second.orderNumber, status: "DELIVERED", by: "jun", cashMinor: second.totalMinor }), null);
+  assert.equal((await order(second.orderId)).status, "DELIVERED");
 });
 
 test("a Facebook pick-up order paid by GCash still to be checked: a sale when picked up, no cash written, the payment stays in review", async () => {
