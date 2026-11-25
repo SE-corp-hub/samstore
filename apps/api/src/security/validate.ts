@@ -276,6 +276,9 @@ export const HUB_ORDER_DTO: ObjectRule = {
     deliveryFeeMinor: { kind: "int", min: 0, max: 10_000_000 },
     locationCode: { kind: "string", max: 20 },
     paymentMethod: { kind: "string", values: ["cod", "gcash"] },
+    customerRef: { kind: "string", max: 64 },
+    priceReason: { kind: "string", max: 120 },
+    priceBy: { kind: "string", max: 60 },
   },
 };
 

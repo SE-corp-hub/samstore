@@ -8,6 +8,7 @@ import { CHECKOUT_SERVICE, CheckoutService } from "./checkout/checkout.service.j
 import { CheckoutController } from "./checkout/checkout.controller.js";
 import { HubOrdersController } from "./integrations/hub-orders.controller.js";
 import { HUB_ORDER_SERVICE, HubOrderService } from "./integrations/hub-orders.service.js";
+import { hubExtras, hubOrderCost } from "./integrations/hub-extras.js";
 import { hubTapApplier } from "./integrations/hub-taps.js";
 import { hubTruckApplier } from "./integrations/hub-truck.js";
 import { OrderAdminService } from "./admin/order-admin.service.js";
@@ -259,7 +260,8 @@ const CLAIM_SECRET = claimSecret(); // M11: no committed fallback (see security/
               await prisma.order.findMany({
                 where: { storeId, source: "hub", OR: [{ updatedAt: { gte: since } }, { createdAt: { gte: new Date(since.getTime() - 4 * 86_400_000) } }] },
                 include: {
-                  items: true,
+                  // With each item's cost today, for an order not handed over yet (its cost is frozen when it is).
+                  items: { include: { product: { select: { costMinor: true } } } },
                   // The last cancel / failed-delivery reason, so the hub can tell why.
                   statusHistory: { where: { toStatus: { in: ["CANCELLED", "FAILED_DELIVERY"] } }, orderBy: { createdAt: "desc" }, take: 1, select: { reason: true } },
                 },
@@ -275,7 +277,8 @@ const CLAIM_SECRET = claimSecret(); // M11: no committed fallback (see security/
               discountMinor: o.discountMinor,
               paymentStatus: o.paymentStatus,
               reason: o.statusHistory[0]?.reason ?? null,
-              items: o.items.map((i) => ({ name: i.productName, quantity: i.quantity, unitPriceMinor: i.unitPriceMinor })),
+              costMinor: hubOrderCost(o.items),
+              items: o.items.map((i) => ({ name: i.productName, sku: i.sku, quantity: i.quantity, unitPriceMinor: i.unitPriceMinor })),
             })),
           // The hub link names the selling location by its code (samrice=bigasan@S2).
           async (storeId, code) =>
@@ -318,6 +321,8 @@ const CLAIM_SECRET = claimSecret(); // M11: no committed fallback (see security/
           ),
           // A truck move from the hub (a confirmed load, a closed day) moves the sacks in this store's stock.
           hubTruckApplier(prisma),
+          // Customers, changed prices, price changes from the hub and selling days (integrations/hub-extras.ts).
+          hubExtras(prisma, (storeId, orderId, items, actorId, role) => new OrderAdminService().replaceOrderItems(storeId, orderId, items, actorId, role)),
         ),
     },
   ],
