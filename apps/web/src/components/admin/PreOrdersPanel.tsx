@@ -31,6 +31,8 @@ import StartChoices, { ChosenRow, CustomerAreaFilter, CustomerListPick, NewCusto
 import { areaLabel, byArea, nameWithTown, storeArea, type Area } from "../../lib/customer-area";
 import { noteUse } from "../../lib/product-find";
 import { printSlip, type Slip } from "../../lib/slip-print";
+import { preorderSaleReceipt } from "../../lib/sale-receipt";
+import { getPrinterSettings } from "../../lib/printer-settings";
 import { cachedGet, offlineRef, savedCopy, savedThenFresh, useOffline } from "../../lib/offlineCache";
 import { heldSteps, QUEUE_EVENT, queuedSteps, sendStep } from "../../lib/offlineQueue";
 import { takeOffShelf, waitingShelf } from "../../lib/offline-stock";
@@ -53,7 +55,7 @@ interface Preorder {
   locationId?: string | null; locationName?: string | null;
   items: { productId: string; productName: string; unitPriceMinor: number; quantity: number; lineTotalMinor: number; variantId?: string | null; variantName?: string | null; priceOverridden?: boolean }[];
   /** Completed on this tablet, not uploaded yet: how it was paid. */
-  paidBy?: "cash" | "credit"; changeMinor?: number; completedAt?: string;
+  paidBy?: "cash" | "credit"; changeMinor?: number; tenderedMinor?: number | null; completedAt?: string;
 }
 interface PosProduct {
   id: string; name: string; sku: string; priceMinor: number; photoKey?: string | null;
@@ -198,6 +200,8 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
   const [error, setError] = useState<string | null>(null);
   const [receiptOrder, setReceiptOrder] = useState<string | null>(null);
   const [lastFinalizedOrderId, setLastFinalizedOrderId] = useState<string | null>(null);
+  /** The receipt of the pre-order just completed online: "Print receipt" prints it in one tap. */
+  const [doneReceipt, setDoneReceipt] = useState<Slip | null>(null);
   // Changing a waiting pre-order opens the same screen as a new one, with its lines loaded.
   const [editingPre, setEditingPre] = useState<{ id: string; orderNumber: string; customerName: string; locationName?: string | null } | null>(null);
   // Delete/void modal
@@ -496,7 +500,7 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
       const change = finalizePay === "cash" ? Math.max(0, finalizeCash - target.totalMinor) : 0;
       const base = preorders.find((p) => p.id === target.id);
       // Shown under Done while it waits on this tablet (never sent).
-      const view: Preorder | undefined = base && { ...base, status: "COMPLETED", paidBy: finalizePay, changeMinor: change, completedAt: new Date().toISOString() };
+      const view: Preorder | undefined = base && { ...base, status: "COMPLETED", paidBy: finalizePay, changeMinor: change, tenderedMinor: finalizePay === "cash" && finalizeTendered ? finalizeCash : null, completedAt: new Date().toISOString() };
       const sent = await sendStep(`/admin/pos/preorders/${target.id}/finalize`, {
         paymentMethod: finalizePay,
         tenderedMinor: finalizePay === "cash" && finalizeTendered ? finalizeCash : undefined,
@@ -510,7 +514,11 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
         // No internet: completed on this tablet, it moves to Done and uploads later (see the upload bar).
         setFinalizeTarget(null);
         setLastFinalizedOrderId(null);
-        setLocalReceipt(view ? soldSlip(view) : null);
+        setDoneReceipt(null);
+        const slip = view ? soldSlip(view) : null;
+        setLocalReceipt(slip);
+        // Like POS: "Print the receipt right after each sale" prints it now, offline too.
+        if (slip && getPrinterSettings().autoPrint) printSlip(slip);
         setSubTab("finalize");
         return;
       }
@@ -529,6 +537,14 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
       setFinalizeTarget(null);
       setLocalReceipt(null);
       setLastFinalizedOrderId(d.orderId ?? target.id);
+      // The sales receipt from what is on screen (no second trip to the server), printed in one tap or right away.
+      const slip = base ? preorderSaleReceipt(
+        { ...base, orderNumber: d.orderNumber ?? target.orderNumber },
+        { paidBy: finalizePay, tenderedMinor: finalizePay === "cash" && finalizeTendered ? finalizeCash : null, changeMinor: d.changeMinor ?? change },
+        storeName || "SAM STORE",
+      ) : null;
+      setDoneReceipt(slip);
+      if (slip && getPrinterSettings().autoPrint) printSlip(slip);
       await loadPreorders();
     } catch (e) {
       setFinalizeError(e instanceof Error ? e.message : "Finalize failed");
@@ -768,11 +784,9 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
   });
 
   /** The receipt for a pre-order completed on this tablet while offline. */
-  const soldSlip = (p: Preorder): Slip => ({
-    ...preorderSlip(p), title: "SALES RECEIPT", when: new Date(p.completedAt ?? Date.now()).toLocaleString("en-PH"),
-    totals: [{ label: "Total", value: toPesos(p.totalMinor) }, ...(p.paidBy === "cash" && (p.changeMinor ?? 0) > 0 ? [{ label: "Change", value: toPesos(p.changeMinor ?? 0) }] : [])],
-    footer: p.paidBy === "cash" ? "Paid in cash. Thank you!" : "On credit (utang). Thank you!",
-  });
+  const soldSlip = (p: Preorder): Slip => preorderSaleReceipt(p,
+    { paidBy: p.paidBy ?? "cash", tenderedMinor: p.tenderedMinor, changeMinor: p.changeMinor, offline: true },
+    storeName || "SAM STORE", new Date(p.completedAt ?? Date.now()));
 
   /** Moving a pre-order between stores is the owner's, and only makes sense with more than one store. */
   const canMove = isOwner && locations.length > 1;
@@ -1202,9 +1216,15 @@ export default function PreOrdersPanel({ onNavigate }: { onNavigate?: (tab: stri
       {lastFinalizedOrderId && subTab !== "build" && (
         <div className="alert alert-success d-flex flex-wrap align-items-center justify-content-center gap-2">
           <span>Sale completed.</span>
-          <button className="btn btn-outline-primary" onClick={() => { setReceiptOrder(lastFinalizedOrderId); setLastFinalizedOrderId(null); }}>
+          <button className="btn btn-outline-primary" onClick={() => {
+            if (doneReceipt) { printSlip(doneReceipt); return; }
+            setReceiptOrder(lastFinalizedOrderId); setLastFinalizedOrderId(null);
+          }}>
             <i className="bi bi-printer me-1" aria-hidden="true"></i>Print receipt
           </button>
+          {doneReceipt && (
+            <button className="btn btn-outline-dark" onClick={() => { setLastFinalizedOrderId(null); setDoneReceipt(null); }}>Close</button>
+          )}
         </div>
       )}
 

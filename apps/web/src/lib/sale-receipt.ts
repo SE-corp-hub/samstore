@@ -32,3 +32,20 @@ export function saleReceipt(l: {
     footer: l.status === "WAITING_OWNER" ? "Waiting for owner approval" : l.offline ? "Saved offline · Salamat po!" : "Salamat po!",
   };
 }
+
+/** A completed pre-order: the same sales receipt as a POS sale (online, or completed offline on this tablet). */
+export function preorderSaleReceipt(p: {
+  orderNumber: string; customerName?: string | null; totalMinor: number; locationId?: string | null;
+  items: { productName: string; variantName?: string | null; quantity: number; unitPriceMinor: number; lineTotalMinor: number }[];
+}, pay: { paidBy: "cash" | "credit"; tenderedMinor?: number | null; changeMinor?: number; offline?: boolean }, storeName: string, at: Date = new Date()): Slip {
+  return saleReceipt({
+    status: "COMPLETED", offline: pay.offline, customerName: p.customerName, orderNumber: p.orderNumber,
+    totalMinor: p.totalMinor, changeMinor: pay.paidBy === "cash" ? pay.changeMinor ?? 0 : 0,
+    lines: p.items.map((it) => ({
+      name: it.variantName ? `${it.productName} · ${it.variantName}` : it.productName,
+      soldBy: null, quantity: it.quantity, grams: null, unitPriceMinor: it.unitPriceMinor, lineTotalMinor: it.lineTotalMinor,
+    })),
+    payLabel: pay.paidBy === "cash" ? "Cash" : "Credit (utang)",
+    tenderedMinor: pay.paidBy === "cash" ? pay.tenderedMinor ?? null : null,
+  }, storeName, p.locationId, at);
+}
