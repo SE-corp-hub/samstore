@@ -10,6 +10,7 @@ import type { CartRepository, CatalogRepository, StoreRepository } from "../pers
 import { randomId } from "../persistence/repositories.js";
 import { checkDto, HUB_ORDER_DTO } from "../security/validate.js";
 import type { HubTap, HubTapApplier } from "./hub-taps.js";
+import { readTruckMove, type HubTruckApplier, type HubTruckMove } from "./hub-truck.js";
 
 export const HUB_CHANNELS = ["messenger", "order_form", "comment", "live", "agent", "counter"] as const;
 
@@ -105,7 +106,18 @@ export class HubOrderService {
     private readonly changedCustomers: ChangedCustomers = async () => [],
     /** Moves one of the store's hub orders on a delivery tap from the hub (integrations/hub-taps.ts). */
     private readonly applyTap: HubTapApplier = async () => "This Sam Store cannot take delivery taps yet",
+    /** Moves a truck's sacks in this store's stock when the hub says so (integrations/hub-truck.ts). */
+    private readonly applyTruck: HubTruckApplier = async () => "This Sam Store cannot move truck stock yet",
   ) {}
+
+  /**
+   * A truck move from the hub (a confirmed load, or a closed day): null when the stock is moved, or was already,
+   * else why not, in words staff read on the truck's sheet in the hub.
+   */
+  async truck(storeSlug: string, move: HubTruckMove): Promise<string | null> {
+    const store = await this.stores.findBySlug(storeSlug);
+    return store ? this.applyTruck(store.id, move) : "Store not found";
+  }
 
   /**
    * A tap from the hub's Deliveries page (On the way, Delivered) on one of this store's hub orders: null when the
@@ -309,12 +321,14 @@ export async function syncWithHub(
   try {
     const res = await send(door, { headers, signal: AbortSignal.timeout(20_000) });
     if (!res.ok) throw new Error(`hub answered ${res.status}`);
-    const got = (await res.json()) as { stores?: unknown; orders?: unknown; taps?: unknown };
+    const got = (await res.json()) as { stores?: unknown; orders?: unknown; taps?: unknown; truck?: unknown };
     const offered = Array.isArray(got.orders) ? got.orders.slice(0, 50) : [];
     // Delivery taps the hub is holding for orders that live here (see hub-taps.ts).
     const tapped = Array.isArray(got.taps) ? got.taps.slice(0, 50) : [];
+    // Truck moves the hub is holding for this store's stock (see hub-truck.ts).
+    const trucks = Array.isArray(got.truck) ? got.truck.slice(0, 20) : [];
     // Quick beat with nothing waiting: no answer, so the hub's copy of items and orders is not rewritten every 15 s.
-    if (opts.full === false && offered.length === 0 && tapped.length === 0) {
+    if (opts.full === false && offered.length === 0 && tapped.length === 0 && trucks.length === 0) {
       link.stuck = [];
       link.lastOkAt = new Date().toISOString();
       link.lastError = null;
@@ -382,6 +396,24 @@ export async function syncWithHub(
         console.warn(`[sam-store] hub tap ${id}: ${e instanceof Error ? e.message : String(e)}`);
       }
     }
+    // Truck moves come before `products` is built, so the same answer carries the stock as the move left it. Each
+    // one is answered: done, or why not. One that crashed is left alone, and the hub offers it again.
+    const truckAnswers: ({ id: number; ok: true } | { id: number; error: string })[] = [];
+    for (const t of trucks) {
+      const id = (t as { id?: unknown } | null)?.id;
+      if (typeof id !== "number" || !Number.isSafeInteger(id)) continue;
+      const read = readTruckMove(t);
+      if (!read) {
+        truckAnswers.push({ id, error: "Sam Store could not read this truck move" });
+        continue;
+      }
+      try {
+        const error = await hub.truck(read.store, read.move);
+        truckAnswers.push(error ? { id, error: error.slice(0, 300) } : { id, ok: true });
+      } catch (e) {
+        console.warn(`[sam-store] hub truck move ${id}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
     const products = [];
     const updates = [];
     const stores = Array.isArray(got.stores) ? got.stores.filter((s): s is string => typeof s === "string").slice(0, 20) : [];
@@ -407,7 +439,7 @@ export async function syncWithHub(
     const answer = await send(door, {
       method: "POST",
       headers,
-      body: JSON.stringify({ results, products, updates: updates.slice(0, 200), ...(customers.length ? { customers } : {}), ...(refusedTaps.length ? { taps: refusedTaps } : {}) }),
+      body: JSON.stringify({ results, products, updates: updates.slice(0, 200), ...(customers.length ? { customers } : {}), ...(refusedTaps.length ? { taps: refusedTaps } : {}), ...(truckAnswers.length ? { truck: truckAnswers } : {}) }),
       signal: AbortSignal.timeout(20_000),
     });
     if (!answer.ok) throw new Error(`hub answered ${answer.status}`);

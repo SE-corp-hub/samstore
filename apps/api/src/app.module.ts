@@ -9,6 +9,7 @@ import { CheckoutController } from "./checkout/checkout.controller.js";
 import { HubOrdersController } from "./integrations/hub-orders.controller.js";
 import { HUB_ORDER_SERVICE, HubOrderService } from "./integrations/hub-orders.service.js";
 import { hubTapApplier } from "./integrations/hub-taps.js";
+import { hubTruckApplier } from "./integrations/hub-truck.js";
 import { OrderAdminService } from "./admin/order-admin.service.js";
 import { PublicStoreController } from "./public/public-store.controller.js";
 import { PublicStoreService } from "./public/public-store.service.js";
@@ -315,6 +316,8 @@ const CLAIM_SECRET = claimSecret(); // M11: no committed fallback (see security/
             new OrderAdminService(),
             new DeliveryService(),
           ),
+          // A truck move from the hub (a confirmed load, a closed day) moves the sacks in this store's stock.
+          hubTruckApplier(prisma),
         ),
     },
   ],

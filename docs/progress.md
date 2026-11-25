@@ -1,5 +1,16 @@
 # PINDIAN — Progress Log
 
+## Truck stock from SE Corp Hub (2026-11-25)
+
+An Agent + Delivery sells from a truck, and SE Corp Hub keeps the truck's sheet (loaded, sold, samples, damaged, what came back). The hub now offers this store two kinds of stock moves on the usual beat (`truck` on `GET /api/samstore`, answered on the `POST`), so the stock here follows the truck. **Stock only: a truck sale is not a sale in Sam Store yet; sales and cash stay in the hub** (owner's choice 2026-11-25: stock now, sales after a test day).
+- **load**: the agent confirmed a load. The sacks move from the store's location (the code in the hub's `SAMSTORE_STORES`, else the main store) to the truck's own location, named like "Truck: Ric". That location is made the first time a load for it arrives (type Warehouse, marked "needs review" under Locations).
+- **close**: the day was counted and closed in the hub. The good sacks counted move back to the store's location; the rest of what was loaded is taken off the truck as a stock adjustment with why ("5 sold, 1 given as a sample, 1 missing").
+- Each move is done once: its stock rows carry `documentType HUB_TRUCK` and `documentId "<kind>:<hub id>"`, and a move offered again is left alone. All of one move happens in one transaction or not at all.
+- A move Sam Store can't do is answered in plain words and shown in the hub (item not found here, not enough on the shelf, truck location turned off, no such store location). Nothing moves then. A crash is not answered, so the hub offers the move again on the next beat.
+- An older hub that sends no `truck` changes nothing here.
+- Known gap until the sales part is built: sacks on a truck still count as stock of this store for the Pages, unless a "take rice from" rule leaves the truck's location out.
+- Code: `apps/api/src/integrations/hub-truck.ts`, wired in `hub-orders.service.ts` and `app.module.ts`. Test: `apps/api/src/integrations/hub-truck.test.ts`.
+
 ## Owner can rename the business (2026-11-16)
 
 The menu top still said "TEST Bigasan" / "test-bigasan" after the owner renamed themselves: that is the business (Store) name, which had no place to change it.
