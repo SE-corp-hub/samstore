@@ -467,3 +467,144 @@ test("a hub that sends no taps, and a Sam Store with no tap handler, behave as b
   await syncWithHub(svc, "https://hub.example", "h".repeat(40), hub([{ id: 1, store: "sam-store", orderNumber: "SAMSTO-000001", status: "DELIVERED" }]));
   assert.deepEqual(body.taps, [{ id: 1, error: "This Sam Store cannot take delivery taps yet" }]);
 });
+
+// ---- Link version 2: item codes, per-kilo items, the customer, price changes from the hub, selling days ----
+
+test("every call says what this Sam Store understands, so a newer hub sends an older one nothing it would refuse", async () => {
+  const { svc } = build();
+  const seen: (string | null)[] = [];
+  const hub = (async (_url: string, init: RequestInit = {}) => {
+    seen.push(new Headers(init.headers).get("x-samstore-link"));
+    return Response.json(init.method === "POST" ? { ok: true } : { stores: ["sam-store"], orders: [] });
+  }) as unknown as typeof fetch;
+  await syncWithHub(svc, "https://hub.example", "h".repeat(40), hub);
+  assert.deepEqual(seen, ["2", "2"]);
+});
+
+/** A service with the database parts of the link (integrations/hub-extras.ts) replaced by what the test gives. */
+function withExtras(extras: ConstructorParameters<typeof HubOrderService>[11]) {
+  const b = build();
+  const svc = new HubOrderService(b.stores, b.catalog, (b.svc as unknown as { carts: InMemoryCartRepository }).carts, (b.svc as unknown as { checkout: CheckoutService }).checkout, undefined, undefined, undefined, undefined, undefined, undefined, undefined, extras);
+  return { ...b, svc };
+}
+
+test("rice sold per kilo is never offered to the Page, and an order for it is refused in plain words", async () => {
+  const { svc, orders } = withExtras({ kiloIds: async () => new Set(["prod-jas-25"]) });
+  assert.deepEqual((await svc.products("sam-store"))?.map((p) => p.sku), ["DINO-25"]);
+  const r = await svc.place(req({ items: [{ name: "Samrice Jasmine 25kg", quantity: 2 }] }));
+  assert.equal(r.ok, false);
+  if (!r.ok) assert.match((r.error as { errors: string[] }).errors.join(" "), /sold per kilo, which the Page cannot order/);
+  assert.equal(orders.exportedForTests().orders.length, 0, "nothing was held: 2 would have meant 2 grams");
+});
+
+test("an item is found by its code first, so a name changed here still matches the hub's order", async () => {
+  const { svc } = build();
+  const r = await svc.place(req({ items: [{ sku: "dino-25", name: "An old name the hub still has", quantity: 1 }] }));
+  assert.ok(r.ok);
+});
+
+test("after an order is placed, its customer and its changed prices are passed on; a miss is tried again, never lost", async () => {
+  const seen: unknown[] = [];
+  let fail = true;
+  const { svc, orders } = withExtras({
+    afterPlace: async (storeId, orderNumber, info) => {
+      if (fail) throw new Error("database blinked");
+      seen.push({ storeId, orderNumber, info });
+    },
+  });
+  const order = req({ customerRef: "sc_77", priceReason: "Suki, pays cash", priceBy: "owner", items: [{ name: "Samrice Dinorado 25kg", quantity: 2, unitPriceMinor: 140000 }, { name: "Samrice Jasmine 25kg", quantity: 1 }] });
+  const first = await svc.place(order);
+  assert.equal(first.ok, false, "the hub is asked to offer it again");
+  if (!first.ok) assert.match((first.error as { errors: string[] }).errors[0]!, /could not finish saving it/);
+  fail = false;
+  const again = await svc.place(order);
+  assert.ok(again.ok);
+  assert.equal(orders.exportedForTests().orders.length, 1, "the same order, not a second one");
+  if (!again.ok) return;
+  assert.deepEqual(seen, [
+    {
+      storeId: "store-1",
+      orderNumber: again.value.orderNumber,
+      info: {
+        customerRef: "sc_77",
+        customerName: "Maria Santos",
+        customerPhone: "0917 123 4567",
+        address: "123 Rizal St, Poblacion, Bauan, Batangas",
+        // Only the line sold at another price than the store's own.
+        repriced: [{ productId: "prod-dino-25", catalogUnitPriceMinor: 150000 }],
+        priceReason: "Suki, pays cash",
+        priceBy: "owner",
+      },
+    },
+  ]);
+});
+
+test("price changes from the hub are done before the answer, each one answered; selling days go only when asked", async () => {
+  const done: string[] = [];
+  const day = { day: "2026-11-25", location: "", salesMinor: 1_000_000, costMinor: 800_000, expensesMinor: 50_000, profitMinor: 150_000, orders: 4, noCostUnits: 0, hubSalesMinor: 290_000, hubOrders: 1 };
+  const asks: number[] = [];
+  const { svc } = withExtras({
+    change: async (storeId, c) => {
+      done.push(`${storeId} ${c.orderNumber} ${c.items.map((i) => `${i.sku ?? i.name}@${i.unitPriceMinor}`).join(",")} why=${c.reason} by=${c.by} as=${c.role}`);
+      if (c.orderNumber === "SAMSTO-000002") return "Samrice Dinorado 25kg cannot go below ₱1,420";
+      if (c.orderNumber === "SAMSTO-000003") throw new Error("database blinked");
+      return null;
+    },
+    days: async (_storeId, count) => (asks.push(count), [day]),
+  });
+  let body: Record<string, unknown> = {};
+  const calls: string[] = [];
+  let answer: Record<string, unknown> = {};
+  const hub = (async (_url: string, init: RequestInit = {}) => {
+    calls.push(init.method ?? "GET");
+    if (init.method === "POST") body = JSON.parse(String(init.body));
+    return Response.json(init.method === "POST" ? { ok: true } : { stores: ["sam-store"], orders: [], ...answer });
+  }) as unknown as typeof fetch;
+  const change = (id: unknown, orderNumber: string, more: Record<string, unknown> = {}) => ({ id, store: "sam-store", orderNumber, items: [{ sku: "DINO-25", name: "Samrice Dinorado 25kg", unitPriceMinor: 140000 }], reason: "Suki price", by: "owner", role: "owner", ...more });
+  answer = {
+    changes: [
+      change(1, "SAMSTO-000001"),
+      change(2, "SAMSTO-000002", { role: "manager", by: "lea" }),
+      change(3, "SAMSTO-000003"),
+      change(4, "SAMSTO-000004", { store: "no-such-store" }),
+      change(5, "SAMSTO-000005", { reason: "" }),
+      change(6, "SAMSTO-000006", { items: [{ name: "Samrice Dinorado 25kg", unitPriceMinor: -5 }] }),
+      change("x", "SAMSTO-000007"),
+    ],
+    daysWanted: 0,
+  };
+  // Even a quick beat answers when a price change waits, so the hub hears in seconds.
+  await syncWithHub(svc, "https://hub.example", "h".repeat(40), hub, { full: false });
+  assert.deepEqual(calls, ["GET", "POST"]);
+  assert.deepEqual(done, [
+    "store-1 SAMSTO-000001 DINO-25@140000 why=Suki price by=owner as=owner",
+    "store-1 SAMSTO-000002 DINO-25@140000 why=Suki price by=lea as=manager",
+    "store-1 SAMSTO-000003 DINO-25@140000 why=Suki price by=owner as=owner",
+  ]);
+  assert.deepEqual(body.changes, [
+    { id: 1, ok: true },
+    { id: 2, error: "Samrice Dinorado 25kg cannot go below ₱1,420" },
+    { id: 4, error: "Store not found" },
+    { id: 5, error: "Sam Store could not read this price change" },
+    { id: 6, error: "Sam Store could not read this price change" },
+  ], "a crash (3) is not a refusal: the hub offers it again; one with no id is skipped");
+  assert.equal("days" in body, false, "the hub's copy is fresh");
+
+  answer = { daysWanted: 7 };
+  await syncWithHub(svc, "https://hub.example", "h".repeat(40), hub);
+  assert.deepEqual(asks, [7]);
+  assert.deepEqual(body.days, [{ store: "sam-store", ...day }]);
+  assert.equal("changes" in body, false);
+
+  // An older hub asks for neither, and is sent neither.
+  answer = {};
+  await syncWithHub(svc, "https://hub.example", "h".repeat(40), hub);
+  assert.equal("days" in body, false);
+  assert.equal("changes" in body, false);
+});
+
+test("a Sam Store without the database parts refuses a price change in plain words", async () => {
+  const { svc } = build();
+  assert.equal(await svc.change("sam-store", { orderNumber: "SAMSTO-000001", items: [{ name: "x", unitPriceMinor: 1 }], reason: "r", by: "o", role: "owner" }), "This Sam Store cannot take price changes from the hub yet");
+  assert.deepEqual(await svc.days("sam-store", 7), []);
+});

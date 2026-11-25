@@ -12,6 +12,9 @@ import { checkDto, HUB_ORDER_DTO } from "../security/validate.js";
 import type { HubTap, HubTapApplier } from "./hub-taps.js";
 import { readTruckMove, type HubTruckApplier, type HubTruckMove } from "./hub-truck.js";
 
+/** What this Sam Store understands of the hub link; sent on every call (see syncWithHub). */
+export const HUB_LINK_VERSION = 2;
+
 export const HUB_CHANNELS = ["messenger", "order_form", "comment", "live", "agent", "counter"] as const;
 
 export interface HubOrderRequest {
@@ -38,7 +41,68 @@ export interface HubOrderRequest {
   locationCode?: string;
   /** How the customer said they will pay on the Page. GCash is shown to staff on the order. */
   paymentMethod?: "cod" | "gcash";
+  /** This store's own id for the customer (StoreCustomer.id), when the hub knows it: the order goes under them. */
+  customerRef?: string;
+  /** Why the hub changed a price on this order before it came here, and who did: kept on each changed line. */
+  priceReason?: string;
+  priceBy?: string;
 }
+
+/** What the door does after an order is placed: put it under its customer, and mark the lines sold at another price. */
+export interface PlacedInfo {
+  customerRef?: string;
+  customerName: string;
+  customerPhone: string;
+  address?: string;
+  /** Lines the Page sold at another price than this store's price at that moment. */
+  repriced: { productId: string; catalogUnitPriceMinor: number }[];
+  priceReason?: string;
+  priceBy?: string;
+}
+
+/** A price change on one of this store's hub orders, asked for in the hub by the owner or a manager. */
+export interface HubPriceChange {
+  orderNumber: string;
+  items: { sku?: string; name?: string; unitPriceMinor: number }[];
+  reason: string;
+  by: string;
+  /** Who asked, as the hub knows them: "owner", or "manager" (a Business lead there). Both change prices as a manager does here. */
+  role: string;
+}
+
+/** One selling day of the store, or of one of its locations (`location` = its code), for the hub's owner. */
+export interface HubDay {
+  day: string;
+  location: string;
+  /** Sales less what was taken back. */
+  salesMinor: number;
+  costMinor: number;
+  expensesMinor: number;
+  profitMinor: number;
+  orders: number;
+  /** Units sold with no cost on record (counted at 0, so the profit reads too high). */
+  noCostUnits: number;
+  /** The part of the sales that came through the hub, so the two sides can be compared. */
+  hubSalesMinor: number;
+  hubOrders: number;
+}
+
+/** The parts of the hub link that need this store's database; each has a harmless default for tests. */
+export interface HubExtras {
+  /** The ids of the store's per-kilo items: the hub sells whole sacks and packs only. */
+  kiloIds: (storeId: string) => Promise<Set<string>>;
+  afterPlace: (storeId: string, orderNumber: string, info: PlacedInfo) => Promise<void>;
+  /** Null when the price is changed (or already was), else why not, in words staff read in the hub. */
+  change: (storeId: string, change: HubPriceChange) => Promise<string | null>;
+  /** The last `count` Manila days, today first: the whole store (location "") and each of its locations. */
+  days: (storeId: string, count: number, now: Date) => Promise<HubDay[]>;
+}
+const NO_EXTRAS: HubExtras = {
+  kiloIds: async () => new Set(),
+  afterPlace: async () => {},
+  change: async () => "This Sam Store cannot take price changes from the hub yet",
+  days: async () => [],
+};
 
 /** Where a hub order stands in Sam Store now: the hub follows it, since orders are changed here, not there. */
 export interface HubOrderUpdate {
@@ -50,9 +114,12 @@ export interface HubOrderUpdate {
   discountMinor: number;
   /** PENDING | COLLECTED | … : whether the money is in, so the hub can show "Paid". */
   paymentStatus?: string;
+  /** What the order's items cost this store (frozen with the sale once handed over, else today's cost). Null when
+   *  an item has no cost on record. The hub shows profit to the owner only. */
+  costMinor?: number | null;
   /** Why it was cancelled or the delivery failed, as staff typed it. */
   reason?: string | null;
-  items: { name: string; quantity: number; unitPriceMinor: number }[];
+  items: { name: string; sku?: string; quantity: number; unitPriceMinor: number }[];
 }
 /** One of the store's customers as the hub keeps it: details, utang and points, and when any of it last changed. */
 export interface HubCustomer {
@@ -108,7 +175,23 @@ export class HubOrderService {
     private readonly applyTap: HubTapApplier = async () => "This Sam Store cannot take delivery taps yet",
     /** Moves a truck's sacks in this store's stock when the hub says so (integrations/hub-truck.ts). */
     private readonly applyTruck: HubTruckApplier = async () => "This Sam Store cannot move truck stock yet",
-  ) {}
+    extras: Partial<HubExtras> = {},
+  ) {
+    this.extras = { ...NO_EXTRAS, ...extras };
+  }
+  private readonly extras: HubExtras;
+
+  /** A price change the hub asks for on one of this store's hub orders. */
+  async change(storeSlug: string, change: HubPriceChange): Promise<string | null> {
+    const store = await this.stores.findBySlug(storeSlug);
+    return store ? this.extras.change(store.id, change) : "Store not found";
+  }
+
+  /** The store's last selling days (sales, cost, expenses, profit), for the hub's owner. */
+  async days(storeSlug: string, count: number, now = new Date()): Promise<HubDay[]> {
+    const store = await this.stores.findBySlug(storeSlug);
+    return store ? this.extras.days(store.id, Math.min(35, Math.max(1, count)), now) : [];
+  }
 
   /**
    * A truck move from the hub (a confirmed load, or a closed day): null when the stock is moved, or was already,
@@ -149,7 +232,9 @@ export class HubOrderService {
     const own = loc ? await this.pricesAt(store.id, loc) : new Map<string, number>();
     // The Page may only promise rice its store can take: its own shelf and the places on its list.
     const free = await this.freeFor(store.id, loc);
-    return (await this.catalog.listActiveProducts(store.id)).map((p) => ({
+    // Per-kilo rice is weighed at the counter: the Page sells whole sacks and packs only, so it is not offered there.
+    const kilo = await this.extras.kiloIds(store.id);
+    return (await this.catalog.listActiveProducts(store.id)).filter((p) => !kilo.has(p.id)).map((p) => ({
       sku: p.sku,
       name: p.name,
       category: p.categoryName,
@@ -171,11 +256,16 @@ export class HubOrderService {
     // Where the Page told the customer another price than the store's price now (a price changed in between, or
     // a wholesale price): the order keeps the customer's price, and staff see both on the order.
     const told: string[] = [];
+    const repriced: PlacedInfo["repriced"] = [];
+    const kilo = await this.extras.kiloIds(store.id);
+    const perKilo: string[] = [];
     for (const item of req.items) {
-      const p = products.find(
-        (x) => (item.sku && norm(x.sku) === norm(item.sku)) || (item.name && norm(x.name) === norm(item.name)),
-      );
+      // The item's code first: a name can be changed here, a code is not.
+      const p =
+        (item.sku ? products.find((x) => norm(x.sku) === norm(item.sku!)) : undefined) ??
+        (item.name ? products.find((x) => norm(x.name) === norm(item.name!)) : undefined);
       if (!p) unknown.push(item.name ?? item.sku ?? "?");
+      else if (kilo.has(p.id)) perKilo.push(p.name);
       else {
         const ours = own.get(p.id) ?? p.priceMinor;
         const price = item.unitPriceMinor && item.unitPriceMinor > 0 ? item.unitPriceMinor : ours;
@@ -183,14 +273,24 @@ export class HubOrderService {
         if (same) same.quantity += item.quantity;
         else {
           lines.push({ productId: p.id, quantity: item.quantity, unitPriceMinor: price });
-          if (price !== ours) told.push(`${p.name}: Page price ${peso(price)}, store price now ${peso(ours)}.`);
+          if (price !== ours) {
+            told.push(`${p.name}: Page price ${peso(price)}, store price now ${peso(ours)}.`);
+            repriced.push({ productId: p.id, catalogUnitPriceMinor: ours });
+          }
         }
       }
     }
-    if (unknown.length > 0) {
+    if (unknown.length > 0 || perKilo.length > 0) {
       return {
         ok: false,
-        error: { type: "validation", errors: unknown.map((n) => `"${n}" is not an active item in this store`) },
+        error: {
+          type: "validation",
+          errors: [
+            ...unknown.map((n) => `"${n}" is not an active item in this store`),
+            // A per-kilo line counts grams here, and the Page counts pieces: taking it would hold 2 grams for "2".
+            ...perKilo.map((n) => `"${n}" is sold per kilo, which the Page cannot order. Take this order at the counter in Sam Store`),
+          ],
+        },
       };
     }
 
@@ -232,7 +332,7 @@ export class HubOrderService {
       .join(" ")
       .slice(0, 500);
     const pickup = req.deliveryType === "pickup";
-    return this.checkout.checkout(
+    const placed = await this.checkout.checkout(
       {
         cartToken,
         idempotencyKey: `hub:${store.id}:${req.idempotencyKey}`.slice(0, 128),
@@ -257,6 +357,26 @@ export class HubOrderService {
         ...(req.paymentMethod === "gcash" ? { gcash: true } : {}),
       },
     );
+    // The order is in. It is then put under its customer and its changed prices are marked. If that misses (the
+    // database blinked), the hub is told to offer the order again: checkout hands back this same order, and the
+    // step is tried again, so no hub order is left without its customer.
+    if (placed.ok) {
+      try {
+        await this.extras.afterPlace(store.id, placed.value.orderNumber, {
+          ...(req.customerRef ? { customerRef: req.customerRef } : {}),
+          customerName: req.customerName,
+          customerPhone: req.customerPhone,
+          ...(req.address ? { address: req.address } : {}),
+          repriced,
+          ...(req.priceReason ? { priceReason: req.priceReason } : {}),
+          ...(req.priceBy ? { priceBy: req.priceBy } : {}),
+        });
+      } catch (e) {
+        console.warn(`[sam-store] hub order ${placed.value.orderNumber}: ${e instanceof Error ? e.message : String(e)}`);
+        return { ok: false, error: { type: "validation", errors: [`Sam Store took this order as ${placed.value.orderNumber} but could not finish saving it. It tries again by itself in a few seconds`] } };
+      }
+    }
+    return placed;
   }
 }
 
@@ -316,7 +436,10 @@ export async function syncWithHub(
   opts: { full?: boolean } = {},
 ): Promise<void> {
   const door = `${hubUrl.replace(/\/+$/, "")}/api/samstore`;
-  const headers = { "x-hub-secret": secret, "content-type": "application/json" };
+  // x-samstore-link: what this Sam Store understands, so a newer hub never sends an older Sam Store a field it
+  // would refuse (the order check turns away keys it does not know). 2 = customer reference, price reason,
+  // price changes from the hub, selling days.
+  const headers = { "x-hub-secret": secret, "content-type": "application/json", "x-samstore-link": String(HUB_LINK_VERSION) };
   link.lastTryAt = new Date().toISOString();
   try {
     const res = await send(door, { headers, signal: AbortSignal.timeout(20_000) });
@@ -327,8 +450,10 @@ export async function syncWithHub(
     const tapped = Array.isArray(got.taps) ? got.taps.slice(0, 50) : [];
     // Truck moves the hub is holding for this store's stock (see hub-truck.ts).
     const trucks = Array.isArray(got.truck) ? got.truck.slice(0, 20) : [];
+    // Price changes the owner or a manager asked for in the hub, on orders that live here.
+    const asked = Array.isArray((got as { changes?: unknown }).changes) ? (got as { changes: unknown[] }).changes.slice(0, 50) : [];
     // Quick beat with nothing waiting: no answer, so the hub's copy of items and orders is not rewritten every 15 s.
-    if (opts.full === false && offered.length === 0 && tapped.length === 0 && trucks.length === 0) {
+    if (opts.full === false && offered.length === 0 && tapped.length === 0 && trucks.length === 0 && asked.length === 0) {
       link.stuck = [];
       link.lastOkAt = new Date().toISOString();
       link.lastError = null;
@@ -396,6 +521,38 @@ export async function syncWithHub(
         console.warn(`[sam-store] hub tap ${id}: ${e instanceof Error ? e.message : String(e)}`);
       }
     }
+    // Price changes come before `updates` is built too: the same answer shows the hub the order at its new price.
+    // Each one is answered: done, or why not. One that crashed is left alone, and the hub offers it again.
+    const changeAnswers: ({ id: number; ok: true } | { id: number; error: string })[] = [];
+    for (const c of asked) {
+      const raw = (c ?? {}) as Record<string, unknown>;
+      const id = raw.id;
+      if (typeof id !== "number" || !Number.isSafeInteger(id)) continue;
+      const items = (Array.isArray(raw.items) ? raw.items.slice(0, 50) : [])
+        .map((i: Record<string, unknown>) => ({
+          ...(typeof i?.sku === "string" && i.sku ? { sku: i.sku.slice(0, 64) } : {}),
+          ...(typeof i?.name === "string" && i.name ? { name: i.name.slice(0, 200) } : {}),
+          unitPriceMinor: i?.unitPriceMinor as number,
+        }))
+        .filter((i) => (i.sku || i.name) && Number.isSafeInteger(i.unitPriceMinor) && i.unitPriceMinor > 0 && i.unitPriceMinor <= 100_000_000);
+      const reason = typeof raw.reason === "string" ? raw.reason.trim().slice(0, 120) : "";
+      if (typeof raw.store !== "string" || typeof raw.orderNumber !== "string" || !raw.orderNumber || items.length === 0 || !reason) {
+        changeAnswers.push({ id, error: "Sam Store could not read this price change" });
+        continue;
+      }
+      try {
+        const error = await hub.change(raw.store.slice(0, 120), {
+          orderNumber: raw.orderNumber.slice(0, 64),
+          items,
+          reason,
+          by: typeof raw.by === "string" && raw.by.trim() ? raw.by.trim().slice(0, 60) : "the hub",
+          role: raw.role === "owner" ? "owner" : "manager",
+        });
+        changeAnswers.push(error ? { id, error: error.slice(0, 300) } : { id, ok: true });
+      } catch (e) {
+        console.warn(`[sam-store] hub price change ${id}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
     // Truck moves come before `products` is built, so the same answer carries the stock as the move left it. Each
     // one is answered: done, or why not. One that crashed is left alone, and the hub offers it again.
     const truckAnswers: ({ id: number; ok: true } | { id: number; error: string })[] = [];
@@ -436,10 +593,16 @@ export async function syncWithHub(
       const id = typeof a.id === "string" ? a.id : "";
       customers.push(...(await hub.customers(store, { at, id })).map((c) => ({ store, ...c })));
     }
+    // Selling days (sales, cost, expenses, profit): only when the hub asks, since it is a report, not a beat.
+    const days = [];
+    const wanted = (got as { daysWanted?: unknown }).daysWanted;
+    if (typeof wanted === "number" && wanted > 0) {
+      for (const store of stores) days.push(...(await hub.days(store, wanted)).map((d) => ({ store, ...d })));
+    }
     const answer = await send(door, {
       method: "POST",
       headers,
-      body: JSON.stringify({ results, products, updates: updates.slice(0, 200), ...(customers.length ? { customers } : {}), ...(refusedTaps.length ? { taps: refusedTaps } : {}), ...(truckAnswers.length ? { truck: truckAnswers } : {}) }),
+      body: JSON.stringify({ results, products, updates: updates.slice(0, 200), ...(customers.length ? { customers } : {}), ...(refusedTaps.length ? { taps: refusedTaps } : {}), ...(truckAnswers.length ? { truck: truckAnswers } : {}), ...(changeAnswers.length ? { changes: changeAnswers } : {}), ...(days.length ? { days } : {}) }),
       signal: AbortSignal.timeout(20_000),
     });
     if (!answer.ok) throw new Error(`hub answered ${answer.status}`);
