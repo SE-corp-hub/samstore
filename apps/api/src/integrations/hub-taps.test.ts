@@ -24,6 +24,39 @@ test("a tap asks only for the steps the order still needs, and never confirms or
   assert.match(steps("RECEIVED", "DELIVERED"), /^refused: Sam Store has not confirmed this order yet/);
   assert.match(steps("CANCELLED", "DELIVERED"), /^refused: This order is cancelled in Sam Store/);
   assert.match(steps("ON_HOLD", "OUT_FOR_DELIVERY"), /^refused: This order is on hold in Sam Store/);
+  // The hub's Confirm button: it confirms a new order and nothing else.
+  assert.equal(steps("RECEIVED", "CONFIRMED"), "confirm");
+  assert.equal(steps("CONFIRMED", "CONFIRMED"), "nothing", "the same tap twice changes nothing");
+  assert.equal(steps("OUT_FOR_DELIVERY", "CONFIRMED"), "nothing", "a late Confirm never takes an order back");
+  assert.equal(steps("DELIVERED", "CONFIRMED"), "nothing");
+  assert.match(steps("CANCELLED", "CONFIRMED"), /^refused: This order is cancelled in Sam Store/);
+});
+
+test("the hub's Confirm tap confirms the store's own new order, with who tapped", async () => {
+  const calls: string[] = [];
+  let status = "RECEIVED";
+  const apply = hubTapApplier(
+    async (storeId, orderNumber) => (storeId === "store-1" && orderNumber === "LIPA-000004" ? { id: "o1", status } : null),
+    {
+      sendForDelivery: async () => ({ ok: false, error: { type: "conflict", message: "not used here" } }),
+      transition: async (storeId, orderId, to, reason) => {
+        calls.push(`${to} ${storeId} ${orderId} "${reason}"`);
+        status = to;
+        return { ok: true, value: { id: orderId, status: to } };
+      },
+    },
+    {
+      retryDelivery: async () => ({ ok: false, error: { type: "conflict", message: "not used here" } }),
+      markStatus: async () => ({ ok: false, error: { type: "conflict", message: "not used here" } }),
+    },
+  );
+  const tap: HubTap = { orderNumber: "LIPA-000004", status: "CONFIRMED", by: "lea" };
+  assert.equal(await apply("store-1", tap), null);
+  assert.deepEqual(calls, ['CONFIRMED store-1 o1 "Confirmed in the hub by lea"']);
+  // Offered again (our answer was lost): nothing more happens.
+  assert.equal(await apply("store-1", tap), null);
+  assert.equal(calls.length, 1);
+  assert.equal(await apply("store-2", tap), "Sam Store has no hub order with this number");
 });
 
 test("the applier walks the store's own hub order through the steps, with the cash and who tapped", async () => {
@@ -37,6 +70,7 @@ test("the applier walks the store's own hub order through the steps, with the ca
         status = "OUT_FOR_DELIVERY";
         return { ok: true, value: { id: orderId, status } };
       },
+      transition: async () => ({ ok: false, error: { type: "conflict", message: "not used here" } }),
     },
     {
       retryDelivery: async () => ({ ok: false, error: { type: "conflict", message: "not used here" } }),
