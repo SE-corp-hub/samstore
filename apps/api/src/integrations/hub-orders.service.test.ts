@@ -376,7 +376,7 @@ test("selling prices: each linked location gets its own price list in the answer
 test("a hub that asks for customers gets the store's changed ones after its last copy; an older hub gets none", async () => {
   const { svc: base } = build();
   const asked: { storeId: string; after: { at: string; id: string }; limit: number }[] = [];
-  const ana = { id: "sc1", changedAt: "2026-11-12T01:00:00.000Z", name: "Ana Cruz", phone: "09171234567", address: "Bauan", utangMinor: 50000, points: 4 };
+  const ana = { id: "sc1", changedAt: "2026-11-12T01:00:00.000Z", name: "Ana Cruz", phone: "09171234567", address: "Bauan", utangMinor: 50000, points: 4, location: "S2" };
   const svc = new HubOrderService(
     (base as unknown as { stores: InMemoryStoreRepository }).stores,
     (base as unknown as { catalog: InMemoryCatalogRepository }).catalog,
@@ -478,7 +478,7 @@ test("every call says what this Sam Store understands, so a newer hub sends an o
     return Response.json(init.method === "POST" ? { ok: true } : { stores: ["sam-store"], orders: [] });
   }) as unknown as typeof fetch;
   await syncWithHub(svc, "https://hub.example", "h".repeat(40), hub);
-  assert.deepEqual(seen, ["2", "2"]);
+  assert.deepEqual(seen, ["3", "3"]);
 });
 
 /** A service with the database parts of the link (integrations/hub-extras.ts) replaced by what the test gives. */

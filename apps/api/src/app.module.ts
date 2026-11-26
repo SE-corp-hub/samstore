@@ -293,11 +293,13 @@ const CLAIM_SECRET = claimSecret(); // M11: no committed fallback (see security/
             // The columns hold UTC without a zone, so the point is passed the same way.
             const since = (after.at && !Number.isNaN(Date.parse(after.at)) ? new Date(after.at) : new Date(0)).toISOString().replace("Z", "");
             const rows = await prisma.$queryRaw<
-              { id: string; changedAt: Date; name: string | null; phone: string | null; address: string | null; credit: number; points: number }[]
+              { id: string; changedAt: Date; name: string | null; phone: string | null; address: string | null; credit: number; points: number; location: string | null }[]
             >`
               SELECT sc."id", GREATEST(sc."updatedAt", c."updatedAt") AS "changedAt", c."name", c."phone", c."address",
-                     sc."creditBalanceMinor" AS "credit", sc."loyaltyBalancePoints" AS "points"
+                     sc."creditBalanceMinor" AS "credit", sc."loyaltyBalancePoints" AS "points", w."code" AS "location"
                 FROM "StoreCustomer" sc JOIN "Customer" c ON c."id" = sc."customerId"
+                -- Where the customer was added: the hub files them under the business that sells from there.
+                LEFT JOIN "Warehouse" w ON w."id" = sc."addedAtId"
                WHERE sc."storeId" = ${storeId}
                  AND (GREATEST(sc."updatedAt", c."updatedAt"), sc."id") > (CAST(${since} AS timestamp(3)), ${after.id})
                ORDER BY 2, 1
@@ -310,6 +312,7 @@ const CLAIM_SECRET = claimSecret(); // M11: no committed fallback (see security/
               address: r.address ?? "",
               utangMinor: Math.max(0, r.credit),
               points: r.points,
+              location: r.location ?? "",
             }));
           },
           // A delivery tap from the hub moves the order through the same steps the Orders and Delivery screens

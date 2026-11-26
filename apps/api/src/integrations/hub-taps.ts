@@ -2,6 +2,9 @@
 // page. An order that came from the hub is changed here, not there, so the hub keeps their "On the way" and
 // "Delivered" taps and offers them on our usual beat (integrations/hub-orders.service.ts). Here a tap moves the
 // order through the same steps the Orders and Delivery screens use, and the next `updates` we send tell the hub.
+//
+// Since link version 3 the hub's order page also has a Confirm button for staff of the order's own business, so a
+// new order need not be opened here first. It comes the same way, as a tap with status CONFIRMED.
 
 // Framework-free like the hub door itself: the app hands in how to find an order and the two services that move one.
 
@@ -11,7 +14,7 @@ import type { DeliveryService } from "../delivery/delivery.service.js";
 /** One tap as the hub offers it. `by` is the hub login that tapped, `cashMinor` the cash they typed (cash on delivery). */
 export interface HubTap {
   orderNumber: string;
-  status: "OUT_FOR_DELIVERY" | "DELIVERED";
+  status: "CONFIRMED" | "OUT_FOR_DELIVERY" | "DELIVERED";
   at?: string;
   by?: string;
   cashMinor?: number;
@@ -20,13 +23,19 @@ export interface HubTap {
 /** Acts on a tap for one store: null when done (or already so), else why not, in words for the delivery person. */
 export type HubTapApplier = (storeId: string, tap: HubTap) => Promise<string | null>;
 
-export type TapStep = "send" | "retry" | "deliver";
+export type TapStep = "confirm" | "send" | "retry" | "deliver";
 
 /**
  * What a tap asks of an order as it stands now: the steps to take, in order. No steps = the order is already
- * there, so the same tap offered twice changes nothing. A tap never confirms, un-cancels or un-delivers an order.
+ * there, so the same tap offered twice changes nothing. A delivery tap never confirms an order (only the Confirm
+ * tap does), and no tap un-cancels or un-delivers one.
  */
 export function tapSteps(orderStatus: string, tap: HubTap["status"]): { ok: true; steps: TapStep[] } | { ok: false; error: string } {
+  if (tap === "CONFIRMED") {
+    if (orderStatus === "RECEIVED") return { ok: true, steps: ["confirm"] };
+    if (orderStatus === "CANCELLED") return { ok: false, error: "This order is cancelled in Sam Store" };
+    return { ok: true, steps: [] }; // confirmed already, or further along
+  }
   const deliver: TapStep[] = tap === "DELIVERED" ? ["deliver"] : [];
   switch (orderStatus) {
     case "DELIVERED":
@@ -51,6 +60,7 @@ export function tapSteps(orderStatus: string, tap: HubTap["status"]): { ok: true
 
 /** The line on the order's history that says the step came from the hub, and who tapped. */
 export function tapNote(tap: Pick<HubTap, "status" | "by">): string {
+  if (tap.status === "CONFIRMED") return `Confirmed in the hub${tap.by ? ` by ${tap.by}` : ""}`;
   return `Tapped ${tap.status === "DELIVERED" ? "Delivered" : "On the way"} in the hub${tap.by ? ` by ${tap.by}` : ""}`;
 }
 
@@ -60,7 +70,7 @@ export type FindHubOrder = (storeId: string, orderNumber: string) => Promise<{ i
 /** Finds the store's own hub order by its number and walks it through the steps. */
 export function hubTapApplier(
   find: FindHubOrder,
-  admin: Pick<OrderAdminService, "sendForDelivery">,
+  admin: Pick<OrderAdminService, "sendForDelivery" | "transition">,
   delivery: Pick<DeliveryService, "retryDelivery" | "markStatus">,
 ): HubTapApplier {
   return async (storeId, tap) => {
@@ -71,7 +81,9 @@ export function hubTapApplier(
     const note = tapNote(tap);
     for (const step of plan.steps) {
       const r =
-        step === "send"
+        step === "confirm"
+          ? await admin.transition(storeId, order.id, "CONFIRMED", note, { type: "admin", id: null })
+          : step === "send"
           ? await admin.sendForDelivery(storeId, order.id, note)
           : step === "retry"
             ? await delivery.retryDelivery(storeId, order.id, note)

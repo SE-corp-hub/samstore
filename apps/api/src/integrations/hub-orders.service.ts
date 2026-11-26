@@ -13,7 +13,7 @@ import type { HubTap, HubTapApplier } from "./hub-taps.js";
 import { readTruckMove, type HubTruckApplier, type HubTruckMove } from "./hub-truck.js";
 
 /** What this Sam Store understands of the hub link; sent on every call (see syncWithHub). */
-export const HUB_LINK_VERSION = 2;
+export const HUB_LINK_VERSION = 3;
 
 export const HUB_CHANNELS = ["messenger", "order_form", "comment", "live", "agent", "counter"] as const;
 
@@ -131,6 +131,9 @@ export interface HubCustomer {
   /** What the customer owes on utang now (0 when nothing). */
   utangMinor: number;
   points: number;
+  /** The code of the location the customer was added at (S1, S3 …), or "" when not known: the hub files a new
+   * customer under the business that sells from that location. */
+  location: string;
 }
 /** The store's customers changed after a point (time, then id), oldest change first, at most `limit`. */
 export type ChangedCustomers = (storeId: string, after: { at: string; id: string }, limit: number) => Promise<HubCustomer[]>;
@@ -503,7 +506,7 @@ export async function syncWithHub(
       const id = raw.id;
       if (typeof id !== "number" || !Number.isSafeInteger(id)) continue;
       const status = raw.status;
-      if (typeof raw.store !== "string" || typeof raw.orderNumber !== "string" || !raw.orderNumber || (status !== "OUT_FOR_DELIVERY" && status !== "DELIVERED")) {
+      if (typeof raw.store !== "string" || typeof raw.orderNumber !== "string" || !raw.orderNumber || (status !== "CONFIRMED" && status !== "OUT_FOR_DELIVERY" && status !== "DELIVERED")) {
         refusedTaps.push({ id, error: "Sam Store could not read this tap" });
         continue;
       }
