@@ -9,7 +9,7 @@ import { CheckoutController } from "./checkout/checkout.controller.js";
 import { HubOrdersController } from "./integrations/hub-orders.controller.js";
 import { HUB_ORDER_SERVICE, HubOrderService } from "./integrations/hub-orders.service.js";
 import { hubBuys } from "./integrations/hub-buys.js";
-import { hubExtras, hubOrderCost } from "./integrations/hub-extras.js";
+import { hubExtras, hubOrderCost, hubShelves } from "./integrations/hub-extras.js";
 import { hubTapApplier } from "./integrations/hub-taps.js";
 import { hubTruckApplier } from "./integrations/hub-truck.js";
 import { OrderAdminService } from "./admin/order-admin.service.js";
@@ -256,9 +256,8 @@ const CLAIM_SECRET = claimSecret(); // M11: no committed fallback (see security/
           new PrismaCartRepository(),
           checkout,
           // Placed in the last week or changed lately: an order edited here shows edited in the hub.
-          async (storeId, since) =>
-            (
-              await prisma.order.findMany({
+          async (storeId, since) => {
+            const orders = await prisma.order.findMany({
                 where: { storeId, source: "hub", OR: [{ updatedAt: { gte: since } }, { createdAt: { gte: new Date(since.getTime() - 4 * 86_400_000) } }] },
                 include: {
                   // With each item's cost today, for an order not handed over yet (its cost is frozen when it is).
@@ -268,8 +267,10 @@ const CLAIM_SECRET = claimSecret(); // M11: no committed fallback (see security/
                 },
                 orderBy: { createdAt: "desc" },
                 take: 200,
-              })
-            ).map((o) => ({
+              });
+            // Rice held on another place's shelf (own shelf first, then the others), so the hub says where to pick it up.
+            const shelves = await hubShelves(prisma, storeId, orders);
+            return orders.map((o) => ({
               orderNumber: o.orderNumber,
               status: o.status,
               deliveryType: o.deliveryType,
@@ -280,7 +281,9 @@ const CLAIM_SECRET = claimSecret(); // M11: no committed fallback (see security/
               reason: o.statusHistory[0]?.reason ?? null,
               costMinor: hubOrderCost(o.items),
               items: o.items.map((i) => ({ name: i.productName, sku: i.sku, quantity: i.quantity, unitPriceMinor: i.unitPriceMinor })),
-            })),
+              ...(shelves.has(o.id) ? { shelves: shelves.get(o.id) } : {}),
+            }));
+          },
           // The hub link names the selling location by its code (samrice=bigasan@S2).
           async (storeId, code) =>
             (await prisma.warehouse.findFirst({ where: { storeId, code: { equals: code.trim(), mode: "insensitive" }, isActive: true }, select: { id: true } }))?.id ?? null,

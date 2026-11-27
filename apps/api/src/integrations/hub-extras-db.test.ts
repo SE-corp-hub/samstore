@@ -10,7 +10,7 @@ import assert from "node:assert/strict";
 import { prisma } from "../persistence/prisma-repositories.js";
 import { OrderAdminService } from "../admin/order-admin.service.js";
 import { manilaDate } from "../domain/reports.js";
-import { hubExtras } from "./hub-extras.js";
+import { hubExtras, hubShelves } from "./hub-extras.js";
 
 const run = `HEX${Date.now()}${Math.floor(Math.random() * 1000)}`;
 const storeIds: string[] = [];
@@ -210,4 +210,24 @@ test("selling days: sales, cost, expenses and profit from the sales book, for th
   assert.deepEqual(of("S2"), { day: today, location: "S2", salesMinor: 300_000, costMinor: 240_000, expensesMinor: 20_000, profitMinor: 40_000, orders: 1, noCostUnits: 0, hubSalesMinor: 300_000, hubOrders: 1 });
   assert.deepEqual(of("S1"), { day: today, location: "S1", salesMinor: 420_000, costMinor: 0, expensesMinor: 0, profitMinor: 420_000, orders: 1, noCostUnits: 3, hubSalesMinor: 0, hubOrders: 0 });
   assert.equal(days[0]?.day, today, "today first");
+});
+
+test("the hub hears which rice an open order holds on another shelf, and nothing once it has left", async () => {
+  const fx = await fixture();
+  // Sold from S1 (Bogs and Lucy): 6 held on its own shelf, 4 on S2's.
+  const a = await fx.order([{ p: fx.dino, quantity: 10, price: 150_000 }], { sellingLocationId: fx.main.id });
+  const hold = (warehouseId: string, delta: number, type = "RESERVE") =>
+    prisma.stockMovement.create({ data: { storeId: fx.storeId, productId: fx.dino.id, warehouseId, delta, type, orderId: a.id, createdBy: "checkout" } });
+  await hold(fx.main.id, 6);
+  await hold(fx.ers.id, 4);
+  // One with no selling location is left out; one that has gone out says "nothing to pick up".
+  const b = await fx.order([{ p: fx.dino, quantity: 1, price: 150_000 }], { sellingLocationId: null });
+  const c = await fx.order([{ p: fx.dino, quantity: 1, price: 150_000 }], { status: "OUT_FOR_DELIVERY" });
+  const got = await hubShelves(prisma, fx.storeId, [a, b, c]);
+  assert.deepEqual(got.get(a.id), [{ location: "S2", name: "Extra Rice Store", items: [{ name: "Dinorado 25kg", quantity: 4 }] }]);
+  assert.equal(got.has(b.id), false);
+  assert.deepEqual(got.get(c.id), []);
+  // Let go of S2's sacks: nothing away any more.
+  await hold(fx.ers.id, 4, "RELEASE_RESERVATION");
+  assert.deepEqual((await hubShelves(prisma, fx.storeId, [a])).get(a.id), []);
 });

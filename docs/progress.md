@@ -1,5 +1,13 @@
 # PINDIAN — Progress Log
 
+## Where a hub order's rice is held, for SE Corp Hub (2026-11-27)
+
+A hub order takes its own store's shelf first, then the places on its take-rice-from list, and a big order can be held partly elsewhere. The hub's order page and Deliveries did not know, so the team went to the wrong shelf (SE Corp Hub whole-hub test, owner's "fix all").
+- Each hub order in `updates` now carries `shelves`: the rice still held for it away from its selling location, as `[{ location: "S2", name: "Extra Rice Store", items: [{ name, quantity }] }]`, counted from its RESERVE legs less what was released. Its own location is left out.
+- `[]` when everything is on its own shelf, and once the order is out for delivery, delivered, completed, cancelled or failed, so the hub clears its note. An order with no selling location sends no `shelves` (the hub keeps what it had); an older hub ignores the field.
+- One read of stock movements for the open hub orders on the usual beat; nothing is written here.
+- Code: `hubShelves` and `shelvesAway` in `apps/api/src/integrations/hub-extras.ts`, wired in `app.module.ts` (`HubOrderUpdate.shelves`). Tests: `hub-extras.test.ts`, `hub-extras-db.test.ts`.
+
 ## Each customer's buying here, for SE Corp Hub's customer cards (2026-11-27)
 
 The hub's Sales CRM shows how often each customer buys (buys every, last bought, next expected, usual order, churn risk), but it only saw the orders it sent here: a regular who buys at the counter showed "no orders" there. Now the hub can ask for each customer's buying in this store (owner's "recommended" and "next", 2026-11-27):
