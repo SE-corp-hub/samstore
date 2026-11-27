@@ -10,6 +10,7 @@ import type { CartRepository, CatalogRepository, StoreRepository } from "../pers
 import { randomId } from "../persistence/repositories.js";
 import { checkDto, HUB_ORDER_DTO } from "../security/validate.js";
 import type { ChangedBuys, HubBuys } from "./hub-buys.js";
+import type { HubShelf } from "./hub-extras.js";
 import type { HubTap, HubTapApplier } from "./hub-taps.js";
 import { readTruckMove, type HubTruckApplier, type HubTruckMove } from "./hub-truck.js";
 
@@ -124,6 +125,9 @@ export interface HubOrderUpdate {
   /** Why it was cancelled or the delivery failed, as staff typed it. */
   reason?: string | null;
   items: { name: string; sku?: string; quantity: number; unitPriceMinor: number }[];
+  /** Rice held for it on another place's shelf, so the hub tells the delivery team where to pick it up; [] when
+   *  none (or it has left), left out when the order names no selling location. */
+  shelves?: HubShelf[];
 }
 /** One of the store's customers as the hub keeps it: details, utang and points, and when any of it last changed. */
 export interface HubCustomer {

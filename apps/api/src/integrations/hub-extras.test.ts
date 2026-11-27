@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { hubOrderCost, hubPriceReason, phoneKey, priceChangeLines } from "./hub-extras.js";
+import { hubOrderCost, hubPriceReason, phoneKey, priceChangeLines, shelvesAway } from "./hub-extras.js";
 
 test("a mobile number is the same person however it was typed", () => {
   assert.equal(phoneKey("0917 123 4567"), "9171234567");
@@ -55,4 +55,27 @@ test("a price change keeps every other line at the price it was sold at, and a p
   // A line whose item was deleted cannot be saved again from here.
   const gone = priceChangeLines([{ ...lines[0]!, productId: null }, lines[1]!], { items: [{ sku: "JAS-25", unitPriceMinor: 130000 }], reason: "r", by: "o" });
   assert.ok("error" in gone && /no longer an item in Sam Store/.test(gone.error));
+});
+
+test("the hub is told only the rice held away from the order's own shelf, net of what was let go", () => {
+  const leg = (warehouseId: string | null, product: string, type: string, delta: number) => ({
+    warehouseId,
+    code: warehouseId === "w2" ? "S2" : warehouseId === "w3" ? "S3" : "S1",
+    place: warehouseId === "w2" ? "Extra Rice Store" : warehouseId === "w3" ? "Lipa" : "Bogs and Lucy",
+    product,
+    type,
+    delta,
+  });
+  // 10 sacks: 6 from its own shelf (S1), 4 from S2; 2 Jasmine from S3 that were later let go.
+  const legs = [
+    leg("w1", "Dinorado 25kg", "RESERVE", 6),
+    leg("w2", "Dinorado 25kg", "RESERVE", 4),
+    leg("w3", "Jasmine 25kg", "RESERVE", 2),
+    leg("w3", "Jasmine 25kg", "RELEASE_RESERVATION", 2),
+    leg(null, "Brown 5kg", "RESERVE", 1),
+    leg("w2", "Dinorado 25kg", "CONSUME", 4),
+  ];
+  assert.deepEqual(shelvesAway("w1", legs), [{ location: "S2", name: "Extra Rice Store", items: [{ name: "Dinorado 25kg", quantity: 4 }] }]);
+  assert.deepEqual(shelvesAway("w1", legs.slice(0, 1)), [], "all on its own shelf: nothing to tell");
+  assert.deepEqual(shelvesAway("w2", legs.slice(0, 2)), [{ location: "S1", name: "Bogs and Lucy", items: [{ name: "Dinorado 25kg", quantity: 6 }] }]);
 });

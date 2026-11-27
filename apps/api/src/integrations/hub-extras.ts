@@ -43,6 +43,71 @@ export function hubOrderCost(items: { quantity: number; grams: number | null; so
   return total;
 }
 
+/** Rice a hub order holds on another place's shelf, as the hub shows it to the delivery team. */
+export interface HubShelf {
+  location: string;
+  name: string;
+  items: { name: string; quantity: number }[];
+}
+
+/** Steps after which the rice has left the shelves, so there is nothing to pick up: the hub clears the note. */
+const SHELF_DONE = new Set(["OUT_FOR_DELIVERY", "DELIVERED", "COMPLETED", "CANCELLED", "FAILED_DELIVERY"]);
+
+/**
+ * Where an order's rice is still held away from its own store: its RESERVE legs less what was released, per place
+ * and item, leaving out its own place (the store takes its own shelf first, then the places on its list, so a big
+ * order can be held partly elsewhere). Places in the order they were first held.
+ */
+export function shelvesAway(
+  own: string,
+  legs: { warehouseId: string | null; code: string | null; place: string | null; product: string; type: string; delta: number }[],
+): HubShelf[] {
+  const held = new Map<string, { location: string; name: string; items: Map<string, number> }>();
+  for (const l of legs) {
+    if (!l.warehouseId || l.warehouseId === own) continue;
+    const sign = l.type === "RESERVE" ? 1 : l.type === "RELEASE_RESERVATION" ? -1 : 0;
+    if (!sign) continue;
+    const at = held.get(l.warehouseId) ?? { location: l.code ?? "", name: l.place ?? "", items: new Map<string, number>() };
+    at.items.set(l.product, (at.items.get(l.product) ?? 0) + sign * l.delta);
+    held.set(l.warehouseId, at);
+  }
+  return [...held.values()]
+    .map((h) => ({ location: h.location, name: h.name, items: [...h.items].filter(([, q]) => q > 0).map(([name, quantity]) => ({ name, quantity })) }))
+    .filter((h) => h.items.length);
+}
+
+/**
+ * The shelves the hub shows for each of these hub orders, by order id: what is held away from the order's own
+ * store while it is still being made ready, [] once it has left (or holds nothing away). An order with no selling
+ * location is left out: the hub keeps what it had.
+ */
+export async function hubShelves(
+  prisma: PrismaClient,
+  storeId: string,
+  orders: { id: string; status: string; sellingLocationId: string | null }[],
+): Promise<Map<string, HubShelf[]>> {
+  const out = new Map<string, HubShelf[]>();
+  const open = orders.filter((o) => o.sellingLocationId && !SHELF_DONE.has(o.status));
+  for (const o of orders) if (o.sellingLocationId && SHELF_DONE.has(o.status)) out.set(o.id, []);
+  if (!open.length) return out;
+  const legs = await prisma.stockMovement.findMany({
+    where: { storeId, orderId: { in: open.map((o) => o.id) }, type: { in: ["RESERVE", "RELEASE_RESERVATION"] } },
+    select: { orderId: true, warehouseId: true, type: true, delta: true, product: { select: { name: true } }, warehouse: { select: { code: true, name: true } } },
+    orderBy: { createdAt: "asc" },
+  });
+  for (const o of open)
+    out.set(
+      o.id,
+      shelvesAway(
+        o.sellingLocationId as string,
+        legs
+          .filter((l) => l.orderId === o.id)
+          .map((l) => ({ warehouseId: l.warehouseId, code: l.warehouse?.code ?? null, place: l.warehouse?.name ?? null, product: l.product.name, type: l.type, delta: l.delta })),
+      ),
+    );
+  return out;
+}
+
 /** The words kept on a line whose price the hub changed: the reason, then who. */
 export function hubPriceReason(reason: string | undefined, by: string | undefined): string {
   const who = by ? ` (${by}, SE Corp Hub)` : " (SE Corp Hub)";
