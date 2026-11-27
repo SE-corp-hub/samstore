@@ -1,5 +1,14 @@
 # PINDIAN — Progress Log
 
+## Each customer's buying here, for SE Corp Hub's customer cards (2026-11-27)
+
+The hub's Sales CRM shows how often each customer buys (buys every, last bought, next expected, usual order, churn risk), but it only saw the orders it sent here: a regular who buys at the counter showed "no orders" there. Now the hub can ask for each customer's buying in this store (owner's "recommended" and "next", 2026-11-27):
+- The hub's `GET /api/samstore` answer may carry `buysAfter` (store, time, customer id: where its copy stands, as `customersAfter` does). The next `POST` then carries `buys`: one line per customer whose own orders changed after that point, oldest change first, at most 200 per store per beat.
+- A line is a summary, not the orders, split by location (S1, S2 …), since each location sells for its own business in the hub (Samrice, Samrice Lipa, Samrice Bauan). For each location: how many times they bought, how many are done (completed or delivered), first and last purchase, what the done ones came to, their purchases of the last 180 days (day, total, done or not; at most 300) and their top 3 items (pieces, or grams for rice by the kilo).
+- Left out: the hub's own orders (`source` "hub", which the hub already counts), cancelled, failed and held (ON_HOLD) orders, and guest sales with no customer. A customer whose orders were all cancelled still gets a line with no locations, so the hub's point moves on.
+- Nothing is written here; it is a read on the beat the store already makes. An older hub that sends no `buysAfter` gets nothing new.
+- Code: `apps/api/src/integrations/hub-buys.ts`, wired in `hub-orders.service.ts` and `app.module.ts`. Tests: `hub-buys.test.ts`, `hub-buys-db.test.ts`, and the sync test in `hub-orders.service.test.ts`.
+
 ## Truck stock from SE Corp Hub (2026-11-25)
 
 An Agent + Delivery sells from a truck, and SE Corp Hub keeps the truck's sheet (loaded, sold, samples, damaged, what came back). The hub now offers this store two kinds of stock moves on the usual beat (`truck` on `GET /api/samstore`, answered on the `POST`), so the stock here follows the truck. **Stock only: a truck sale is not a sale in Sam Store yet; sales and cash stay in the hub** (owner's choice 2026-11-25: stock now, sales after a test day).

@@ -608,3 +608,22 @@ test("a Sam Store without the database parts refuses a price change in plain wor
   assert.equal(await svc.change("sam-store", { orderNumber: "SAMSTO-000001", items: [{ name: "x", unitPriceMinor: 1 }], reason: "r", by: "o", role: "owner" }), "This Sam Store cannot take price changes from the hub yet");
   assert.deepEqual(await svc.days("sam-store", 7), []);
 });
+
+test("a hub that asks for buys gets each changed customer's buying line after its last copy; an older hub gets none", async () => {
+  const asked: { storeId: string; after: { at: string; id: string }; limit: number }[] = [];
+  const line = { id: "sc1", changedAt: "2026-11-26T01:00:00.000Z", places: [{ location: "S1", orders: 3, paidOrders: 3, firstAt: "2026-10-01T02:00:00.000Z", lastAt: "2026-11-26T01:00:00.000Z", spentMinor: 450000, recent: [], items: [] }] };
+  const { svc } = withExtras({ buys: async (storeId, after, limit) => (asked.push({ storeId, after, limit }), [line]) });
+  let body: { buys?: unknown[] } = {};
+  let answer: Record<string, unknown> = { stores: ["sam-store"], orders: [] };
+  const hub = (async (_url: string, init: RequestInit = {}) => {
+    if (init.method === "POST") body = JSON.parse(String(init.body));
+    return Response.json(init.method === "POST" ? { ok: true } : answer);
+  }) as unknown as typeof fetch;
+  await syncWithHub(svc, "https://hub.example", "h".repeat(40), hub);
+  assert.equal(body.buys, undefined, "a hub that doesn't ask gets no buys");
+  assert.equal(asked.length, 0);
+  answer = { ...answer, buysAfter: [{ store: "sam-store", at: "2026-11-25T00:00:00.000Z", id: "sc0" }, { store: "no-such-store", at: "", id: "" }, { at: "x" }] };
+  await syncWithHub(svc, "https://hub.example", "h".repeat(40), hub);
+  assert.deepEqual(body.buys, [{ store: "sam-store", ...line }], "an unknown store sends nothing");
+  assert.deepEqual(asked, [{ storeId: "store-1", after: { at: "2026-11-25T00:00:00.000Z", id: "sc0" }, limit: 200 }]);
+});

@@ -8,6 +8,7 @@ import { CHECKOUT_SERVICE, CheckoutService } from "./checkout/checkout.service.j
 import { CheckoutController } from "./checkout/checkout.controller.js";
 import { HubOrdersController } from "./integrations/hub-orders.controller.js";
 import { HUB_ORDER_SERVICE, HubOrderService } from "./integrations/hub-orders.service.js";
+import { hubBuys } from "./integrations/hub-buys.js";
 import { hubExtras, hubOrderCost } from "./integrations/hub-extras.js";
 import { hubTapApplier } from "./integrations/hub-taps.js";
 import { hubTruckApplier } from "./integrations/hub-truck.js";
@@ -325,7 +326,8 @@ const CLAIM_SECRET = claimSecret(); // M11: no committed fallback (see security/
           // A truck move from the hub (a confirmed load, a closed day) moves the sacks in this store's stock.
           hubTruckApplier(prisma),
           // Customers, changed prices, price changes from the hub and selling days (integrations/hub-extras.ts).
-          hubExtras(prisma, (storeId, orderId, items, actorId, role) => new OrderAdminService().replaceOrderItems(storeId, orderId, items, actorId, role)),
+          // … and what each customer bought here, for the hub's customer cards (integrations/hub-buys.ts).
+          { ...hubExtras(prisma, (storeId, orderId, items, actorId, role) => new OrderAdminService().replaceOrderItems(storeId, orderId, items, actorId, role)), buys: hubBuys(prisma) },
         ),
     },
   ],

@@ -86,7 +86,7 @@ export function priceChangeLines(
 /** Changes an order's lines (OrderAdminService.replaceOrderItems): the hub's price change goes through the same door as the screen's. */
 type ReplaceItems = (storeId: string, orderId: string, items: OrderEditLine[], actorId: string | null, role?: string) => Promise<{ ok: true } | { ok: false; error: { message?: string; errors?: string[] } }>;
 
-export function hubExtras(prisma: PrismaClient, replaceItems: ReplaceItems): HubExtras {
+export function hubExtras(prisma: PrismaClient, replaceItems: ReplaceItems): Omit<HubExtras, "buys"> {
   /** This store's customer for a hub order: the one the hub named, else the one with this mobile number, else a new one. */
   async function customerFor(storeId: string, info: PlacedInfo, locationId: string | null): Promise<string | null> {
     if (info.customerRef) {
