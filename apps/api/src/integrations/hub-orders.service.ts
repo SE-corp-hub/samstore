@@ -9,6 +9,7 @@ import type { CheckoutService } from "../checkout/checkout.service.js";
 import type { CartRepository, CatalogRepository, StoreRepository } from "../persistence/repositories.js";
 import { randomId } from "../persistence/repositories.js";
 import { checkDto, HUB_ORDER_DTO } from "../security/validate.js";
+import type { ChangedBuys, HubBuys } from "./hub-buys.js";
 import type { HubTap, HubTapApplier } from "./hub-taps.js";
 import { readTruckMove, type HubTruckApplier, type HubTruckMove } from "./hub-truck.js";
 
@@ -96,12 +97,15 @@ export interface HubExtras {
   change: (storeId: string, change: HubPriceChange) => Promise<string | null>;
   /** The last `count` Manila days, today first: the whole store (location "") and each of its locations. */
   days: (storeId: string, count: number, now: Date) => Promise<HubDay[]>;
+  /** What each customer bought here (not through the hub), for the hub's customer cards (integrations/hub-buys.ts). */
+  buys: ChangedBuys;
 }
 const NO_EXTRAS: HubExtras = {
   kiloIds: async () => new Set(),
   afterPlace: async () => {},
   change: async () => "This Sam Store cannot take price changes from the hub yet",
   days: async () => [],
+  buys: async () => [],
 };
 
 /** Where a hub order stands in Sam Store now: the hub follows it, since orders are changed here, not there. */
@@ -212,6 +216,12 @@ export class HubOrderService {
   async tap(storeSlug: string, tap: HubTap): Promise<string | null> {
     const store = await this.stores.findBySlug(storeSlug);
     return store ? this.applyTap(store.id, tap) : "Store not found";
+  }
+
+  /** Up to 200 customers whose own orders here changed after the hub's last copy, oldest change first. */
+  async buys(storeSlug: string, after: { at: string; id: string }): Promise<HubBuys[]> {
+    const store = await this.stores.findBySlug(storeSlug);
+    return store ? this.extras.buys(store.id, after, 200) : [];
   }
 
   /** Up to 200 of the store's customers changed after the hub's last copy, oldest change first. */
@@ -596,6 +606,17 @@ export async function syncWithHub(
       const id = typeof a.id === "string" ? a.id : "";
       customers.push(...(await hub.customers(store, { at, id })).map((c) => ({ store, ...c })));
     }
+    // What each customer bought here: only a hub that asks (Sales CRM, 27 Nov 2026) gets it, oldest change first.
+    // The customers come first in the same answer, so the hub knows each buyer before their line reaches it.
+    const buys = [];
+    const buysAfter = Array.isArray((got as { buysAfter?: unknown }).buysAfter) ? ((got as { buysAfter: unknown[] }).buysAfter as Record<string, unknown>[]) : [];
+    for (const a of buysAfter.slice(0, 20)) {
+      const store = typeof a?.store === "string" ? a.store : "";
+      if (!store) continue;
+      const at = typeof a.at === "string" ? a.at : "";
+      const id = typeof a.id === "string" ? a.id : "";
+      buys.push(...(await hub.buys(store, { at, id })).map((b) => ({ store, ...b })));
+    }
     // Selling days (sales, cost, expenses, profit): only when the hub asks, since it is a report, not a beat.
     const days = [];
     const wanted = (got as { daysWanted?: unknown }).daysWanted;
@@ -605,7 +626,7 @@ export async function syncWithHub(
     const answer = await send(door, {
       method: "POST",
       headers,
-      body: JSON.stringify({ results, products, updates: updates.slice(0, 200), ...(customers.length ? { customers } : {}), ...(refusedTaps.length ? { taps: refusedTaps } : {}), ...(truckAnswers.length ? { truck: truckAnswers } : {}), ...(changeAnswers.length ? { changes: changeAnswers } : {}), ...(days.length ? { days } : {}) }),
+      body: JSON.stringify({ results, products, updates: updates.slice(0, 200), ...(customers.length ? { customers } : {}), ...(buys.length ? { buys } : {}), ...(refusedTaps.length ? { taps: refusedTaps } : {}), ...(truckAnswers.length ? { truck: truckAnswers } : {}), ...(changeAnswers.length ? { changes: changeAnswers } : {}), ...(days.length ? { days } : {}) }),
       signal: AbortSignal.timeout(20_000),
     });
     if (!answer.ok) throw new Error(`hub answered ${answer.status}`);
